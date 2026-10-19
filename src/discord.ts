@@ -1,0 +1,129 @@
+// Discord interaction shapes and reply helpers (the subset this Worker reads and sends).
+import { InteractionResponseFlags, InteractionResponseType } from 'discord-interactions';
+
+export interface User {
+  id: string;
+  username: string;
+  global_name?: string | null;
+}
+
+export interface GuildMember {
+  user: User;
+  nick?: string | null;
+  roles: string[];
+  /** The caller's resolved permissions in the channel, as a string bitfield. */
+  permissions: string;
+}
+
+export interface Option {
+  type: number;
+  name: string;
+  value?: string | number | boolean;
+  focused?: boolean;
+  options?: Option[];
+}
+
+/** A modal-submit component: a Label wrapping one input, or a legacy action row of inputs. */
+export interface ModalComponent {
+  type: number;
+  custom_id?: string;
+  value?: string;
+  component?: ModalComponent;
+  components?: ModalComponent[];
+}
+
+export interface Interaction {
+  type: number;
+  guild_id?: string;
+  member?: GuildMember;
+  user?: User;
+  data?: {
+    name?: string;
+    options?: Option[];
+    custom_id?: string;
+    component_type?: number;
+    values?: string[];
+    components?: ModalComponent[];
+  };
+}
+
+export interface Embed {
+  title?: string;
+  description?: string;
+  color?: number;
+}
+
+export interface MessageData {
+  content?: string;
+  embeds?: Embed[];
+  components?: unknown[];
+  flags?: number;
+  allowed_mentions?: { parse: string[] };
+}
+
+export type InteractionReply =
+  | { type: InteractionResponseType.PONG }
+  | { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE; data: MessageData }
+  | { type: InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT; data: { choices: Choice[] } }
+  | { type: InteractionResponseType.MODAL; data: { custom_id: string; title: string; components: unknown[] } };
+
+export interface Choice {
+  name: string;
+  value: string;
+}
+
+/** A private reply. Mentions in it never ping anyone. */
+export function ephemeral(content: string, extra: Omit<MessageData, 'content' | 'flags'> = {}): InteractionReply {
+  return {
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content, ...extra, flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
+  };
+}
+
+export const choices = (list: Choice[]): InteractionReply => ({
+  type: InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
+  data: { choices: list },
+});
+
+/** The subcommand and its options, for a command registered as name → subcommand. */
+export function subcommand(i: Interaction): { name: string | undefined; options: Option[] } {
+  const sub = i.data?.options?.[0];
+  return { name: sub?.name, options: sub?.options ?? [] };
+}
+
+export const optString = (opts: Option[], name: string): string | undefined => {
+  const v = opts.find((o) => o.name === name)?.value;
+  return typeof v === 'string' ? v : v === undefined ? undefined : String(v);
+};
+export const optInt = (opts: Option[], name: string): number | undefined => {
+  const v = opts.find((o) => o.name === name)?.value;
+  return typeof v === 'number' ? v : typeof v === 'string' && /^-?\d+$/.test(v) ? Number(v) : undefined;
+};
+export const optBool = (opts: Option[], name: string): boolean | undefined => {
+  const v = opts.find((o) => o.name === name)?.value;
+  return typeof v === 'boolean' ? v : undefined;
+};
+export const focused = (opts: Option[]): Option | undefined => opts.find((o) => o.focused);
+
+// Permission bits (https://docs.discord.com/developers/topics/permissions).
+export const ADMINISTRATOR = 1n << 3n;
+export const MANAGE_GUILD = 1n << 5n;
+
+export function hasPermission(bitfield: string | undefined, bit: bigint): boolean {
+  if (!bitfield || !/^\d+$/.test(bitfield)) return false;
+  return (BigInt(bitfield) & bit) === bit;
+}
+
+/** Escapes Discord markdown in member-typed text shown back in a reply. */
+export const md = (s: string): string => s.replace(/([\\*_~`|>\[\]])/g, '\\$1');
+
+/** Up to 25 matches: prefix matches first, then substring matches, each in list order (case-insensitive). */
+export function matchChoices(names: string[], typed: string, max = 25): string[] {
+  const q = typed.trim().toLowerCase();
+  if (!q) return names.slice(0, max);
+  const prefix = names.filter((n) => n.toLowerCase().startsWith(q));
+  const inner = names.filter((n) => !n.toLowerCase().startsWith(q) && n.toLowerCase().includes(q));
+  return [...prefix, ...inner].slice(0, max);
+}
+
+export const truncate = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);

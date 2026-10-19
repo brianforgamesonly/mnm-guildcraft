@@ -26,7 +26,7 @@ const componentsOf = (key: string) =>
 
 beforeEach(async () => {
   await env.DB.batch(
-    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import'].map((t) =>
+    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class'].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );
@@ -154,8 +154,54 @@ describe('import', () => {
       stub: { insert: 4 },
       recipe: { insert: 6, update: 0, deactivate: 0 },
       recipe_component: { insert: 8, update: 0, delete: 0 },
+      game_class: { insert: 0, update: 0, deactivate: 0 },
     });
     expect(await one('SELECT (SELECT count(*) FROM tradeskill) + (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM recipe_component) AS n')).toEqual({ n: 0 });
     expect(await all('SELECT status, items, recipes FROM data_import')).toEqual([{ status: 'dry-run', items: 12, recipes: 6 }]);
+  });
+});
+
+describe('game_class (classes derived at import)', () => {
+  // 121 items carry a class, so the 1% bar is 1.21 items: SHB (1 item) drops, WAR and CLR stay.
+  const withClasses = () => {
+    const f = fixture();
+    for (let i = 0; i < 120; i++) f.items[`Class Test ${i}`] = { class: i === 0 ? 'SHB' : i % 2 ? 'war clr' : 'WAR<br> ALL' };
+    f.items['Class Test markup'] = { class: '<br>SPB' };
+    f.items['Class Test null'] = { class: null };
+    return f;
+  };
+
+  it('upper-cases, cuts at "<", drops ALL/NONE and keeps codes on at least 1% of class-carrying items', async () => {
+    const res = await load(withClasses());
+    expect(res.status).toBe('ok');
+    expect(res.classes).toEqual({
+      carrying: 121,
+      kept: [{ code: 'WAR', item_count: 119 }, { code: 'CLR', item_count: 60 }],
+      dropped: [{ code: 'SHB', items: 1 }],
+      ignored: [{ token: 'ALL', items: 59 }, { token: '<br>SPB', items: 1 }],
+    });
+    expect(await all('SELECT code, item_count FROM game_class ORDER BY code')).toEqual([
+      { code: 'CLR', item_count: 60 },
+      { code: 'WAR', item_count: 119 },
+    ]);
+  });
+
+  it('a second run writes 0 game_class rows; a code that falls away is set to 0, never deleted', async () => {
+    await load(withClasses());
+    const second = await load(withClasses());
+    expect(second.written!.game_class.statements).toBeGreaterThan(0);
+    expect(second.written!.game_class.rows_written).toBe(0);
+    expect(second.predicted!.game_class).toEqual({ insert: 0, update: 0, deactivate: 0 });
+
+    const noClr = withClasses();
+    for (const it of Object.values(noClr.items)) if (it.class === 'war clr') it.class = 'war';
+    const dry = await load(noClr, true);
+    expect(dry.predicted!.game_class).toEqual({ insert: 0, update: 0, deactivate: 1 });
+    const third = await load(noClr);
+    expect(third.written!.game_class.changes).toBe(1);
+    expect(await all('SELECT code, item_count FROM game_class ORDER BY code')).toEqual([
+      { code: 'CLR', item_count: 0 },
+      { code: 'WAR', item_count: 119 },
+    ]);
   });
 });

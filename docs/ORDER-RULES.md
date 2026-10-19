@@ -69,3 +69,7 @@ Treat the clock as authoritative over any date an order states.
 - The PRD (`docs/PRD.md`) is the specification. A departure from it is named in the report, with the reason.
 - Attribution: item data replies credit the Monsters and Memories Wiki (CC BY-SA 4.0), and the README credits mnm-tools (MIT).
 - When Brian asks to understand something, lead with a plain-words explanation before the numbers.
+
+## Added by work order 2 (characters, skills and first use)
+
+- A member's command never reveals another member's private data. Replies about the caller are ephemeral. A name that resolves to another member's character returns the same "not found" a missing name would, unless the caller is an officer.
