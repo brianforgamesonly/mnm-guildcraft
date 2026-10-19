@@ -87,12 +87,12 @@ function find(obj, key, depth = 0) {
   return undefined;
 }
 
-/** The timing line, whether stored parsed (`source`) or as a message string. */
-function timingOf(e) {
-  if (e.source && typeof e.source === 'object' && e.source.gc === 'interaction') return e.source;
+/** A structured line (gc = 'interaction' or 'board'), whether stored parsed (`source`) or as a message string. */
+function timingOf(e, gc = 'interaction') {
+  if (e.source && typeof e.source === 'object' && e.source.gc === gc) return e.source;
   for (const m of [e.$metadata?.message, find(e, 'message'), ...(Array.isArray(find(e, 'messages')) ? find(e, 'messages') : [])]) {
     if (typeof m !== 'string') continue;
-    const at = m.indexOf('{"gc":"interaction"');
+    const at = m.indexOf(`{"gc":"${gc}"`);
     if (at !== -1)
       try {
         return JSON.parse(m.slice(at));
@@ -117,6 +117,8 @@ for (const e of events) {
   r.at = Math.min(r.at ?? Infinity, Number(e.timestamp) || Infinity);
   const t = timingOf(e);
   if (t) r.line = t;
+  const b = timingOf(e, 'board');
+  if (b) r.board = b;
   const level = e.$metadata?.level ?? e.source?.level;
   if (e.$metadata?.error || level === 'error') r.errors.push(redact(e.$metadata?.error ?? e.$metadata?.message ?? JSON.stringify(e.source)).slice(0, 400));
   byRequest.set(id, r);
@@ -127,7 +129,7 @@ const pct = (xs, p) => {
   if (!s.length) return null;
   return s[Math.min(s.length - 1, Math.ceil((p / 100) * s.length) - 1)];
 };
-const pathOf = (r) => (r.line ? `${r.line.kind} ${r.line.cmd ?? ''}`.trim() : `(no timing line) ${r.method ?? ''}`.trim());
+const pathOf = (r) => (r.line ? `${r.line.kind} ${r.line.cmd ?? ''}`.trim() : r.board ? `board ${r.board.trigger}` : `(no timing line) ${r.method ?? ''}`.trim());
 const paths = new Map();
 const meta = { colos: new Set(), d1Regions: new Set() };
 for (const r of byRequest.values()) {
@@ -170,18 +172,28 @@ for (const [k, p] of [...paths].sort()) {
  * wall time includes the delivery after the answer; for it, a refused delivery or an err counts instead.
  */
 const failed = (r) =>
+  r.board && !r.line ? r.errors.length > 0 || !!r.board.err || (r.outcome && r.outcome !== 'ok') :
   r.errors.length > 0 || (r.outcome && r.outcome !== 'ok') || (r.status !== undefined && r.status !== 200) || !!r.line?.err ||
   (r.line?.ack ? (r.line.deliveries ?? []).some((d) => d.status < 200 || d.status >= 300) : typeof r.wall === 'number' && r.wall >= 3000);
 console.log(`failed requests (order 4 definition): ${[...byRequest.values()].filter(failed).length} of ${byRequest.size}`);
 if (perRequest) {
-  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tcolo\td1_region\tack\tdeliveries\tfailed\terrors');
-  for (const r of [...byRequest.values()].sort((a, b) => a.at - b.at))
+  // Order 5 (ITEM 2): sql_ms / d1_dur are D1's own server-side times, rows its rows read (a game-list cache
+  // reload reads the whole list), first = the isolate's first request, idle = ms since this isolate's last D1 call.
+  // gap_s = seconds since the previous request of any kind (from the logs, across isolates).
+  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tsql_ms\td1_dur\trows\tfirst\tidle_ms\tgap_s\tcolo\td1_region\tack\tdeliveries\tfailed\terrors');
+  let prev = null;
+  for (const r of [...byRequest.values()].sort((a, b) => a.at - b.at)) {
+    const l = r.line ?? r.board;
     console.log(
       [
-        new Date(r.at).toISOString(), redact(pathOf(r)), r.outcome, r.status, r.wall, r.cpu, r.line?.io_ms, r.line?.q, JSON.stringify(r.line?.d1_ms ?? null), r.line?.colo, r.line?.d1_region,
-        r.line?.ack ?? '', redact(JSON.stringify(r.line?.deliveries ?? [])), failed(r) ? 'FAILED' : '', [...r.errors, r.line?.err].filter(Boolean).map(redact).join(' | '),
+        new Date(r.at).toISOString(), redact(pathOf(r)), r.outcome, r.status, r.wall, r.cpu, r.line?.io_ms, r.line?.q ?? r.board?.d1_calls, JSON.stringify(r.line?.d1_ms ?? (r.board ? [r.board.first_query_ms] : null)),
+        JSON.stringify(r.line?.sql_ms ?? (r.board ? [r.board.first_sql_ms] : null)), JSON.stringify(r.line?.d1_duration ?? null), JSON.stringify(r.line?.rows_read ?? (r.board ? [r.board.first_rows_read] : null)),
+        l?.isolate_first_request ?? '', l?.ms_since_last_d1_in_isolate ?? '', prev === null ? '' : ((r.at - prev) / 1000).toFixed(1), r.line?.colo, r.line?.d1_region,
+        r.line?.ack ?? '', redact(JSON.stringify(r.line?.deliveries ?? r.board?.calls ?? [])), failed(r) ? 'FAILED' : '', [...r.errors, r.line?.err, r.board?.err].filter(Boolean).map(redact).join(' | '),
       ].join('\t'),
     );
+    prev = r.at;
+  }
 }
 if (events[0]) {
   const e = events.find((x) => x.source && Object.keys(x.source).length) ?? events[0];

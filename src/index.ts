@@ -2,8 +2,10 @@ import { Hono } from 'hono';
 import { InteractionType, verifyKey } from 'discord-interactions';
 import type { Env } from './env.ts';
 import { deferredReply, immediateReply, planFor, type Interaction, type InteractionReply, type Plan } from './interactions.ts';
+import { refreshAfterCommand, scheduled as runScheduled } from './board/refresh.ts';
+import type { Effects } from './context.ts';
 import { ackFor, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
-import { countD1, timingLine, type D1Call } from './telemetry.ts';
+import { countD1, isolateSnapshot, timingLine, type D1Call } from './telemetry.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -15,12 +17,19 @@ const fallback = (i: Interaction): InteractionReply =>
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-/** The deferred work, inside ctx.waitUntil (up to 30 seconds after the acknowledgement). Logs the one timing line. */
-async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number) {
+type Isolate = ReturnType<typeof isolateSnapshot>;
+
+/**
+ * The deferred work, inside ctx.waitUntil (up to 30 seconds after the acknowledgement). Logs the one timing
+ * line. A handler that marked board posts dirty gets them rewritten here, after its reply is delivered
+ * (order 5); if that fails the posts stay dirty for the 15-minute sweep.
+ */
+async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number, isolate: Isolate) {
   const log: Delivery[] = [];
+  const effects: Effects = {};
   let err: string | null = null;
   try {
-    const reply = await deferredReply(i, env, ctx);
+    const reply = await deferredReply(i, env, ctx, effects);
     if (!(await deliver(i, plan, reply, log))) err = 'delivery refused';
   } catch (e) {
     err = errText(e);
@@ -29,7 +38,8 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
     console.error('interaction failed', err, JSON.stringify(log.filter((d) => d.error)));
     await deliverError(i, plan, log);
   }
-  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err }));
+  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate }));
+  if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls)));
 }
 
 app.post('/', async (c) => {
@@ -45,6 +55,7 @@ app.post('/', async (c) => {
 
   // Past this point the caller is Discord: never answer with a 500, always with a polite reply.
   const started = Date.now();
+  const isolate = isolateSnapshot();
   const counted = countD1(c.env.DB);
   const env = { ...c.env, DB: counted.db };
   const colo = (c.req.raw.cf as { colo?: string } | undefined)?.colo;
@@ -55,13 +66,13 @@ app.post('/', async (c) => {
     plan = planFor(interaction);
   } catch (err) {
     console.error('interaction failed', errText(err));
-    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err: errText(err) }));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err: errText(err), isolate }));
     return c.json(fallback(interaction));
   }
 
   // Deferred: acknowledge now (no I/O on this path), work and deliver after the response.
   if (plan.defer) {
-    c.executionCtx.waitUntil(runDeferred(interaction, plan, env, c.executionCtx as ExecutionContext, counted.calls, colo, started));
+    c.executionCtx.waitUntil(runDeferred(interaction, plan, env, c.executionCtx as ExecutionContext, counted.calls, colo, started, isolate));
     return c.json(ackFor(plan));
   }
 
@@ -74,8 +85,14 @@ app.post('/', async (c) => {
     return c.json(fallback(interaction));
   } finally {
     // One line per interaction (ITEM 3.1). io_ms covers D1 and network waits only (see src/telemetry.ts).
-    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err }));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err, isolate }));
   }
 });
 
-export default app;
+// fetch: Discord's interactions. scheduled: the one "*/15 * * * *" cron trigger (board sweep; nightly rebuild at 08:00 UTC).
+export default {
+  fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
+  scheduled: async (controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> => {
+    await runScheduled(controller, env, ctx);
+  },
+};

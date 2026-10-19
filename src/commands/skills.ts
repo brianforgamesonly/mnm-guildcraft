@@ -1,6 +1,7 @@
 // /craft set | update | me (PRD FR-2, except know/forget).
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
+import { markSkillsDirty } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
@@ -45,6 +46,7 @@ export async function craftSet(c: Ctx, opts: Option[]): Promise<MessageReply> {
   await c.db.batch([
     upsertSkill(c, ch.id, skill.id, level),
     audit(c.db, c.guild.id, c.userId, 'skill.set', `character:${ch.id}`, { [skill.name]: before?.level ?? null }, { [skill.name]: level }),
+    markSkillsDirty(c, [skill.id]),
   ]);
   const was = before ? ` (was ${before.level})` : '';
   return ephemeral(`**${md(ch.name)}**: ${skill.name} set to **${level}**${was}.`, { components: updateButtons([ch]) });
@@ -228,6 +230,7 @@ export async function updateSubmitted(c: Ctx, customId: string, components: Moda
   await c.db.batch([
     ...entries.map((e) => upsertSkill(c, ch.id, e.skill!.id, Number(e.raw))),
     audit(c.db, c.guild.id, c.userId, 'skill.update', `character:${ch.id}`, before, after),
+    markSkillsDirty(c, entries.map((e) => e.skill!.id)),
   ]);
   const list = entries.map((e) => `${e.skill!.name} **${e.raw.replace(/^0+(?=\d)/, '')}**${before[e.skill!.name] !== null ? ` (was ${before[e.skill!.name]})` : ''}`);
   return ephemeral(`Saved for **${md(ch.name)}**: ${list.join(', ')}.`);

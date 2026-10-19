@@ -3,13 +3,13 @@ import { ensureGuild, isAdmin, isOfficer, loadGuild, passesMemberGate, touchMemb
 import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
 import { HELP_TEXT } from './commands/help.ts';
-import { guildcraftSetup } from './commands/setup.ts';
+import { guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
 import { craftFind, postFind } from './commands/find.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
 import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
 import { WELCOME } from './commands/welcome.ts';
-import type { Ctx } from './context.ts';
+import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
 import type { Env } from './env.ts';
 
@@ -37,11 +37,22 @@ const ROUTES: Record<string, { access: Access; search?: true; run: (c: Ctx, opts
   'roster top': { access: 'member', search: true, run: rosterTop },
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
+  'guildcraft status': { access: 'admin', run: guildcraftStatus },
 };
 
 const routeOf = (i: Interaction) => ROUTES[`${i.data?.name} ${subcommand(i).name}`];
 
-const ctxFor = (db: D1Database, guild: Guild, m: GuildMember): Ctx => ({ db, guild, member: m, userId: m.user.id, officer: isOfficer(guild, m) });
+const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: Interaction): Ctx => ({
+  db: env.DB,
+  guild,
+  member: m,
+  userId: m.user.id,
+  officer: isOfficer(guild, m),
+  effects,
+  resolved: i?.data?.resolved,
+  applicationId: i?.application_id,
+  botToken: env.DISCORD_BOT_TOKEN,
+});
 
 /** Adds the one-time welcome to a reply, as an extra embed, and keeps the reply private. */
 function withWelcome(reply: MessageReply): MessageReply {
@@ -82,7 +93,7 @@ export function planFor(i: Interaction): Plan {
 
 // ---------------------------------------------------------------- deferred work (runs inside ctx.waitUntil)
 
-async function command(i: Interaction, env: Env, ctx: WaitUntil): Promise<MessageReply> {
+async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
   const { options } = subcommand(i);
   const route = routeOf(i)!;
   // Rights are re-read from this request (member.roles, member.permissions) every time.
@@ -94,16 +105,16 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil): Promise<Messag
   // Insert order: the guild row (above), then the member row, then rows that reference them.
   // Only a command that passes the member gate creates the member row, and only a new row shows the welcome.
   const isNew = passesGate ? (await touchMember(env.DB, guild.id, m)).isNew : false;
-  const reply = await route.run(ctxFor(env.DB, guild, m), options);
+  const reply = await route.run(ctxFor(env, guild, m, effects, i), options);
   return isNew ? withWelcome(reply) : reply;
 }
 
 /** Buttons and modal submits: read the guild and member state, never create it. */
-async function component(i: Interaction, env: Env): Promise<MessageReply> {
+async function component(i: Interaction, env: Env, effects: Effects): Promise<MessageReply> {
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
-  const c = ctxFor(env.DB, guild, i.member!);
+  const c = ctxFor(env, guild, i.member!, effects, i);
   const id = i.data?.custom_id ?? '';
   if (i.type === InteractionType.MODAL_SUBMIT) return id.startsWith(MODAL_PREFIX) ? updateSubmitted(c, id, i.data?.components) : ephemeral(STALE_FORM);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
@@ -117,9 +128,12 @@ async function component(i: Interaction, env: Env): Promise<MessageReply> {
   return ephemeral(STALE_FORM);
 }
 
-/** The reply to an interaction planFor deferred. Typed MessageReply: a modal can never come back here. */
-export function deferredReply(i: Interaction, env: Env, ctx: WaitUntil): Promise<MessageReply> {
-  return i.type === InteractionType.APPLICATION_COMMAND ? command(i, env, ctx) : component(i, env);
+/**
+ * The reply to an interaction planFor deferred. Typed MessageReply: a modal can never come back here.
+ * `effects` collects work for after delivery (a board refresh when the handler marked posts dirty).
+ */
+export function deferredReply(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects = {}): Promise<MessageReply> {
+  return i.type === InteractionType.APPLICATION_COMMAND ? command(i, env, ctx, effects) : component(i, env, effects);
 }
 
 // ---------------------------------------------------------------- answered at once
@@ -129,7 +143,7 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
-  return updateSelected(ctxFor(env.DB, guild, i.member!), i.data?.custom_id ?? '', i.data?.values ?? []);
+  return updateSelected(ctxFor(env, guild, i.member!, {}), i.data?.custom_id ?? '', i.data?.values ?? []);
 }
 
 /** The reply to an interaction planFor answers at once. */

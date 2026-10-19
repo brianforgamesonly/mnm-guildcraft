@@ -11,6 +11,9 @@
       // Workers Logs (order 3, ITEM 3.1): free plan 200,000 events/day, 3 days' retention. About 2 events
       // per interaction (the invocation log + one timing line from src/index.ts).
       "observability": { "enabled": true },
+      // Order 5: ONE trigger (cron triggers are counted per account: 5 on the free plan). Every 15 minutes
+      // it sweeps dirty board posts; the 08:00 UTC run also re-renders every post (src/board/refresh.ts).
+      "triggers": { "crons": ["*/15 * * * *"] },
       "d1_databases": [
         {
           "binding": "DB",
