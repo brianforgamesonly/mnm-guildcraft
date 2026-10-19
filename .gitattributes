@@ -1,0 +1,3 @@
+* text=auto eol=lf
+# Committed byte-for-byte so their sha256 matches the source (ITEM 2, order 1).
+docs/** -text
