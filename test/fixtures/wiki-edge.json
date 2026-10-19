@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-10-19T17:35:56.514Z",
+  "vendors": {},
+  "items": {
+    "Copper Bar": { "hasPage": true, "tradeskills": ["Smelting"] },
+    "Copper Ore": { "hasPage": true },
+    "Prison Gruel": { "hasPage": true },
+    "Recipe: Prison Gruel": { "hasPage": true },
+    "Double-Bladed Retractable Prison Shiv": { "hasPage": true, "slot": "PRIMARY" },
+    "Recipe: Double-Bladed Retractable Prison Shiv": { "hasPage": true },
+    "Net Arrow": { "hasPage": true },
+    "Recipe: Net Arrow (x20)": { "hasPage": true },
+    "Wood": { "hasPage": true },
+    "Rope, Hempen, 50 Length": { "hasPage": true }
+  },
+  "mobs": {},
+  "nodes": {},
+  "recipes": [
+    { "tradeskill": "Smelting", "result": { "qty": 1, "item": "Copper Bar" }, "components": [{ "qty": 2, "item": "Copper Ore" }], "trivial": 20, "trivialUnconfirmed": true, "mold": "Bar Mold" },
+    { "tradeskill": "Cooking", "result": { "qty": 1, "item": "Prison Gruel" }, "components": [{ "qty": 1, "item": "Unknown" }], "trivial": 10 },
+    { "tradeskill": "Cooking", "result": { "qty": 1, "item": "Recipe: Prison Gruel" }, "components": [{ "qty": 1, "item": "Unknown" }, { "qty": 1, "item": "Unknown" }], "trivial": null, "fromItemPage": true },
+    { "tradeskill": "Blacksmithing", "result": { "qty": 1, "item": "Recipe: Double-Bladed Retractable Prison Shiv" }, "components": [{ "qty": 1, "item": "Unknown" }, { "qty": 1, "item": "Unknown" }], "trivial": null, "fromItemPage": true },
+    { "tradeskill": "Fletching", "result": { "qty": 20, "item": "Net Arrow" }, "components": [{ "qty": 1, "item": "Wood" }, { "qty": 1, "item": "Rope, Hempen, 50 Length" }], "trivial": null },
+    { "tradeskill": "Fletching", "result": { "qty": 20, "item": "Recipe: Net Arrow (x20)" }, "components": [{ "qty": 1, "item": "Wood" }, { "qty": 1, "item": "Rope, Hempen, 50 Length" }], "trivial": null, "fromItemPage": true },
+    { "tradeskill": "Fletching", "result": { "qty": 1, "item": "Recipe: Ghost Arrow" }, "components": [{ "qty": 1, "item": "Wood" }, { "qty": 1, "item": "Ectoplasm" }], "trivial": null, "fromItemPage": true }
+  ]
+}
