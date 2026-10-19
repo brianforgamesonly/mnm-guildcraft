@@ -34,7 +34,31 @@ export interface WikiRecipe {
   result: WikiComponent;
   components: WikiComponent[];
   trivial: number | null;
+  trivialUnconfirmed?: boolean;
+  fromItemPage?: boolean;
 }
+
+/** Problems that do not stop an import; stored in data_import.warnings as a JSON list. */
+export type Warning =
+  | { kind: 'unknown_field'; path: string; count: number }
+  | { kind: 'scroll'; tradeskill: string; result: string; product: string; decision: string }
+  | { kind: 'placeholder_result'; tradeskill: string; result: string }
+  | { kind: 'unmatched_component_names'; count: number; names: string[] };
+
+// The source's fields as of mnm-tools e19cc75 (2026-10-19). A field outside these lists is a
+// warning, not a failure, so the next source change names itself in data_import.warnings.
+const KNOWN_FIELDS = {
+  top: ['generatedAt', 'items', 'mobs', 'nodes', 'recipes'],
+  recipe: ['tradeskill', 'result', 'components', 'trivial', 'trivialUnconfirmed', 'fromItemPage'],
+  component: ['item', 'qty'],
+  item: ['ac', 'categories', 'class', 'container', 'delay', 'dmg', 'effect', 'flags', 'from', 'fromImport', 'fromTrade',
+    'handed', 'harvestedBy', 'hasPage', 'haste', 'hp', 'hpRegen', 'icon', 'iconId', 'instr', 'mana', 'manaRegen', 'race',
+    'resists', 'size', 'skill', 'slot', 'soldBy', 'stats', 'statsV', 'tradeskills', 'weight', 'wikiOnly', 'wikiZones'],
+} as const;
+
+/** A component name the source uses for "not known": counted on the recipe, never stored as an item. */
+export const PLACEHOLDER_KEY = 'unknown';
+export const isPlaceholder = (name: string) => name.trim().toLowerCase() === PLACEHOLDER_KEY;
 export type WikiItem = Record<string, unknown> & {
   icon?: string | null;
   slot?: string | null;
@@ -60,27 +84,46 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const isName = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0 && !v.includes('\u0000');
 const isPosInt = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0;
 
-/** Checks top-level keys and the recipe and item shapes. Throws StructureError; never partially accepts. */
-export function checkStructure(raw: unknown): WikiData {
+/**
+ * Checks top-level keys and the recipe and item shapes. Throws StructureError; never partially accepts.
+ * Fields outside KNOWN_FIELDS are appended to `warnings` (counted per path), never a failure.
+ */
+export function checkStructure(raw: unknown, warnings: Warning[] = []): WikiData {
   const p: string[] = [];
   if (!isObj(raw)) throw new StructureError(['top level is not an object']);
+  const unknown = new Map<string, number>();
+  const note = (obj: Record<string, unknown>, known: readonly string[], path: string) => {
+    for (const k of Object.keys(obj)) if (!known.includes(k)) unknown.set(`${path}.${k}`, (unknown.get(`${path}.${k}`) ?? 0) + 1);
+  };
+  const flush = () => {
+    for (const [path, count] of [...unknown].sort()) warnings.push({ kind: 'unknown_field', path, count });
+    unknown.clear();
+  };
+  note(raw, KNOWN_FIELDS.top, '$');
   if (typeof raw.generatedAt !== 'string' || Number.isNaN(Date.parse(raw.generatedAt))) p.push('generatedAt is not an ISO date string');
   if (!isObj(raw.items) || Object.keys(raw.items).length === 0) p.push('items is not a non-empty object');
   if (!Array.isArray(raw.recipes) || raw.recipes.length === 0) p.push('recipes is not a non-empty array');
   if (!isObj(raw.nodes)) p.push('nodes is not an object');
-  if (p.length) throw new StructureError(p);
+  if (p.length) {
+    flush();
+    throw new StructureError(p);
+  }
 
   (raw.recipes as unknown[]).forEach((r, i) => {
     const at = `recipes[${i}]`;
     if (!isObj(r)) return void p.push(`${at} is not an object`);
+    note(r, KNOWN_FIELDS.recipe, '$.recipes[]');
     if (!isName(r.tradeskill)) p.push(`${at}.tradeskill is not a name`);
     if (!isObj(r.result) || !isName(r.result.item) || !isPosInt(r.result.qty)) p.push(`${at}.result is not {qty>0, item}`);
+    else note(r.result, KNOWN_FIELDS.component, '$.recipes[].result');
     if (!('trivial' in r) || !(r.trivial === null || (Number.isInteger(r.trivial) && (r.trivial as number) >= 0)))
       p.push(`${at}.trivial is not a non-negative integer or null`);
+    if (r.trivialUnconfirmed !== undefined && typeof r.trivialUnconfirmed !== 'boolean') p.push(`${at}.trivialUnconfirmed is not a boolean`);
     if (!Array.isArray(r.components) || r.components.length === 0) p.push(`${at}.components is not a non-empty array`);
     else
       r.components.forEach((c, j) => {
         if (!isObj(c) || !isName(c.item) || !isPosInt(c.qty)) p.push(`${at}.components[${j}] is not {qty>0, item}`);
+        else note(c, KNOWN_FIELDS.component, '$.recipes[].components[]');
       });
   });
   for (const [name, it] of Object.entries(raw.items as Record<string, unknown>)) {
@@ -90,12 +133,14 @@ export function checkStructure(raw: unknown): WikiData {
       p.push(`${at} is not an object`);
       continue;
     }
+    note(it, KNOWN_FIELDS.item, '$.items[]');
     for (const k of ['icon', 'slot'] as const)
       if (it[k] !== undefined && it[k] !== null && typeof it[k] !== 'string') p.push(`${at}.${k} is not a string or null`);
     if (it.tradeskills !== undefined && !(Array.isArray(it.tradeskills) && it.tradeskills.every(isName)))
       p.push(`${at}.tradeskills is not an array of names`);
     if (it.harvestedBy !== undefined && it.harvestedBy !== null && !isName(it.harvestedBy)) p.push(`${at}.harvestedBy is not a name`);
   }
+  flush();
   if (p.length) throw new StructureError(p);
   return raw as unknown as WikiData;
 }
@@ -161,6 +206,10 @@ export interface PlannedRecipe {
   result_key: string;
   result_qty: number;
   trivial: number | null;
+  /** 1 when the source marks the trivial as unconfirmed (recipe.trivial_unconfirmed). */
+  trivial_unconfirmed: number;
+  /** Source component rows named "Unknown" (recipe.unknown_components); never stored as components. */
+  unknown_components: number;
   components: Map<string, number>; // item name_key -> qty
 }
 interface ExistingRecipe {
@@ -171,6 +220,8 @@ interface ExistingRecipe {
   result_key: string;
   result_qty: number;
   trivial: number | null;
+  trivial_unconfirmed: number;
+  unknown_components: number;
   components: Map<string, number>;
 }
 export interface ExistingState {
@@ -192,6 +243,8 @@ export interface Plan {
   duplicatesCollapsed: number;
   itemNameCollisions: number;
   caseOnlyMatches: number;
+  scrolls: { skipped: number; adopted: number };
+  warnings: Warning[];
 }
 
 /** A recipe's identity within its (tradeskill, result) group, excluding the variant number. */
@@ -203,10 +256,20 @@ function parseSourceKey(k: string): { group: string; variant: number } {
   return { group: k.slice(0, i), variant: Number(k.slice(i + 1)) };
 }
 
-function signature(r: { result_qty: number; trivial: number | null; components: Map<string, number> }): string {
+function signature(r: {
+  result_qty: number;
+  trivial: number | null;
+  trivial_unconfirmed: number;
+  unknown_components: number;
+  components: Map<string, number>;
+}): string {
   const comps = [...r.components.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return JSON.stringify([r.result_qty, r.trivial, comps]);
+  return JSON.stringify([r.result_qty, r.trivial, r.trivial_unconfirmed, r.unknown_components, comps]);
 }
+
+const SCROLL = /^Recipe:\s*/;
+/** "Recipe: Net Arrow (x20)" -> "Net Arrow". */
+export const scrollProduct = (result: string) => result.replace(SCROLL, '').replace(/\s*\(x\d+\)\s*$/, '').trim();
 
 /**
  * Variant rule (source_key = "<tradeskill>|<result name_key>|<variant>").
@@ -276,11 +339,49 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     });
   }
 
-  // Stub items: names a recipe references that have no item record (FKs need a row).
+  const warnings: Warning[] = [];
+
+  // "Recipe: <product>" results are recipe scrolls, not crafted goods. A scroll is skipped when its
+  // product already has a recipe; adopted as the product's recipe when the product has an item record
+  // and no recipe (the scroll is the only evidence); otherwise skipped. Every decision is logged.
+  const scrolls = { skipped: 0, adopted: 0 };
+  const plainResults = new Set(data.recipes.filter((r) => !SCROLL.test(r.result.item)).map((r) => nameKey(r.result.item)));
+  const effective: WikiRecipe[] = [];
+  for (const r of data.recipes) {
+    if (isPlaceholder(r.result.item)) {
+      warnings.push({ kind: 'placeholder_result', tradeskill: r.tradeskill, result: r.result.item });
+      continue;
+    }
+    if (!SCROLL.test(r.result.item)) {
+      effective.push(r);
+      continue;
+    }
+    const product = scrollProduct(r.result.item);
+    const pk = nameKey(product);
+    let decision: string;
+    if (plainResults.has(pk)) {
+      decision = 'skipped: the product already has a recipe';
+      scrolls.skipped++;
+    } else if (items.has(pk)) {
+      decision = "adopted as the product's recipe";
+      scrolls.adopted++;
+      effective.push({ ...r, result: { ...r.result, item: items.get(pk)!.name } });
+      plainResults.add(pk);
+    } else {
+      decision = 'skipped: the product has no item record';
+      scrolls.skipped++;
+    }
+    warnings.push({ kind: 'scroll', tradeskill: r.tradeskill, result: r.result.item, product, decision });
+  }
+
+  const unmatched = [...new Set(data.recipes.flatMap((r) => r.components.map((c) => c.item)))].filter((n) => !items.has(nameKey(n))).sort();
+  if (unmatched.length) warnings.push({ kind: 'unmatched_component_names', count: unmatched.length, names: unmatched });
+
+  // Stub items: names a recipe references that have no item record (FKs need a row). Placeholders are not items.
   const stubs = new Map<string, { name: string; name_key: string }>();
   let caseOnlyMatches = 0;
   const caseOnlySeen = new Set<string>();
-  const refs = data.recipes.flatMap((r) => [r.result.item, ...r.components.map((c) => c.item)]);
+  const refs = effective.flatMap((r) => [r.result.item, ...r.components.map((c) => c.item)]).filter((n) => !isPlaceholder(n));
   for (const name of refs) {
     const key = nameKey(name);
     if (items.has(key)) {
@@ -297,12 +398,25 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
   const groups = new Map<string, Omit<PlannedRecipe, 'source_key'>[]>();
   const seen = new Set<string>();
   let duplicatesCollapsed = 0;
-  for (const r of data.recipes) {
-    // recipe_component's key is (recipe, item): an item listed twice in one recipe is one row with
-    // the quantities added (0 such recipes in the 2026-10-14 data).
+  for (const r of effective) {
+    // Placeholder rows are counted, not stored. recipe_component's key is (recipe, item): a real item
+    // listed twice in one recipe would be one row with the quantities added (0 such recipes in e19cc75;
+    // its only repeats were placeholders).
     const components = new Map<string, number>();
-    for (const c of r.components) components.set(nameKey(c.item), (components.get(nameKey(c.item)) ?? 0) + c.qty);
-    const rec = { tradeskill: r.tradeskill, result_key: nameKey(r.result.item), result_qty: r.result.qty, trivial: r.trivial, components };
+    let unknown_components = 0;
+    for (const c of r.components) {
+      if (isPlaceholder(c.item)) unknown_components++;
+      else components.set(nameKey(c.item), (components.get(nameKey(c.item)) ?? 0) + c.qty);
+    }
+    const rec = {
+      tradeskill: r.tradeskill,
+      result_key: nameKey(r.result.item),
+      result_qty: r.result.qty,
+      trivial: r.trivial,
+      trivial_unconfirmed: r.trivialUnconfirmed === true ? 1 : 0,
+      unknown_components,
+      components,
+    };
     const g = groupKey(rec.tradeskill, rec.result_key);
     const sig = `${g}|${signature(rec)}`;
     if (seen.has(sig)) {
@@ -349,6 +463,8 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     duplicatesCollapsed,
     itemNameCollisions,
     caseOnlyMatches,
+    scrolls,
+    warnings,
   };
 }
 
@@ -385,7 +501,10 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
   for (const r of plan.recipes) {
     const o = ex.recipes.get(r.source_key);
     if (!o) p.recipe.insert++;
-    else if (!o.active || o.tradeskill !== r.tradeskill || o.result_key !== r.result_key || o.result_qty !== r.result_qty || o.trivial !== r.trivial)
+    else if (
+      !o.active || o.tradeskill !== r.tradeskill || o.result_key !== r.result_key || o.result_qty !== r.result_qty || o.trivial !== r.trivial ||
+      o.trivial_unconfirmed !== r.trivial_unconfirmed || o.unknown_components !== r.unknown_components
+    )
       p.recipe.update++;
     for (const [k, q] of r.components) {
       const oq = o?.components.get(k);
@@ -458,14 +577,21 @@ export function buildStatements(plan: Plan, importedAt: string): Statement[] {
     out.push({
       table: 'recipe',
       sql:
-        `INSERT INTO recipe (source_key, tradeskill_id, result_item_id, result_qty, trivial, source, active, imported_at) VALUES ` +
+        `INSERT INTO recipe (source_key, tradeskill_id, result_item_id, result_qty, trivial, trivial_unconfirmed, unknown_components, source, active, imported_at) VALUES ` +
         rows
-          .map((r) => `(${lit(r.source_key)}, (SELECT id FROM tradeskill WHERE name = ${lit(r.tradeskill)}), ${itemId(r.result_key)}, ${r.result_qty}, ${lit(r.trivial)}, 'wiki', 1, ${at})`)
+          .map(
+            (r) =>
+              `(${lit(r.source_key)}, (SELECT id FROM tradeskill WHERE name = ${lit(r.tradeskill)}), ${itemId(r.result_key)}, ${r.result_qty}, ` +
+              `${lit(r.trivial)}, ${lit(r.trivial_unconfirmed)}, ${lit(r.unknown_components)}, 'wiki', 1, ${at})`,
+          )
           .join(', ') +
         ` ON CONFLICT(source_key) DO UPDATE SET tradeskill_id = excluded.tradeskill_id, result_item_id = excluded.result_item_id, ` +
-        `result_qty = excluded.result_qty, trivial = excluded.trivial, active = 1, imported_at = excluded.imported_at ` +
+        `result_qty = excluded.result_qty, trivial = excluded.trivial, trivial_unconfirmed = excluded.trivial_unconfirmed, ` +
+        `unknown_components = excluded.unknown_components, active = 1, imported_at = excluded.imported_at ` +
         `WHERE recipe.source = 'wiki' AND (recipe.tradeskill_id IS NOT excluded.tradeskill_id OR recipe.result_item_id IS NOT excluded.result_item_id ` +
-        `OR recipe.result_qty IS NOT excluded.result_qty OR recipe.trivial IS NOT excluded.trivial OR recipe.active IS NOT 1)`,
+        `OR recipe.result_qty IS NOT excluded.result_qty OR recipe.trivial IS NOT excluded.trivial ` +
+        `OR recipe.trivial_unconfirmed IS NOT excluded.trivial_unconfirmed OR recipe.unknown_components IS NOT excluded.unknown_components ` +
+        `OR recipe.active IS NOT 1)`,
     });
   const comps = plan.recipes.flatMap((r) => [...r.components].map(([k, q]) => ({ r: r.source_key, k, q })));
   for (const rows of chunk(comps, ROWS_PER_STATEMENT))
@@ -496,8 +622,12 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
   const its = await db.all<{ name: string; name_key: string; icon_url: string | null; slot: string | null; stats_json: string | null; source: string }>(
     'SELECT name, name_key, icon_url, slot, stats_json, source FROM item',
   );
-  const rs = await db.all<{ source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null; item_key: string | null; qty: number | null }>(
-    `SELECT r.source_key, r.active, t.name AS tradeskill, ri.name_key AS result_key, r.result_qty, r.trivial, ci.name_key AS item_key, c.qty
+  const rs = await db.all<{
+    source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null;
+    trivial_unconfirmed: number; unknown_components: number; item_key: string | null; qty: number | null;
+  }>(
+    `SELECT r.source_key, r.active, t.name AS tradeskill, ri.name_key AS result_key, r.result_qty, r.trivial,
+            r.trivial_unconfirmed, r.unknown_components, ci.name_key AS item_key, c.qty
      FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id JOIN item ri ON ri.id = r.result_item_id
      LEFT JOIN recipe_component c ON c.recipe_id = r.id LEFT JOIN item ci ON ci.id = c.item_id
      WHERE r.source = 'wiki'`,
@@ -514,6 +644,9 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
         result_key: row.result_key,
         result_qty: row.result_qty,
         trivial: row.trivial,
+        // Read back as integers so the comparison with the plan is exact (second run writes 0).
+        trivial_unconfirmed: Number(row.trivial_unconfirmed),
+        unknown_components: Number(row.unknown_components),
         components: new Map(),
       };
       recipes.set(row.source_key, r);
@@ -558,7 +691,12 @@ export interface ImportResult {
     itemNameCollisions: number;
     caseOnlyMatches: number;
     deactivated: number;
+    trivialUnconfirmed: number;
+    unknownComponentRows: number;
+    scrolls: { skipped: number; adopted: number };
   };
+  /** Also stored as JSON in data_import.warnings. */
+  warnings?: Warning[];
   gatheringCandidates?: string[];
   predicted?: Predicted;
   /** D1 response metadata summed per table (absent on dry runs and failures). */
@@ -572,12 +710,14 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   const startedAt = opts.now();
   const generatedAt = isObj(raw) && typeof raw.generatedAt === 'string' ? raw.generatedAt : 'unknown';
   const sourceVersion = `${opts.sourceSha} / ${generatedAt}`;
+  const warnings: Warning[] = [];
+  const warningsJson = () => (warnings.length ? lit(JSON.stringify(warnings)) : 'NULL');
   const fail = async (error: string): Promise<ImportResult> => {
     if (!opts.dryRun)
       await db.run([
-        `INSERT INTO data_import (source, source_version, status, error, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'failed', ${lit(error.slice(0, 2000))}, ${lit(startedAt)}, ${lit(opts.now())})`,
+        `INSERT INTO data_import (source, source_version, status, error, warnings, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'failed', ${lit(error.slice(0, 2000))}, ${warningsJson()}, ${lit(startedAt)}, ${lit(opts.now())})`,
       ]);
-    return { status: 'failed', sourceVersion, error };
+    return { status: 'failed', sourceVersion, error, warnings };
   };
 
   // The first real write to a database (e.g. by the nightly cron) must follow a dispatched dry run.
@@ -589,13 +729,14 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
 
   let data: WikiData;
   try {
-    data = checkStructure(raw);
+    data = checkStructure(raw, warnings);
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }
 
   const existing = await loadExisting(db);
   const plan = buildPlan(data, existing);
+  warnings.push(...plan.warnings);
   if (existing.activeWikiRecipes > 0 && plan.recipes.length < existing.activeWikiRecipes * MIN_RECIPE_RATIO)
     return fail(`implausible drop: ${plan.recipes.length} recipes against ${existing.activeWikiRecipes} active stored`);
 
@@ -613,17 +754,20 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     itemNameCollisions: plan.itemNameCollisions,
     caseOnlyMatches: plan.caseOnlyMatches,
     deactivated: plan.deactivate.length,
+    trivialUnconfirmed: plan.recipes.filter((r) => r.trivial_unconfirmed === 1).length,
+    unknownComponentRows: plan.recipes.reduce((n, r) => n + r.unknown_components, 0),
+    scrolls: plan.scrolls,
   };
   const predicted = predict(plan, existing);
   if (opts.dryRun) {
     await db.run([
-      `INSERT INTO data_import (source, source_version, items, recipes, status, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, ${counts.items + counts.stubItems}, ${counts.recipes}, 'dry-run', ${lit(startedAt)}, ${lit(opts.now())})`,
+      `INSERT INTO data_import (source, source_version, items, recipes, status, warnings, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, ${counts.items + counts.stubItems}, ${counts.recipes}, 'dry-run', ${warningsJson()}, ${lit(startedAt)}, ${lit(opts.now())})`,
     ]);
-    return { status: 'dry-run', sourceVersion, counts, gatheringCandidates: plan.gatheringCandidates, predicted };
+    return { status: 'dry-run', sourceVersion, counts, warnings, gatheringCandidates: plan.gatheringCandidates, predicted };
   }
 
   await db.run([
-    `INSERT INTO data_import (source, source_version, status, started_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'running', ${lit(startedAt)})`,
+    `INSERT INTO data_import (source, source_version, status, warnings, started_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'running', ${warningsJson()}, ${lit(startedAt)})`,
   ]);
   const runRow = `(SELECT max(id) FROM data_import WHERE status = 'running' AND started_at = ${lit(startedAt)})`;
   const statements = buildStatements(plan, startedAt);
@@ -645,10 +789,10 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await db.run([`UPDATE data_import SET status = 'failed', error = ${lit(error.slice(0, 2000))}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`]);
-    return { status: 'failed', sourceVersion, error, counts, predicted };
+    return { status: 'failed', sourceVersion, error, counts, warnings, predicted };
   }
   await db.run([
     `UPDATE data_import SET status = 'ok', items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
   ]);
-  return { status: 'ok', sourceVersion, counts, gatheringCandidates: plan.gatheringCandidates, predicted, written };
+  return { status: 'ok', sourceVersion, counts, warnings, gatheringCandidates: plan.gatheringCandidates, predicted, written };
 }
