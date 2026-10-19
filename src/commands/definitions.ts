@@ -8,7 +8,10 @@ const STRING = 3;
 const INTEGER = 4;
 const BOOLEAN = 5;
 const USER = 6;
+const CHANNEL = 7;
 const ROLE = 8;
+/** Channel type GUILD_FORUM (also src/discord.ts GUILD_FORUM; kept literal so the registration script reads this file alone). */
+const GUILD_FORUM_CHANNEL = 15;
 /** Interaction context: guild channels only. */
 const GUILD_ONLY = [0];
 /** Manage Server. Administrators hold every permission, so they see the command too. */
@@ -116,12 +119,14 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'setup',
-        description: 'Set the member and officer roles (leave both out to see the current settings)',
+        description: 'Set the roles and the roster board (leave all out to see the current settings)',
         options: [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
           { type: ROLE, name: 'officer_role', description: "Officers can edit any member's entries" },
+          { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
         ],
       },
+      { type: SUBCOMMAND, name: 'status', description: 'Data version, last import and the roster board' },
     ],
   },
 ] as const;

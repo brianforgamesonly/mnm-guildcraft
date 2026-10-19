@@ -15,9 +15,25 @@ export interface D1Call {
   region?: string;
   primary?: boolean;
   sql_ms?: number;
+  /** D1's meta.duration (order 5, ITEM 2): its own server-side time for the query. */
+  duration?: number;
+  /** Rows D1 read: a game-list cache reload (src/gamedata.ts) reads the whole list, a warm read about 2. */
+  rows_read?: number;
 }
 
-type Meta = { served_by_region?: string; served_by_primary?: boolean; timings?: { sql_duration_ms?: number } };
+type Meta = { served_by_region?: string; served_by_primary?: boolean; duration?: number; rows_read?: number; timings?: { sql_duration_ms?: number } };
+
+// ---------------------------------------------------------------- the isolate's state (order 5, ITEM 2)
+// Module-level, so it lives as long as the isolate: whether this is the isolate's first request, and how
+// long since this isolate last heard back from D1. A cold first keystroke is told apart by these two.
+let isolateRequests = 0;
+let lastD1At: number | null = null;
+
+/** Called once at the start of each request or scheduled run: the isolate's state before it. */
+export function isolateSnapshot(): { isolate_first_request: boolean; ms_since_last_d1_in_isolate: number | null } {
+  isolateRequests++;
+  return { isolate_first_request: isolateRequests === 1, ms_since_last_d1_in_isolate: lastD1At === null ? null : Date.now() - lastD1At };
+}
 const metaOf = (r: unknown): Meta | undefined => {
   const one = Array.isArray(r) ? r[0] : r;
   return one && typeof one === 'object' && 'meta' in one ? ((one as { meta?: Meta }).meta ?? undefined) : undefined;
@@ -38,9 +54,12 @@ export function countD1(db: D1Database): { db: D1Database; calls: D1Call[] } {
       if (m?.served_by_region) call.region = m.served_by_region;
       if (typeof m?.served_by_primary === 'boolean') call.primary = m.served_by_primary;
       if (typeof m?.timings?.sql_duration_ms === 'number') call.sql_ms = m.timings.sql_duration_ms;
+      if (typeof m?.duration === 'number') call.duration = m.duration;
+      if (typeof m?.rows_read === 'number') call.rows_read = m.rows_read;
       return r;
     } finally {
-      call.ms = Date.now() - t;
+      lastD1At = Date.now();
+      call.ms = lastD1At - t;
       calls.push(call);
     }
   };
@@ -92,6 +111,8 @@ export interface Outcome {
   ack: number | null;
   deliveries?: { op: string; status: number; error?: string }[];
   err?: string | null;
+  /** The isolate's state when the request arrived (isolateSnapshot). */
+  isolate?: ReturnType<typeof isolateSnapshot>;
 }
 
 /** The one structured line per interaction. Read back from Workers Logs (see .github/workflows/timings.yml). */
@@ -102,6 +123,9 @@ export function timingLine(i: Parameters<typeof describeInteraction>[0], calls: 
     q: calls.length,
     d1_ms: calls.map((c) => c.ms),
     sql_ms: calls.map((c) => c.sql_ms ?? null),
+    d1_duration: calls.map((c) => c.duration ?? null),
+    rows_read: calls.map((c) => c.rows_read ?? null),
+    ...(outcome.isolate ?? {}),
     d1_region: [...new Set(calls.map((c) => c.region).filter(Boolean))].join(',') || null,
     d1_primary: calls.some((c) => c.primary === false) ? false : calls.some((c) => c.primary) ? true : null,
     colo: colo ?? null,

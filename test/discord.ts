@@ -31,16 +31,26 @@ export const guildLookup = {
   },
 };
 
-function spyOnFetch() {
+/** The fake Discord's bot API (order 5: the roster board). Set `handle` to answer bot-token calls; reset() clears it. */
+export const botApi = {
+  handle: null as null | ((method: string, path: string, body: any) => Response | Promise<Response>),
+  reset() {
+    this.handle = null;
+  },
+};
+
+export function spyOnFetch() {
   if (vi.isMockFunction(globalThis.fetch)) return;
   const real = globalThis.fetch.bind(globalThis);
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (url.startsWith(`${DISCORD_API}/guilds/`) && guildLookup.respond) {
+    if (url === `${DISCORD_API}/guilds/${GUILD}` && guildLookup.respond) {
       guildLookup.calls.push(url);
       return guildLookup.respond();
     }
     const prefix = `${DISCORD_API}/webhooks/`;
+    if (!url.startsWith(prefix) && url.startsWith(DISCORD_API) && botApi.handle)
+      return botApi.handle(init?.method ?? 'GET', url.slice(DISCORD_API.length), init?.body ? JSON.parse(String(init.body)) : undefined);
     if (!url.startsWith(prefix)) return real(input, init);
     const call = { method: init?.method ?? 'GET', url, token: url.slice(prefix.length).split('/')[1], body: init?.body ? JSON.parse(String(init.body)) : undefined };
     webhookCalls.push(call);

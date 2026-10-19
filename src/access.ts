@@ -11,9 +11,11 @@ export interface Guild {
   stale_days: number;
   /** /craft find "Still learning": this many points below the trivial (migration 0004). */
   learning_window: number;
+  /** The roster board's forum channel (PRD FR-5), set by /guildcraft setup board:. */
+  board_channel_id: string | null;
 }
 
-const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window';
+const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window, board_channel_id';
 
 /** Budget for the guild-name lookup, well inside Discord's 3-second first-reply window. */
 export const GUILD_NAME_TIMEOUT_MS = 1500;
@@ -101,6 +103,13 @@ export async function touchMember(db: D1Database, guildId: string, m: GuildMembe
     db.prepare(
       "INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, ?, 'active', ?) ON CONFLICT DO NOTHING",
     ).bind(guildId, m.user.id, name, now()),
+    // The board shows display names (order 5): a changed name marks the member's posts dirty for the
+    // 15-minute sweep. Runs before the UPDATE below, while the stored name is still the old one.
+    db.prepare(
+      `UPDATE board_post SET dirty = 1 WHERE guild_id = ?1 AND tradeskill_id IN (SELECT cs.tradeskill_id FROM character_skill cs JOIN character c ON c.id = cs.character_id
+         WHERE c.guild_id = ?1 AND c.owner_user_id = ?2 AND c.deleted_at IS NULL)
+       AND EXISTS (SELECT 1 FROM member WHERE guild_id = ?1 AND discord_user_id = ?2 AND (display_name IS NOT ?3 OR status <> 'active'))`,
+    ).bind(guildId, m.user.id, name),
     db.prepare(
       "UPDATE member SET display_name = ?, status = 'active' WHERE guild_id = ? AND discord_user_id = ? AND (display_name IS NOT ? OR status <> 'active')",
     ).bind(name, guildId, m.user.id, name),

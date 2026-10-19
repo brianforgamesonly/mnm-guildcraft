@@ -32,6 +32,19 @@ export interface ModalComponent {
   components?: ModalComponent[];
 }
 
+/** A channel in an interaction's resolved data: Discord adds the invoker's and the app's permissions there. */
+export interface ResolvedChannel {
+  id: string;
+  name?: string;
+  type: number;
+  permissions?: string;
+  app_permissions?: string;
+}
+
+export interface Resolved {
+  channels?: Record<string, ResolvedChannel>;
+}
+
 export interface Interaction {
   type: number;
   /** Both present on every interaction Discord sends; the deferred path edits the reply with them. */
@@ -47,6 +60,7 @@ export interface Interaction {
     component_type?: number;
     values?: string[];
     components?: ModalComponent[];
+    resolved?: Resolved;
   };
 }
 
@@ -165,6 +179,15 @@ export const focused = (opts: Option[]): Option | undefined => opts.find((o) => 
 // Permission bits (https://docs.discord.com/developers/topics/permissions).
 export const ADMINISTRATOR = 1n << 3n;
 export const MANAGE_GUILD = 1n << 5n;
+export const VIEW_CHANNEL = 1n << 10n;
+/** In a forum channel this is "Create Posts" (CREATE_PUBLIC_THREADS is ignored there). */
+export const SEND_MESSAGES = 1n << 11n;
+export const EMBED_LINKS = 1n << 14n;
+export const READ_MESSAGE_HISTORY = 1n << 16n;
+export const MANAGE_THREADS = 1n << 34n;
+export const SEND_MESSAGES_IN_THREADS = 1n << 38n;
+/** Channel type GUILD_FORUM. */
+export const GUILD_FORUM = 15;
 
 export function hasPermission(bitfield: string | undefined, bit: bigint): boolean {
   if (!bitfield || !/^\d+$/.test(bitfield)) return false;

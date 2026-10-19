@@ -84,3 +84,9 @@ Treat the clock as authoritative over any date an order states.
 ## Added by work order 4 (roster timeout and speed)
 
 - Game meaning is never inferred from item names. Items with different names are distinct, and are never merged, aliased or described as a category, unless the source data or Brian says so (Brian, 2026-10-19: Corroded and Rusty items are not the same).
+
+## Added by work order 5 (board, status, warm)
+
+- The session never creates channels or posts on Brian's server. Live board posts start from Brian's own `/guildcraft setup board:`; before that, board code is verified in workerd against a mocked Discord API, and the dry run is a read-only render from live D1 (`.github/workflows/board.yml`, action `render`), with `delete` as the rollback.
+- A Worker invocation that does board work (after a command, or a cron run) stops at about 40 external calls (D1 and Discord together), below the Free plan's 50 subrequests; work beyond that stays dirty for the next sweep (`src/board/api.ts` BOARD_CALL_CAP).
+- This repository is public, so Actions logs are public: a log that would show guild data (display names, character names) prints pseudonyms instead.

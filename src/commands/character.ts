@@ -2,6 +2,7 @@
 // Privacy (ORDER-RULES, order 2): a name resolves only among the caller's own characters unless an
 // officer passes member:@user, so another member's character answers exactly like a missing one.
 import { audit, auditNewCharacter, now } from '../access.ts';
+import { markCharacterDirty } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, md, optBool, optInt, optString, type MessageReply, type Option } from '../discord.ts';
 import { updateButtons } from './skills.ts';
@@ -157,6 +158,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
         .prepare('UPDATE character SET deleted_at = NULL, class = ?, level = ?, is_main = ?, updated_at = ? WHERE id = ?')
         .bind(after.class, after.level, after.is_main, at, existing.id),
       audit(c.db, c.guild.id, c.userId, 'character.restore', `character:${existing.id}`, snapshot(existing), snapshot(after)),
+      markCharacterDirty(c, existing.id),
     ];
     await c.db.batch(stmts);
     const skills = await c.db.prepare('SELECT count(*) AS n FROM character_skill WHERE character_id = ?').bind(existing.id).first<{ n: number }>();
@@ -244,6 +246,8 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
         .prepare('UPDATE character SET name = ?, name_key = ?, class = ?, level = ?, is_main = ?, updated_at = ? WHERE id = ?')
         .bind(after.name, after.name_key, after.class, after.level, after.is_main, at, ch.id),
       audit(c.db, c.guild.id, c.userId, 'character.edit', `character:${ch.id}`, snapshot(ch), snapshot(after)),
+      // The board shows the character's name, so only a rename changes its posts.
+      ...(after.name !== ch.name ? [markCharacterDirty(c, ch.id)] : []),
     ]);
   } catch (e) {
     if (isUniqueViolation(e)) return ephemeral(TAKEN(after.name));
@@ -270,6 +274,7 @@ export async function characterRemove(c: Ctx, opts: Option[]): Promise<MessageRe
     c.db.prepare('UPDATE character SET deleted_at = ?, is_main = 0, updated_at = ? WHERE id = ?').bind(at, at, ch.id),
     ...(next ? [c.db.prepare('UPDATE character SET is_main = 1, updated_at = ? WHERE id = ?').bind(at, next.id)] : []),
     audit(c.db, c.guild.id, c.userId, 'character.remove', `character:${ch.id}`, snapshot(ch), snapshot({ ...ch, is_main: 0, deleted_at: at })),
+    markCharacterDirty(c, ch.id),
   ]);
   const lines = [`Removed **${md(ch.name)}**. Its skills are kept: \`/character add name:${inCode(ch.name)}\` restores it.`];
   if (next) lines.push(`**${md(next.name)}** is now the main.`);
