@@ -42,4 +42,4 @@ jobs:
         run: |
           curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
-            | jq -c '{success, subdomain: .result.subdomain, errors: [.errors[]? | {code, message}]}'
+            | jq -c '{workers_dev_subdomain_exists: ((.result.subdomain // "") != ""), subdomain: .result.subdomain, success, errors: [.errors[]? | {code, message}]}'

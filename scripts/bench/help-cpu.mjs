@@ -1,5 +1,5 @@
 // CPU cost of one /craft help request through the Worker's own code (Hono app + Ed25519 verify).
-// Runs under Node 24, not workerd: a local approximation of the Workers CPU-time limit, not a production reading.
+// A PROXY measured in Node 24, not a Worker measurement: workerd's CPU accounting is not reproduced here.
 // Usage: node scripts/bench/help-cpu.mjs [requests]
 
 import app from '../../src/index.ts';

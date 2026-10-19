@@ -126,7 +126,26 @@ describe('import', () => {
     expect(await fingerprint()).toEqual(before);
   });
 
-  it('a dry run writes nothing and predicts the writes', async () => {
+  it('a real write is refused while data_import holds no completed dry run, and allowed after one', async () => {
+    const guarded = (dryRun: boolean) => runImport(db, fixture(), { sourceSha: 'b'.repeat(40), now, dryRun, requireDryRun: true });
+    const refused = await guarded(false);
+    expect(refused.status).toBe('refused');
+    expect(await one('SELECT (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM data_import) AS n')).toEqual({ n: 0 });
+
+    expect((await guarded(true)).status).toBe('dry-run');
+    const allowed = await guarded(false);
+    expect(allowed.status).toBe('ok');
+    expect(await one('SELECT count(*) AS n FROM recipe')).toEqual({ n: 6 });
+    expect(await all('SELECT status FROM data_import ORDER BY id')).toEqual([{ status: 'dry-run' }, { status: 'ok' }]);
+  });
+
+  it('a structure failure in a dry run does not unlock real writes', async () => {
+    const res = await runImport(db, corrupt, { sourceSha: 'c'.repeat(40), now, dryRun: true });
+    expect(res.status).toBe('failed');
+    expect((await runImport(db, fixture(), { sourceSha: 'c'.repeat(40), now, requireDryRun: true })).status).toBe('refused');
+  });
+
+  it('a dry run writes only its own data_import row and predicts the writes', async () => {
     const res = await load(fixture(), true);
     expect(res.status).toBe('dry-run');
     expect(res.predicted).toEqual({
@@ -136,6 +155,7 @@ describe('import', () => {
       recipe: { insert: 6, update: 0, deactivate: 0 },
       recipe_component: { insert: 8, update: 0, delete: 0 },
     });
-    expect(await one('SELECT (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM data_import) AS n')).toEqual({ n: 0 });
+    expect(await one('SELECT (SELECT count(*) FROM tradeskill) + (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM recipe_component) AS n')).toEqual({ n: 0 });
+    expect(await all('SELECT status, items, recipes FROM data_import')).toEqual([{ status: 'dry-run', items: 12, recipes: 6 }]);
   });
 });

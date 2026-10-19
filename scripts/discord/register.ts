@@ -41,10 +41,21 @@ async function workerUrl(): Promise<string> {
 type Command = { id: string; name: string; options?: { name: string }[] };
 const describe = (cmds: Command[]) => cmds.map((c) => ({ id: c.id, name: c.name, subcommands: (c.options ?? []).map((o) => o.name) }));
 
+// The live Worker must reject bad signatures before Discord is pointed at it: Discord sends invalid
+// signatures on save and afterwards, and removes the URL if one is accepted.
+const url = await workerUrl();
+for (const [label, headers] of [
+  ['invalid signature', { 'X-Signature-Ed25519': '00'.repeat(64), 'X-Signature-Timestamp': String(Math.floor(Date.now() / 1000)) }],
+  ['no signature headers', {}],
+] as const) {
+  const probe = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: '{"type":1}' });
+  console.log(`live check ${url} (${label}): HTTP ${probe.status}`);
+  if (probe.status !== 401) throw new Error(`live Worker returned ${probe.status} for ${label}, expected 401; not registering`);
+}
+
 const registered = (await discord('PUT', `/applications/${appId}/guilds/${guildId}/commands`, COMMANDS)) as Command[];
 console.log('registered (guild-scoped):', JSON.stringify(describe(registered)));
 
-const url = await workerUrl();
 console.log('setting interactions_endpoint_url:', url);
 await discord('PATCH', '/applications/@me', { interactions_endpoint_url: url });
 

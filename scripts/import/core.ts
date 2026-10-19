@@ -534,11 +534,14 @@ export interface ImportOptions {
   /** Commit SHA of the source file, resolved at run time. */
   sourceSha: string;
   now: () => string;
+  /** Plan and predict only. Writes nothing but its own completed data_import row (status 'dry-run'). */
   dryRun?: boolean;
+  /** Refuse a real write while data_import holds no completed dry-run row (the remote database). */
+  requireDryRun?: boolean;
 }
 
 export interface ImportResult {
-  status: 'ok' | 'failed' | 'dry-run';
+  status: 'ok' | 'failed' | 'dry-run' | 'refused';
   sourceVersion: string;
   error?: string;
   counts?: {
@@ -577,6 +580,13 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     return { status: 'failed', sourceVersion, error };
   };
 
+  // The first real write to a database (e.g. by the nightly cron) must follow a dispatched dry run.
+  if (!opts.dryRun && opts.requireDryRun) {
+    const [row] = await db.all<{ n: number }>("SELECT count(*) AS n FROM data_import WHERE status = 'dry-run' AND finished_at IS NOT NULL");
+    if (!row || row.n === 0)
+      return { status: 'refused', sourceVersion, error: 'no completed dry run in data_import: dispatch the import with dry_run first' };
+  }
+
   let data: WikiData;
   try {
     data = checkStructure(raw);
@@ -605,7 +615,12 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     deactivated: plan.deactivate.length,
   };
   const predicted = predict(plan, existing);
-  if (opts.dryRun) return { status: 'dry-run', sourceVersion, counts, gatheringCandidates: plan.gatheringCandidates, predicted };
+  if (opts.dryRun) {
+    await db.run([
+      `INSERT INTO data_import (source, source_version, items, recipes, status, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, ${counts.items + counts.stubItems}, ${counts.recipes}, 'dry-run', ${lit(startedAt)}, ${lit(opts.now())})`,
+    ]);
+    return { status: 'dry-run', sourceVersion, counts, gatheringCandidates: plan.gatheringCandidates, predicted };
+  }
 
   await db.run([
     `INSERT INTO data_import (source, source_version, status, started_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'running', ${lit(startedAt)})`,

@@ -36,9 +36,14 @@ try {
   const { sha, raw } = args.file
     ? { sha: args.sha ?? 'local-file', raw: JSON.parse(readFileSync(args.file, 'utf8')) as unknown }
     : await fetchSource(process.env.GITHUB_TOKEN);
-  const result = await runImport(db, raw, { sourceSha: sha, now: () => new Date().toISOString(), dryRun: args['dry-run'] });
+  const result = await runImport(db, raw, {
+    sourceSha: sha,
+    now: () => new Date().toISOString(),
+    dryRun: args['dry-run'],
+    requireDryRun: args.remote,
+  });
   console.log(JSON.stringify({ target: args.local ? 'local' : 'remote', ...result }, null, 2));
-  if (result.status === 'failed') process.exitCode = 1;
+  if (result.status === 'failed' || result.status === 'refused') process.exitCode = 1;
 } finally {
   await dispose();
 }
