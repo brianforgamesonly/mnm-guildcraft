@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Top level is intentionally inert: the production environment is created at launch (order 6).
+  "name": "mnm-guildcraft",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "env": {
+    "dev": {
+      "name": "mnm-guildcraft-dev",
+      "workers_dev": true,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mnm-guildcraft-dev",
+          // Printed by .github/workflows/provision.yml (not a secret).
+          "database_id": "00000000-0000-0000-0000-000000000000",
+          "migrations_dir": "migrations"
+        }
+      ]
+    }
+  }
+}

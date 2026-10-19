@@ -1,0 +1,36 @@
+# Applies migrations to the remote dev D1 and deploys the dev Worker.
+# Runs on push to main and by dispatch. Expected: ~1 billed minute per run.
+name: deploy
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency: deploy-dev
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check the dev database is provisioned
+        run: node --input-type=module -e "import { devDatabaseId } from './scripts/import/db.ts'; console.log('database_id', devDatabaseId())"
+      - name: Apply migrations (remote dev D1)
+        run: npx wrangler d1 migrations apply mnm-guildcraft-dev --remote --env dev
+      - name: Deploy the dev Worker
+        env:
+          DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
+        run: npx wrangler deploy --env dev --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
+      - name: Set DISCORD_BOT_TOKEN as a Worker secret
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+        run: printf '%s' "$DISCORD_BOT_TOKEN" | npx wrangler secret put DISCORD_BOT_TOKEN --env dev
