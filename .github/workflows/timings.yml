@@ -1,0 +1,29 @@
+# Reads the dev Worker's interaction timings back from Workers Logs (work order 3, ITEM 3.1 b) and prints
+# p50/p95 per path. Dispatch only; reads, writes nothing. Expected: <1 billed minute per run.
+# Needs the API token permission "Workers Observability Write" (the telemetry query API's only listed
+# permission); if missing, the run says so and fails.
+name: timings
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Look back this many hours (Workers Logs keeps 3 days on the free plan)'
+        default: '72'
+permissions:
+  contents: read
+jobs:
+  timings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Timings per path
+        env:
+          HOURS: ${{ inputs.hours }}
+        run: node scripts/bench/timings.mjs "$HOURS"

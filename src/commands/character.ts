@@ -4,6 +4,7 @@
 import { audit, auditNewCharacter, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, md, optBool, optInt, optString, type InteractionReply, type Option } from '../discord.ts';
+import { updateButtons } from './skills.ts';
 
 export const NAME_MAX = 32;
 /** Guards against typos only: the game's level cap is unverified. */
@@ -160,12 +161,15 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<InteractionR
     await c.db.batch(stmts);
     const skills = await c.db.prepare('SELECT count(*) AS n FROM character_skill WHERE character_id = ?').bind(existing.id).first<{ n: number }>();
     const n2 = skills?.n ?? 0;
-    return ephemeral(`Restored ${describe(after)}, which you removed earlier, with its ${n2} saved skill${n2 === 1 ? '' : 's'}.${isMain ? ' It is your main.' : ''}${notes}`);
+    return ephemeral(`Restored ${describe(after)}, which you removed earlier, with its ${n2} saved skill${n2 === 1 ? '' : 's'}.${isMain ? ' It is your main.' : ''}${notes}`, {
+      components: updateButtons([existing]),
+    });
   }
 
   const row = { name: n.name, class: cls.value ?? null, level: level ?? null, is_main: isMain ? 1 : 0, deleted_at: null };
+  let newId: number;
   try {
-    await c.db.batch([
+    const results = await c.db.batch([
       ...(isMain ? [clearMain(c.db, c.guild.id, c.userId, at)] : []),
       c.db
         .prepare(
@@ -174,11 +178,12 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<InteractionR
         .bind(c.guild.id, c.userId, row.name, key, row.class, row.level, row.is_main, at, at),
       auditNewCharacter(c.db, c.guild.id, c.userId, 'character.add', key, row),
     ]);
+    newId = results[isMain ? 1 : 0].meta.last_row_id;
   } catch (e) {
     if (isUniqueViolation(e)) return ephemeral(TAKEN(n.name));
     throw e;
   }
-  return ephemeral(`Added ${describe(row)}.${mainLine}${notes}`);
+  return ephemeral(`Added ${describe(row)}.${mainLine}${notes}`, { components: updateButtons([{ id: newId, name: row.name }]) });
 }
 
 // ---------------------------------------------------------------- /character edit

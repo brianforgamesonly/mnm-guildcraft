@@ -16,7 +16,7 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/character remove'], text: 'remove a character (its skills are kept if you add it back)' },
   '**Your skills and recipes**',
   { cmds: ['/craft set'], text: 'set one tradeskill level' },
-  { cmds: ['/craft update'], text: 'set up to 5 tradeskills at once' },
+  { cmds: ['/craft update'], text: 'press Enter, pick up to 5 tradeskills, then type their levels' },
   { cmds: ['/craft me'], text: 'your skills, levels and last update (private)' },
   { cmds: ['/craft know', '/craft forget'], text: 'mark a recipe as known, or undo it' },
   '**Find a crafter**',

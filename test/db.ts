@@ -5,6 +5,13 @@ export const all = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.
 export const count = async (table: string, where = '1 = 1', ...binds: unknown[]) =>
   (await one<{ n: number }>(`SELECT count(*) AS n FROM ${table} WHERE ${where}`, ...binds)).n;
 
+let imports = 0;
+/** A completed import row: what tells the game-data cache (src/gamedata.ts) to reload. Call after seeding reference data. */
+export const markImported = () =>
+  env.DB.prepare("INSERT INTO data_import (source, source_version, status, started_at, finished_at) VALUES ('test', ?, 'ok', '2026-10-19T00:00:00Z', '2026-10-19T00:00:00Z')")
+    .bind(`test${String(++imports).padStart(7, '0')} / 2026-10-19T17:35:56.514Z`)
+    .run();
+
 /** Empties guild and reference data, then seeds tradeskills and classes (as an import would). */
 export async function reset(tradeskills: string[] = ['Alchemy', 'Blacksmithing', 'Brewing', 'Fletching', 'Tailoring'], classes: [string, number][] = [['CLR', 1140], ['SHD', 1498], ['WIZ', 342], ['OLD', 0]]) {
   await env.DB.batch(
@@ -16,4 +23,5 @@ export async function reset(tradeskills: string[] = ['Alchemy', 'Blacksmithing',
     ...tradeskills.map((name, i) => env.DB.prepare("INSERT INTO tradeskill (name, kind, sort_order) VALUES (?, 'crafting', ?)").bind(name, i + 1)),
     ...classes.map(([code, n]) => env.DB.prepare('INSERT INTO game_class (code, item_count) VALUES (?, ?)').bind(code, n)),
   ]);
+  await markImported();
 }

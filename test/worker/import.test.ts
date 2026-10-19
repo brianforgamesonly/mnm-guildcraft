@@ -81,6 +81,28 @@ describe('import', () => {
     expect(await one('SELECT stats_json FROM item WHERE name_key = \'copper sword\'')).toEqual({ stats_json: '{"delay":30,"dmg":5,"stats":{"STR":1}}' });
   });
 
+  it('order 3: fills item.wiki_url for hasPage items only, as mnm-tools builds it; stubs stay NULL; then writes 0', async () => {
+    const f = fixture();
+    (f.items['Arrow'] as Record<string, unknown>).hasPage = false;
+    // The state before order 3: items stored with wiki_url empty.
+    await load(f);
+    await env.DB.prepare('UPDATE item SET wiki_url = NULL').run();
+    const dry = await load(f, true);
+    expect(dry.predicted!.item).toEqual({ insert: 0, update: 7 });
+    const fill = await load(f);
+    expect(fill.written!.item.changes).toBe(7);
+    expect(await all("SELECT name, wiki_url FROM item WHERE name IN ('Arrow', 'Copper Bar', 'HIDE BOOTS', 'Rune of Fire', 'Feather') ORDER BY name")).toEqual([
+      { name: 'Arrow', wiki_url: null },
+      { name: 'Copper Bar', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Copper_Bar' },
+      { name: 'Feather', wiki_url: null },
+      { name: 'HIDE BOOTS', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/HIDE_BOOTS' },
+      { name: 'Rune of Fire', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Rune_of_Fire' },
+    ]);
+    const again = await load(f);
+    expect(again.written!.item.statements).toBeGreaterThan(0);
+    expect(again.written!.item.rows_written).toBe(0);
+  });
+
   it('keeps each variant\'s key when components change', async () => {
     await load(fixture());
     const swordId = await one<{ id: number }>('SELECT id FROM recipe WHERE source_key = \'Blacksmithing|copper sword|1\'');

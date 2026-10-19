@@ -68,8 +68,12 @@ describe('/craft help copy', () => {
     for (const c of DEFINED) expect(entries.some((e) => e.cmds.includes(c)), c).toBe(true);
     for (const c of entries.flatMap((e) => e.cmds)) expect(prdCommands, c).toContain(c);
     expect([...DEFINED].sort()).toEqual([
-      '/character add', '/character edit', '/character remove', '/craft help', '/craft me', '/craft set', '/craft update', '/guildcraft setup',
+      '/character add', '/character edit', '/character remove', '/craft find', '/craft help', '/craft me', '/craft set', '/craft update', '/guildcraft setup',
+      '/roster member', '/roster skill', '/roster top',
     ]);
+    // Order 3: the four search entries lose "(coming soon)" because they are now registered.
+    for (const c of ['/craft find', '/roster skill', '/roster member', '/roster top'])
+      expect(HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${c}\``))!.endsWith(COMING_SOON), c).toBe(false);
   });
 
   it('fits one Discord message and carries the draft footer', () => {

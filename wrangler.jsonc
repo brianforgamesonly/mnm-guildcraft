@@ -8,6 +8,9 @@
     "dev": {
       "name": "mnm-guildcraft-dev",
       "workers_dev": true,
+      // Workers Logs (order 3, ITEM 3.1): free plan 200,000 events/day, 3 days' retention. About 2 events
+      // per interaction (the invocation log + one timing line from src/index.ts).
+      "observability": { "enabled": true },
       "d1_databases": [
         {
           "binding": "DB",

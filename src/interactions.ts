@@ -4,7 +4,10 @@ import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
 import { HELP_TEXT } from './commands/help.ts';
 import { guildcraftSetup } from './commands/setup.ts';
-import { craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateSelected, updateSubmitted } from './commands/skills.ts';
+import { craftFind, postFind } from './commands/find.ts';
+import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
+import { POST_PREFIX } from './commands/share.ts';
+import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
 import { WELCOME } from './commands/welcome.ts';
 import type { Ctx } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type Option } from './discord.ts';
@@ -27,6 +30,10 @@ const ROUTES: Record<string, { access: Access; run: (c: Ctx, opts: Option[]) => 
   'craft set': { access: 'member', run: craftSet },
   'craft update': { access: 'member', run: craftUpdate },
   'craft me': { access: 'member', run: craftMe },
+  'craft find': { access: 'member', run: craftFind },
+  'roster skill': { access: 'member', run: rosterSkill },
+  'roster member': { access: 'member', run: rosterMember },
+  'roster top': { access: 'member', run: rosterTop },
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
 };
@@ -58,7 +65,7 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil): Promise<Intera
   return isNew ? withWelcome(reply) : reply;
 }
 
-/** Selects and modal submits: read the guild and member state, never create it. */
+/** Buttons, selects and modal submits: read the guild and member state, never create it. */
 async function component(i: Interaction, env: Env): Promise<InteractionReply> {
   if (!i.guild_id || !i.member) return ephemeral(NOT_IN_GUILD);
   const guild = await loadGuild(env.DB, i.guild_id);
@@ -66,8 +73,17 @@ async function component(i: Interaction, env: Env): Promise<InteractionReply> {
   if (!passesMemberGate(guild, i.member)) return ephemeral(roleRequired(guild));
   const c = ctxFor(env.DB, guild, i.member);
   const id = i.data?.custom_id ?? '';
-  if (i.type === InteractionType.MESSAGE_COMPONENT && id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
-  if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
+  if (i.type === InteractionType.MODAL_SUBMIT) return id.startsWith(MODAL_PREFIX) ? updateSubmitted(c, id, i.data?.components) : ephemeral(STALE_FORM);
+  if (i.type !== InteractionType.MESSAGE_COMPONENT) return ephemeral(STALE_FORM);
+  if (id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
+  if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
+  if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);
+  if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
+  if (id.startsWith(POST_PREFIX)) {
+    const what = id.slice(POST_PREFIX.length);
+    if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
+    return (await postRoster(c, what)) ?? ephemeral(STALE_FORM);
+  }
   return ephemeral(STALE_FORM);
 }
 
@@ -77,12 +93,9 @@ export async function handleInteraction(i: Interaction, env: Env, ctx: WaitUntil
       return { type: InteractionResponseType.PONG };
     case InteractionType.APPLICATION_COMMAND:
       return command(i, env, ctx);
-    case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE: {
-      if (!i.guild_id || !i.member) return choices([]);
-      const guild = await loadGuild(env.DB, i.guild_id);
-      if (!passesMemberGate(guild, i.member)) return choices([]);
-      return choices(await autocomplete(env.DB, guild, i));
-    }
+    case InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE:
+      // At most one D1 statement per keystroke; the character list applies the gate inside it.
+      return choices(await autocomplete(env.DB, i));
     case InteractionType.MESSAGE_COMPONENT:
     case InteractionType.MODAL_SUBMIT:
       return component(i, env);
