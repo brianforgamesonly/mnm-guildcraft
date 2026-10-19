@@ -1,12 +1,36 @@
 import { Hono } from 'hono';
-import { verifyKey } from 'discord-interactions';
+import { InteractionType, verifyKey } from 'discord-interactions';
 import type { Env } from './env.ts';
-import { handleInteraction, NOT_YET, type Interaction } from './interactions.ts';
-import { countD1, timingLine } from './telemetry.ts';
+import { deferredReply, immediateReply, planFor, type Interaction, type InteractionReply, type Plan } from './interactions.ts';
+import { ackFor, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
+import { countD1, timingLine, type D1Call } from './telemetry.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.get('/', (c) => c.text('mnm-guildcraft: Discord interactions endpoint'));
+
+/** The answer when the immediate path throws: autocomplete gets no suggestions, anything else the polite error. */
+const fallback = (i: Interaction): InteractionReply =>
+  i.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE ? { type: 8, data: { choices: [] } } : { type: 4, data: { content: ERROR_REPLY, flags: 64, allowed_mentions: { parse: [] } } };
+
+const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/** The deferred work, inside ctx.waitUntil (up to 30 seconds after the acknowledgement). Logs the one timing line. */
+async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number) {
+  const log: Delivery[] = [];
+  let err: string | null = null;
+  try {
+    const reply = await deferredReply(i, env, ctx);
+    if (!(await deliver(i, plan, reply, log))) err = 'delivery refused';
+  } catch (e) {
+    err = errText(e);
+  }
+  if (err) {
+    console.error('interaction failed', err, JSON.stringify(log.filter((d) => d.error)));
+    await deliverError(i, plan, log);
+  }
+  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err }));
+}
 
 app.post('/', async (c) => {
   const signature = c.req.header('X-Signature-Ed25519');
@@ -19,19 +43,38 @@ app.post('/', async (c) => {
     (await verifyKey(body, signature, timestamp, c.env.DISCORD_PUBLIC_KEY));
   if (!valid) return c.text('invalid request signature', 401);
 
-  // Past this point the caller is Discord: never answer with a 500, always with a polite ephemeral reply.
+  // Past this point the caller is Discord: never answer with a 500, always with a polite reply.
   const started = Date.now();
   const counted = countD1(c.env.DB);
+  const env = { ...c.env, DB: counted.db };
+  const colo = (c.req.raw.cf as { colo?: string } | undefined)?.colo;
   let interaction: Interaction = { type: 0 };
+  let plan: Plan = { defer: false };
   try {
     interaction = JSON.parse(body) as Interaction;
-    return c.json(await handleInteraction(interaction, { ...c.env, DB: counted.db }, c.executionCtx));
+    plan = planFor(interaction);
   } catch (err) {
-    console.error('interaction failed', err instanceof Error ? err.message : String(err));
-    return c.json({ type: 4, data: { content: NOT_YET, flags: 64 } });
+    console.error('interaction failed', errText(err));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err: errText(err) }));
+    return c.json(fallback(interaction));
+  }
+
+  // Deferred: acknowledge now (no I/O on this path), work and deliver after the response.
+  if (plan.defer) {
+    c.executionCtx.waitUntil(runDeferred(interaction, plan, env, c.executionCtx as ExecutionContext, counted.calls, colo, started));
+    return c.json(ackFor(plan));
+  }
+
+  let err: string | null = null;
+  try {
+    return c.json(await immediateReply(interaction, env));
+  } catch (e) {
+    err = errText(e);
+    console.error('interaction failed', err);
+    return c.json(fallback(interaction));
   } finally {
     // One line per interaction (ITEM 3.1). io_ms covers D1 and network waits only (see src/telemetry.ts).
-    console.log(timingLine(interaction, counted.calls, (c.req.raw.cf as { colo?: string } | undefined)?.colo, Date.now() - started));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err }));
   }
 });
 

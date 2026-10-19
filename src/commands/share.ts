@@ -2,7 +2,7 @@
 // that re-posts the same content publicly (PRD FR-3). Brian's open question A6 may flip the default:
 // SEARCH_REPLIES_PRIVATE is the single setting.
 import { InteractionResponseFlags, InteractionResponseType } from 'discord-interactions';
-import { button, publicReply, row, type InteractionReply, type MessageData } from '../discord.ts';
+import { button, publicReply, row, type MessageData, type MessageReply } from '../discord.ts';
 
 export const SEARCH_REPLIES_PRIVATE = true;
 
@@ -14,7 +14,7 @@ export const postButton = (what: string) => button(`${POST_PREFIX}${what}`, 'Pos
  * A search reply. `extraRows` are the action rows a private reply carries (paging, switchers); `links`
  * are link buttons, kept on both the private reply and the public post.
  */
-export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, post: string, links: unknown[] = [], extraRows: unknown[] = []): InteractionReply {
+export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, post: string, links: unknown[] = [], extraRows: unknown[] = []): MessageReply {
   if (!SEARCH_REPLIES_PRIVATE) return publicReply({ ...data, components: links.length ? [row(links)] : [] });
   return {
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
@@ -23,7 +23,7 @@ export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, pos
 }
 
 /** The public copy: same content, link buttons only, and who shared it (a mention that never pings). */
-export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, userId: string, links: unknown[] = []): InteractionReply {
+export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, userId: string, links: unknown[] = []): MessageReply {
   const by = `-# Shared by <@${userId}>`;
   return publicReply({ ...data, content: data.content ? `${data.content}\n${by}` : by, components: links.length ? [row(links)] : [] });
 }

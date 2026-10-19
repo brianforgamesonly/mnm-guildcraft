@@ -164,11 +164,23 @@ for (const [k, p] of [...paths].sort()) {
   const qs = p.q.filter((x) => typeof x === 'number');
   console.log([k, p.n, pct(p.wall, 50), p95(p.wall, p.n), pct(p.cpu, 50), p95(p.cpu, p.n), pct(p.io, 50), p95(p.io, p.n), qs.length ? Math.max(...qs) : null].join('\t'));
 }
+/**
+ * Order 4's definition of a failed request: an exception, an outcome other than ok, a status other than 200,
+ * or 3 s or more before Discord got its answer. A deferred request (ack 5/6) answers before any I/O, so its
+ * wall time includes the delivery after the answer; for it, a refused delivery or an err counts instead.
+ */
+const failed = (r) =>
+  r.errors.length > 0 || (r.outcome && r.outcome !== 'ok') || (r.status !== undefined && r.status !== 200) || !!r.line?.err ||
+  (r.line?.ack ? (r.line.deliveries ?? []).some((d) => d.status < 200 || d.status >= 300) : typeof r.wall === 'number' && r.wall >= 3000);
+console.log(`failed requests (order 4 definition): ${[...byRequest.values()].filter(failed).length} of ${byRequest.size}`);
 if (perRequest) {
-  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tcolo\td1_region\terrors');
+  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tcolo\td1_region\tack\tdeliveries\tfailed\terrors');
   for (const r of [...byRequest.values()].sort((a, b) => a.at - b.at))
     console.log(
-      [new Date(r.at).toISOString(), redact(pathOf(r)), r.outcome, r.status, r.wall, r.cpu, r.line?.io_ms, r.line?.q, JSON.stringify(r.line?.d1_ms ?? null), r.line?.colo, r.line?.d1_region, r.errors.join(' | ')].join('\t'),
+      [
+        new Date(r.at).toISOString(), redact(pathOf(r)), r.outcome, r.status, r.wall, r.cpu, r.line?.io_ms, r.line?.q, JSON.stringify(r.line?.d1_ms ?? null), r.line?.colo, r.line?.d1_region,
+        r.line?.ack ?? '', redact(JSON.stringify(r.line?.deliveries ?? [])), failed(r) ? 'FAILED' : '', [...r.errors, r.line?.err].filter(Boolean).map(redact).join(' | '),
+      ].join('\t'),
     );
 }
 if (events[0]) {

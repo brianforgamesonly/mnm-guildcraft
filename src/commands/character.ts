@@ -3,7 +3,7 @@
 // officer passes member:@user, so another member's character answers exactly like a missing one.
 import { audit, auditNewCharacter, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { ephemeral, md, optBool, optInt, optString, type InteractionReply, type Option } from '../discord.ts';
+import { ephemeral, md, optBool, optInt, optString, type MessageReply, type Option } from '../discord.ts';
 import { updateButtons } from './skills.ts';
 
 export const NAME_MAX = 32;
@@ -50,7 +50,7 @@ function removedByOther(c: Ctx, name: string, owner: string): string {
 }
 
 /** Whose characters a command acts on: the caller's, or (officers only) member:@user's. */
-export function resolveOwner(c: Ctx, opts: Option[]): { ownerId: string } | { reply: InteractionReply } {
+export function resolveOwner(c: Ctx, opts: Option[]): { ownerId: string } | { reply: MessageReply } {
   const target = optString(opts, 'member');
   if (!target || target === c.userId) return { ownerId: c.userId };
   if (!c.officer) return { reply: ephemeral(OFFICERS_ONLY) };
@@ -77,7 +77,7 @@ export async function liveCharacters(db: D1Database, guildId: string, ownerId: s
 }
 
 /** The named character, or the owner's main when no name is given (PRD FR-1). */
-export async function resolveCharacter(c: Ctx, ownerId: string, name: string | undefined): Promise<{ character: Character } | { reply: InteractionReply }> {
+export async function resolveCharacter(c: Ctx, ownerId: string, name: string | undefined): Promise<{ character: Character } | { reply: MessageReply }> {
   if (name !== undefined) {
     const ch = await findByName(c.db, c.guild.id, ownerId, name);
     return ch ? { character: ch } : { reply: ephemeral(notFound(c, ownerId, name)) };
@@ -128,7 +128,7 @@ const clearMain = (db: D1Database, guildId: string, ownerId: string, at: string,
 
 // ---------------------------------------------------------------- /character add
 
-export async function characterAdd(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const n = cleanName(optString(opts, 'name'));
   if ('error' in n) return ephemeral(n.error);
   const level = optInt(opts, 'level');
@@ -188,7 +188,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<InteractionR
 
 // ---------------------------------------------------------------- /character edit
 
-export async function characterEdit(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const owner = resolveOwner(c, opts);
   if ('reply' in owner) return owner.reply;
   const name = optString(opts, 'name') ?? '';
@@ -256,7 +256,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<Interaction
 
 // ---------------------------------------------------------------- /character remove
 
-export async function characterRemove(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function characterRemove(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const owner = resolveOwner(c, opts);
   if ('reply' in owner) return owner.reply;
   const name = optString(opts, 'name') ?? '';

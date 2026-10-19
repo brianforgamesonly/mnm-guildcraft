@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { ADMIN_ONLY } from '../../src/interactions.ts';
 import { all, count, one, reset } from '../db.ts';
-import { ADMIN, as, auto, cmd, GUILD, MANAGE_GUILD, select, send, submit } from '../discord.ts';
+import { ADMIN, as, auto, cmd, GUILD, guildLookup, MANAGE_GUILD, select, send, submit } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const BO = '100000000000000002';
@@ -11,7 +11,10 @@ const MEMBER_ROLE = '700000000000000001';
 const OFFICER_ROLE = '700000000000000002';
 
 beforeEach(() => reset());
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  guildLookup.reset();
+});
 
 const hasWelcome = (r: { data: { embeds?: { title?: string }[] } }) => (r.data.embeds ?? []).some((e) => e.title === WELCOME.title);
 
@@ -23,22 +26,22 @@ describe('guild row', () => {
     });
   });
 
+  // The fake Discord (test/discord.ts) answers the lookup; the reply itself arrives by webhook (order 4).
   it('guild.name comes from one bot-token GET /guilds/{id} when the row is created', async () => {
-    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ id: GUILD, name: 'The Test Guild' }));
+    guildLookup.respond = () => Response.json({ id: GUILD, name: 'The Test Guild' });
     await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
-    expect(spy).toHaveBeenCalledTimes(1);
-    expect(String(spy.mock.calls[0][0])).toBe(`https://discord.com/api/v10/guilds/${GUILD}`);
+    expect(guildLookup.calls).toEqual([`https://discord.com/api/v10/guilds/${GUILD}`]);
     expect(await one('SELECT name FROM guild')).toEqual({ name: 'The Test Guild' });
     await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
-    expect(spy).toHaveBeenCalledTimes(1); // only on creation
+    expect(guildLookup.calls).toHaveLength(1); // only on creation
   });
 
   it('a failed lookup stores the id as the name; a later command refreshes it', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('nope', { status: 500 }));
+    guildLookup.respond = () => new Response('nope', { status: 500 });
     const first = await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
     expect(first.data.content).toMatch(/^## GuildCraft/); // the reply is not held up
     expect(await one('SELECT name FROM guild')).toEqual({ name: GUILD });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ id: GUILD, name: 'Renamed Later' }));
+    guildLookup.respond = () => Response.json({ id: GUILD, name: 'Renamed Later' });
     await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
     expect(await one('SELECT name FROM guild')).toEqual({ name: 'Renamed Later' });
   });

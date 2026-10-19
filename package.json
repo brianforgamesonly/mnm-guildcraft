@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p scripts",
     "test": "vitest run",
     "test:hook": "node --test .claude/hooks/check-bash.test.mjs",
+    "test:actions": "node --test scripts/ci/action-runtimes.test.mjs",
     "dev": "wrangler dev --env dev",
     "db:migrate:local": "wrangler d1 migrations apply mnm-guildcraft-dev --local --env dev",
     "import:local": "node scripts/import/run.ts --local",
