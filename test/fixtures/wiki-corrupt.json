@@ -1,0 +1,11 @@
+{
+  "generatedAt": "2026-10-15T07:00:00.000Z",
+  "items": {
+    "Copper Bar": { "hasPage": true, "icon": 42, "tradeskills": "Smelting" }
+  },
+  "nodes": {},
+  "recipes": [
+    { "tradeskill": "Smelting", "result": { "item": "Copper Bar" }, "components": [], "trivial": "ten" },
+    { "tradeskill": "", "result": { "qty": 1, "item": "Copper Sword" }, "components": [{ "qty": "three", "item": "Copper Bar" }] }
+  ]
+}

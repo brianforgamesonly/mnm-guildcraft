@@ -1,0 +1,33 @@
+# Loads mnm-tools wiki.json into the remote dev D1.
+# Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~1 billed minute per run, ~30 min/month.
+# Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
+name: import
+on:
+  schedule:
+    - cron: '30 7 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: print the counts it would write, write nothing'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency: import-dev
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Import (dry run = ${{ inputs.dry_run == true }})
+        run: node scripts/import/run.ts --remote ${{ inputs.dry_run == true && '--dry-run' || '' }}

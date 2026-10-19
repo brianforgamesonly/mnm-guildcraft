@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-10-14T07:00:59.321Z",
+  "items": {
+    "Copper Bar": { "hasPage": true, "icon": "https://example.invalid/copper-bar.png", "slot": null, "weight": 1, "tradeskills": ["Smelting"] },
+    "Copper Ore": { "hasPage": true, "weight": 1 },
+    "Copper Sword": { "hasPage": true, "slot": "PRIMARY", "dmg": 5, "delay": 30, "stats": { "STR": 1 }, "resists": {}, "flags": [], "tradeskills": ["Blacksmithing"] },
+    "HIDE BOOTS": { "hasPage": true, "slot": "FEET", "ac": 2 },
+    "Rune of Fire": { "hasPage": true, "tradeskills": ["Enchanting"] },
+    "Arrow": { "hasPage": true },
+    "Wood Shaft": { "hasPage": true },
+    "Silver Herb": { "hasPage": true, "harvestedBy": "Herbalism" }
+  },
+  "mobs": {},
+  "nodes": {
+    "Fishing": { "hasPage": true, "yields": [{ "section": "Getting Started", "items": [] }] },
+    "Copper Vein": { "hasPage": true, "yields": [{ "section": "Ore", "items": ["Copper Ore"] }] }
+  },
+  "recipes": [
+    { "tradeskill": "Smelting", "result": { "qty": 1, "item": "Copper Bar" }, "components": [{ "qty": 2, "item": "Copper Ore" }], "trivial": 10 },
+    { "tradeskill": "Blacksmithing", "result": { "qty": 1, "item": "Copper Sword" }, "components": [{ "qty": 3, "item": "Copper Bar" }], "trivial": null },
+    { "tradeskill": "Leatherworking", "result": { "qty": 1, "item": "Hide Boots" }, "components": [{ "qty": 2, "item": "Tanned Hide" }], "trivial": 20 },
+    { "tradeskill": "Fletching", "result": { "qty": 20, "item": "Arrow" }, "components": [{ "qty": 1, "item": "Wood Shaft" }, { "qty": 1, "item": "Feather" }], "trivial": 5 },
+    { "tradeskill": "Fletching", "result": { "qty": 20, "item": "Arrow" }, "components": [{ "qty": 1, "item": "Wood Shaft" }, { "qty": 1, "item": "Bone Tip" }], "trivial": 15 },
+    { "tradeskill": "Smelting", "result": { "qty": 1, "item": "Copper Bar" }, "components": [{ "qty": 2, "item": "Copper Ore" }], "trivial": 10 },
+    { "tradeskill": "Blacksmithing", "result": { "qty": 1, "item": "Mystery Helm" }, "components": [{ "qty": 2, "item": "Copper Bar" }], "trivial": null }
+  ]
+}

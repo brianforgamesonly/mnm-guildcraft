@@ -1,0 +1,50 @@
+# Registers the slash commands (guild-scoped to the test server), sets the interactions endpoint
+# to the dev Worker, and reads both back. Runs only after a successful deploy.yml run on main, and
+# only if the live Worker answers an invalid signature with 401. A tail records the requests Discord
+# sends to validate the endpoint (PING and invalid signatures), never /craft help.
+# Expected: ~1 billed minute per run.
+name: register-commands
+on: workflow_dispatch
+permissions:
+  contents: read
+  actions: read
+concurrency: register-commands
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Require the latest deploy.yml run on main to have succeeded
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          run="$(gh run list -R "$GITHUB_REPOSITORY" --workflow deploy.yml --branch main --limit 1 --json databaseId,status,conclusion,headSha)"
+          echo "latest deploy run: $run"
+          test "$(echo "$run" | jq -r '.[0].conclusion')" = "success"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Start a tail on the dev Worker
+        run: |
+          nohup npx wrangler tail mnm-guildcraft-dev --format json > tail.jsonl 2> tail.err &
+          sleep 20
+      - name: Register commands and set the endpoint
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+          DISCORD_TEST_GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+        run: node scripts/discord/register.ts
+      - name: Discord validation requests seen by the Worker (status and CPU time only)
+        if: always()
+        run: |
+          sleep 15
+          pkill -f "wrangler tail" || true
+          echo "tail events: $(grep -c . tail.jsonl || true)"
+          jq -c 'select(type == "object") | {outcome, status: .event.response.status, cpuTime, wallTime}' tail.jsonl || true
+          grep -iE "error|denied|permission" tail.err | head -5 || true
