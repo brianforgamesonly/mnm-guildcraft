@@ -2,7 +2,7 @@
 // nightly Action (scripts/import/run.ts) and the Workers-pool tests run exactly this code.
 //
 // Rules applied here (docs/ORDER-RULES.md, Data):
-// - tradeskills are derived from the data, never typed by hand;
+// - tradeskills and game classes are derived from the data, never typed by hand;
 // - a value the source does not hold is stored as NULL (trivial), never guessed;
 // - recipes that disappear upstream are deactivated (active = 0), never deleted;
 // - only changed rows are written: every upsert carries a "differs" guard, so D1 reports
@@ -171,6 +171,51 @@ export function deriveGatheringCandidates(data: WikiData, crafting: string[]): s
   return [...s].sort();
 }
 
+/** Share of the items carrying a class value that a code must appear on to be kept. */
+export const CLASS_MIN_SHARE = 0.01;
+const CLASS_IGNORED = new Set(['ALL', 'NONE']);
+
+export interface ClassDerivation {
+  /** Items whose class is a non-empty string (the denominator). */
+  carrying: number;
+  kept: { code: string; item_count: number }[];
+  /** Codes below CLASS_MIN_SHARE, with the items carrying them. */
+  dropped: { code: string; items: number }[];
+  /** Raw tokens that yield no code: ALL, NONE, or nothing left before a '<'. */
+  ignored: { token: string; items: number }[];
+}
+
+/**
+ * The game's classes, derived from items' class tokens (never typed): upper-case each token, cut it
+ * at the first '<' (wiki markup such as "SHD<br>"), drop ALL and NONE, and keep a code carried by at
+ * least CLASS_MIN_SHARE of the items that carry a class. Counts are items, not token occurrences.
+ */
+export function deriveClasses(data: WikiData): ClassDerivation {
+  let carrying = 0;
+  const codes = new Map<string, number>();
+  const ignored = new Map<string, number>();
+  for (const it of Object.values(data.items)) {
+    if (typeof it.class !== 'string' || it.class.trim() === '') continue;
+    carrying++;
+    const seen = new Set<string>();
+    for (const token of it.class.split(/\s+/)) {
+      if (!token) continue;
+      const code = token.toUpperCase().replace(/<.*$/s, '');
+      if (!code || CLASS_IGNORED.has(code)) ignored.set(token, (ignored.get(token) ?? 0) + 1);
+      else seen.add(code);
+    }
+    for (const c of seen) codes.set(c, (codes.get(c) ?? 0) + 1);
+  }
+  const min = carrying * CLASS_MIN_SHARE;
+  const byCount = [...codes].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en'));
+  return {
+    carrying,
+    kept: byCount.filter(([, n]) => n >= min).map(([code, item_count]) => ({ code, item_count })),
+    dropped: byCount.filter(([, n]) => n < min).map(([code, items]) => ({ code, items })),
+    ignored: [...ignored].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en')).map(([token, items]) => ({ token, items })),
+  };
+}
+
 // The PRD's stats_json set (docs/PRD-schema.sql item.stats_json) plus the other combat fields the source holds.
 const STAT_KEYS = ['ac', 'dmg', 'delay', 'skill', 'handed', 'hp', 'mana', 'hpRegen', 'manaRegen', 'haste',
   'stats', 'resists', 'effect', 'weight', 'size', 'class', 'race', 'flags'] as const;
@@ -229,6 +274,7 @@ export interface ExistingState {
   items: Map<string, { name: string; icon_url: string | null; slot: string | null; stats_json: string | null; source: string }>;
   recipes: Map<string, ExistingRecipe>; // by source_key, source = 'wiki' only
   activeWikiRecipes: number;
+  classes: Map<string, number>; // game_class code -> item_count (0 = no longer kept)
 }
 
 export interface Plan {
@@ -245,6 +291,9 @@ export interface Plan {
   caseOnlyMatches: number;
   scrolls: { skipped: number; adopted: number };
   warnings: Warning[];
+  classes: ClassDerivation;
+  /** Stored codes that no longer meet the class rule: set to item_count 0, never deleted. */
+  classDeactivate: string[];
 }
 
 /** A recipe's identity within its (tradeskill, result) group, excluding the variant number. */
@@ -451,7 +500,13 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     if (gone.length) componentDeletes.push({ source_key: r.source_key, item_keys: gone });
   }
 
+  const classes = deriveClasses(data);
+  const keptCodes = new Set(classes.kept.map((c) => c.code));
+  const classDeactivate = [...existing.classes].filter(([code, n]) => n > 0 && !keptCodes.has(code)).map(([code]) => code).sort();
+
   return {
+    classes,
+    classDeactivate,
     tradeskills: crafting.map((name, i) => ({ name, sort_order: i + 1 })),
     items: [...items.values()],
     stubs: [...stubs.values()],
@@ -476,6 +531,7 @@ export interface Predicted {
   stub: { insert: number };
   recipe: { insert: number; update: number; deactivate: number };
   recipe_component: { insert: number; update: number; delete: number };
+  game_class: { insert: number; update: number; deactivate: number };
 }
 
 export function predict(plan: Plan, ex: ExistingState): Predicted {
@@ -485,7 +541,13 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
     stub: { insert: 0 },
     recipe: { insert: 0, update: 0, deactivate: plan.deactivate.length },
     recipe_component: { insert: 0, update: 0, delete: plan.componentDeletes.reduce((n, d) => n + d.item_keys.length, 0) },
+    game_class: { insert: 0, update: 0, deactivate: plan.classDeactivate.length },
   };
+  for (const c of plan.classes.kept) {
+    const o = ex.classes.get(c.code);
+    if (o === undefined) p.game_class.insert++;
+    else if (o !== c.item_count) p.game_class.update++;
+  }
   for (const t of plan.tradeskills) {
     const o = ex.tradeskills.get(t.name);
     if (!o) p.tradeskill.insert++;
@@ -532,7 +594,7 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
   return out;
 };
 
-export type Table = 'tradeskill' | 'item' | 'recipe' | 'recipe_component';
+export type Table = 'tradeskill' | 'item' | 'recipe' | 'recipe_component' | 'game_class';
 export interface Statement {
   table: Table;
   sql: string;
@@ -612,6 +674,18 @@ export function buildStatements(plan: Plan, importedAt: string): Statement[] {
       table: 'recipe',
       sql: `UPDATE recipe SET active = 0 WHERE source = 'wiki' AND active = 1 AND source_key IN (${keys.map(lit).join(', ')})`,
     });
+  for (const rows of chunk(plan.classes.kept, ROWS_PER_STATEMENT))
+    out.push({
+      table: 'game_class',
+      sql:
+        `INSERT INTO game_class (code, item_count) VALUES ${rows.map((c) => `(${lit(c.code)}, ${c.item_count})`).join(', ')} ` +
+        `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count WHERE game_class.item_count IS NOT excluded.item_count`,
+    });
+  for (const codes of chunk(plan.classDeactivate, ROWS_PER_STATEMENT))
+    out.push({
+      table: 'game_class',
+      sql: `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`,
+    });
   return out;
 }
 
@@ -632,6 +706,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
      LEFT JOIN recipe_component c ON c.recipe_id = r.id LEFT JOIN item ci ON ci.id = c.item_id
      WHERE r.source = 'wiki'`,
   );
+  const cls = await db.all<{ code: string; item_count: number }>('SELECT code, item_count FROM game_class');
   const recipes = new Map<string, ExistingRecipe>();
   for (const row of rs) {
     let r = recipes.get(row.source_key);
@@ -658,6 +733,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     items: new Map(its.map((i) => [i.name_key, i])),
     recipes,
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
+    classes: new Map(cls.map((c) => [c.code, Number(c.item_count)])),
   };
 }
 
@@ -697,6 +773,8 @@ export interface ImportResult {
   };
   /** Also stored as JSON in data_import.warnings. */
   warnings?: Warning[];
+  /** The class list written to game_class, and what the rule dropped. */
+  classes?: ClassDerivation;
   gatheringCandidates?: string[];
   predicted?: Predicted;
   /** D1 response metadata summed per table (absent on dry runs and failures). */
@@ -763,7 +841,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     await db.run([
       `INSERT INTO data_import (source, source_version, items, recipes, status, warnings, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, ${counts.items + counts.stubItems}, ${counts.recipes}, 'dry-run', ${warningsJson()}, ${lit(startedAt)}, ${lit(opts.now())})`,
     ]);
-    return { status: 'dry-run', sourceVersion, counts, warnings, gatheringCandidates: plan.gatheringCandidates, predicted };
+    return { status: 'dry-run', sourceVersion, counts, warnings, classes: plan.classes, gatheringCandidates: plan.gatheringCandidates, predicted };
   }
 
   await db.run([
@@ -776,6 +854,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     item: { statements: 0, rows_written: 0, changes: 0 },
     recipe: { statements: 0, rows_written: 0, changes: 0 },
     recipe_component: { statements: 0, rows_written: 0, changes: 0 },
+    game_class: { statements: 0, rows_written: 0, changes: 0 },
   };
   try {
     const metas = await db.run(statements.map((s) => s.sql));
@@ -794,5 +873,5 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   await db.run([
     `UPDATE data_import SET status = 'ok', items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
   ]);
-  return { status: 'ok', sourceVersion, counts, warnings, gatheringCandidates: plan.gatheringCandidates, predicted, written };
+  return { status: 'ok', sourceVersion, counts, warnings, classes: plan.classes, gatheringCandidates: plan.gatheringCandidates, predicted, written };
 }

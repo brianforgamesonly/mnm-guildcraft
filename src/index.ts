@@ -20,7 +20,7 @@ app.post('/', async (c) => {
 
   // Past this point the caller is Discord: never answer with a 500, always with a polite ephemeral reply.
   try {
-    return c.json(handleInteraction(JSON.parse(body) as Interaction));
+    return c.json(await handleInteraction(JSON.parse(body) as Interaction, c.env, c.executionCtx));
   } catch (err) {
     console.error('interaction failed', err instanceof Error ? err.message : String(err));
     return c.json({ type: 4, data: { content: NOT_YET, flags: 64 } });

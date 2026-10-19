@@ -6,6 +6,11 @@ import migration from '../../migrations/0001_init.sql?raw';
 
 // Expected names are derived from the PRD's own SQL, never typed by hand.
 const prdTables = [...prdSchema.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]).sort();
+// Named departures: tables created by later migrations (each one's header names the reason).
+const laterMigrations = import.meta.glob<string>('../../migrations/*.sql', { query: '?raw', import: 'default', eager: true });
+const departureTables = Object.entries(laterMigrations)
+  .filter(([path]) => !path.endsWith('/0001_init.sql'))
+  .flatMap(([, sql]) => [...sql.matchAll(/CREATE TABLE (\w+)/g)].map((m) => m[1]));
 const prdIndexes = [...prdSchema.matchAll(/CREATE INDEX (\w+)/g)].map((m) => m[1]).sort();
 
 describe('schema (migrations/0001_init.sql)', () => {
@@ -21,7 +26,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
-    expect(tables.map((t) => t.name)).toEqual(prdTables);
+    expect(departureTables).toEqual(['game_class']);
+    expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect(indexes.map((i) => i.name)).toEqual(prdIndexes);
     expect(prdIndexes).toEqual(['character_by_owner', 'image_by_item', 'recipe_by_result', 'skill_ranking']);
   });

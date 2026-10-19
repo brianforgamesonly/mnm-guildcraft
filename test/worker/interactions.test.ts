@@ -1,35 +1,10 @@
-import { createExecutionContext, env, waitOnExecutionContext } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
-import { HELP_FOOTER, HELP_TEXT } from '../../src/commands/help.ts';
-import app from '../../src/index.ts';
+import { DEFINED } from '../../src/commands/definitions.ts';
+import { COMING_SOON, HELP_FOOTER, HELP_LINES, HELP_TEXT } from '../../src/commands/help.ts';
+import { as, cmd, post } from '../discord.ts';
 
-const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
-
-let keys: CryptoKeyPair;
-let publicKeyHex: string;
-
-beforeAll(async () => {
-  keys = (await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])) as CryptoKeyPair;
-  publicKeyHex = hex((await crypto.subtle.exportKey('raw', keys.publicKey)) as ArrayBuffer);
-});
-
-async function post(body: unknown, opts: { tamper?: boolean; noHeaders?: boolean } = {}) {
-  const text = JSON.stringify(body);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const sig = hex(await crypto.subtle.sign({ name: 'Ed25519' }, keys.privateKey, new TextEncoder().encode(timestamp + text)));
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (!opts.noHeaders) {
-    headers['X-Signature-Ed25519'] = opts.tamper ? sig.replace(/^./, sig[0] === '0' ? '1' : '0') : sig;
-    headers['X-Signature-Timestamp'] = timestamp;
-  }
-  const ctx = createExecutionContext();
-  const res = await app.fetch(new Request('https://worker.test/', { method: 'POST', headers, body: text }), { ...env, DISCORD_PUBLIC_KEY: publicKeyHex }, ctx);
-  await waitOnExecutionContext(ctx);
-  return res;
-}
-
-const helpCommand = { type: 2, data: { name: 'craft', options: [{ type: 1, name: 'help' }] } };
+const helpCommand = cmd(as('100000000000000001'), 'craft', 'help');
 
 describe('Discord interactions endpoint', () => {
   it('a valid signature returns 200', async () => {
@@ -79,6 +54,22 @@ describe('/craft help copy', () => {
   it('lists every command in the PRD', () => {
     expect(prdCommands.length).toBe(23);
     for (const c of prdCommands) expect(HELP_TEXT, c).toContain(c);
+  });
+
+  it('marks exactly the commands that are not registered as coming soon', () => {
+    const entries = HELP_LINES.filter((l) => typeof l !== 'string');
+    for (const e of entries) {
+      const built = e.cmds.map((c) => DEFINED.has(c));
+      expect(new Set(built).size, `${e.cmds.join(', ')}: one status per entry`).toBe(1);
+      const line = HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${e.cmds[0]}\``))!;
+      expect(line.endsWith(COMING_SOON), e.cmds[0]).toBe(!built[0]);
+    }
+    // Every registered subcommand is listed, and the help lists nothing that is not in the PRD.
+    for (const c of DEFINED) expect(entries.some((e) => e.cmds.includes(c)), c).toBe(true);
+    for (const c of entries.flatMap((e) => e.cmds)) expect(prdCommands, c).toContain(c);
+    expect([...DEFINED].sort()).toEqual([
+      '/character add', '/character edit', '/character remove', '/craft help', '/craft me', '/craft set', '/craft update', '/guildcraft setup',
+    ]);
   });
 
   it('fits one Discord message and carries the draft footer', () => {
