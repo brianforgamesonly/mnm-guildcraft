@@ -34,6 +34,9 @@ export interface ModalComponent {
 
 export interface Interaction {
   type: number;
+  /** Both present on every interaction Discord sends; the deferred path edits the reply with them. */
+  application_id?: string;
+  token?: string;
   guild_id?: string;
   member?: GuildMember;
   user?: User;
@@ -102,21 +105,35 @@ export interface Choice {
   value: string;
 }
 
+/**
+ * A reply that is a message: a new one (4) or an edit of the component's message (7). Every handler on
+ * the deferred path (src/respond.ts) returns this type, so the type checker keeps modals and
+ * autocomplete results, which cannot be deferred, off that path (order 4, ITEM 1.2).
+ */
+export type MessageReply = Extract<InteractionReply, { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.UPDATE_MESSAGE }>;
+
+/**
+ * Empty content is left out rather than sent as "". Order 4: /roster skill was the only reply that sent "",
+ * and the only command reported failing live; that this was the cause is unverified.
+ */
+const withContent = (content: string | undefined) => (content ? { content } : {});
+
 /** A private reply. Mentions in it never ping anyone. */
-export function ephemeral(content: string, extra: Omit<MessageData, 'content' | 'flags'> = {}): InteractionReply {
+export function ephemeral(content: string, extra: Omit<MessageData, 'content' | 'flags'> = {}): MessageReply {
   return {
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { content, ...extra, flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
+    data: { ...withContent(content), ...extra, flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
   };
 }
 
 /** A message everyone in the channel sees (Post to channel). Mentions in it never ping anyone. */
-export function publicReply(data: Omit<MessageData, 'flags'>): InteractionReply {
-  return { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data: { ...data, allowed_mentions: { parse: [] } } };
+export function publicReply(data: Omit<MessageData, 'flags'>): MessageReply {
+  const { content, ...rest } = data;
+  return { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data: { ...withContent(content), ...rest, allowed_mentions: { parse: [] } } };
 }
 
 /** Edits the message a button or select belongs to (paging). */
-export function updateMessage(data: Omit<MessageData, 'flags'>): InteractionReply {
+export function updateMessage(data: Omit<MessageData, 'flags'>): MessageReply {
   return { type: InteractionResponseType.UPDATE_MESSAGE, data: { ...data, allowed_mentions: { parse: [] } } };
 }
 

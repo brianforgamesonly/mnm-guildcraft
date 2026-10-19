@@ -2,7 +2,7 @@
 // Rosters show guild roster data only: character names, classes, levels and skill levels. Removed
 // characters (deleted_at) and departed members (status 'left') never appear.
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type InteractionReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { postButton, postedReply, searchReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { skillGroups, type Tradeskill } from './skills.ts';
 
@@ -102,7 +102,7 @@ function skillRows(d: SkillPage): unknown[] {
   return [nav, ...switchers];
 }
 
-export async function rosterSkill(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function rosterSkill(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const typed = (optString(opts, 'skill') ?? '').trim();
   const skill = await c.db.prepare('SELECT id, name FROM tradeskill WHERE name = ? COLLATE NOCASE').bind(typed).first<Tradeskill>();
   if (!skill) return ephemeral(`I don't know a tradeskill called **${md(typed)}**. Pick one from the list as you type.`);
@@ -115,7 +115,7 @@ export async function rosterSkill(c: Ctx, opts: Option[]): Promise<InteractionRe
 }
 
 /** Previous / Next: a new interaction each time, so Discord's 15-minute follow-up window never applies. */
-export async function rosterPage(c: Ctx, customId: string): Promise<InteractionReply> {
+export async function rosterPage(c: Ctx, customId: string): Promise<MessageReply> {
   const [skillId, min, page] = customId.slice(PAGE_PREFIX.length).split(':').map(Number);
   const d = await loadSkillPage(c, skillId, min, page);
   if (!d) return ephemeral('That tradeskill is no longer in the list. Run `/roster skill` again.');
@@ -123,7 +123,7 @@ export async function rosterPage(c: Ctx, customId: string): Promise<InteractionR
 }
 
 /** The tradeskill switcher: the chosen skill, page 1, same min_level. */
-export async function rosterSwitch(c: Ctx, customId: string, values: string[]): Promise<InteractionReply> {
+export async function rosterSwitch(c: Ctx, customId: string, values: string[]): Promise<MessageReply> {
   const min = Number(customId.slice(SWITCH_PREFIX.length).split(':')[0]);
   const d = await loadSkillPage(c, Number(values[0]), Number.isInteger(min) ? min : 0, 0);
   if (!d) return ephemeral('That tradeskill is no longer in the list. Run `/roster skill` again.');
@@ -162,7 +162,7 @@ async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; 
   return { embeds, content };
 }
 
-export async function rosterMember(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function rosterMember(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const userId = optString(opts, 'member');
   if (!userId) return ephemeral('Pick a member.');
   const { embeds, content } = await memberEmbeds(c, userId);
@@ -194,13 +194,13 @@ async function topEmbed(c: Ctx): Promise<Embed> {
   };
 }
 
-export async function rosterTop(c: Ctx): Promise<InteractionReply> {
+export async function rosterTop(c: Ctx): Promise<MessageReply> {
   return searchReply({ embeds: [await topEmbed(c)] }, 'rt');
 }
 
 // ---------------------------------------------------------------- Post to channel
 
-export async function postRoster(c: Ctx, what: string): Promise<InteractionReply | null> {
+export async function postRoster(c: Ctx, what: string): Promise<MessageReply | null> {
   const [kind, ...args] = what.split(':');
   if (kind === 'rs') {
     const [skillId, min, page] = args.map(Number);

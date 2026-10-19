@@ -2,7 +2,7 @@
 // recipes, their components, the crafters and the data version; crafters are tiered by src/crafters.ts.
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
-import { EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, truncate, type Embed, type EmbedField, type InteractionReply, type Option } from '../discord.ts';
+import { EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { postedReply, searchReply } from './share.ts';
 
 export interface ItemRecord {
@@ -227,7 +227,7 @@ export function findEmbeds(d: FindData, window: number): { embeds: Embed[]; note
 
 export const noRecipe = (typed: string) => `No recipe found for **${md(typed)}**. Pick an item from the list as you type.`;
 
-export async function craftFind(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function craftFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const typed = (optString(opts, 'item') ?? '').trim();
   const d = await loadFind(c.db, c.guild.id, { key: typed.toLowerCase() });
   if (!d.item || !d.isResult) {
@@ -239,7 +239,7 @@ export async function craftFind(c: Ctx, opts: Option[]): Promise<InteractionRepl
 }
 
 /** Post to channel: the same reply, rebuilt now, posted publicly. */
-export async function postFind(c: Ctx, itemId: number): Promise<InteractionReply> {
+export async function postFind(c: Ctx, itemId: number): Promise<MessageReply> {
   const d = await loadFind(c.db, c.guild.id, { id: itemId });
   if (!d.item || !d.isResult) return ephemeral('That item no longer has a recipe. Run `/craft find` again.');
   const { embeds, note } = findEmbeds(d, c.guild.learning_window);

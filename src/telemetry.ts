@@ -83,8 +83,19 @@ export function describeInteraction(i: { type: number; data?: { name?: string; o
   return { kind };
 }
 
+/**
+ * What the deferred path adds (order 4): the acknowledgement type (5 or 6; null = answered at once, inside
+ * Discord's 3 seconds), each webhook call with Discord's status, and the error, if any. On the deferred
+ * path io_ms runs to the end of delivery; the acknowledgement itself does no I/O.
+ */
+export interface Outcome {
+  ack: number | null;
+  deliveries?: { op: string; status: number; error?: string }[];
+  err?: string | null;
+}
+
 /** The one structured line per interaction. Read back from Workers Logs (see .github/workflows/timings.yml). */
-export function timingLine(i: Parameters<typeof describeInteraction>[0], calls: D1Call[], colo: string | undefined, totalMs: number): string {
+export function timingLine(i: Parameters<typeof describeInteraction>[0], calls: D1Call[], colo: string | undefined, totalMs: number, outcome: Outcome = { ack: null }): string {
   return JSON.stringify({
     gc: 'interaction',
     ...describeInteraction(i),
@@ -95,5 +106,8 @@ export function timingLine(i: Parameters<typeof describeInteraction>[0], calls: 
     d1_primary: calls.some((c) => c.primary === false) ? false : calls.some((c) => c.primary) ? true : null,
     colo: colo ?? null,
     io_ms: totalMs,
+    ack: outcome.ack,
+    ...(outcome.deliveries?.length ? { deliveries: outcome.deliveries } : {}),
+    err: outcome.err ?? null,
   });
 }

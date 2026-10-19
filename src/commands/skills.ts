@@ -2,7 +2,7 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
 
 export interface Tradeskill {
@@ -16,8 +16,9 @@ const LABEL_MAX = 45;
 const LEVEL_INPUT_MAX = 3;
 
 /** Every tradeskill, by name: the list is derived by the import, never typed here. */
+const allTradeskillsStmt = (db: D1Database) => db.prepare('SELECT id, name FROM tradeskill ORDER BY name COLLATE NOCASE');
 export async function allTradeskills(db: D1Database): Promise<Tradeskill[]> {
-  const { results } = await db.prepare('SELECT id, name FROM tradeskill ORDER BY name COLLATE NOCASE').all<Tradeskill>();
+  const { results } = await allTradeskillsStmt(db).all<Tradeskill>();
   return results;
 }
 
@@ -25,7 +26,7 @@ const levelRange = (c: Ctx) => `Level must be a whole number from 0 to ${c.guild
 
 // ---------------------------------------------------------------- /craft set
 
-export async function craftSet(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function craftSet(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const owner = resolveOwner(c, opts);
   if ('reply' in owner) return owner.reply;
   const typed = (optString(opts, 'skill') ?? '').trim();
@@ -58,9 +59,10 @@ function upsertSkill(c: Ctx, characterId: number, skillId: number, level: number
     .bind(characterId, skillId, level, now(), c.userId);
 }
 
+const levelsStmt = (db: D1Database, characterId: number) => db.prepare('SELECT tradeskill_id, level FROM character_skill WHERE character_id = ?').bind(characterId);
+const levelMap = (rows: { tradeskill_id: number; level: number }[]) => new Map(rows.map((r) => [r.tradeskill_id, r.level]));
 async function levelsOf(db: D1Database, characterId: number): Promise<Map<number, number>> {
-  const { results } = await db.prepare('SELECT tradeskill_id, level FROM character_skill WHERE character_id = ?').bind(characterId).all<{ tradeskill_id: number; level: number }>();
-  return new Map(results.map((r) => [r.tradeskill_id, r.level]));
+  return levelMap((await levelsStmt(db, characterId).all<{ tradeskill_id: number; level: number }>()).results);
 }
 
 // ---------------------------------------------------------------- /craft update: the select
@@ -109,7 +111,7 @@ export function updateSelects(characterId: number, skills: Tradeskill[], levels:
 }
 
 /** The skill-select step of /craft update, for one character. Also what an Update skills button opens. */
-async function updatePicker(c: Ctx, ch: Character): Promise<InteractionReply> {
+async function updatePicker(c: Ctx, ch: Character): Promise<MessageReply> {
   const skills = await allTradeskills(c.db);
   if (!skills.length) return ephemeral('The tradeskill list is empty: the recipe data has not been imported yet.');
   return ephemeral(`Pick up to ${MAX_PICK} tradeskills for **${md(ch.name)}**. A form then opens with a level box for each.`, {
@@ -117,7 +119,7 @@ async function updatePicker(c: Ctx, ch: Character): Promise<InteractionReply> {
   });
 }
 
-export async function craftUpdate(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function craftUpdate(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const target = await resolveCharacter(c, c.userId, optString(opts, 'character'));
   if ('reply' in target) return target.reply;
   return updatePicker(c, target.character);
@@ -137,29 +139,33 @@ export function updateButtons(chars: Pick<Character, 'id' | 'name'>[]): unknown[
 }
 
 /** An Update skills button: the same skill select /craft update opens, for that character. */
-export async function updateButton(c: Ctx, customId: string): Promise<InteractionReply> {
+export async function updateButton(c: Ctx, customId: string): Promise<MessageReply> {
   const target = await componentCharacter(c, customId, BUTTON_PREFIX);
   if ('reply' in target) return target.reply;
   return updatePicker(c, target.character);
 }
 
 /** The character a select or modal acts on, re-checked: still live, and the caller's (or the caller is an officer). */
-async function componentCharacter(c: Ctx, customId: string, prefix: string): Promise<{ character: Character } | { reply: InteractionReply }> {
+async function componentCharacter(c: Ctx, customId: string, prefix: string): Promise<{ character: Character } | { reply: MessageReply }> {
   const id = Number(customId.slice(prefix.length).split(':')[0]);
   const ch = Number.isInteger(id) ? await findById(c.db, c.guild.id, id) : null;
   if (!ch || (ch.owner_user_id !== c.userId && !c.officer)) return { reply: ephemeral('That character is no longer available. Run `/craft update` again.') };  return { character: ch };
 }
 
-/** The select's answer: a modal with one level box per chosen skill, pre-filled with the current level. */
+/**
+ * The select's answer: a modal with one level box per chosen skill, pre-filled with the current level.
+ * A modal cannot follow a deferral, so this answers inside Discord's 3 seconds: 3 D1 round trips (the
+ * guild row, the character, then tradeskills and levels in one batch).
+ */
 export async function updateSelected(c: Ctx, customId: string, values: string[]): Promise<InteractionReply> {
   const target = await componentCharacter(c, customId, SELECT_PREFIX);
   if ('reply' in target) return target.reply;
   const ch = target.character;
   const ids = [...new Set(values.map(Number))].filter(Number.isInteger).slice(0, MAX_PICK);
-  const all = await allTradeskills(c.db);
-  const chosen = all.filter((s) => ids.includes(s.id));
+  const [allRes, levelRes] = await c.db.batch([allTradeskillsStmt(c.db), levelsStmt(c.db, ch.id)]);
+  const chosen = (allRes.results as Tradeskill[]).filter((s) => ids.includes(s.id));
   if (!chosen.length) return ephemeral('Those tradeskills are no longer in the list. Run `/craft update` again.');
-  const levels = await levelsOf(c.db, ch.id);
+  const levels = levelMap(levelRes.results as { tradeskill_id: number; level: number }[]);
   return {
     type: InteractionResponseType.MODAL,
     data: {
@@ -196,7 +202,7 @@ export function modalInputs(components: ModalComponent[] | undefined): { custom_
 }
 
 /** The modal's answer: every box is validated first; one invalid box writes nothing. */
-export async function updateSubmitted(c: Ctx, customId: string, components: ModalComponent[] | undefined): Promise<InteractionReply> {
+export async function updateSubmitted(c: Ctx, customId: string, components: ModalComponent[] | undefined): Promise<MessageReply> {
   const target = await componentCharacter(c, customId, MODAL_PREFIX);
   if ('reply' in target) return target.reply;
   const ch = target.character;
@@ -232,7 +238,7 @@ export async function updateSubmitted(c: Ctx, customId: string, components: Moda
 const EMBED_MAX = 10;
 const DAY_MS = 86_400_000;
 
-export async function craftMe(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const name = optString(opts, 'character');
   let chars: Character[];
   if (name !== undefined) {

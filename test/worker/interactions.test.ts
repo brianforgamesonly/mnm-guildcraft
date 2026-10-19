@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
 import { DEFINED } from '../../src/commands/definitions.ts';
 import { COMING_SOON, HELP_FOOTER, HELP_LINES, HELP_TEXT } from '../../src/commands/help.ts';
-import { as, cmd, post } from '../discord.ts';
+import { APP_ID, as, cmd, exchange, post } from '../discord.ts';
 
 const helpCommand = cmd(as('100000000000000001'), 'craft', 'help');
 
@@ -20,13 +20,12 @@ describe('Discord interactions endpoint', () => {
     expect(await (await post({ type: 1 })).json()).toEqual({ type: 1 });
   });
 
-  it('/craft help returns type 4 with flag 64', async () => {
-    const res = await post(helpCommand);
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { type: number; data: { content: string; flags: number } };
-    expect(body.type).toBe(4);
-    expect(body.data.flags).toBe(64);
-    expect(body.data.content).toBe(HELP_TEXT);
+  it('/craft help defers privately (type 5, flag 64), then edits @original with the help text', async () => {
+    const { ack, calls } = await exchange(helpCommand);
+    expect(ack).toEqual({ type: 5, data: { flags: 64 } });
+    expect(calls.map((c) => [c.method, c.url])).toEqual([['PATCH', `https://discord.com/api/v10/webhooks/${APP_ID}/${calls[0].token}/messages/@original`]]);
+    expect(calls[0].body.content).toBe(HELP_TEXT);
+    expect(calls[0].body.flags).toBeUndefined(); // an edit cannot change visibility; the defer set it
   });
 
   it('an unknown command returns a polite ephemeral error, never a 500', async () => {
