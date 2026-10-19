@@ -9,9 +9,11 @@ export interface Guild {
   officer_role_id: string | null;
   skill_cap: number;
   stale_days: number;
+  /** /craft find "Still learning": this many points below the trivial (migration 0004). */
+  learning_window: number;
 }
 
-const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days';
+const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window';
 
 /** Budget for the guild-name lookup, well inside Discord's 3-second first-reply window. */
 export const GUILD_NAME_TIMEOUT_MS = 1500;
@@ -73,6 +75,18 @@ export const isOfficer = (guild: Guild | null, m: GuildMember): boolean =>
 /** Member commands: the guild's member role when one is set, otherwise anyone in the server. */
 export const passesMemberGate = (guild: Guild | null, m: GuildMember): boolean =>
   !guild?.member_role_id || m.roles.includes(guild.member_role_id);
+
+/**
+ * The same two decisions as passesMemberGate and isOfficer, as SQL, for an autocomplete that must answer
+ * in one statement (order 3, ITEM 3.2). Parameters (bind with sqlAccessParams): ?1 guild id, ?2 JSON
+ * array of the caller's role ids, ?3 1 when isAdmin. A missing guild row passes the gate, as
+ * passesMemberGate(null) does. test/worker/access-sql.test.ts checks both forms agree over every combination.
+ */
+export const SQL_PASSES_MEMBER_GATE =
+  'NOT EXISTS (SELECT 1 FROM guild g WHERE g.id = ?1 AND g.member_role_id IS NOT NULL AND g.member_role_id NOT IN (SELECT value FROM json_each(?2)))';
+export const SQL_IS_OFFICER =
+  '(?3 = 1 OR EXISTS (SELECT 1 FROM guild g WHERE g.id = ?1 AND g.officer_role_id IS NOT NULL AND g.officer_role_id IN (SELECT value FROM json_each(?2))))';
+export const sqlAccessParams = (guildId: string, m: GuildMember): [string, string, number] => [guildId, JSON.stringify(m.roles ?? []), isAdmin(m) ? 1 : 0];
 
 export const displayName = (m: GuildMember): string => m.nick || m.user.global_name || m.user.username;
 

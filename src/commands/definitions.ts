@@ -1,5 +1,6 @@
 // Slash-command definitions registered with Discord (scripts/discord/register.ts).
-// Order 2 ships /character, /craft set|update|me|help and /guildcraft setup; later orders add the rest.
+// Order 2 shipped /character, /craft set|update|me|help and /guildcraft setup; order 3 adds /craft find
+// and /roster skill|member|top; later orders add the rest.
 // /craft help marks every PRD command not defined here as "coming soon" (src/commands/help.ts).
 
 export const SUBCOMMAND = 1;
@@ -21,7 +22,8 @@ const memberOption = {
 const classOption = { type: STRING, name: 'class', description: 'Class: pick from the list, or type your own', autocomplete: true, max_length: 32 };
 const levelOption = { type: INTEGER, name: 'level', description: 'Character level', min_value: 1, max_value: 100 };
 const mainOption = { type: BOOLEAN, name: 'main', description: 'Make this your main character' };
-const characterOption = { type: STRING, name: 'character', description: 'Which character (default: your main)', autocomplete: true, max_length: 32 };
+const characterOption = { type: STRING, name: 'character', description: 'Optional; defaults to your main', autocomplete: true, max_length: 32 };
+const skillOption = { type: STRING, name: 'skill', description: 'Tradeskill', required: true, autocomplete: true };
 
 export const COMMANDS = [
   {
@@ -70,16 +72,38 @@ export const COMMANDS = [
         type: SUBCOMMAND,
         name: 'set',
         description: 'Set one tradeskill level',
-        options: [
-          { type: STRING, name: 'skill', description: 'Tradeskill', required: true, autocomplete: true },
-          { type: INTEGER, name: 'level', description: 'Skill level', required: true, min_value: 0 },
-          characterOption,
-          memberOption,
-        ],
+        options: [skillOption, { type: INTEGER, name: 'level', description: 'Skill level', required: true, min_value: 0 }, characterOption, memberOption],
       },
-      { type: SUBCOMMAND, name: 'update', description: 'Set up to 5 tradeskills at once', options: [characterOption] },
+      { type: SUBCOMMAND, name: 'update', description: 'Update up to 5 skills: press Enter, pick skills, then type levels', options: [characterOption] },
       { type: SUBCOMMAND, name: 'me', description: 'Your characters, skills and last updates (private)', options: [characterOption] },
+      {
+        type: SUBCOMMAND,
+        name: 'find',
+        description: 'Who in the guild can make an item: recipe, stats and crafters',
+        options: [{ type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 }],
+      },
       { type: SUBCOMMAND, name: 'help', description: 'A one-screen guide to every command' },
+    ],
+  },
+  {
+    name: 'roster',
+    description: "The guild's crafters, by tradeskill or by member",
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'skill',
+        description: 'Everyone with a tradeskill, ranked by skill level',
+        options: [skillOption, { type: INTEGER, name: 'min_level', description: 'Only show skill levels at or above this', min_value: 0 }],
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'member',
+        description: "One member's characters and skills",
+        options: [{ type: USER, name: 'member', description: 'The member', required: true }],
+      },
+      { type: SUBCOMMAND, name: 'top', description: 'The top 3 characters in each tradeskill' },
     ],
   },
   {

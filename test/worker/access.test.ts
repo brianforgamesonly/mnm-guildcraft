@@ -149,7 +149,9 @@ describe('first-use welcome (FR-9)', () => {
     expect(hasWelcome(second)).toBe(false);
   });
 
-  it('says /craft find is coming soon and does not present it as working', () => {
-    expect(WELCOME.description).toMatch(/`\/craft find`.*coming soon/);
+  it('step 3 (/craft find) is no longer "coming soon" now it is registered; step 2 names the Update skills button', () => {
+    expect(WELCOME.description).toMatch(/`\/craft find`: look up who in the guild can make an item\.\n/);
+    expect(WELCOME.description).not.toMatch(/coming soon/);
+    expect(WELCOME.description).toMatch(/\*\*2\.\*\* `\/craft update`: press Enter.*\*\*Update skills\*\* button/);
   });
 });

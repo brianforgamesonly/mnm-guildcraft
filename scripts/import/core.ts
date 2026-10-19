@@ -243,8 +243,14 @@ export interface ItemRow {
   icon_url: string | null;
   slot: string | null;
   stats_json: string | null;
+  /** The item's wiki page, only when the source marks hasPage (order 3, 1.2: fills the existing column). */
+  wiki_url: string | null;
   source: 'wiki';
 }
+
+/** The wiki link as mnm-tools builds it (mnmdb/app.js:179-180). Checked live in order 3: 21 of 21 sampled pages 200, no redirect. */
+export const WIKI_BASE = 'https://monstersandmemories.miraheze.org/wiki/';
+export const wikiUrl = (name: string) => WIKI_BASE + encodeURIComponent(name.replace(/ /g, '_'));
 export interface PlannedRecipe {
   source_key: string;
   tradeskill: string;
@@ -271,7 +277,7 @@ interface ExistingRecipe {
 }
 export interface ExistingState {
   tradeskills: Map<string, { kind: string; sort_order: number }>;
-  items: Map<string, { name: string; icon_url: string | null; slot: string | null; stats_json: string | null; source: string }>;
+  items: Map<string, { name: string; icon_url: string | null; slot: string | null; stats_json: string | null; wiki_url: string | null; source: string }>;
   recipes: Map<string, ExistingRecipe>; // by source_key, source = 'wiki' only
   activeWikiRecipes: number;
   classes: Map<string, number>; // game_class code -> item_count (0 = no longer kept)
@@ -384,6 +390,7 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
       icon_url: typeof it.icon === 'string' && it.icon ? it.icon : null,
       slot: typeof it.slot === 'string' && it.slot ? it.slot : null,
       stats_json: statsJson(it),
+      wiki_url: it.hasPage === true ? wikiUrl(name) : null,
       source: 'wiki',
     });
   }
@@ -556,7 +563,7 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
   for (const it of plan.items) {
     const o = ex.items.get(it.name_key);
     if (!o) p.item.insert++;
-    else if (o.name !== it.name || o.icon_url !== it.icon_url || o.slot !== it.slot || o.stats_json !== it.stats_json || o.source !== 'wiki')
+    else if (o.name !== it.name || o.icon_url !== it.icon_url || o.slot !== it.slot || o.stats_json !== it.stats_json || o.wiki_url !== it.wiki_url || o.source !== 'wiki')
       p.item.update++;
   }
   for (const s of plan.stubs) if (!ex.items.has(s.name_key)) p.stub.insert++;
@@ -617,12 +624,12 @@ export function buildStatements(plan: Plan, importedAt: string): Statement[] {
     out.push({
       table: 'item',
       sql:
-        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, source, imported_at) VALUES ` +
-        rows.map((i) => `(${lit(i.name)}, ${lit(i.name_key)}, ${lit(i.icon_url)}, ${lit(i.slot)}, ${lit(i.stats_json)}, 'wiki', ${at})`).join(', ') +
+        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, wiki_url, source, imported_at) VALUES ` +
+        rows.map((i) => `(${lit(i.name)}, ${lit(i.name_key)}, ${lit(i.icon_url)}, ${lit(i.slot)}, ${lit(i.stats_json)}, ${lit(i.wiki_url)}, 'wiki', ${at})`).join(', ') +
         ` ON CONFLICT(name_key) DO UPDATE SET name = excluded.name, icon_url = excluded.icon_url, slot = excluded.slot, ` +
-        `stats_json = excluded.stats_json, source = excluded.source, imported_at = excluded.imported_at ` +
+        `stats_json = excluded.stats_json, wiki_url = excluded.wiki_url, source = excluded.source, imported_at = excluded.imported_at ` +
         `WHERE item.name IS NOT excluded.name OR item.icon_url IS NOT excluded.icon_url OR item.slot IS NOT excluded.slot ` +
-        `OR item.stats_json IS NOT excluded.stats_json OR item.source IS NOT excluded.source`,
+        `OR item.stats_json IS NOT excluded.stats_json OR item.wiki_url IS NOT excluded.wiki_url OR item.source IS NOT excluded.source`,
     });
   // Stub rows are only created, never overwritten: a stored record (wiki or stub) always wins.
   for (const rows of chunk(plan.stubs, ROWS_PER_STATEMENT))
@@ -693,8 +700,8 @@ export function buildStatements(plan: Plan, importedAt: string): Statement[] {
 
 export async function loadExisting(db: Db): Promise<ExistingState> {
   const ts = await db.all<{ name: string; kind: string; sort_order: number }>('SELECT name, kind, sort_order FROM tradeskill');
-  const its = await db.all<{ name: string; name_key: string; icon_url: string | null; slot: string | null; stats_json: string | null; source: string }>(
-    'SELECT name, name_key, icon_url, slot, stats_json, source FROM item',
+  const its = await db.all<{ name: string; name_key: string; icon_url: string | null; slot: string | null; stats_json: string | null; wiki_url: string | null; source: string }>(
+    'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source FROM item',
   );
   const rs = await db.all<{
     source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null;

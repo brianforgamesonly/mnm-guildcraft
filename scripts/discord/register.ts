@@ -38,8 +38,11 @@ async function workerUrl(): Promise<string> {
   return `https://${WORKER_NAME}.${sub}.workers.dev/`;
 }
 
-type Command = { id: string; name: string; options?: { name: string }[] };
+type Command = { id: string; name: string; options?: { name: string; description?: string; options?: { name: string; description?: string }[] }[] };
 const describe = (cmds: Command[]) => cmds.map((c) => ({ id: c.id, name: c.name, subcommands: (c.options ?? []).map((o) => o.name) }));
+/** Each subcommand's description and its options' descriptions, as Discord stored them. */
+const descriptions = (cmds: Command[]) =>
+  cmds.flatMap((c) => (c.options ?? []).map((o) => ({ cmd: `/${c.name} ${o.name}`, description: o.description, options: (o.options ?? []).map((p) => `${p.name}: ${p.description}`) })));
 
 // The live Worker must reject bad signatures before Discord is pointed at it: Discord sends invalid
 // signatures on save and afterwards, and removes the URL if one is accepted.
@@ -63,4 +66,5 @@ const me = (await discord('GET', '/applications/@me')) as { id: string; interact
 console.log('read back GET /applications/@me:', JSON.stringify({ id: me.id, interactions_endpoint_url: me.interactions_endpoint_url }));
 const readBack = (await discord('GET', `/applications/${appId}/guilds/${guildId}/commands`)) as Command[];
 console.log('read back guild commands:', JSON.stringify(describe(readBack)));
+for (const d of descriptions(readBack)) console.log('read back:', JSON.stringify(d));
 if (me.interactions_endpoint_url !== url) process.exitCode = 1;

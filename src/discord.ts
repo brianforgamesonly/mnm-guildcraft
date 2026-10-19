@@ -47,11 +47,40 @@ export interface Interaction {
   };
 }
 
+export interface EmbedField {
+  name: string;
+  value: string;
+  inline?: boolean;
+}
+
 export interface Embed {
   title?: string;
   description?: string;
   color?: number;
+  url?: string;
+  thumbnail?: { url: string };
+  fields?: EmbedField[];
+  footer?: { text: string };
 }
+
+// Discord embed limits (https://docs.discord.com/developers/resources/message#embed-object-embed-limits).
+export const EMBED_LIMITS = { total: 6000, title: 256, description: 4096, fields: 25, fieldName: 256, fieldValue: 1024, footer: 2048, embeds: 10 } as const;
+
+/** Characters Discord counts toward the 6,000 total across a message's embeds. */
+export const embedChars = (embeds: Embed[]): number =>
+  embeds.reduce(
+    (n, e) => n + (e.title?.length ?? 0) + (e.description?.length ?? 0) + (e.footer?.text.length ?? 0) + (e.fields ?? []).reduce((m, f) => m + f.name.length + f.value.length, 0),
+    0,
+  );
+
+// Message components (https://docs.discord.com/developers/components/reference).
+export const BUTTON = 2;
+export const STYLE_PRIMARY = 1;
+export const STYLE_SECONDARY = 2;
+export const STYLE_LINK = 5;
+export const button = (custom_id: string, label: string, style = STYLE_SECONDARY, disabled = false) => ({ type: BUTTON, style, label, custom_id, ...(disabled ? { disabled } : {}) });
+export const linkButton = (label: string, url: string) => ({ type: BUTTON, style: STYLE_LINK, label, url });
+export const row = (components: unknown[]) => ({ type: 1, components });
 
 export interface MessageData {
   content?: string;
@@ -64,6 +93,7 @@ export interface MessageData {
 export type InteractionReply =
   | { type: InteractionResponseType.PONG }
   | { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE; data: MessageData }
+  | { type: InteractionResponseType.UPDATE_MESSAGE; data: MessageData }
   | { type: InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT; data: { choices: Choice[] } }
   | { type: InteractionResponseType.MODAL; data: { custom_id: string; title: string; components: unknown[] } };
 
@@ -78,6 +108,16 @@ export function ephemeral(content: string, extra: Omit<MessageData, 'content' | 
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content, ...extra, flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
   };
+}
+
+/** A message everyone in the channel sees (Post to channel). Mentions in it never ping anyone. */
+export function publicReply(data: Omit<MessageData, 'flags'>): InteractionReply {
+  return { type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE, data: { ...data, allowed_mentions: { parse: [] } } };
+}
+
+/** Edits the message a button or select belongs to (paging). */
+export function updateMessage(data: Omit<MessageData, 'flags'>): InteractionReply {
+  return { type: InteractionResponseType.UPDATE_MESSAGE, data: { ...data, allowed_mentions: { parse: [] } } };
 }
 
 export const choices = (list: Choice[]): InteractionReply => ({

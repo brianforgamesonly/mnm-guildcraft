@@ -2,7 +2,7 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { ephemeral, md, optInt, optString, truncate, type Embed, type InteractionReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
 
 export interface Tradeskill {
@@ -46,7 +46,7 @@ export async function craftSet(c: Ctx, opts: Option[]): Promise<InteractionReply
     audit(c.db, c.guild.id, c.userId, 'skill.set', `character:${ch.id}`, { [skill.name]: before?.level ?? null }, { [skill.name]: level }),
   ]);
   const was = before ? ` (was ${before.level})` : '';
-  return ephemeral(`**${md(ch.name)}**: ${skill.name} set to **${level}**${was}.`);
+  return ephemeral(`**${md(ch.name)}**: ${skill.name} set to **${level}**${was}.`, { components: updateButtons([ch]) });
 }
 
 function upsertSkill(c: Ctx, characterId: number, skillId: number, level: number): D1PreparedStatement {
@@ -108,10 +108,8 @@ export function updateSelects(characterId: number, skills: Tradeskill[], levels:
   }));
 }
 
-export async function craftUpdate(c: Ctx, opts: Option[]): Promise<InteractionReply> {
-  const target = await resolveCharacter(c, c.userId, optString(opts, 'character'));
-  if ('reply' in target) return target.reply;
-  const ch = target.character;
+/** The skill-select step of /craft update, for one character. Also what an Update skills button opens. */
+async function updatePicker(c: Ctx, ch: Character): Promise<InteractionReply> {
   const skills = await allTradeskills(c.db);
   if (!skills.length) return ephemeral('The tradeskill list is empty: the recipe data has not been imported yet.');
   return ephemeral(`Pick up to ${MAX_PICK} tradeskills for **${md(ch.name)}**. A form then opens with a level box for each.`, {
@@ -119,12 +117,37 @@ export async function craftUpdate(c: Ctx, opts: Option[]): Promise<InteractionRe
   });
 }
 
+export async function craftUpdate(c: Ctx, opts: Option[]): Promise<InteractionReply> {
+  const target = await resolveCharacter(c, c.userId, optString(opts, 'character'));
+  if ('reply' in target) return target.reply;
+  return updatePicker(c, target.character);
+}
+
+// ---------------------------------------------------------------- Update skills buttons (order 3, ITEM 2)
+
+export const BUTTON_PREFIX = 'upb:';
+const BUTTONS_PER_ROW = 5;
+
+/** One Update skills button per character (labelled with the name when there are several), up to 5 rows. */
+export function updateButtons(chars: Pick<Character, 'id' | 'name'>[]): unknown[] {
+  const buttons = chars.map((ch) => button(`${BUTTON_PREFIX}${ch.id}`, chars.length === 1 ? 'Update skills' : truncate(`Update ${ch.name}`, 80), STYLE_PRIMARY));
+  const rows: unknown[] = [];
+  for (let i = 0; i < buttons.length && rows.length < 5; i += BUTTONS_PER_ROW) rows.push(row(buttons.slice(i, i + BUTTONS_PER_ROW)));
+  return rows;
+}
+
+/** An Update skills button: the same skill select /craft update opens, for that character. */
+export async function updateButton(c: Ctx, customId: string): Promise<InteractionReply> {
+  const target = await componentCharacter(c, customId, BUTTON_PREFIX);
+  if ('reply' in target) return target.reply;
+  return updatePicker(c, target.character);
+}
+
 /** The character a select or modal acts on, re-checked: still live, and the caller's (or the caller is an officer). */
 async function componentCharacter(c: Ctx, customId: string, prefix: string): Promise<{ character: Character } | { reply: InteractionReply }> {
   const id = Number(customId.slice(prefix.length).split(':')[0]);
   const ch = Number.isInteger(id) ? await findById(c.db, c.guild.id, id) : null;
-  if (!ch || (ch.owner_user_id !== c.userId && !c.officer)) return { reply: ephemeral('That character is no longer available. Run `/craft update` again.') };
-  return { character: ch };
+  if (!ch || (ch.owner_user_id !== c.userId && !c.officer)) return { reply: ephemeral('That character is no longer available. Run `/craft update` again.') };  return { character: ch };
 }
 
 /** The select's answer: a modal with one level box per chosen skill, pre-filled with the current level. */
@@ -249,5 +272,5 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<InteractionReply>
     chars.length > EMBED_MAX ? `Showing ${EMBED_MAX} of ${chars.length} characters.` : null,
     anyStale ? `-# *stale* = not updated in ${c.guild.stale_days} days.` : null,
   ].filter(Boolean);
-  return ephemeral(notes.join('\n'), { embeds });
+  return ephemeral(notes.join('\n'), { embeds, components: updateButtons(shown) });
 }
