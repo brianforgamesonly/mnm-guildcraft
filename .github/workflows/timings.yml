@@ -9,6 +9,16 @@ on:
       hours:
         description: 'Look back this many hours (Workers Logs keeps 3 days on the free plan)'
         default: '72'
+      from:
+        description: 'Window start, ISO UTC (overrides hours), e.g. 2026-10-19T20:50:00Z'
+        default: ''
+      to:
+        description: 'Window end, ISO UTC (default now)'
+        default: ''
+      requests:
+        description: 'Also print one line per request (ids redacted)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -26,4 +36,7 @@ jobs:
       - name: Timings per path
         env:
           HOURS: ${{ inputs.hours }}
+          FROM: ${{ inputs.from }}
+          TO: ${{ inputs.to }}
+          REQUESTS: ${{ inputs.requests && '1' || '' }}
         run: node scripts/bench/timings.mjs "$HOURS"
