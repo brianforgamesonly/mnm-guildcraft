@@ -31,6 +31,7 @@ import { contentHash, renderIndex, renderSkillPost } from '../../src/board/rende
 import { BOARD_CALL_CAP, botApi } from '../../src/board/api.ts';
 import { archivesAt, CRON_RUN_MS, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
 import { boardInOrder, displayOrder, snowflakeAt, snowflakeMs } from '../../src/board/order.ts';
+import { runDepartures } from '../../src/departures.ts';
 
 const action = process.env.ACTION ?? 'render';
 const dryRun = process.env.DRY_RUN !== '0';
@@ -42,7 +43,7 @@ const cfg = JSON.parse(readFileSync('wrangler.jsonc', 'utf8').replace(/^\s*\/\/.
 const databaseId = cfg.env.dev.d1_databases[0].database_id;
 const readOnly = action === 'render' || action === 'inspect' || dryRun;
 if (['archive', 'refresh'].includes(action) && dryRun) throw new Error(`ACTION=${action} changes live data: it runs only with DRY_RUN=0`);
-if (['inspect', 'archive', 'refresh'].includes(action) && !bot) throw new Error(`DISCORD_BOT_TOKEN must be set for ACTION=${action}`);
+if (['inspect', 'archive', 'refresh', 'departures'].includes(action) && !bot) throw new Error(`DISCORD_BOT_TOKEN must be set for ACTION=${action}`);
 
 const redact = (s) => String(s).replace(/\d{15,}/g, '<id>');
 const tail = (id) => (id ? `…${String(id).slice(-6)}` : '-');
@@ -219,4 +220,21 @@ if (action === 'render') {
       console.log(`guild ${gi + 1}: board rows removed and board channel cleared`);
     }
   }
+} else if (action === 'departures') {
+  // Order 7, ITEM 3.2: the nightly departure run invoked directly (src/departures.ts runDepartures), with the
+  // Worker's 40-call budget. DRY_RUN=1 (the default) lists the server's members and reports who would be marked
+  // and which notices are owed, writing nothing (every statement must be a SELECT) and posting nothing.
+  // Members are named by pseudonym only (public logs).
+  d1Calls = 0;
+  const budget = { d1: () => d1Calls, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + CRON_RUN_MS };
+  const api = botApi(bot, budget);
+  const results = await runDepartures(db, api, { dryRun });
+  const alias = new Map();
+  const pseudo = (id) => alias.get(id) ?? (alias.set(id, `Member ${String.fromCharCode(65 + alias.size)}`), alias.get(id));
+  for (const [gi, r] of results.entries()) {
+    const { guild: _g, would_mark, errors, ...rest } = r;
+    console.log(redact(JSON.stringify({ guild: gi + 1, ...rest, would_mark: would_mark.map(pseudo), errors })));
+  }
+  console.log(`calls: d1 ${d1Calls}, discord ${budget.discord} (${api.log.map((c) => `${c.route} ${c.status}${c.code ? ` ${c.code}` : ''}`).join('; ') || 'none'}), total ${d1Calls + budget.discord} of ${BOARD_CALL_CAP}`);
+  if (results.some((r) => r.errors.length)) process.exitCode = 1;
 } else throw new Error(`unknown ACTION ${action}`);

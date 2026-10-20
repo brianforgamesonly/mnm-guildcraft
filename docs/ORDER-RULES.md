@@ -94,3 +94,10 @@ Treat the clock as authoritative over any date an order states.
 ## Added by work order 6 (alphabetical board and first keystroke)
 
 - The bot never deletes a post or message that a member wrote, or that has member replies, without Brian's explicit approval for that action.
+
+## Added by work order 7 (logs, hook, lag, departures)
+
+- An order that permits something an earlier order or rule forbade says so explicitly, naming the earlier rule. Without that, the earlier rule stands, and the session stops on the conflict.
+- Order 7's one explicit override of order 5's "The session never creates channels or posts on Brian's server": the bot's departure notices, posted in the review channel Brian sets with `/guildcraft setup review:`. Everything else in that rule stands.
+- Workers Logs is not a complete record (order 7, ITEM 1.1: 3 of 39 invocations missing on 2026-10-19/20, against Cloudflare's own invocation analytics). A logs-based conclusion states the completeness check's result for its window (`.github/workflows/timings.yml`).
+- `.claude/hooks/check-bash.mjs` cannot see a leading `cd <the current directory> &&`: Claude Code rewrites it into the call's working directory before the hook runs (order 7, ITEM 1.2). The rule against chaining still binds there.

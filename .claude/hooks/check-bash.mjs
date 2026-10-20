@@ -217,20 +217,32 @@ export function check(command) {
 }
 
 // Hook entry point: JSON on stdin, { tool_input: { command } }.
+//
+// Order 7 (ITEM 1.2): fail closed. Claude Code lets the call go ahead on any exit code other than 2, so every
+// failure of our own (unreadable stdin, input that is not hook JSON, no command string, an exception, a crash)
+// exits 2 with the reason. What this script cannot cover: node failing to start at all. The documented
+// `onFailure: "block"` setting covers that, but needs Claude Code v2.1.295 or later (this machine has 2.1.278).
+// Recovery when a broken hook blocks every Bash call: README.md, "If the Bash hook blocks everything".
+const failClosed = (why) => {
+  process.stderr.write(`Blocked by .claude/hooks/check-bash.mjs: the hook could not check this command (${why}), so it blocks it. See README.md, "If the Bash hook blocks everything".\n`);
+  process.exit(2);
+};
+process.on('uncaughtException', (e) => failClosed(`error: ${e?.message ?? e}`));
 {
   let input = '';
   try {
     input = readFileSync(0, 'utf8');
-  } catch {
-    process.exit(0);
+  } catch (e) {
+    failClosed(`stdin unreadable: ${e?.message ?? e}`);
   }
   let command;
   try {
     command = JSON.parse(input)?.tool_input?.command;
   } catch {
-    process.exit(0); // not hook input: never block on our own parse failure
+    failClosed('input is not hook JSON');
   }
-  if (typeof command !== 'string') process.exit(0);
+  if (typeof command !== 'string') failClosed('no tool_input.command string');
+  if (process.env.CHECK_BASH_FAULT === '1') throw new Error('injected fault (test only)');
   const reason = check(command);
   if (reason) {
     process.stderr.write(`Blocked by .claude/hooks/check-bash.mjs: ${reason}\n`);

@@ -19,5 +19,6 @@ jobs:
       - run: npm test
       - run: npm run test:hook
       - run: npm run test:actions
+      - run: npm run test:logs
       - name: Every action runs on the allowed Node runtime
         run: node scripts/ci/action-runtimes.mjs

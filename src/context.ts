@@ -6,6 +6,8 @@ export interface Effects {
   board?: boolean;
   /** Order 6: the refresh is /guildcraft rebuild-board's own run (it may create while the rebuild is in progress). */
   rebuild?: boolean;
+  /** Order 7: a read's audit row (craft.find, roster.view, guildcraft.status), written after delivery. */
+  audit?: { guildId: string; actor: string; action: string; target: string; detail: unknown };
 }
 
 /** What every command handler gets: the caller, their guild and their rights, checked for this request. */

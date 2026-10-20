@@ -35,6 +35,15 @@ npm run import:local                 # mnm-tools wiki.json -> local D1 (add -- -
 
 `recipe.source_key` is `<tradeskill>|<result item, lower-case>|<variant>`. A variant keeps its number when its components change (see `assignVariants` in `scripts/import/core.ts`).
 
+## If the Bash hook blocks everything
+
+`.claude/hooks/check-bash.mjs` runs before every Bash call in Claude Code and fails closed: if it cannot check a command, it blocks it. If a broken hook ever blocks every Bash call, either:
+
+- edit `.claude/settings.json` with Claude Code's file tools (Edit or Write, which the hook does not cover) to remove or fix the hook entry; or
+- start Claude Code with all hooks off: `claude --settings '{"disableAllHooks": true}'`.
+
+Then fix the hook and run `npm run test:hook`.
+
 ## Credits
 
 - Item and recipe data: the [Monsters and Memories Wiki](https://monstersandmemories.miraheze.org/), licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).

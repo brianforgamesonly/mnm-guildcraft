@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { InteractionType, verifyKey } from 'discord-interactions';
 import type { Env } from './env.ts';
+import { audit } from './access.ts';
 import { deferredReply, immediateReply, planFor, type Interaction, type InteractionReply, type Plan } from './interactions.ts';
 import { refreshAfterCommand, scheduled as runScheduled } from './board/refresh.ts';
 import type { Effects } from './context.ts';
@@ -38,7 +39,19 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
     console.error('interaction failed', err, JSON.stringify(log.filter((d) => d.error)));
     await deliverError(i, plan, log);
   }
-  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate, receivedAt }));
+  // Order 7: a read's audit row, after the member has the reply (it adds nothing to what they wait for).
+  let audited: { action: string; ok: boolean } | undefined;
+  if (effects.audit) {
+    const a = effects.audit;
+    try {
+      await audit(env.DB, a.guildId, a.actor, a.action, a.target, null, a.detail).run();
+      audited = { action: a.action, ok: true };
+    } catch (e) {
+      audited = { action: a.action, ok: false };
+      console.error('audit write failed', a.action, errText(e));
+    }
+  }
+  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate, receivedAt, audit: audited }));
   if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls, { rebuild: effects.rebuild })));
 }
 
