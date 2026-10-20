@@ -5,11 +5,12 @@
 //   who:   GitHub's failed-run mail to the repository owner, from the production run of the usage job only (the
 //          figures are account-wide, so the dev run would repeat it; it never fails on this);
 //   state: per metric, 'over' when a day's figure is at least 10% of its Free limit (src/limits.ts), else 'under'.
-//          Today's state is yesterday's figure; the previous state is the day before it, read from usage_daily
-//          (no stored state, and never the usage.alert rows). Separate from the job's stale/GraphQL alarm;
-//   how often: only a metric whose newest day is yesterday is judged, so each day's change is judged once: crossing
-//          up fails the run (at most once a day per metric); staying over passes; dropping back under is reported in
-//          the summary and passes. A metric with no earlier day counts as previously under.
+//          Each new day's state against the day before it, read from usage_daily (no stored state, and never the
+//          usage.alert rows). Separate from the job's stale/GraphQL alarm;
+//   how often: only days newer than what usage_daily held before the run are judged, so each day is judged once by
+//          the run that writes it: crossing up fails the run (at most once a day per metric); staying over passes;
+//          dropping back under is reported in the summary and passes. No earlier day counts as previously under.
+//          A dry-run dispatch writes nothing, so the scheduled run after it judges the same days again.
 import { alarmOutcome } from '../ci/alarm-outcome.ts';
 import { FREE_LIMITS, USAGE_TARGET_SHARE, type Metric } from '../../src/limits.ts';
 
@@ -32,16 +33,24 @@ export const judgesLevel = (copy: string) => copy === 'production';
 const over = (m: Metric, v: number) => v / FREE_LIMITS[m].limit >= USAGE_TARGET_SHARE;
 const pct = (m: Metric, v: number) => `${((v / FREE_LIMITS[m].limit) * 100).toFixed(1)}%`;
 
-/** Each metric whose newest figure is for `yesterday`, with what the alarm does about it. */
-export function levelChanges(rows: DayFigure[], yesterday: string): LevelChange[] {
+/**
+ * Each metric with days newer than the newest day usage_daily held for it before this run (`heldBefore`), with what
+ * the alarm does: every such day is judged against the day before it, so a day a dropped run, a failed measurement
+ * or a late figure skipped is judged by the next run, and a day already written is never judged twice. A crossing up
+ * on any of them notifies; otherwise the newest day's outcome stands.
+ */
+export function levelChanges(rows: DayFigure[], heldBefore: Partial<Record<string, string>>): LevelChange[] {
   const out: LevelChange[] = [];
   for (const m of Object.keys(FREE_LIMITS) as Metric[]) {
     const days = rows.filter((r) => r.metric === m).sort((a, b) => a.day.localeCompare(b.day));
-    const now = days.at(-1);
-    if (!now || now.day !== yesterday) continue;
-    const before = days.at(-2);
-    // scheduled: true, so staying over is quiet on a dispatch too: only crossing up fails (order 11).
-    out.push({ metric: m, day: now.day, value: now.value, outcome: alarmOutcome(over(m, now.value), before ? over(m, before.value) : false, true) });
+    const judged = days.flatMap((d, i) =>
+      d.day > (heldBefore[m] ?? '')
+        ? // scheduled: true, so staying over is quiet on a dispatch too: only crossing up fails (order 11).
+          [{ metric: m, day: d.day, value: d.value, outcome: alarmOutcome(over(m, d.value), i > 0 ? over(m, days[i - 1].value) : false, true) }]
+        : [],
+    );
+    const pick = judged.find((c) => c.outcome === 'notify') ?? judged.at(-1);
+    if (pick) out.push(pick);
   }
   return out;
 }

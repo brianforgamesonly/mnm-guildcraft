@@ -266,27 +266,34 @@ describe('/guildcraft status: production omits the operator-only lines; dev keep
 describe('the usage-level alarm (the production run of the usage job)', () => {
   const READ = 5_000_000; // d1_rows_read's Free limit
   const fig = (day: string, share: number): DayFigure => ({ metric: 'd1_rows_read', day, value: Math.round(READ * share) });
-  const judge = (rows: DayFigure[], yesterday: string) => levelSummary(levelChanges(rows, yesterday));
+  // `held`: the newest day usage_daily held for d1_rows_read before the run; the run judges only days after it.
+  const judge = (rows: DayFigure[], held: string | undefined) => levelSummary(levelChanges(rows, { d1_rows_read: held }));
 
   it('crossing up fails once; the unchanged state the next day passes', () => {
     const rows = [fig('2026-10-18', 0.02), fig('2026-10-19', 0.12)];
-    const first = judge(rows, '2026-10-19');
+    const first = judge(rows, '2026-10-18');
     expect(first.failed).toBe(true);
     expect(first.line).toBe('usage level: over the 10% target: Records read 12.0% on 2026-10-19');
-    const next = judge([...rows, fig('2026-10-20', 0.13)], '2026-10-20');
+    const next = judge([...rows, fig('2026-10-20', 0.13)], '2026-10-19');
     expect(next.failed).toBe(false);
     expect(next.line).toContain('still over (already reported): Records read 13.0% on 2026-10-20');
   });
   it('dropping back under is a state change reported in the summary, and passes', () => {
-    const r = judge([fig('2026-10-19', 0.12), fig('2026-10-20', 0.03)], '2026-10-20');
+    const r = judge([fig('2026-10-19', 0.12), fig('2026-10-20', 0.03)], '2026-10-19');
     expect(r.failed).toBe(false);
     expect(r.line).toBe('usage level: back under 10%: Records read 3.0% on 2026-10-20');
   });
-  it('under and staying under passes; no earlier day counts as under; a metric without yesterday is not judged again', () => {
-    expect(judge([fig('2026-10-19', 0.01), fig('2026-10-20', 0.02)], '2026-10-20')).toEqual({ failed: false, line: 'usage level: every metric under 10%' });
-    expect(judge([fig('2026-10-20', 0.5)], '2026-10-20').failed).toBe(true);
-    // Yesterday's figure missing (storage lands late): the older crossing was judged on its own day, not again.
-    expect(judge([fig('2026-10-18', 0.02), fig('2026-10-19', 0.12)], '2026-10-20').failed).toBe(false);
+  it('under and staying under passes; no earlier day counts as under; a day already held is not judged again', () => {
+    expect(judge([fig('2026-10-19', 0.01), fig('2026-10-20', 0.02)], '2026-10-19')).toEqual({ failed: false, line: 'usage level: every metric under 10%' });
+    expect(judge([fig('2026-10-20', 0.5)], undefined).failed).toBe(true);
+    // Nothing new since the last run (a figure that lands late): the crossing was judged by the run that wrote it.
+    expect(judge([fig('2026-10-18', 0.02), fig('2026-10-19', 0.12)], '2026-10-19')).toEqual({ failed: false, line: 'usage level: every metric under 10%' });
+  });
+  it('a crossing on a day no run judged (a dropped run, a failed measurement) is judged by the next run', () => {
+    // The run for 10-19 never wrote; the next run writes 10-19 (crossed up) and 10-20 (still over).
+    const r = judge([fig('2026-10-18', 0.02), fig('2026-10-19', 0.12), fig('2026-10-20', 0.13)], '2026-10-18');
+    expect(r.failed).toBe(true);
+    expect(r.line).toBe('usage level: over the 10% target: Records read 12.0% on 2026-10-19');
   });
   it('only the production run judges it: the dev run never fails on it (the figures are account-wide)', () => {
     expect(judgesLevel('production')).toBe(true);
@@ -294,7 +301,9 @@ describe('the usage-level alarm (the production run of the usage job)', () => {
   });
   it('per metric: one metric crossing fails even while another stays over', () => {
     const w = (day: string, v: number): DayFigure => ({ metric: 'workers_requests', day, value: v });
-    const r = judge([fig('2026-10-19', 0.12), fig('2026-10-20', 0.12), w('2026-10-19', 1_000), w('2026-10-20', 20_000)], '2026-10-20');
+    const r = levelSummary(
+      levelChanges([fig('2026-10-19', 0.12), fig('2026-10-20', 0.12), w('2026-10-19', 1_000), w('2026-10-20', 20_000)], { d1_rows_read: '2026-10-19', workers_requests: '2026-10-19' }),
+    );
     expect(r.failed).toBe(true);
     expect(r.line).toBe('usage level: over the 10% target: Commands and lookups 20.0% on 2026-10-20; still over (already reported): Records read 12.0% on 2026-10-20');
   });

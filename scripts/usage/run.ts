@@ -174,6 +174,10 @@ if (args['introspect-only']) {
 // /guildcraft status shows the account-wide figures in both apps.
 const db = remoteDb({ accountId: account, apiToken: token, databaseId: copyDatabaseId() });
 const [existing] = await db.all<{ n: number; last: string | null }>('SELECT count(*) AS n, max(measured_at) AS last FROM usage_daily');
+// Order 11: the newest day held per metric before this run writes; the level alarm judges only days after it.
+const heldBefore = Object.fromEntries(
+  (await db.all<{ metric: string; day: string }>('SELECT metric, max(day) AS day FROM usage_daily GROUP BY metric')).map((r) => [r.metric, r.day]),
+);
 // The previous state: failing when the last figures written are older than the alarm window.
 previousFailing = existing.last ? Date.now() - Date.parse(existing.last) > STALE_MS - 6 * 3_600_000 : null;
 const days = Number(args.days) || (existing.n ? 2 : 7);
@@ -289,7 +293,7 @@ if (judgesLevel(currentCopy().name) && !problems.length) {
   const held = await db.all<DayFigure>(`SELECT metric, day, value FROM usage_daily WHERE day >= ${lit(new Date(today - 10 * DAY).toISOString().slice(0, 10))}`);
   const merged = new Map(held.map((r) => [`${r.metric}|${r.day}`, r]));
   for (const r of rows) merged.set(`${r.metric}|${r.day}`, r);
-  level = levelSummary(levelChanges([...merged.values()], y));
+  level = levelSummary(levelChanges([...merged.values()], heldBefore));
 } else console.log(`usage level: not judged (${problems.length ? 'the measurement failed' : `the ${currentCopy().name} run; the production run alarms for the account`})`);
 // Order 9 (read only): the dev review channel's usage warnings as the Worker recorded them, posted or refused. The log
 // is public, so no guild id: metric, state, day and outcome only.
