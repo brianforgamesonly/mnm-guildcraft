@@ -14,7 +14,7 @@
 // The first run (usage_daily empty) backfills 7 days; later runs re-measure the last 2 (late data settles).
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
-import { devDatabaseId, remoteDb } from '../import/db.ts';
+import { copyDatabaseId, remoteDb } from '../import/db.ts';
 import { FREE_LIMITS, STALE_MS, type Metric } from '../../src/limits.ts';
 
 const { values: args } = parseArgs({
@@ -167,7 +167,9 @@ if (args['introspect-only']) {
 
 // ---------------------------------------------------------------- 2. the figures
 
-const db = remoteDb({ accountId: account, apiToken: token, databaseId: devDatabaseId() });
+// Order 10: the figures are account-wide; each copy's database gets the same rows (usage.yml runs once per copy), so
+// /guildcraft status shows the account-wide figures in both apps.
+const db = remoteDb({ accountId: account, apiToken: token, databaseId: copyDatabaseId() });
 const [existing] = await db.all<{ n: number; last: string | null }>('SELECT count(*) AS n, max(measured_at) AS last FROM usage_daily');
 // The previous state: failing when the last figures written are older than the alarm window.
 previousFailing = existing.last ? Date.now() - Date.parse(existing.last) > STALE_MS - 6 * 3_600_000 : null;

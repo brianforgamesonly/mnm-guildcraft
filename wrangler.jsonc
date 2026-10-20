@@ -1,6 +1,9 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // Top level is intentionally inert: the production environment is created at launch (order 6).
+  // Top level is intentionally inert: every deploy names an environment. Order 10: two copies, same code, different
+  // config (scripts/copies.ts reads this file): dev (the Dev app, the test server) and production (the MNM-Guildcraft app).
+  // What differs between them is only what is below each environment: the Worker name, the D1 database and
+  // GUILDCRAFT_COPY; plus, set at deploy (.github/workflows/deploy.yml), DISCORD_PUBLIC_KEY and the DISCORD_BOT_TOKEN secret.
   "name": "mnm-guildcraft",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
@@ -13,15 +16,34 @@
       // Order 7: head_sampling_rate stated (1 = every invocation, also the default); the free plan samples 1% only
       // past 200,000 events a day (68 events in the 4 hours read on 2026-10-20). Workers Logs still lost 3 of 39 invocations on 2026-10-19/20.
       "observability": { "enabled": true, "head_sampling_rate": 1 },
-      // Order 5: ONE trigger (cron triggers are counted per account: 5 on the free plan). Every 15 minutes
+      // Order 5: ONE trigger per Worker (cron triggers are counted per account: 5 on the free plan). Every 15 minutes
       // it sweeps dirty board posts; the 08:00 UTC run also re-renders every post (src/board/refresh.ts).
       "triggers": { "crons": ["*/15 * * * *"] },
+      // Order 10: which copy answered (/guildcraft status shows it).
+      "vars": { "GUILDCRAFT_COPY": "dev" },
       "d1_databases": [
         {
           "binding": "DB",
           "database_name": "mnm-guildcraft-dev",
           // Printed by .github/workflows/provision.yml run 39281889247 (not a secret).
           "database_id": "e33fd35e-dfa8-441b-b6bf-f79e26cd6842",
+          "migrations_dir": "migrations"
+        }
+      ]
+    },
+    "production": {
+      "name": "mnm-guildcraft",
+      "workers_dev": true,
+      "observability": { "enabled": true, "head_sampling_rate": 1 },
+      // The same */15 trigger: the account then has two cron triggers of the Free plan's 5.
+      "triggers": { "crons": ["*/15 * * * *"] },
+      "vars": { "GUILDCRAFT_COPY": "production" },
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "mnm-guildcraft-prod",
+          // Printed by .github/workflows/provision.yml (not a secret); zeros until it has run.
+          "database_id": "00000000-0000-0000-0000-000000000000",
           "migrations_dir": "migrations"
         }
       ]

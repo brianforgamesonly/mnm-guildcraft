@@ -7,7 +7,8 @@ import { readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { previousImportFailing, runImport, type Db } from './core.ts';
 import { isFailing } from '../../src/import-status.ts';
-import { devDatabaseId, localDb, remoteDb } from './db.ts';
+import { currentCopy } from '../copies.ts';
+import { copyDatabaseId, localDb, remoteDb } from './db.ts';
 import { fetchSource } from './source.ts';
 import { alarm } from '../ci/alarm.ts';
 
@@ -31,7 +32,8 @@ if (args.local) {
   const apiToken = process.env.CLOUDFLARE_API_TOKEN;
   const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   if (!apiToken || !accountId) throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
-  db = remoteDb({ apiToken, accountId, databaseId: devDatabaseId() });
+  db = remoteDb({ apiToken, accountId, databaseId: copyDatabaseId() });
+  console.log(`copy: ${currentCopy().name} (${currentCopy().database})`);
 }
 
 try {

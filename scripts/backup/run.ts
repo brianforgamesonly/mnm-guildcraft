@@ -8,7 +8,7 @@
 //  2. Count every table (remote, read-only), export (wrangler d1 export --remote; "A running export will block other
 //     database requests", so its duration is measured), count again.
 //  3. Load the export into a scratch local D1 and count it: each table's count must lie between the two remote counts.
-//  4. Push backups/<date>.sql and backups/<date>.json (the manifest) to the private backup repository, after
+//  4. Push backups/<copy>/<date>.sql and its .json (the manifest) to the private backup repository, after
 //     confirming it is private; prune to the last 30 dailies plus the first of each month.
 //  5. Read the token's expiry (GitHub-Authentication-Token-Expiration; 'unknown' when absent).
 //  6. Write one backup_status row (a permitted remote write; --dry-run prints it instead).
@@ -19,8 +19,9 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
-import { devDatabaseId, remoteDb } from '../import/db.ts';
-import { BACKUP_REPO, checkBounds, countsOf, countSql, DATABASE, expiryAlarms, expiryState, git, loadAndCount, prune, REPO_URL, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
+import { currentCopy } from '../copies.ts';
+import { remoteDb } from '../import/db.ts';
+import { BACKUP_REPO, backupDir, checkBounds, commitToBackupRepo, countsOf, countSql, expiryAlarms, expiryState, loadAndCount, prune, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
 
 const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
 const dryRun = args['dry-run'];
@@ -31,10 +32,13 @@ const tmp = join(process.env.RUNNER_TEMP ?? process.cwd(), 'backup-work');
 rmSync(tmp, { recursive: true, force: true });
 mkdirSync(tmp, { recursive: true });
 
-const db = remoteDb({ accountId: account, apiToken: token, databaseId: devDatabaseId() });
+const COPY = currentCopy();
+const db = remoteDb({ accountId: account, apiToken: token, databaseId: COPY.databaseId() });
+console.log(`copy: ${COPY.name} (${COPY.database})`);
 const startedAt = new Date().toISOString();
 const date = startedAt.slice(0, 10);
-const file = `backups/${date}.sql`;
+const dir = backupDir(COPY.name);
+const file = `${dir}/${date}.sql`;
 const problems: string[] = [];
 const out: { size_bytes: number | null; export_ms: number | null; commit_sha: string | null; token_expires: string } = { size_bytes: null, export_ms: null, commit_sha: null, token_expires: 'unknown' };
 let previous: { result: string; token_expires: string | null; finished_at: string } | undefined;
@@ -63,7 +67,7 @@ try {
   step('2. count, export, count');
   const before = await counts();
   const t0 = Date.now();
-  wrangler(['d1', 'export', DATABASE, '--remote', '--env', 'dev', '--output', dump]);
+  wrangler(['d1', 'export', COPY.database, '--remote', '--env', COPY.name, '--output', dump]);
   out.export_ms = Date.now() - t0;
   const after = await counts();
   out.size_bytes = statSync(dump).size;
@@ -104,27 +108,20 @@ try {
     if (!res.ok) throw new Error(`backup repository unreadable: HTTP ${res.status}`);
     if (repo.private !== true) throw new Error('the backup repository is not private: nothing pushed');
 
-    const work = join(tmp, 'repo');
-    mkdirSync(work);
-    git(work, ['init', '-q', '-b', 'main']);
-    git(work, ['remote', 'add', 'origin', REPO_URL]);
-    const heads = git(work, ['ls-remote', '--heads', 'origin', 'main']).trim();
-    // An empty repository has no main to check out: the first run starts it.
-    if (heads) {
-      git(work, ['fetch', '-q', '--depth=1', 'origin', 'main']);
-      git(work, ['checkout', '-q', '-B', 'main', 'FETCH_HEAD']);
-    }
-    mkdirSync(join(work, 'backups'), { recursive: true });
-    copyFileSync(dump, join(work, file));
-    writeFileSync(join(work, `backups/${date}.json`), `${JSON.stringify(manifest, null, 2)}\n`);
-    const dates = readdirSync(join(work, 'backups')).filter((f) => /^\d{4}-\d{2}-\d{2}\.sql$/.test(f)).map((f) => f.slice(0, 10));
-    const gone = prune(dates);
-    for (const d of gone) for (const ext of ['sql', 'json']) if (existsSync(join(work, `backups/${d}.${ext}`))) rmSync(join(work, `backups/${d}.${ext}`));
-    git(work, ['add', '-A', 'backups']);
-    git(work, ['-c', 'user.name=mnm-guildcraft backup', '-c', 'user.email=backup@users.noreply.github.com', 'commit', '-q', '-m', `Backup ${date}`]);
-    git(work, ['push', '-q', 'origin', 'main']);
-    out.commit_sha = git(work, ['rev-parse', 'HEAD']).trim();
-    console.log(JSON.stringify({ pushed: file, commit: out.commit_sha.slice(0, 7), kept_files: dates.length - gone.length, pruned: gone.length }));
+    let kept = 0;
+    let pruned = 0;
+    // An empty repository has no main to check out: the first run starts it (commitToBackupRepo).
+    out.commit_sha = commitToBackupRepo(join(tmp, 'repo'), [dir], `Backup ${COPY.name} ${date}`, (work) => {
+      mkdirSync(join(work, dir), { recursive: true });
+      copyFileSync(dump, join(work, file));
+      writeFileSync(join(work, `${dir}/${date}.json`), `${JSON.stringify(manifest, null, 2)}\n`);
+      const dates = readdirSync(join(work, dir)).filter((f) => /^\d{4}-\d{2}-\d{2}\.sql$/.test(f)).map((f) => f.slice(0, 10));
+      const gone = prune(dates);
+      for (const d of gone) for (const ext of ['sql', 'json']) if (existsSync(join(work, `${dir}/${d}.${ext}`))) rmSync(join(work, `${dir}/${d}.${ext}`));
+      kept = dates.length - gone.length;
+      pruned = gone.length;
+    });
+    console.log(JSON.stringify({ pushed: file, commit: out.commit_sha.slice(0, 7), kept_files: kept, pruned }));
   }
 } catch (e) {
   problems.push(e instanceof Error ? e.message : String(e));

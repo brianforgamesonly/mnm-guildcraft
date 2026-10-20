@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { currentCopy } from '../copies.ts';
 import { bindingDb, type D1Like } from './binding.ts';
 import type { Db, StatementMeta } from './core.ts';
 
@@ -9,14 +9,8 @@ export async function localDb(): Promise<{ db: Db; dispose: () => Promise<void> 
   return { db: bindingDb(proxy.env.DB), dispose: () => proxy.dispose() };
 }
 
-/** database_id of the dev D1, read from wrangler.jsonc (committed; not secret). */
-export function devDatabaseId(configPath = 'wrangler.jsonc'): string {
-  const text = readFileSync(configPath, 'utf8').replace(/^\s*\/\/.*$/gm, '');
-  const cfg = JSON.parse(text) as { env: { dev: { d1_databases: { database_id: string }[] } } };
-  const id = cfg.env.dev.d1_databases[0].database_id;
-  if (!/^[0-9a-f-]{36}$/.test(id) || /^0{8}-/.test(id)) throw new Error('wrangler.jsonc has no provisioned dev database_id');
-  return id;
-}
+/** database_id of the copy GUILDCRAFT_COPY names (default dev), read from wrangler.jsonc (committed; not secret). */
+export const copyDatabaseId = () => currentCopy().databaseId();
 
 interface D1HttpResult {
   results?: unknown[];
@@ -26,7 +20,7 @@ interface D1HttpResult {
 
 const MAX_SQL_CHARS = 90_000;
 
-/** The remote dev D1 over Cloudflare's D1 HTTP query API. Credentials come from the environment only. */
+/** A remote D1 over Cloudflare's D1 HTTP query API. Credentials come from the environment only. */
 export function remoteDb(opts: { accountId: string; apiToken: string; databaseId: string }): Db {
   const url = `https://api.cloudflare.com/client/v4/accounts/${opts.accountId}/d1/database/${opts.databaseId}/query`;
   async function query(sql: string): Promise<D1HttpResult[]> {

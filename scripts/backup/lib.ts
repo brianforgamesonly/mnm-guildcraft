@@ -3,14 +3,17 @@
 // credential: only table names, counts, sizes and hashes.
 import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { BACKUP_TOKEN_EXPIRY_NOTE } from '../../src/limits.ts';
 import { IMPORT_TABLES } from '../import/core.ts';
 
 /** The private backup repository: <the owner of this repository>/mnm-guildcraft-backup, so a fork backs up to its own. */
 export const BACKUP_REPO = `${process.env.GITHUB_REPOSITORY_OWNER || 'brianforgamesonly'}/mnm-guildcraft-backup`;
+/** The database name local scratch loads go through (the dev environment's binding; never the remote). */
 export const DATABASE = 'mnm-guildcraft-dev';
+/** Order 10 (override 3): each copy's backups live in their own folder, backups/<copy>/<date>.sql with its manifest. */
+export const backupDir = (copy: string) => `backups/${copy}`;
 
 export interface Manifest {
   /** The UTC date the backup was made, and its file in the backup repository. */
@@ -102,6 +105,8 @@ export async function confirmPrivate(): Promise<{ status: number; expiryHeader: 
  * change under `paths` and pushes. Returns the new commit. The commit message must not carry guild data.
  */
 export function commitToBackupRepo(work: string, paths: string[], message: string, change: (work: string) => void): string {
+  // Order 10: the folder must exist before git runs in it (export run 39430400299 failed with spawnSync git ENOENT).
+  mkdirSync(work, { recursive: true });
   git(work, ['init', '-q', '-b', 'main']);
   git(work, ['remote', 'add', 'origin', REPO_URL]);
   if (git(work, ['ls-remote', '--heads', 'origin', 'main']).trim()) {
