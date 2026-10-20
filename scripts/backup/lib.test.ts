@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { copies } from '../copies.ts';
 import { IMPORT_TABLES } from '../import/core.ts';
-import { checkBounds, countSql, expiryAlarms, expiryState, loadAndCount, MUST_HOLD_ROWS, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
+import { backupDir, checkBounds, countSql, expiryAlarms, expiryState, loadAndCount, MUST_HOLD_ROWS, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
 
 test('prune keeps the last 30 dailies and the first file of each month', () => {
   const dates: string[] = [];
@@ -41,6 +42,18 @@ test('order 10: MUST_HOLD_ROWS is the import\'s own table list, and every one of
   const full = Object.fromEntries(MUST_HOLD_ROWS.map((t) => [t, 3]));
   assert.deepEqual(checkBounds(full, full, full), []);
   assert.deepEqual(checkBounds(full, full, { ...full, game_class: 0 }, undefined).filter((p) => p.includes('game_class')).length, 2);
+});
+
+test('order 10: the copies are wrangler.jsonc environments; each marks itself and names its own Worker and database', () => {
+  const all = copies(fileURLToPath(new URL('../../wrangler.jsonc', import.meta.url)));
+  assert.deepEqual(all.map((c) => [c.name, c.worker, c.database]), [
+    ['dev', 'mnm-guildcraft-dev', 'mnm-guildcraft-dev'],
+    ['production', 'mnm-guildcraft', 'mnm-guildcraft-prod'],
+  ]);
+  assert.equal(new Set(all.map((c) => c.database)).size, all.length, 'no two copies share a database');
+  assert.equal(new Set(all.map((c) => c.worker)).size, all.length, 'no two copies share a Worker');
+  assert.match(all[0].databaseId(), /^[0-9a-f-]{36}$/);
+  assert.equal(backupDir('production'), 'backups/production');
 });
 
 test('order 10: the token-expiry warning never fires for the owner\'s "no expiry" note', () => {

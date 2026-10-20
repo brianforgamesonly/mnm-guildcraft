@@ -42,6 +42,24 @@ export function copies(configPath = 'wrangler.jsonc'): Copy[] {
   });
 }
 
+/**
+ * The Actions secrets' prefix per copy, as the operator named them (work order 10): the Dev app's are DISCORD_*,
+ * the production app's PROD_DISCORD_*. Any other copy a fork adds uses its upper-cased name and an underscore.
+ */
+export const secretPrefix = (copy: string) => (copy === 'dev' ? '' : copy === 'production' ? 'PROD_' : `${copy.toUpperCase()}_`);
+
+/**
+ * The workflows' matrix: one entry per copy wrangler.jsonc defines, filtered by `want` ('both' or a copy's name),
+ * production first when `primaryFirst` (the backup's order: production is primary).
+ */
+export function matrix(want = 'both', primaryFirst = false, configPath = 'wrangler.jsonc'): { copy: string; prefix: string }[] {
+  const all = copies(configPath).map((c) => ({ copy: c.name, prefix: secretPrefix(c.name) }));
+  if (primaryFirst) all.sort((a, b) => Number(b.copy === 'production') - Number(a.copy === 'production'));
+  const out = want === 'both' ? all : all.filter((c) => c.copy === want);
+  if (!out.length) throw new Error(`no copy named ${want} in wrangler.jsonc`);
+  return out;
+}
+
 /** The copy a job runs against: GUILDCRAFT_COPY, default dev. */
 export function currentCopy(name = process.env.GUILDCRAFT_COPY || 'dev', configPath = 'wrangler.jsonc'): Copy {
   const c = copies(configPath).find((x) => x.name === name);

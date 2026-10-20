@@ -15,9 +15,13 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { alarm, summary } from '../ci/alarm.ts';
+import { currentCopy } from '../copies.ts';
 import { DROP_BOUND_CONFIDENCE, DROP_BOUND_MIN_N, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, SLOT_MS } from './logs-check.mjs';
 
-const SCRIPT = 'mnm-guildcraft-dev';
+// Order 10: the copy GUILDCRAFT_COPY names (default dev): its Worker's logs, checked against its own database.
+const COPY = currentCopy();
+const SCRIPT = COPY.worker;
+console.log(`copy: ${COPY.name} (Worker ${SCRIPT})`);
 const hours = Math.min(72, Math.max(1, Number(process.argv[2]) || 72));
 const token = process.env.CLOUDFLARE_API_TOKEN;
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
@@ -279,8 +283,7 @@ const cf = async (path, init) => {
 const errorsOf = (r) => redact(JSON.stringify((r.json.errors ?? []).map((x) => x.message ?? x).slice(0, 3)));
 
 // The independent records: audit_log rows (D1), deploy times and the schedule's creation (Workers API).
-const cfg = JSON.parse(readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
-const databaseId = cfg.env.dev.d1_databases[0].database_id;
+const databaseId = COPY.databaseId();
 const auditSql = 'SELECT action, actor, created_at FROM audit_log WHERE created_at >= ? AND created_at <= ? ORDER BY id';
 const d1 = await cf(`/accounts/${account}/d1/database/${databaseId}/query`, {
   method: 'POST',

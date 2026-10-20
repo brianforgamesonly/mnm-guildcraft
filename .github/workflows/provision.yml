@@ -1,5 +1,6 @@
-# Creates the dev D1 database if missing and prints its ID (not secret) for wrangler.jsonc.
-# Also the check of the Cloudflare token's permissions. Expected: <1 billed minute per run.
+# Creates each copy's D1 database if missing (order 10: every wrangler.jsonc environment, scripts/copies.ts) and
+# prints its ID (not secret) for wrangler.jsonc. Also reports whether each copy's Worker name is already taken in the
+# account, and the workers.dev subdomain. Expected: <1 billed minute per run.
 # The pull_request trigger (only when this file changes, same-repo branches only) exists because
 # workflow_dispatch needs the file on main first, and the ID must be committed before the merge.
 name: provision
@@ -25,19 +26,28 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Ensure the D1 database mnm-guildcraft-dev exists
+      - name: Ensure every copy's D1 database exists
         run: |
-          find_id() { npx wrangler d1 list --json | jq -r '.[] | select(.name == "mnm-guildcraft-dev") | (.uuid // .id)'; }
-          id="$(find_id)"
-          if [ -z "$id" ]; then
-            echo "creating mnm-guildcraft-dev"
-            npx wrangler d1 create mnm-guildcraft-dev
-            id="$(find_id)"
-          else
-            echo "already exists"
-          fi
-          test -n "$id"
-          echo "database_id=$id"
+          node --input-type=module -e "import { copies } from './scripts/copies.ts'; for (const c of copies()) console.log(c.name, c.database, c.worker)" > copies.txt
+          cat copies.txt
+          find_id() { npx wrangler d1 list --json | jq -r --arg n "$1" '.[] | select(.name == $n) | (.uuid // .id)'; }
+          while read -r copy db worker; do
+            id="$(find_id "$db")"
+            if [ -z "$id" ]; then
+              echo "$copy: creating $db"
+              npx wrangler d1 create "$db"
+              id="$(find_id "$db")"
+            else
+              echo "$copy: $db already exists"
+            fi
+            test -n "$id"
+            echo "$copy database_id=$id"
+          done < copies.txt
+      - name: Worker names already in the account (a name in use by something else must not be overwritten)
+        run: |
+          curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts" \
+            | jq -c '{success, scripts: [.result[]?.id], errors: [.errors[]? | {code, message}]}'
       - name: workers.dev subdomain (needed for the Worker URL)
         run: |
           curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \

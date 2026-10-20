@@ -72,6 +72,7 @@ const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: In
   resolved: i?.data?.resolved,
   applicationId: i?.application_id,
   botToken: env.DISCORD_BOT_TOKEN,
+  copy: env.GUILDCRAFT_COPY,
 });
 
 /** Adds the one-time welcome to a reply, as an extra embed, and keeps the reply private. */

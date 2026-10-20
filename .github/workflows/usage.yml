@@ -25,16 +25,41 @@ on:
       days:
         description: 'Days to measure, ending yesterday (default: 7 on the first run, then 2)'
         default: ''
+      copy:
+        description: 'Which copy to write to (the figures are account-wide either way)'
+        type: choice
+        options: [both, dev, production]
+        default: both
 permissions:
   contents: read
-concurrency: usage-dev
+# Order 10: one job per copy (scripts/copies.ts). The figures are account-wide, so both databases get the same rows and
+# both apps' /guildcraft status shows the whole account. Each job alarms for its own copy: a GraphQL outage mails twice.
 jobs:
+  # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
+  copies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.c.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: c
+        env:
+          WANT: ${{ inputs.copy || 'both' }}
+        run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"
   usage:
+    needs: copies
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
+    concurrency: usage-${{ matrix.copy }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
