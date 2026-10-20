@@ -19,6 +19,11 @@ on:
         description: 'Dry run: export and check, push nothing'
         type: boolean
         default: true
+      copy:
+        description: 'Which copy holds the guild'
+        type: choice
+        options: [production, dev]
+        default: production
 permissions:
   contents: read
 # Shared with backup.yml: both push to the backup repository's main, so they never race.
@@ -32,6 +37,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
       WRANGLER_SEND_METRICS: 'false'
+      GUILDCRAFT_COPY: ${{ inputs.copy }}
     steps:
       # The input is read from the event file, not an expression or env: a step's script and env are printed in the log
       # before a mask can apply.

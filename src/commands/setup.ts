@@ -2,10 +2,8 @@
 // The review channel arrived in order 7; the vault channel arrives in order 9.
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import {
-  ADMINISTRATOR, ATTACH_FILES, EMBED_LINKS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL,
-  type MessageReply, type Option,
-} from '../discord.ts';
+import { ADMINISTRATOR, ephemeral, GUILD_FORUM, GUILD_TEXT, optString, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
+import { channelPermissions } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
@@ -26,31 +24,11 @@ const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
 
 // ---------------------------------------------------------------- the board channel's permissions
 
-/** What the bot needs in the board forum, by the name Discord's settings show. */
-export const BOARD_PERMISSIONS: [bigint, string][] = [
-  [VIEW_CHANNEL, 'View Channel'],
-  [SEND_MESSAGES, 'Send Messages (Create Posts)'],
-  [SEND_MESSAGES_IN_THREADS, 'Send Messages in Threads (Send Messages in Posts)'],
-  [EMBED_LINKS, 'Embed Links'],
-  [READ_MESSAGE_HISTORY, 'Read Message History'],
-  [MANAGE_THREADS, 'Manage Threads (Manage Posts, to pin the index)'],
-];
-
-/** What the bot needs in the review channel (order 7): it posts departure notices with embeds and buttons there. */
-export const REVIEW_PERMISSIONS: [bigint, string][] = [
-  [VIEW_CHANNEL, 'View Channel'],
-  [SEND_MESSAGES, 'Send Messages'],
-  [EMBED_LINKS, 'Embed Links'],
-];
-
-/** What the bot needs in the vault channel (order 9): it re-uploads screenshots there and reads them back for fresh links. */
-export const VAULT_PERMISSIONS: [bigint, string][] = [
-  [VIEW_CHANNEL, 'View Channel'],
-  [SEND_MESSAGES, 'Send Messages'],
-  [ATTACH_FILES, 'Attach Files'],
-  [EMBED_LINKS, 'Embed Links'],
-  [READ_MESSAGE_HISTORY, 'Read Message History'],
-];
+// Order 10: what the bot needs in each channel, by the name Discord's settings show, derived from the routes the
+// code calls there (src/permissions.ts). The install link's permissions come from the same table.
+export const BOARD_PERMISSIONS = channelPermissions('board');
+export const REVIEW_PERMISSIONS = channelPermissions('review');
+export const VAULT_PERMISSIONS = channelPermissions('vault');
 
 export const missingPermissions =(bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
   (bits & ADMINISTRATOR) === ADMINISTRATOR ? [] : needed.filter(([b]) => (bits & b) !== b).map(([, name]) => name);
@@ -320,6 +298,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       : [];
   const lines = [
     '## GuildCraft status',
+    // Order 10: which copy answered, so the operator can always tell the Dev app from production.
+    `**Copy:** ${c.copy === 'production' ? 'production' : c.copy === 'dev' ? 'dev' : 'not set'}`,
     `**Data version:** ${ok ? `\`${ok.source_version}\`` : 'no completed import yet'}`,
     `**Last import:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${last.status}${last.error ? ` (${last.error.slice(0, 200)})` : ''} · ${warnings === null ? 'warnings unreadable' : `${warnings} warning${warnings === 1 ? '' : 's'}`}` : 'none yet'}`,
     ...alarmLine,

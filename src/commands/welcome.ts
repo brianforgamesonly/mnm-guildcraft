@@ -2,7 +2,7 @@
 // Shown once, privately, with a new member's first command reply (PRD FR-9).
 // "(coming soon)" is derived from the registered definitions, as in /craft help.
 import type { Embed } from '../discord.ts';
-import { isBuilt } from './help.ts';
+import { CONTACT, isBuilt } from './help.ts';
 
 export const WELCOME: Embed = {
   title: 'Welcome to GuildCraft',
@@ -13,5 +13,6 @@ export const WELCOME: Embed = {
     `**3.** \`/craft find\`: look up who in the guild can make an item.${isBuilt('/craft find') ? '' : ' *(coming soon: not available yet)*'}`,
     '',
     '*You see this message once. `/craft help` lists every command. (draft)*',
+    CONTACT,
   ].join('\n'),
 };

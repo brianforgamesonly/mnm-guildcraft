@@ -1,5 +1,6 @@
-# Applies migrations to the remote dev D1 and deploys the dev Worker.
-# Runs on push to main and by dispatch. Expected: ~1 billed minute per run.
+# Applies migrations and deploys the Worker, for each copy (order 10: dev and production; wrangler.jsonc env.*).
+# Runs on push to main and by dispatch. Expected: ~1 billed minute per copy per run (public repository: free).
+# Each copy's Discord app has its own secrets: dev DISCORD_*, production PROD_DISCORD_* (Actions secrets; never printed).
 name: deploy
 on:
   push:
@@ -7,14 +8,34 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
-concurrency: deploy-dev
 jobs:
+  # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
+  copies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.c.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: c
+        shell: bash
+        run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix()))" | tee -a "$GITHUB_OUTPUT"
   deploy:
+    needs: copies
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
+    concurrency: deploy-${{ matrix.copy }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -22,15 +43,23 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Check the dev database is provisioned
-        run: node --input-type=module -e "import { devDatabaseId } from './scripts/import/db.ts'; console.log('database_id', devDatabaseId())"
-      - name: Apply migrations (remote dev D1)
-        run: npx wrangler d1 migrations apply mnm-guildcraft-dev --remote --env dev
-      - name: Deploy the dev Worker
+      - name: Check the database is provisioned, and name it
+        id: copy
+        shell: bash
+        run: |
+          node --input-type=module -e "import { currentCopy } from './scripts/copies.ts'; const c = currentCopy(); console.log('database_id', c.databaseId(), c.database)"
+          node --input-type=module -e "import { currentCopy } from './scripts/copies.ts'; console.log('database=' + currentCopy().database)" >> "$GITHUB_OUTPUT"
+      - name: Apply migrations (remote D1)
+        run: npx wrangler d1 migrations apply "${{ steps.copy.outputs.database }}" --remote --env "$GUILDCRAFT_COPY"
+      - name: Deploy the Worker
         env:
-          DISCORD_PUBLIC_KEY: ${{ secrets.DISCORD_PUBLIC_KEY }}
-        run: npx wrangler deploy --env dev --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
+          DISCORD_PUBLIC_KEY: ${{ secrets[format('{0}DISCORD_PUBLIC_KEY', matrix.prefix)] }}
+        run: |
+          test -n "$DISCORD_PUBLIC_KEY" || { echo "::error::${{ matrix.prefix }}DISCORD_PUBLIC_KEY is not set"; exit 1; }
+          npx wrangler deploy --env "$GUILDCRAFT_COPY" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
       - name: Set DISCORD_BOT_TOKEN as a Worker secret
         env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-        run: printf '%s' "$DISCORD_BOT_TOKEN" | npx wrangler secret put DISCORD_BOT_TOKEN --env dev
+          DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', matrix.prefix)] }}
+        run: |
+          test -n "$DISCORD_BOT_TOKEN" || { echo "::error::${{ matrix.prefix }}DISCORD_BOT_TOKEN is not set"; exit 1; }
+          printf '%s' "$DISCORD_BOT_TOKEN" | npx wrangler secret put DISCORD_BOT_TOKEN --env "$GUILDCRAFT_COPY"

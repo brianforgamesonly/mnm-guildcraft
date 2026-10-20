@@ -1,4 +1,4 @@
-# Loads mnm-tools wiki.json into the remote dev D1.
+# Loads mnm-tools wiki.json into each copy's remote D1 (order 10: dev and production).
 # Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~1 billed minute per run, ~30 min/month.
 # Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
 #
@@ -18,17 +18,45 @@ on:
         description: 'Dry run: print the counts it would write, write nothing'
         type: boolean
         default: true
+      copy:
+        description: 'Which copy to import into'
+        type: choice
+        options: [both, dev, production]
+        default: both
 permissions:
   contents: read
-concurrency: import-dev
+# Order 10: one job per copy (scripts/copies.ts), each importing the same source into its own database, with its own alarm.
 jobs:
+  # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
+  copies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.c.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: c
+        shell: bash
+        env:
+          WANT: ${{ inputs.copy || 'both' }}
+        run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"
   import:
+    needs: copies
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
+    concurrency: import-${{ matrix.copy }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       GITHUB_TOKEN: ${{ github.token }}
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7

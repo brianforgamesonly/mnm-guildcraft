@@ -2,6 +2,30 @@
 
 Steps a server admin follows when GuildCraft is added to a guild's server. Started in order 8.
 
+## Adding GuildCraft to your server
+
+A server admin (someone with **Manage Server**) opens this link, chooses the server and presses **Authorize**:
+
+```
+https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=292057893888
+```
+
+Discord shows the permissions GuildCraft asks for before you authorize. Each is there because GuildCraft calls something that needs it, and nothing else is asked for:
+
+| Permission | Why GuildCraft needs it |
+|---|---|
+| View Channel | to see the roster board, review and vault channels you choose |
+| Send Messages | to create the roster board's posts (in a forum channel, a post) and to post in the review and vault channels |
+| Send Messages in Threads | to add further messages inside a board post when a tradeskill's list is long |
+| Embed Links | GuildCraft's board posts, report cards and departure notices are embeds |
+| Attach Files | to re-post item screenshots in the vault channel for officers to approve |
+| Read Message History | to find archived board posts, and to read approved screenshots back |
+| Manage Threads | to keep board posts open, pin the board's index post, and remove old board posts when the board is rebuilt |
+
+GuildCraft does not ask for Administrator, Manage Messages, Create Public Threads or any moderation permission. It never reads members' messages. Discord's own guide to the link: https://docs.discord.com/developers/topics/oauth2 (bot authorization flow; `permissions` is "an integer corresponding to the permission calculations for the bot").
+
+After authorizing, run `/guildcraft setup` to choose the roles and channels; it checks GuildCraft can do its job in each channel you pick and names anything missing.
+
 ## Letting officers use `/guildcraft remove-member`
 
 **Why this is needed.** The `/guildcraft` command is registered with `default_member_permissions` = Manage Server (`src/commands/definitions.ts`), so Discord shows it only to members with Manage Server (or Administrator). An officer without Manage Server does not see `/guildcraft remove-member` at all, even though GuildCraft itself would let them use it.
@@ -45,7 +69,7 @@ GuildCraft re-checks the officer role on every `/recipe` call (`src/interactions
 Screenshots sent with `/item image` wait in a private channel until an officer presses Approve or Reject there.
 
 1. Create a private text channel (for example `guildcraft-vault`) that only officers and MNM-Guildcraft can see.
-2. Run `/guildcraft setup vault:#guildcraft-vault`. GuildCraft checks it can View Channel, Send Messages, Attach Files, Embed Links and Read Message History there, and names any permission it is missing. It warns (and still saves) if @everyone can see the channel.
+2. Run `/guildcraft setup vault:#guildcraft-vault`. GuildCraft checks it can View Channel, Send Messages, Attach Files and Read Message History there, and names any permission it is missing. It warns (and still saves) if @everyone can see the channel.
 
 ## Coming soon
 

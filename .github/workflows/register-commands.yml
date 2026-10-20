@@ -1,13 +1,19 @@
-# Registers the slash commands (guild-scoped to the test server), sets the interactions endpoint
-# to the dev Worker, and reads both back. Runs only after a successful deploy.yml run on main, and
-# only if the live Worker answers an invalid signature with 401. A tail records the requests Discord
-# sends to validate the endpoint (PING and invalid signatures), never /craft help.
+# Registers the slash commands and sets the interactions endpoint, for one copy (order 10; scripts/discord/register.ts):
+#   dev:        guild-scoped to the test server, the Dev app (DISCORD_*), the dev Worker.
+#   production: global, the MNM-Guildcraft app (PROD_DISCORD_*), the production Worker, plus the app's icon.
+# Reads both back. Runs only after a successful deploy.yml run on main, and only if the live Worker answers an invalid
+# signature with 401. A tail records the requests Discord sends to validate the endpoint (PING and invalid
+# signatures), never a member's command. read_only reads the registered definitions back and writes nothing.
 # Expected: ~1 billed minute per run.
 name: register-commands
-# Order 10: read_only reads the registered definitions back and compares them with the code; nothing is written.
 on:
   workflow_dispatch:
     inputs:
+      copy:
+        description: 'Which copy'
+        type: choice
+        options: [dev, production]
+        default: dev
       read_only:
         description: 'Only read the registered commands back (no PUT, no endpoint change)'
         type: boolean
@@ -15,7 +21,7 @@ on:
 permissions:
   contents: read
   actions: read
-concurrency: register-commands
+concurrency: register-commands-${{ inputs.copy }}
 jobs:
   register:
     runs-on: ubuntu-26.04
@@ -23,6 +29,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GUILDCRAFT_COPY: ${{ inputs.copy }}
     steps:
       - name: Require the latest deploy.yml run on main to have succeeded
         env:
@@ -37,17 +44,22 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Start a tail on the dev Worker
+      - name: Start a tail on the copy's Worker
         run: |
-          nohup npx wrangler tail mnm-guildcraft-dev --format json > tail.jsonl 2> tail.err &
+          worker="$(node --input-type=module -e "import { currentCopy } from './scripts/copies.ts'; console.log(currentCopy().worker)")"
+          nohup npx wrangler tail "$worker" --format json > tail.jsonl 2> tail.err &
           sleep 20
       - name: Register commands and set the endpoint
         env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
-          DISCORD_TEST_GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+          # The copy's own secrets only: a missing production secret stops the run, never falls back to the Dev app's.
+          DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', inputs.copy == 'production' && 'PROD_' || '')] }}
+          DISCORD_APPLICATION_ID: ${{ secrets[format('{0}DISCORD_APPLICATION_ID', inputs.copy == 'production' && 'PROD_' || '')] }}
+          DISCORD_TEST_GUILD_ID: ${{ inputs.copy == 'dev' && secrets.DISCORD_TEST_GUILD_ID || '' }}
           READ_ONLY: ${{ inputs.read_only && '1' || '' }}
-        run: node scripts/discord/register.ts
+        run: |
+          test -n "$DISCORD_BOT_TOKEN" || { echo "::error::the ${{ inputs.copy }} bot token secret is not set"; exit 1; }
+          test -n "$DISCORD_APPLICATION_ID" || { echo "::error::the ${{ inputs.copy }} application id secret is not set"; exit 1; }
+          node scripts/discord/register.ts
       - name: Discord validation requests seen by the Worker (status and CPU time only)
         if: always()
         run: |

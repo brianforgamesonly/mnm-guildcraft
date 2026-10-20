@@ -98,6 +98,10 @@ describe('/guildcraft status: backup and usage', () => {
     ]);
     expect(await status()).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token: no expiry \(owner's note\) · latest run <t:\d+:f> \*\*failed\*\*: push refused/);
   });
+  it('order 10: status says which copy answered (the tests run as the dev environment)', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    expect(await status()).toMatch(/^## GuildCraft status\n\*\*Copy:\*\* dev\n/);
+  });
   it('the token text: a read expiry wins; without one, the note decides', () => {
     expect(tokenExpiryText('2027-10-20T00:00:00.000Z')).toBe('token expires 2027-10-20');
     expect(tokenExpiryText('unknown')).toBe("token: no expiry (owner's note)");

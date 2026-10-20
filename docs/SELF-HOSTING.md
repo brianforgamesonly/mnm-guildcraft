@@ -72,8 +72,8 @@ In your fork: **Settings → Secrets and variables → Actions → New repositor
 
 ## Step 5 — The database
 
-1. **Actions → provision → Run workflow.** It creates the database and prints a line `database_id=...` (not a secret).
-2. In your fork, open `wrangler.jsonc` (press the pencil to edit it on GitHub), replace the `database_id` value with yours, and commit to `main`.
+1. First delete the `"production": { ... }` block from `wrangler.jsonc` (see step 2), so provision creates only your database. Then **Actions → provision → Run workflow.** It creates the database and prints a line `dev database_id=...` (not a secret).
+2. In your fork, open `wrangler.jsonc` (press the pencil to edit it on GitHub). It describes two copies, `dev` and `production`; yours is the `dev` one, which uses the `DISCORD_*` secrets from Step 4. With the `"production": { ... }` block already deleted (step 1; every job then runs for your copy only), replace the `dev` block's `database_id` value with yours, and commit to `main`.
 3. That commit starts a **deploy** run (Actions tab). **Wait until it has finished**, whether it succeeds or fails, before Step 6: it sets up the database's tables, and the export must not load while that is still running.
 4. In `src/limits.ts`, set `BACKUP_TOKEN_EXPIRY_NOTE` to `'unset'` unless your `BACKUP_REPO_TOKEN` really has no expiry date. (It records the original operator's choice; with `'unset'`, `/guildcraft status` warns you 30 days before your token expires.)
 
@@ -150,4 +150,4 @@ Without an export, run `/guildcraft setup` to choose the roles and channels.
 
 - The jobs that keep it running are all in the **Actions** tab: `import` (game data, daily), `backup` (nightly, to your private backup repository), `usage` and `timings` (free-tier checks). GitHub emails the account owner when one fails.
 - `/guildcraft status` in Discord shows the data version, the last backup and the free-tier usage.
-- To give the guild's data to someone else later, the `export` workflow does what Joegandomi did for you: **Actions → export → Run workflow**, with your server's ID. It writes to `guild-exports/` in your private backup repository.
+- To give the guild's data to someone else later, the `export` workflow does what Joegandomi did for you: **Actions → export → Run workflow**, with your server's ID and **copy: dev** (your copy's name in `wrangler.jsonc`). It writes to `guild-exports/` in your private backup repository.

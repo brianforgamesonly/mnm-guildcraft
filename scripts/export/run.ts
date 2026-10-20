@@ -16,7 +16,8 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createHash } from 'node:crypto';
 import { summary } from '../ci/alarm.ts';
-import { commitToBackupRepo, confirmPrivate, DATABASE, wrangler } from '../backup/lib.ts';
+import { commitToBackupRepo, confirmPrivate, wrangler } from '../backup/lib.ts';
+import { currentCopy } from '../copies.ts';
 import { IMPORT_WRITES } from '../import/core.ts';
 import { guildDump } from './dump.ts';
 
@@ -29,8 +30,9 @@ mkdirSync(tmp, { recursive: true });
 
 const full = join(tmp, 'full.sql');
 const t0 = Date.now();
-wrangler(['d1', 'export', DATABASE, '--remote', '--env', 'dev', '--output', full]);
-console.log(JSON.stringify({ database: DATABASE, export_ms: Date.now() - t0 }));
+const COPY = currentCopy();
+wrangler(['d1', 'export', COPY.database, '--remote', '--env', COPY.name, '--output', full]);
+console.log(JSON.stringify({ copy: COPY.name, database: COPY.database, export_ms: Date.now() - t0 }));
 
 const out = guildDump(readFileSync(full, 'utf8'), guildId, IMPORT_WRITES);
 rmSync(full);
@@ -42,7 +44,8 @@ const dir = `guild-exports/${guildId}`;
 const sha256 = createHash('sha256').update(out.sql).digest('hex');
 const manifest = {
   date,
-  database: DATABASE,
+  copy: COPY.name,
+  database: COPY.database,
   created_at: new Date().toISOString(),
   bytes: Buffer.byteLength(out.sql),
   sha256,

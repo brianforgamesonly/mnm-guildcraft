@@ -24,4 +24,6 @@ export interface Ctx {
   /** This application's id (the bot user's id), from the interaction. */
   applicationId?: string;
   botToken?: string;
+  /** Which copy answered: 'dev' or 'production' (Env.GUILDCRAFT_COPY). */
+  copy?: string;
 }

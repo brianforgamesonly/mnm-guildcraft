@@ -39,13 +39,44 @@ on:
         description: 'Run only the restore test (latest backup → scratch local D1 → its manifest)'
         type: boolean
         default: false
+      copy:
+        description: 'Which copy'
+        type: choice
+        options: [both, production, dev]
+        default: both
 permissions:
   contents: read
 # Shared with export.yml: both push to the backup repository's main.
 concurrency: backup-repo
+# Order 10 (override 3): production (primary) and dev, one after the other (max-parallel 1: both push to the same
+# repository), each to backups/<copy>/ with its own manifest, backup_status row and restore test.
 jobs:
+  # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix, production first), never a list typed here.
+  copies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.c.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: c
+        shell: bash
+        env:
+          WANT: ${{ inputs.copy || 'both' }}
+        run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT, true)))" | tee -a "$GITHUB_OUTPUT"
   backup:
     if: ${{ !inputs.restore_test }}
+    needs: copies
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 15
     env:
@@ -53,6 +84,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
       WRANGLER_SEND_METRICS: 'false'
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -74,11 +106,17 @@ jobs:
           exit 1
   restore-test:
     if: ${{ inputs.restore_test }}
+    needs: copies
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     env:
       BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
       WRANGLER_SEND_METRICS: 'false'
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
     steps:
       - uses: actions/checkout@v7
         with:
