@@ -28,6 +28,7 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/roster top'], text: 'the top 3 in each tradeskill' },
   { cmds: ['/roster recipes'], text: 'who knows the hard-to-get reputation and discovery recipes' },
   '**Items and data**',
+  { cmds: ['/gear find'], text: 'find gear for your class by slot, weapon type, AC, ratio, stats and source' },
   { cmds: ['/item image'], text: 'send a screenshot of an item window; it shows under **Stat image** once an officer approves it' },
   { cmds: ['/craft report'], text: 'report a wrong trivial, ingredient or source, or a missing recipe (or press **Report a problem**)' },
   { cmds: ['/recipe add'], text: 'record a recipe the data is missing (officer-approved)' },

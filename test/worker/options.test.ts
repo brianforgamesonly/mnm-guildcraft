@@ -7,6 +7,7 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import { autocomplete } from '../../src/commands/autocomplete.ts';
 import { COMMANDS } from '../../src/commands/definitions.ts';
+import { gearFindOptions } from '../../src/gear/options.ts';
 import { ACQUISITIONS, REPORT_ISSUES } from '../../src/recipes.ts';
 import { ADMIN, as, auto } from '../discord.ts';
 
@@ -15,8 +16,12 @@ type Opt = { type: number; name: string; choices?: readonly { value: string }[];
 const strings = COMMANDS.flatMap((c) =>
   (c.options as readonly Opt[]).flatMap((s) => (s.options ?? []).filter((o) => o.type === STRING).map((o) => ({ command: c.name, sub: s.name, o }))),
 );
-/** The closed lists a choice set may come from. */
-const CLOSED = [ACQUISITIONS.map(String), REPORT_ISSUES.map((i) => i.value)].map((l) => JSON.stringify([...l].sort()));
+/** The closed lists a choice set may come from. Order 13: /gear find's, each derived (src/gear/options.ts). */
+const CLOSED = [
+  ACQUISITIONS.map(String),
+  REPORT_ISSUES.map((i) => i.value),
+  ...(gearFindOptions([]).filter((o) => o.choices) as { choices: { value: string }[] }[]).map((o) => o.choices.map((c) => c.value)),
+].map((l) => JSON.stringify([...l].sort()));
 
 describe('string options against the client-side rules', () => {
   it('found the options', () => expect(strings.length).toBeGreaterThan(10));

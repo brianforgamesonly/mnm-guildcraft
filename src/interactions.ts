@@ -9,7 +9,8 @@ import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
 import { craftForget, craftKnow, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
-import { craftReport, DISMISS_PREFIX, FIXED_PREFIX, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted } from './commands/reports.ts';
+import { craftReport, DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted } from './commands/reports.ts';
+import { DETAILS_PREFIX, gearDetails, gearFind, gearPage, PAGE_PREFIX as GEAR_PAGE_PREFIX, postGear, POST_WHAT as GEAR_POST } from './commands/gear.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
 import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
@@ -50,6 +51,10 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'craft forget': { access: 'member', run: craftForget },
   'craft report': { access: 'member', run: craftReport },
   'roster recipes': { access: 'member', search: true, audit: 'roster.view', run: rosterRecipes },
+  // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
+  // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),
+  // whatever SEARCH_REPLIES_PRIVATE says, and Previous/Next edit them in place; the item card has Post to channel.
+  'gear find': { access: 'member', audit: 'gear.find', run: gearFind },
   'item image': { access: 'member', run: itemImage },
   'recipe source': { access: 'officer', run: recipeSource },
   'recipe override': { access: 'officer', run: recipeOverride },
@@ -103,7 +108,7 @@ export function planFor(i: Interaction): Plan {
     }
     case InteractionType.MESSAGE_COMPONENT:
       // The skill select and Report a problem open a modal, which cannot follow a deferral.
-      if (!inGuild || (i.data?.custom_id ?? '').startsWith(SELECT_PREFIX) || (i.data?.custom_id ?? '').startsWith(REPORT_PREFIX)) return { defer: false };
+      if (!inGuild || [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX].some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: false };
       return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
     case InteractionType.MODAL_SUBMIT:
       if (!inGuild) return { defer: false };
@@ -154,7 +159,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) {
     if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
-    if (id.startsWith(REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
+    if (id.startsWith(REPORT_MODAL_PREFIX) || id.startsWith(ITEM_REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
     return ephemeral(STALE_FORM);
   }
   // Order 9: /craft find's buttons, private or on a posted copy. Each answers the presser with a new private message.
@@ -162,12 +167,16 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(KNOW_SELECT_PREFIX)) return knowSelected(c, i.data?.values ?? []);
   if (id.startsWith(IMAGE_PREFIX)) return statImage(c, Number(id.slice(IMAGE_PREFIX.length)));
   if (id.startsWith(RECIPES_PAGE_PREFIX)) return rosterRecipesPage(c, id);
+  // Order 13: /gear find's paging (edits the private results) and details menu (a new private card).
+  if (id.startsWith(GEAR_PAGE_PREFIX)) return gearPage(c, id);
+  if (id.startsWith(DETAILS_PREFIX)) return gearDetails(c, i.data?.values ?? []);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
   if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);
   if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
   if (id.startsWith(POST_PREFIX)) {
     const what = id.slice(POST_PREFIX.length);
     if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
+    if (what.startsWith(GEAR_POST)) return postGear(c, Number(what.slice(GEAR_POST.length)));
     if (what.startsWith('rr:')) return postRosterRecipes(c, what.slice(3).split(':'));
     return (await postRoster(c, what)) ?? ephemeral(STALE_FORM);
   }
@@ -191,6 +200,7 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   const id = i.data?.custom_id ?? '';
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
+  if (id.startsWith(ITEM_REPORT_PREFIX)) return reportModal(Number(id.slice(ITEM_REPORT_PREFIX.length)), 'item');
   return updateSelected(ctxFor(env, guild, i.member!, {}), id, i.data?.values ?? []);
 }
 
