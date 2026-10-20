@@ -30,7 +30,7 @@ describe('schema (migrations/0001_init.sql)', () => {
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
-    expect(departureTables).toEqual(['game_class', 'backup_status', 'usage_daily']);
+    expect(departureTables).toEqual(['game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component']);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect(departureIndexes.sort()).toEqual(['audit_by_action', 'audit_by_target']);
     expect(indexes.map((i) => i.name)).toEqual([...prdIndexes, ...departureIndexes].sort());

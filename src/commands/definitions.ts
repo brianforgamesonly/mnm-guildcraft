@@ -3,6 +3,8 @@
 // and /roster skill|member|top; later orders add the rest.
 // /craft help marks every PRD command not defined here as "coming soon" (src/commands/help.ts).
 
+import { ACQUISITION_LABEL, ACQUISITIONS, REPORT_ISSUES } from '../recipes.ts';
+
 export const SUBCOMMAND = 1;
 const STRING = 3;
 const INTEGER = 4;
@@ -29,6 +31,12 @@ const levelOption = { type: INTEGER, name: 'level', description: 'Character leve
 const mainOption = { type: BOOLEAN, name: 'main', description: 'Make this your main character' };
 const characterOption = { type: STRING, name: 'character', description: 'Optional; defaults to your main', autocomplete: true, max_length: 32 };
 const skillOption = { type: STRING, name: 'skill', description: 'Tradeskill', required: true, autocomplete: true };
+/** Order 9: one choice per recipe, with its tradeskill and trivial (src/commands/autocomplete.ts). */
+const recipeOption = { type: STRING, name: 'recipe', description: 'A recipe: pick from the list (each shows its tradeskill and trivial)', required: true, autocomplete: true, max_length: 100 };
+const itemOption = { type: STRING, name: 'item', description: 'An item: pick from the list', required: true, autocomplete: true, max_length: 100 };
+/** /recipe picks a recipe through item: (autocomplete offers each of an item's recipes). */
+const recipeItemOption = { ...recipeOption, name: 'item', description: 'The item: pick its recipe from the list (each shows its tradeskill and trivial)' };
+const ATTACHMENT = 11;
 
 export const COMMANDS = [
   {
@@ -87,7 +95,67 @@ export const COMMANDS = [
         description: 'Who in the guild can make an item: recipe, stats and crafters',
         options: [{ type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 }],
       },
+      { type: SUBCOMMAND, name: 'know', description: 'Mark a recipe as known by your character', options: [recipeOption, characterOption] },
+      { type: SUBCOMMAND, name: 'forget', description: 'Unmark a recipe your character marked known', options: [recipeOption, characterOption] },
+      {
+        type: SUBCOMMAND,
+        name: 'report',
+        description: 'Report a wrong trivial, component or source, or a missing recipe, to the officers',
+        options: [
+          itemOption,
+          { type: STRING, name: 'issue', description: 'What is wrong', required: true, choices: REPORT_ISSUES.map((i) => ({ name: i.label, value: i.value })) },
+          { type: STRING, name: 'details', description: 'Optional: what it should be (up to 300 characters)', max_length: 300 },
+        ],
+      },
       { type: SUBCOMMAND, name: 'help', description: 'A one-screen guide to every command' },
+    ],
+  },
+  {
+    name: 'item',
+    description: 'Item screenshots',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'image',
+        description: 'Send a screenshot of an item window; an officer approves it before it shows',
+        options: [itemOption, { type: ATTACHMENT, name: 'image', description: 'PNG, JPEG or WebP, up to 8 MB', required: true }],
+      },
+    ],
+  },
+  {
+    name: 'recipe',
+    description: 'Officers: correct recipes for this server',
+    type: 1,
+    contexts: GUILD_ONLY,
+    // Order 9: its own top-level command, so a server admin can grant it to the officer role (Server Settings →
+    // Integrations → MNM-Guildcraft → /recipe) without granting /guildcraft. src/interactions.ts re-checks the officer
+    // role on every call (FR-8).
+    default_member_permissions: MANAGE_GUILD,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'source',
+        description: 'Set how a recipe is obtained (this server only)',
+        options: [
+          recipeItemOption,
+          { type: STRING, name: 'how', description: 'How it is obtained', required: true, choices: ACQUISITIONS.map((a) => ({ name: ACQUISITION_LABEL[a], value: a })) },
+          { type: STRING, name: 'faction', description: 'Reputation recipes: the faction that sells it', max_length: 80 },
+          { type: STRING, name: 'note', description: 'Optional: vendor, standing needed, or a hint', max_length: 200 },
+        ],
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'override',
+        description: "Correct a recipe's trivial or components (this server only)",
+        options: [
+          recipeItemOption,
+          { type: INTEGER, name: 'trivial', description: 'The correct trivial', min_value: 0 },
+          { type: STRING, name: 'components', description: 'The full list, e.g. 2 Copper Bar, 1 Flux', max_length: 500 },
+          { type: BOOLEAN, name: 'reset', description: "True: remove this server's correction" },
+        ],
+      },
     ],
   },
   {
@@ -109,6 +177,12 @@ export const COMMANDS = [
         options: [{ type: USER, name: 'member', description: 'The member', required: true }],
       },
       { type: SUBCOMMAND, name: 'top', description: 'The top 3 characters in each tradeskill' },
+      {
+        type: SUBCOMMAND,
+        name: 'recipes',
+        description: 'Who knows the reputation and discovery recipes',
+        options: [{ ...skillOption, required: false, description: 'Optional: one tradeskill' }],
+      },
     ],
   },
   {
@@ -129,7 +203,8 @@ export const COMMANDS = [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
           { type: ROLE, name: 'officer_role', description: "Officers can edit any member's entries" },
           { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
-          { type: CHANNEL, name: 'review', description: 'A private text channel for officers: notices when a member leaves the server', channel_types: [GUILD_TEXT_CHANNEL] },
+          { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
+          { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
         ],
       },
       { type: SUBCOMMAND, name: 'status', description: 'Data version, last import, the roster board and departures' },

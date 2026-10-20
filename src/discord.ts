@@ -28,6 +28,8 @@ export interface ModalComponent {
   type: number;
   custom_id?: string;
   value?: string;
+  /** A string select inside a Label (order 9: the report modal's issue). */
+  values?: string[];
   component?: ModalComponent;
   components?: ModalComponent[];
 }
@@ -41,8 +43,18 @@ export interface ResolvedChannel {
   app_permissions?: string;
 }
 
+/** An attachment option's file (resolved.attachments; option type 11). content_type is the client's claim. */
+export interface ResolvedAttachment {
+  id: string;
+  filename: string;
+  size: number;
+  url: string;
+  content_type?: string;
+}
+
 export interface Resolved {
   channels?: Record<string, ResolvedChannel>;
+  attachments?: Record<string, ResolvedAttachment>;
 }
 
 export interface Interaction {
@@ -78,6 +90,7 @@ export interface Embed {
   color?: number;
   url?: string;
   thumbnail?: { url: string };
+  image?: { url: string };
   fields?: EmbedField[];
   footer?: { text: string };
 }
@@ -186,6 +199,7 @@ export const VIEW_CHANNEL = 1n << 10n;
 /** In a forum channel this is "Create Posts" (CREATE_PUBLIC_THREADS is ignored there). */
 export const SEND_MESSAGES = 1n << 11n;
 export const EMBED_LINKS = 1n << 14n;
+export const ATTACH_FILES = 1n << 15n;
 export const READ_MESSAGE_HISTORY = 1n << 16n;
 export const MANAGE_THREADS = 1n << 34n;
 export const SEND_MESSAGES_IN_THREADS = 1n << 38n;

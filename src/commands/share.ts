@@ -22,8 +22,11 @@ export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, pos
   };
 }
 
-/** The public copy: same content, link buttons only, and who shared it (a mention that never pings). */
-export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, userId: string, links: unknown[] = []): MessageReply {
+/**
+ * The public copy: same content, link buttons, and who shared it (a mention that never pings). `actionRows`
+ * (order 9: /craft find's buttons) are buttons any viewer may press; each press answers that viewer privately.
+ */
+export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, userId: string, links: unknown[] = [], actionRows: unknown[] = []): MessageReply {
   const by = `-# Shared by <@${userId}>`;
-  return publicReply({ ...data, content: data.content ? `${data.content}\n${by}` : by, components: links.length ? [row(links)] : [] });
+  return publicReply({ ...data, content: data.content ? `${data.content}\n${by}` : by, components: [...(links.length ? [row(links)] : []), ...actionRows] });
 }

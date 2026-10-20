@@ -6,7 +6,10 @@ import { HELP_TEXT } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
 import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, removeMemberButton } from './commands/members.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
-import { craftFind, postFind } from './commands/find.ts';
+import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
+import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
+import { craftForget, craftKnow, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
+import { craftReport, DISMISS_PREFIX, FIXED_PREFIX, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted } from './commands/reports.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
 import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
@@ -42,6 +45,14 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
   'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
   'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
+  // Order 9.
+  'craft know': { access: 'member', run: craftKnow },
+  'craft forget': { access: 'member', run: craftForget },
+  'craft report': { access: 'member', run: craftReport },
+  'roster recipes': { access: 'member', search: true, audit: 'roster.view', run: rosterRecipes },
+  'item image': { access: 'member', run: itemImage },
+  'recipe source': { access: 'officer', run: recipeSource },
+  'recipe override': { access: 'officer', run: recipeOverride },
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
   'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
@@ -90,7 +101,8 @@ export function planFor(i: Interaction): Plan {
       return { defer: true, ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, private: route.search ? SEARCH_REPLIES_PRIVATE : true };
     }
     case InteractionType.MESSAGE_COMPONENT:
-      if (!inGuild || (i.data?.custom_id ?? '').startsWith(SELECT_PREFIX)) return { defer: false }; // the select opens a modal
+      // The skill select and Report a problem open a modal, which cannot follow a deferral.
+      if (!inGuild || (i.data?.custom_id ?? '').startsWith(SELECT_PREFIX) || (i.data?.custom_id ?? '').startsWith(REPORT_PREFIX)) return { defer: false };
       return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
     case InteractionType.MODAL_SUBMIT:
       if (!inGuild) return { defer: false };
@@ -136,14 +148,26 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
+  if (id.startsWith(FIXED_PREFIX) || id.startsWith(DISMISS_PREFIX)) return reportButton(c, id);
+  if (id.startsWith(APPROVE_PREFIX) || id.startsWith(REJECT_PREFIX)) return imageButton(c, id);
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
-  if (i.type === InteractionType.MODAL_SUBMIT) return id.startsWith(MODAL_PREFIX) ? updateSubmitted(c, id, i.data?.components) : ephemeral(STALE_FORM);
+  if (i.type === InteractionType.MODAL_SUBMIT) {
+    if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
+    if (id.startsWith(REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
+    return ephemeral(STALE_FORM);
+  }
+  // Order 9: /craft find's buttons, private or on a posted copy. Each answers the presser with a new private message.
+  if (id.startsWith(KNOW_PREFIX)) return knowButton(c, Number(id.slice(KNOW_PREFIX.length)));
+  if (id.startsWith(KNOW_SELECT_PREFIX)) return knowSelected(c, i.data?.values ?? []);
+  if (id.startsWith(IMAGE_PREFIX)) return statImage(c, Number(id.slice(IMAGE_PREFIX.length)));
+  if (id.startsWith(RECIPES_PAGE_PREFIX)) return rosterRecipesPage(c, id);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
   if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);
   if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
   if (id.startsWith(POST_PREFIX)) {
     const what = id.slice(POST_PREFIX.length);
     if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
+    if (what.startsWith('rr:')) return postRosterRecipes(c, what.slice(3).split(':'));
     return (await postRoster(c, what)) ?? ephemeral(STALE_FORM);
   }
   return ephemeral(STALE_FORM);
@@ -164,7 +188,9 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
   if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
-  return updateSelected(ctxFor(env, guild, i.member!, {}), i.data?.custom_id ?? '', i.data?.values ?? []);
+  const id = i.data?.custom_id ?? '';
+  if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
+  return updateSelected(ctxFor(env, guild, i.member!, {}), id, i.data?.values ?? []);
 }
 
 /** The reply to an interaction planFor answers at once. */

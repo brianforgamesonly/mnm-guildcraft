@@ -15,7 +15,7 @@ export const markImported = () =>
 /** Empties guild and reference data, then seeds tradeskills and classes (as an import would). */
 export async function reset(tradeskills: string[] = ['Alchemy', 'Blacksmithing', 'Brewing', 'Fletching', 'Tailoring'], classes: [string, number][] = [['CLR', 1140], ['SHD', 1498], ['WIZ', 342], ['OLD', 0]]) {
   await env.DB.batch(
-    ['audit_log', 'character_recipe', 'character_skill', 'character', 'member', 'guild', 'board_post', 'recipe_component', 'recipe', 'tradeskill', 'game_class'].map((t) =>
+    ['audit_log', 'recipe_correction_component', 'recipe_correction', 'recipe_report', 'item_image', 'character_recipe', 'character_skill', 'character', 'member', 'guild', 'board_post', 'recipe_component', 'recipe', 'tradeskill', 'game_class'].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );

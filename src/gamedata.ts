@@ -16,6 +16,10 @@ const LISTS = {
   classes: 'SELECT code AS name FROM game_class WHERE item_count > 0',
   // Shared recipes only: the cache is per isolate, across guilds. Guild-private recipes arrive in order 5.
   items: 'SELECT DISTINCT i.name FROM recipe r JOIN item i ON i.id = r.result_item_id WHERE r.active = 1 AND r.guild_id IS NULL',
+  // Order 9: one entry per recipe, as "item␟tradeskill␟trivial␟id" (unit separator), so an item with several recipes
+  // offers each one (src/commands/autocomplete.ts). The imported trivial: a guild's correction shows on /craft find.
+  recipes: `SELECT i.name || char(31) || t.name || char(31) || ifnull(r.trivial, '') || char(31) || r.id AS name
+    FROM recipe r JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id WHERE r.active = 1 AND r.guild_id IS NULL`,
 } as const;
 export type GameList = keyof typeof LISTS;
 

@@ -39,6 +39,15 @@ export const botApi = {
   },
 };
 
+/** Discord's attachment CDN, faked (order 9: /item image downloads the member's attachment). */
+export const CDN = 'https://cdn.discordapp.com/';
+export const cdn = {
+  handle: null as null | ((url: string) => Response | Promise<Response>),
+  reset() {
+    this.handle = null;
+  },
+};
+
 export function spyOnFetch() {
   if (vi.isMockFunction(globalThis.fetch)) return;
   const real = globalThis.fetch.bind(globalThis);
@@ -49,8 +58,10 @@ export function spyOnFetch() {
       return guildLookup.respond();
     }
     const prefix = `${DISCORD_API}/webhooks/`;
+    // Order 9: a multipart upload's body arrives as its FormData (payload_json and files[n]); a fake CDN serves attachments.
     if (!url.startsWith(prefix) && url.startsWith(DISCORD_API) && botApi.handle)
-      return botApi.handle(init?.method ?? 'GET', url.slice(DISCORD_API.length), init?.body ? JSON.parse(String(init.body)) : undefined);
+      return botApi.handle(init?.method ?? 'GET', url.slice(DISCORD_API.length), init?.body instanceof FormData ? init.body : init?.body ? JSON.parse(String(init.body)) : undefined);
+    if (url.startsWith(CDN) && cdn.handle) return cdn.handle(url);
     if (!url.startsWith(prefix)) return real(input, init);
     const call = { method: init?.method ?? 'GET', url, token: url.slice(prefix.length).split('/')[1], body: init?.body ? JSON.parse(String(init.body)) : undefined };
     webhookCalls.push(call);
