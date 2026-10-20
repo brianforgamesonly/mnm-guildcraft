@@ -4,6 +4,8 @@ import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
 import { HELP_TEXT } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
+import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, removeMemberButton } from './commands/members.ts';
+import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { craftFind, postFind } from './commands/find.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
@@ -21,24 +23,30 @@ export const ADMIN_ONLY = 'Only server admins (Administrator or Manage Server) c
 export const STALE_FORM = 'Sorry, that menu has expired. Run the command again.';
 export const roleRequired = (g: Guild) => `GuildCraft in this server is for members with the <@&${g.member_role_id}> role. Ask an officer if you should have it.`;
 
-/** open: anyone in the server · member: the member-role gate · admin: Administrator or Manage Server. */
-type Access = 'open' | 'member' | 'admin';
-/** search: the reply's visibility follows SEARCH_REPLIES_PRIVATE; every other command replies privately. */
-const ROUTES: Record<string, { access: Access; search?: true; run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
+/** open: anyone in the server · member: the member-role gate · officer: isOfficer · admin: Administrator or Manage Server. */
+type Access = 'open' | 'member' | 'officer' | 'admin';
+/**
+ * search: the reply's visibility follows SEARCH_REPLIES_PRIVATE; every other command replies privately.
+ * audit (order 7, ITEM 1.1): a read that writes this audit row after its reply is delivered (PRD: the bot "counts
+ * lookups in its audit log"; craft.find is the PRD's action, roster.view and guildcraft.status are named additions).
+ * Writes keep their own audit rows inside their write batch.
+ */
+const ROUTES: Record<string, { access: Access; search?: true; audit?: string; run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
   'character add': { access: 'member', run: characterAdd },
   'character edit': { access: 'member', run: characterEdit },
   'character remove': { access: 'member', run: characterRemove },
   'craft set': { access: 'member', run: craftSet },
   'craft update': { access: 'member', run: craftUpdate },
   'craft me': { access: 'member', run: craftMe },
-  'craft find': { access: 'member', search: true, run: craftFind },
-  'roster skill': { access: 'member', search: true, run: rosterSkill },
-  'roster member': { access: 'member', search: true, run: rosterMember },
-  'roster top': { access: 'member', search: true, run: rosterTop },
+  'craft find': { access: 'member', search: true, audit: 'craft.find', run: craftFind },
+  'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
+  'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
+  'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
-  'guildcraft status': { access: 'admin', run: guildcraftStatus },
+  'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
   'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
+  'guildcraft remove-member': { access: 'officer', run: guildcraftRemoveMember },
 };
 
 const routeOf = (i: Interaction) => ROUTES[`${i.data?.name} ${subcommand(i).name}`];
@@ -103,10 +111,19 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effect
   const passesGate = passesMemberGate(guild, m);
   if (route.access === 'member' && !passesGate) return ephemeral(roleRequired(guild));
   if (route.access === 'admin' && !isAdmin(m)) return ephemeral(ADMIN_ONLY);
+  if (route.access === 'officer' && !isOfficer(guild, m)) return ephemeral(OFFICER_ONLY);
   // Insert order: the guild row (above), then the member row, then rows that reference them.
   // Only a command that passes the member gate creates the member row, and only a new row shows the welcome.
   const isNew = passesGate ? (await touchMember(env.DB, guild.id, m)).isNew : false;
   const reply = await route.run(ctxFor(env, guild, m, effects, i), options);
+  if (route.audit)
+    effects.audit = {
+      guildId: guild.id,
+      actor: m.user.id,
+      action: route.audit,
+      target: `${i.data?.name} ${subcommand(i).name}`,
+      detail: Object.fromEntries(options.filter((o) => !o.focused).map((o) => [o.name, o.value ?? null])),
+    };
   return isNew ? withWelcome(reply) : reply;
 }
 
@@ -114,9 +131,12 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effect
 async function component(i: Interaction, env: Env, effects: Effects): Promise<MessageReply> {
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
-  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   const c = ctxFor(env, guild, i.member!, effects, i);
   const id = i.data?.custom_id ?? '';
+  // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
+  if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
+  if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
+  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) return id.startsWith(MODAL_PREFIX) ? updateSubmitted(c, id, i.data?.components) : ephemeral(STALE_FORM);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
   if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);

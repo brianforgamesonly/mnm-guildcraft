@@ -15,8 +15,11 @@
 
 export const SLOT_MS = 15 * 60_000;
 export const CRON_PROPAGATION_MS = 15 * 60_000;
-/** An audit row is written during its request; the request's log event is stamped at its start. */
-export const AUDIT_WINDOW_MS = { before: 60_000, after: 5_000 };
+/**
+ * How far a request's log events may lie from its audit row. Read back on 2026-10-20: the events are stamped after
+ * the row (setup: row 00:29:55.956, event 00:29:56.643), and deferred work runs up to 30 s after the reply.
+ */
+export const AUDIT_WINDOW_MS = { before: 60_000, after: 35_000 };
 /** A slot whose run may still be in flight or not yet ingested is not expected yet. */
 export const INGEST_GRACE_MS = 3 * 60_000;
 

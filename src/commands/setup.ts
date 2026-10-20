@@ -1,9 +1,9 @@
-// /guildcraft setup member_role: officer_role: board: and /guildcraft status (PRD FR-8).
-// Review and vault channels arrive in order 6.
+// /guildcraft setup member_role: officer_role: board: review: and /guildcraft status (PRD FR-8).
+// The review channel arrived in order 7; the vault channel arrives in order 9.
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import {
-  ADMINISTRATOR, EMBED_LINKS, ephemeral, GUILD_FORUM, MANAGE_THREADS, optString, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL,
+  ADMINISTRATOR, EMBED_LINKS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL,
   type MessageReply, type Option,
 } from '../discord.ts';
 import { DISCORD_API } from '../respond.ts';
@@ -17,6 +17,8 @@ const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   ].join('\n');
 
 const describeBoard = (g: Pick<Guild, 'board_channel_id'>) => `Roster board: ${g.board_channel_id ? `<#${g.board_channel_id}>` : 'not set (`board:` picks a forum channel)'}`;
+const describeReview = (g: Pick<Guild, 'review_channel_id'>) =>
+  `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices)'}`;
 
 // ---------------------------------------------------------------- the board channel's permissions
 
@@ -30,8 +32,15 @@ export const BOARD_PERMISSIONS: [bigint, string][] = [
   [MANAGE_THREADS, 'Manage Threads (Manage Posts, to pin the index)'],
 ];
 
-export const missingPermissions = (bits: bigint): string[] =>
-  (bits & ADMINISTRATOR) === ADMINISTRATOR ? [] : BOARD_PERMISSIONS.filter(([b]) => (bits & b) !== b).map(([, name]) => name);
+/** What the bot needs in the review channel (order 7): it posts departure notices with embeds and buttons there. */
+export const REVIEW_PERMISSIONS: [bigint, string][] = [
+  [VIEW_CHANNEL, 'View Channel'],
+  [SEND_MESSAGES, 'Send Messages'],
+  [EMBED_LINKS, 'Embed Links'],
+];
+
+export const missingPermissions = (bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
+  (bits & ADMINISTRATOR) === ADMINISTRATOR ? [] : needed.filter(([b]) => (bits & b) !== b).map(([, name]) => name);
 
 interface Overwrite {
   id: string;
@@ -76,11 +85,25 @@ export async function computeAppPermissions(token: string, guildId: string, chan
   return bits;
 }
 
-/** Checks the picked channel: a forum, where the bot holds every board permission. Returns the refusal text, or null. */
-async function checkBoardChannel(c: Ctx, channelId: string): Promise<{ refusal: string } | { ok: true; source: 'app_permissions' | 'computed' }> {
+const CHANNEL_KINDS = {
+  board: {
+    type: GUILD_FORUM,
+    permissions: BOARD_PERMISSIONS,
+    wrongType: (id: string) => `<#${id}> is not a forum channel. The roster board needs a forum channel: create one (Create Channel → Forum), then pick it here.`,
+  },
+  review: {
+    type: GUILD_TEXT,
+    permissions: REVIEW_PERMISSIONS,
+    wrongType: (id: string) => `<#${id}> is not a text channel. The review channel needs a text channel (a private one, for officers), then pick it here.`,
+  },
+} as const;
+
+/** Checks a picked channel: the right type, and the bot holds every permission it needs there. Returns the refusal text, or ok. */
+async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNEL_KINDS): Promise<{ refusal: string } | { ok: true; source: 'app_permissions' | 'computed' }> {
+  const want = CHANNEL_KINDS[kind];
   const ch = c.resolved?.channels?.[channelId];
   if (!ch) return { refusal: "Sorry, Discord didn't send that channel's details. Run the command again and pick the channel from the list." };
-  if (ch.type !== GUILD_FORUM) return { refusal: `<#${channelId}> is not a forum channel. The roster board needs a forum channel: create one (Create Channel → Forum), then pick it here.` };
+  if (ch.type !== want.type) return { refusal: want.wrongType(channelId) };
   let bits: bigint | null = null;
   let source: 'app_permissions' | 'computed' = 'app_permissions';
   if (ch.app_permissions && /^\d+$/.test(ch.app_permissions)) bits = BigInt(ch.app_permissions);
@@ -89,7 +112,7 @@ async function checkBoardChannel(c: Ctx, channelId: string): Promise<{ refusal: 
     bits = await computeAppPermissions(c.botToken, c.guild.id, channelId, c.applicationId);
   }
   if (bits === null) return { refusal: `Sorry, I couldn't read my permissions in <#${channelId}>. Nothing was changed; please try again.` };
-  const missing = missingPermissions(bits);
+  const missing = missingPermissions(bits, want.permissions);
   if (missing.length)
     return {
       refusal: `Nothing was changed. In <#${channelId}> GuildCraft is missing: **${missing.join('**, **')}**.\nGive the GuildCraft role these in the channel's settings (Permissions), then run this again.`,
@@ -103,18 +126,27 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const memberRole = optString(opts, 'member_role');
   const officerRole = optString(opts, 'officer_role');
   const board = optString(opts, 'board');
-  if (memberRole === undefined && officerRole === undefined && board === undefined)
-    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}`);
+  const review = optString(opts, 'review');
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined)
+    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}`);
 
-  if (board !== undefined) {
-    const check = await checkBoardChannel(c, board);
+  for (const [id, kind] of [[board, 'board'], [review, 'review']] as const) {
+    if (id === undefined) continue;
+    const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
-  const before = { member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id };
-  const after = { member_role_id: memberRole ?? before.member_role_id, officer_role_id: officerRole ?? before.officer_role_id, board_channel_id: board ?? before.board_channel_id };
+  const before = { member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id };
+  const after = {
+    member_role_id: memberRole ?? before.member_role_id,
+    officer_role_id: officerRole ?? before.officer_role_id,
+    board_channel_id: board ?? before.board_channel_id,
+    review_channel_id: review ?? before.review_channel_id,
+  };
   const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
   const stmts = [
-    c.db.prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ? WHERE id = ?').bind(after.member_role_id, after.officer_role_id, after.board_channel_id, c.guild.id),
+    c.db
+      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ? WHERE id = ?')
+      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, c.guild.id),
     audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
   ];
   // A new forum starts a new board: the old posts are forgotten here (they stay in the old channel).
@@ -125,7 +157,8 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     );
   const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
   const results = await c.db.batch([...stmts, counted]);
-  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}`];
+  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}`];
+  if (review !== undefined) lines.push(`Departure notices will go to <#${review}>: one per member who leaves the server, checked nightly, with Remove and Keep buttons for officers.`);
   if (board !== undefined) {
     const { skills, posts } = (results.at(-1)!.results as { skills: number; posts: number }[])[0];
     const toCreate = Math.max(0, skills - posts);
@@ -155,7 +188,7 @@ function warningsCount(json: string | null): number | null {
 }
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
-  const [okImport, lastImport, board, posts] = await c.db.batch([
+  const [okImport, lastImport, board, posts, departures] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
     c.db.prepare('SELECT status, started_at, finished_at, warnings, error FROM data_import ORDER BY id DESC LIMIT 1'),
     c.db
@@ -166,7 +199,23 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       .bind(c.guild.id),
     // Order 6: the board order is derived from the thread ids (src/board/order.ts), never stored.
     c.db.prepare('SELECT t.id, t.name, p.thread_id FROM tradeskill t LEFT JOIN board_post p ON p.tradeskill_id = t.id AND p.guild_id = ?').bind(c.guild.id),
+    // Order 7: members marked left, and the nightly departure run's own record (src/departures.ts).
+    c.db
+      .prepare(
+        `SELECT (SELECT count(*) FROM member WHERE guild_id = ?1 AND status = 'left') AS left_members,
+          (SELECT created_at FROM audit_log WHERE guild_id = ?1 AND action = 'departures.run' ORDER BY id DESC LIMIT 1) AS at,
+          (SELECT detail_json FROM audit_log WHERE guild_id = ?1 AND action = 'departures.run' ORDER BY id DESC LIMIT 1) AS detail`,
+      )
+      .bind(c.guild.id),
   ]);
+  const d = (departures.results as { left_members: number; at: string | null; detail: string | null }[])[0];
+  const run = (() => {
+    try {
+      return d?.detail ? (JSON.parse(d.detail) as { marked?: number; stopped?: string | null }) : null;
+    } catch {
+      return null;
+    }
+  })();
   const threadOf = new Map((posts.results as { id: number; name: string; thread_id: string | null }[]).map((p) => [p.id, p.thread_id]));
   const inOrder = boardInOrder(posts.results as { id: number; name: string }[], (id) => threadOf.get(id));
   const ok =(okImport.results as { source_version: string; finished_at: string | null }[])[0];
@@ -181,6 +230,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
+    `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
+    `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.stopped ? `stopped: ${run.stopped.slice(0, 200)}` : `${run.marked ?? 0} marked`}` : ''}`,
     '**Usage against the free-tier limits:** coming soon',
   ];
   return ephemeral(lines.join('\n'));

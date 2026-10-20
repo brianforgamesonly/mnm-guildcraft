@@ -10,7 +10,9 @@
       "workers_dev": true,
       // Workers Logs (order 3, ITEM 3.1): free plan 200,000 events/day, 3 days' retention. About 2 events
       // per interaction (the invocation log + one timing line from src/index.ts).
-      "observability": { "enabled": true },
+      // Order 7: head_sampling_rate stated (1 = every invocation, also the default); the free plan samples 1% only
+      // past 200,000 events a day (68 events in the 4 hours read on 2026-10-20). Workers Logs still lost 3 of 39 invocations on 2026-10-19/20.
+      "observability": { "enabled": true, "head_sampling_rate": 1 },
       // Order 5: ONE trigger (cron triggers are counted per account: 5 on the free plan). Every 15 minutes
       // it sweeps dirty board posts; the 08:00 UTC run also re-renders every post (src/board/refresh.ts).
       "triggers": { "crons": ["*/15 * * * *"] },

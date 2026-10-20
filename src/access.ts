@@ -13,9 +13,11 @@ export interface Guild {
   learning_window: number;
   /** The roster board's forum channel (PRD FR-5), set by /guildcraft setup board:. */
   board_channel_id: string | null;
+  /** Where departure notices go (order 7, PRD FR-8), set by /guildcraft setup review:. */
+  review_channel_id: string | null;
 }
 
-const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window, board_channel_id';
+const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window, board_channel_id, review_channel_id';
 
 /** Budget for the guild-name lookup, well inside Discord's 3-second first-reply window. */
 export const GUILD_NAME_TIMEOUT_MS = 1500;

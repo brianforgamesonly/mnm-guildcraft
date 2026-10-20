@@ -31,6 +31,7 @@ import { BOARD_CALL_CAP, botApi, budgetLeft, THREAD_ARCHIVED, UNKNOWN_CHANNEL, U
 import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } from './data.ts';
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
+import { isDepartureRun, runDepartures } from '../departures.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
 const AUTO_ARCHIVE_MINUTES = 10080;
@@ -600,13 +601,27 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   const log: BoardRunLog = { gc: 'board', trigger: nightly ? 'nightly' : 'sweep', guilds: 0, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
   let first: D1Call | undefined;
   let api: BotApi | null = null;
+  // Order 7: in its own slot (08:15–08:29 UTC) the departure run goes first, on the same 40-call budget; the
+  // sweep below gets what is left (it needs RESERVE + 3) and anything it cannot reach stays dirty.
+  if (isDepartureRun(controller.scheduledTime) && env.DISCORD_BOT_TOKEN) {
+    api = botApi(env.DISCORD_BOT_TOKEN, budget);
+    let line: Record<string, unknown> = { gc: 'departures', results: [] };
+    try {
+      const results = await runDepartures(counted.db, api, {});
+      // No names or ids in the log: counts and reasons only.
+      line = { gc: 'departures', results: results.map(({ guild: _g, would_mark, ...r }) => ({ ...r, would_mark: would_mark.length })) };
+    } catch (e) {
+      line.err = e instanceof Error ? e.message : String(e);
+    }
+    console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length, discord_calls: budget.discord, calls: api.log.slice() }));
+  }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string }>();
-    first = counted.calls[0];
+    first = counted.calls.at(-1);
     log.guilds = results.length;
     if (results.length && !env.DISCORD_BOT_TOKEN) log.err = 'DISCORD_BOT_TOKEN not set';
     else if (results.length) {
-      api = botApi(env.DISCORD_BOT_TOKEN!, budget);
+      api ??= botApi(env.DISCORD_BOT_TOKEN!, budget);
       for (const g of results) {
         if (budgetLeft(budget) < RESERVE + 3) break;
         log.results.push(await refreshGuildBoard(counted.db, api, g.id, { all: nightly, trigger: log.trigger }));

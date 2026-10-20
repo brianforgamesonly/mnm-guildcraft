@@ -55,6 +55,12 @@ const TABLE = [
   ["python3 -c \"import pathlib; pathlib.Path('a.ts').write_text('x')\"", 'block', 'python3 -c write_text'],
   ["node -e \"console.log(process.version)\"", 'allow', 'node -e without a write'],
   ["python -c \"print(1 + 1)\"", 'allow', 'python -c without a write'],
+  // Order 7 (ITEM 1.2): order 6's first command, verbatim from that session's transcript (its wireToolInputs).
+  // The hook blocks it when it receives it. Claude Code did not pass it on as written: it rewrote a leading
+  // `cd <the current directory> &&` into the call's working directory and sent the hook "git fetch origin 2>&1 | tail -2".
+  ['cd /c/Users/bmatt/Projects/mnm-guildcraft && git fetch origin 2>&1 | tail -2', 'block', "order 6's first command, as written"],
+  ['git fetch origin 2>&1 | tail -2', 'allow', 'the same command as Claude Code passed it to the hook'],
+  ['cd /c/Users/bmatt/Projects/mnm-guildcraft/.claude/worktrees/order-04 && git ls-files | grep -v \'^data/\' | head -100', 'block', 'order 5: a cd into another directory reaches the hook whole'],
 ];
 
 test(`hook table: ${TABLE.length} commands`, () => {
@@ -69,7 +75,21 @@ test(`hook table: ${TABLE.length} commands`, () => {
   if (process.env.HOOK_TABLE) console.log(JSON.stringify(rows, null, 1));
 });
 
-test('input that is not hook JSON is never blocked', () => {
-  const r = spawnSync(process.execPath, [HOOK], { input: 'not json', encoding: 'utf8' });
-  assert.equal(r.status, 0);
+// Order 7: fail closed. Each failure of the hook's own exits 2 (Claude Code blocks only on 2).
+for (const [why, input] of [
+  ['input that is not JSON', 'not json'],
+  ['empty input', ''],
+  ['JSON without tool_input.command', JSON.stringify({ tool_name: 'Bash', tool_input: {} })],
+  ['a command that is not a string', JSON.stringify({ tool_name: 'Bash', tool_input: { command: 42 } })],
+])
+  test(`fails closed: ${why}`, () => {
+    const r = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8' });
+    assert.equal(r.status, 2, r.stderr);
+    assert.match(r.stderr, /could not check this command/);
+  });
+
+test('fails closed: an exception inside the check', () => {
+  const r = spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ tool_input: { command: 'ls' } }), encoding: 'utf8', env: { ...process.env, CHECK_BASH_FAULT: '1' } });
+  assert.equal(r.status, 2, r.stderr);
+  assert.match(r.stderr, /injected fault/);
 });

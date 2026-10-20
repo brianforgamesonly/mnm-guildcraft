@@ -14,7 +14,7 @@
 // population (all events in the window, by type) is counted first so a short read shows as one.
 
 import { readFileSync } from 'node:fs';
-import { reconcile, SLOT_MS } from './logs-check.mjs';
+import { INGEST_GRACE_MS, reconcile, SLOT_MS } from './logs-check.mjs';
 
 const SCRIPT = 'mnm-guildcraft-dev';
 const hours = Math.min(72, Math.max(1, Number(process.argv[2]) || 72));
@@ -60,19 +60,18 @@ const population = groups.reduce((s, g) => s + (Number(g.n) || 0), 0);
 
 // Order 7 (ITEM 1.1): the same count with no filter at all, by script, dataset and type, so an event that lacks
 // $workers.scriptName (and so escapes the filter above) shows as a group of its own.
-const unfiltered = await query({
-  queryId: `timings-unfiltered-${to}`,
-  timeframe: { from, to },
-  view: 'calculations',
-  dry: true,
-  parameters: {
-    filters: [],
-    calculations: [{ operator: 'count', alias: 'n' }],
-    groupBys: [{ type: 'string', value: '$workers.scriptName' }, { type: 'string', value: 'dataset' }, { type: 'string', value: '$metadata.type' }],
-    limit: 50,
-  },
-});
-const unfilteredGroups = (unfiltered.calculations?.[0]?.aggregates ?? []).map((a) => ({ groups: (a.groups ?? []).map((g) => `${g.key}=${g.value}`), n: a.count ?? a.value }));
+// (A three-way groupBy with an empty filter list came back empty on 2026-10-20, so: one key per query, no filters key.)
+const unfilteredGroups = {};
+for (const key of ['$workers.scriptName', 'dataset', '$metadata.type']) {
+  const u = await query({
+    queryId: `timings-unfiltered-${key}-${to}`,
+    timeframe: { from, to },
+    view: 'calculations',
+    dry: true,
+    parameters: { calculations: [{ operator: 'count', alias: 'n' }], groupBys: [{ type: 'string', value: key }], limit: 50 },
+  });
+  unfilteredGroups[key] = (u.calculations?.[0]?.aggregates ?? []).map((a) => ({ value: a.groups?.[0]?.value ?? null, n: a.count ?? a.value }));
+}
 
 // 2. The events themselves, paged by cursor. Order 7: a read that stops at the page cap is reported, never silent.
 const PAGE_CAP = 50;
@@ -299,8 +298,10 @@ console.log(
 const requestsForCheck = [...byRequest.values()].map((r) => ({
   at: r.at,
   path: pathOf(r),
-  kind: r.board || (r.eventType && r.eventType !== 'fetch') ? 'cron' : r.line && r.line.kind !== 'ping' ? 'interaction' : 'other',
-  audit: r.line?.audit ?? null,
+  // A command's own board refresh also logs a board line, so only the platform's event type marks a cron run.
+  kind: r.eventType === 'scheduled' ? 'cron' : r.line && r.line.kind !== 'ping' ? 'interaction' : 'other',
+  // A read names its audit action (audit), or the action whose write failed (audit_failed): either way a row is owed.
+  audit: r.line?.audit ?? r.line?.audit_failed ?? null,
 }));
 const check = reconcile({ from, to, requests: requestsForCheck, audit, deploys, cronSince });
 console.log('\ncompleteness check (order 7): expected vs found per event type');
@@ -318,6 +319,7 @@ const gql = await cf('/graphql', {
   }),
 });
 const inv = gql.json?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive;
+let logsShortOfAnalytics = [];
 if (!gql.ok || !inv) console.log(`invocation analytics (GraphQL): unread, HTTP ${gql.status} ${errorsOf(gql)}`);
 else {
   const slot = (ms) => new Date(Math.floor(ms / SLOT_MS) * SLOT_MS).toISOString().slice(0, 16);
@@ -327,12 +329,19 @@ else {
   for (const r of byRequest.values()) logged.set(slot(r.at), (logged.get(slot(r.at)) ?? 0) + 1);
   const keys = [...new Set([...analytics.keys(), ...logged.keys()])].sort();
   const differ = keys.filter((k) => (analytics.get(k) ?? 0) !== (logged.get(k) ?? 0));
+  // Logs short of the platform's own invocation count fail the check (the newest slots may still be ingesting).
+  logsShortOfAnalytics = differ.filter((k) => (analytics.get(k) ?? 0) > (logged.get(k) ?? 0) && Date.parse(`${k}Z`) + SLOT_MS < to - INGEST_GRACE_MS);
   console.log(`invocation analytics (GraphQL): ${[...analytics.values()].reduce((a, b) => a + b, 0)} invocations vs ${byRequest.size} logged requests; slots that differ: ${differ.length}`);
-  for (const k of differ) console.log(`  ${k}Z\tanalytics ${analytics.get(k) ?? 0}\tlogged ${logged.get(k) ?? 0}`);
+  for (const k of differ) {
+    const rows = inv.filter((x) => slot(Date.parse(x.dimensions.datetime)) === k).map((x) => `${x.dimensions.datetime.slice(11, 19)} ${x.dimensions.status} ×${x.sum.requests}`);
+    const seen = [...byRequest.values()].filter((r) => slot(r.at) === k).map((r) => `${new Date(r.at).toISOString().slice(11, 19)} ${redact(pathOf(r))}`);
+    console.log(`  ${k}Z\tanalytics ${analytics.get(k) ?? 0} [${rows.join(', ')}]\tlogged ${logged.get(k) ?? 0} [${seen.join(', ')}]`);
+  }
 }
 
-if (readShort || !check.ok || !d1.ok) {
-  console.log(`\nCOMPLETENESS CHECK FAILED: ${[readShort && 'short read', !check.ok && 'mismatch', !d1.ok && 'audit rows unread'].filter(Boolean).join(', ')}`);
+if (readShort || !check.ok || !d1.ok || logsShortOfAnalytics.length) {
+  const why = [readShort && 'short read', !check.ok && 'mismatch', !d1.ok && 'audit rows unread', logsShortOfAnalytics.length && `logs short of invocation analytics in ${logsShortOfAnalytics.length} slot(s)`];
+  console.log(`\nCOMPLETENESS CHECK FAILED: ${why.filter(Boolean).join(', ')}`);
   process.exit(1);
 }
 console.log('\ncompleteness check passed');

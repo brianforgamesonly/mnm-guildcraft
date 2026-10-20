@@ -7,6 +7,8 @@
 #            continues the A→Z rebuild (dry_run must be off).
 #   delete:  the rollback; deletes the bot-owned board posts and clears the board channel. dry_run (default)
 #            prints what it would delete and changes nothing.
+#   departures: order 7; the nightly departure run (src/departures.ts) invoked directly. dry_run (default) lists the
+#            server's members and prints who would be marked (pseudonyms) and the notices owed, changing nothing.
 # Dispatch only. Expected: <1 billed minute per run.
 name: board
 on:
@@ -15,7 +17,7 @@ on:
       action:
         description: 'render / inspect (read-only), archive / refresh (live), delete (rollback)'
         type: choice
-        options: [render, inspect, archive, refresh, delete]
+        options: [render, inspect, archive, refresh, delete, departures]
         default: render
       dry_run:
         description: 'delete: print what would be deleted, change nothing. archive and refresh need this off.'
@@ -51,5 +53,5 @@ jobs:
           DRY_RUN: ${{ (inputs.action == 'render' || inputs.action == 'inspect' || inputs.dry_run) && '1' || '0' }}
           SKILL: ${{ inputs.skill }}
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
-          DISCORD_BOT_TOKEN: ${{ (inputs.action == 'inspect' || ((inputs.action == 'archive' || inputs.action == 'refresh' || inputs.action == 'delete') && !inputs.dry_run)) && secrets.DISCORD_BOT_TOKEN || '' }}
+          DISCORD_BOT_TOKEN: ${{ (inputs.action == 'inspect' || inputs.action == 'departures' || ((inputs.action == 'archive' || inputs.action == 'refresh' || inputs.action == 'delete') && !inputs.dry_run)) && secrets.DISCORD_BOT_TOKEN || '' }}
         run: node scripts/board/run.mjs

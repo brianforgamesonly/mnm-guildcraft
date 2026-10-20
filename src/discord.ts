@@ -96,6 +96,7 @@ export const embedChars = (embeds: Embed[]): number =>
 export const BUTTON = 2;
 export const STYLE_PRIMARY = 1;
 export const STYLE_SECONDARY = 2;
+export const STYLE_DANGER = 4;
 export const STYLE_LINK = 5;
 export const button = (custom_id: string, label: string, style = STYLE_SECONDARY, disabled = false) => ({ type: BUTTON, style, label, custom_id, ...(disabled ? { disabled } : {}) });
 export const linkButton = (label: string, url: string) => ({ type: BUTTON, style: STYLE_LINK, label, url });
@@ -190,6 +191,8 @@ export const MANAGE_THREADS = 1n << 34n;
 export const SEND_MESSAGES_IN_THREADS = 1n << 38n;
 /** Channel type GUILD_FORUM. */
 export const GUILD_FORUM = 15;
+/** Channel type GUILD_TEXT (order 7: the review channel). */
+export const GUILD_TEXT = 0;
 
 export function hasPermission(bitfield: string | undefined, bit: bigint): boolean {
   if (!bitfield || !/^\d+$/.test(bitfield)) return false;

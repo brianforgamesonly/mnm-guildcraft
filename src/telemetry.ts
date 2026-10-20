@@ -115,6 +115,8 @@ export interface Outcome {
   isolate?: ReturnType<typeof isolateSnapshot>;
   /** When the Worker received the request, epoch ms (order 6: compared with the interaction id's creation time). */
   receivedAt?: number;
+  /** Order 7: the read's audit row, and whether it was written (the logs completeness check pairs the two). */
+  audit?: { action: string; ok: boolean };
 }
 
 const DISCORD_EPOCH = 1420070400000n;
@@ -147,6 +149,7 @@ export function timingLine(i: Parameters<typeof describeInteraction>[0] & { id?:
     io_ms: totalMs,
     ack: outcome.ack,
     ...(outcome.deliveries?.length ? { deliveries: outcome.deliveries } : {}),
+    ...(outcome.audit ? { audit: outcome.audit.ok ? outcome.audit.action : null, audit_failed: outcome.audit.ok ? undefined : outcome.audit.action } : {}),
     err: outcome.err ?? null,
   });
 }

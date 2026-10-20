@@ -12,6 +12,8 @@ const CHANNEL = 7;
 const ROLE = 8;
 /** Channel type GUILD_FORUM (also src/discord.ts GUILD_FORUM; kept literal so the registration script reads this file alone). */
 const GUILD_FORUM_CHANNEL = 15;
+/** Channel type GUILD_TEXT (also src/discord.ts GUILD_TEXT). */
+const GUILD_TEXT_CHANNEL = 0;
 /** Interaction context: guild channels only. */
 const GUILD_ONLY = [0];
 /** Manage Server. Administrators hold every permission, so they see the command too. */
@@ -114,6 +116,9 @@ export const COMMANDS = [
     description: 'GuildCraft settings for this server',
     type: 1,
     contexts: GUILD_ONLY,
+    // Shown to Manage Server by default. remove-member is officer-level (src/interactions.ts re-checks it): an
+    // officer role without Manage Server sees it once a server admin allows that role in Server Settings →
+    // Integrations → MNM-Guildcraft (a Discord setting; unverified on the live server).
     default_member_permissions: MANAGE_GUILD,
     options: [
       {
@@ -124,10 +129,17 @@ export const COMMANDS = [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
           { type: ROLE, name: 'officer_role', description: "Officers can edit any member's entries" },
           { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
+          { type: CHANNEL, name: 'review', description: 'A private text channel for officers: notices when a member leaves the server', channel_types: [GUILD_TEXT_CHANNEL] },
         ],
       },
-      { type: SUBCOMMAND, name: 'status', description: 'Data version, last import and the roster board' },
+      { type: SUBCOMMAND, name: 'status', description: 'Data version, last import, the roster board and departures' },
       { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
+      {
+        type: SUBCOMMAND,
+        name: 'remove-member',
+        description: "Officers: remove a member's characters and mark them as left (shows a preview first)",
+        options: [{ type: USER, name: 'user', description: 'The member to remove', required: true }],
+      },
     ],
   },
 ] as const;
