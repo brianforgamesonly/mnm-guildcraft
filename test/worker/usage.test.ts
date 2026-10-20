@@ -217,6 +217,14 @@ describe('the usage warning (mocked Discord)', () => {
     expect(posted[0].body.content).toContain('**Commands and lookups** was 15,000 of 100,000 (15%)');
     expect(GUILD).toBeTruthy();
   });
+  it('order 12: usageAlerts itself posts and records nothing outside dev (the line is OperatorText)', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await withReview();
+    await usage([['d1_rows_read', '2026-10-20', 612_000]]);
+    for (const copy of ['production', undefined]) expect((await usageAlerts(env.DB, api(), copy, NOW)).posted).toBe(0);
+    expect(posted).toEqual([]);
+    expect(await alerts()).toEqual([]);
+  });
   it('order 11: the production cron posts no usage warning in any channel', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await withReview();

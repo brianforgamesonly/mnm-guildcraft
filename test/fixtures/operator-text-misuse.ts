@@ -11,6 +11,7 @@ export const c: string = raw; // MISUSE: assigned to a string (TS2322)
 guildReply(raw); // MISUSE: passed where a string is expected (TS2345)
 export const d = raw.slice(0, 200); // MISUSE: a string method (TS2339)
 export const e = 'failed'.concat(raw); // MISUSE: String.prototype.concat (TS2345)
+export const f = raw.toString(); // MISUSE: toString (TS2349, typed never)
 
 // The one allowed path: render() with a copy, never a string conversion.
 export const ok: string = render('dev', [['**Last data update:** failed', raw]]);

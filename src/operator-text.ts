@@ -8,15 +8,16 @@
 //
 // The guard:
 //   compile time: OperatorText is typed as a branded symbol, so `${x}` (TS2731), x + '' (TS2469), assigning it to a
-//                 string, passing it where a string is expected and calling string methods on it are all type errors
+//                 string, passing it where a string is expected, string methods and x.toString() are all type errors
 //                 (test/fixtures/operator-text-misuse.ts, checked by scripts/ci/operator-text.test.ts);
 //   run time:     the value is an object whose every string conversion throws, which covers the conversions whose
-//                 parameter is `any` and so escape the types (String(x), [x].join(), JSON.stringify(x)).
+//                 parameter is `any` and so escape the types (String(x), [x].join(), JSON.stringify(x)). x.description
+//                 (from the symbol type) compiles and is undefined at run time: it can print "undefined", never the text.
 import { isDevCopy } from './copy.ts';
 
 declare const operatorOnly: unique symbol;
 /** Text only the operator sees. Created with operatorText() at its source; read only by render() in the dev copy. */
-export type OperatorText = symbol & { readonly [operatorOnly]: true };
+export type OperatorText = symbol & { readonly [operatorOnly]: true; readonly toString: never; readonly valueOf: never };
 
 /** A piece of a line: guild-facing text, or operator-only text. */
 export type Segment = string | OperatorText;
