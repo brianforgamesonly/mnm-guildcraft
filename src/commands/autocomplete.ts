@@ -47,7 +47,7 @@ function recipeChoices(rows: { item: string; tradeskill: string; trivial: number
 }
 
 /** The factions this guild's corrections already name (the correction layer; read only). */
-const FACTIONS_SQL = 'SELECT DISTINCT faction FROM recipe_correction WHERE guild_id = ?1 AND faction IS NOT NULL ORDER BY faction COLLATE NOCASE';
+const FACTIONS_SQL = 'SELECT min(faction) AS faction FROM recipe_correction WHERE guild_id = ?1 AND faction IS NOT NULL GROUP BY lower(faction) ORDER BY faction COLLATE NOCASE';
 
 /**
  * /recipe source faction: the typed name first, exactly as typed (up to FACTION_MAX), then this guild's factions that

@@ -88,6 +88,7 @@ export function parseTable(t: TableSql): Parsed {
     columns.push({ name, nullable: !/\bNOT\s+NULL\b/i.test(part) && !/\bPRIMARY\s+KEY\b/i.test(part) });
     const inline = /\bREFERENCES\s+([\w"`[\]]+)\s*\(([^)]*)\)/i.exec(part);
     if (inline) foreignKeys.push({ columns: [name], parent: ident(inline[1]), parentColumns: list(inline[2]) });
+    else if (/\bREFERENCES\b/i.test(part)) throw new Error(`table ${t.name}: a foreign key without a column list (${name}); the export cannot scope it`);
   }
   return { name: t.name, columns, foreignKeys };
 }
@@ -114,7 +115,8 @@ export function exportPlan(tables: TableSql[], guildId: string, referenceTables:
     const gid = t.columns.find((c) => c.name === 'guild_id');
     let out: { scope: Scope; keep: string };
     if (name === 'guild') out = { scope: 'guild', keep: `id = ${g}` };
-    else if (gid) out = { scope: 'guild_id', keep: gid.nullable ? `(guild_id IS NULL OR guild_id = ${g})` : `guild_id = ${g}` };
+    // A NULL guild_id means "shared" only in the game data the import writes (recipe); anywhere else it is not the guild's.
+    else if (gid) out = { scope: 'guild_id', keep: gid.nullable && referenceTables.includes(name) ? `(guild_id IS NULL OR guild_id = ${g})` : `guild_id = ${g}` };
     else {
       const scopedKeys = t.foreignKeys.filter((k) => parsed.has(k.parent) && isGuildData(k.parent));
       if (scopedKeys.length) {

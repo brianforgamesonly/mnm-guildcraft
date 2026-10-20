@@ -83,6 +83,11 @@ test('the plan is derived: every guild_id table and every child of one is scoped
   const extra = [...tablesOf(fixture()), { name: 'later_table', sql: 'CREATE TABLE later_table (x TEXT)' }];
   assert.equal(exportPlan(extra, A, IMPORT_WRITES).find((p) => p.table === 'later_table')!.scope, 'emptied');
   assert.throws(() => exportPlan(tablesOf(fixture()), "1' OR '1", IMPORT_WRITES), /snowflake/);
+  // A nullable guild_id outside the game data keeps only the guild's rows, never the NULL ones.
+  const ops = [...tablesOf(fixture()), { name: 'ops_log', sql: 'CREATE TABLE ops_log (guild_id TEXT, x TEXT)' }];
+  assert.equal(exportPlan(ops, A, IMPORT_WRITES).find((p) => p.table === 'ops_log')!.keep, `guild_id = '${A}'`);
+  // A key the parser cannot read stops the export rather than leaving a table unscoped.
+  assert.throws(() => parseTable({ name: 'bad', sql: 'CREATE TABLE bad (character_id INTEGER REFERENCES character)' }), /without a column list/);
 });
 
 test("two guilds: guild B's rows never appear in guild A's export, and A's are all there", () => {
@@ -103,6 +108,10 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
   assert.equal(c.backup_status, 0);
   assert.equal(c.usage_daily, 0);
   assert.equal(c.item, 2);
+  // Guild rows are plain INSERTs (a refused row fails the load); only d1_migrations and game data are OR IGNORE.
+  assert.match(out.sql, /^INSERT INTO "character" /m);
+  assert.match(out.sql, /^INSERT OR IGNORE INTO "d1_migrations" /m);
+  assert.doesNotMatch(out.sql, /^INSERT OR IGNORE INTO "(member|character|audit_log)" /m);
   assert.throws(() => guildDump(sql, '333333333333333333', IMPORT_WRITES), /not in this database/);
 });
 
