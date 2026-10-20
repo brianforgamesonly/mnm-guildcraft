@@ -20,5 +20,29 @@ jobs:
       - run: npm run test:hook
       - run: npm run test:actions
       - run: npm run test:logs
+      - run: npm run test:backup
       - name: Every action runs on the allowed Node runtime
         run: node scripts/ci/action-runtimes.mjs
+  # Order 8 (ITEM 0): the credentials' reach, read-only, before the merge (a same-repository pull_request run
+  # receives secrets; dispatch works only from the default branch). Prints statuses, field names and counts only.
+  # Expected: <1 billed minute per pull request.
+  reach:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: GraphQL analytics, introspected, and one small D1 query
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node scripts/usage/run.ts --introspect-only
+      - name: The backup token's reach (unset is reported, not failed)
+        env:
+          BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+        run: node scripts/backup/reach.ts

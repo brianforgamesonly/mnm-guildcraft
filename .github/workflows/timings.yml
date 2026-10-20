@@ -5,6 +5,15 @@
 # Order 7 (ITEM 1.1): every run ends with the logs completeness check (scripts/bench/logs-check.mjs) and fails
 # when an event type does not reconcile with its own record. The daily schedule runs it over the last 24 hours,
 # so a mismatch arrives as a failed run (GitHub mails the repository owner). Expected: <1 billed minute a day.
+# Order 8 (ITEM 3.1), the alarm (ORDER-RULES order 8):
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   how often: at most once a day (one scheduled run a day);
+#   state: (a) gaps Cloudflare's analytics does not explain, the reader coming up short, or audit rows unread: each
+#          scheduled window is new, so each fails; (b) the 7-day drop-rate bound over its threshold
+#          (scripts/bench/logs-check.mjs): fails only on crossing it. A platform drop (an invocation analytics counts
+#          as a success, missing from the logs) never fails: it is counted in the job summary and the drop history.
+# The drop history (dates and counts only; this repository is public) passes from one scheduled run to the next as
+# the artifact drop-history (14 days' retention).
 name: timings
 on:
   schedule:
@@ -30,6 +39,7 @@ on:
         default: false
 permissions:
   contents: read
+  actions: read
 jobs:
   timings:
     runs-on: ubuntu-26.04
@@ -43,13 +53,30 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - name: The previous scheduled run's drop history
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh run list -R "$GITHUB_REPOSITORY" --workflow timings.yml --event schedule --status completed --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          if [ -n "$id" ]; then gh run download "$id" -R "$GITHUB_REPOSITORY" -n drop-history -D "$RUNNER_TEMP/prev" || echo "run $id has no drop history: starting a new one"; else echo "no earlier scheduled run"; fi
       - name: Timings per path
         env:
           HOURS: ${{ inputs.hours || '24' }}
           FROM: ${{ inputs.from }}
           TO: ${{ inputs.to }}
           REQUESTS: ${{ inputs.requests && '1' || '' }}
+          DROP_HISTORY_IN: ${{ runner.temp }}/prev/drop-history.json
+          DROP_HISTORY_OUT: ${{ github.event_name == 'schedule' && format('{0}/drop-history.json', runner.temp) || '' }}
         run: node scripts/bench/timings.mjs "$HOURS"
+      - name: Keep the drop history for the next scheduled run
+        if: always() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@v7
+        with:
+          name: drop-history
+          path: ${{ runner.temp }}/drop-history.json
+          retention-days: 14
+          if-no-files-found: ignore
       - if: inputs.facts
         run: npm ci
       - name: Read-only D1 facts

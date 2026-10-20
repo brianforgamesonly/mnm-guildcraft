@@ -31,7 +31,7 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/recipe add'], text: 'record a recipe the data is missing (officer-approved)' },
   '**Officers and admins**',
   { cmds: ['/guildcraft setup'], text: 'set the member and officer roles, the roster board forum and the review channel' },
-  { cmds: ['/guildcraft status'], text: 'data version, last import, the roster board and departures' },
+  { cmds: ['/guildcraft status'], text: 'data version, last import, the roster board, departures, the backup and free-tier usage' },
   { cmds: ['/recipe source', '/recipe override'], text: 'set how a recipe is obtained; correct a recipe' },
   { cmds: ['/guildcraft remove-member'], text: 'remove a departed member' },
   { cmds: ['/guildcraft rebuild-board'], text: 'recreate the roster board posts in A→Z order' },

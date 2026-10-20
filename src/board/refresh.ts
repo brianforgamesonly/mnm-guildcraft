@@ -32,6 +32,7 @@ import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } 
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
+import { usageAlerts } from '../usage.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
 const AUTO_ARCHIVE_MINUTES = 10080;
@@ -616,6 +617,19 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       line.err = e instanceof Error ? e.message : String(e);
     }
     console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length, discord_calls: budget.discord, calls: api.log.slice() }));
+    before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
+  }
+  // Order 8 (ITEM 2.4): the usage warning, one read per run; it posts only when a metric's state changes (src/usage.ts).
+  // The sweep keeps its share: the warning runs only while the budget leaves the sweep RESERVE + 3 and a post.
+  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= RESERVE + 6) {
+    api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
+    let line: Record<string, unknown> = { gc: 'usage-alert' };
+    try {
+      line = { ...(await usageAlerts(counted.db, api, controller.scheduledTime)) };
+    } catch (e) {
+      line.err = e instanceof Error ? e.message : String(e);
+    }
+    console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length - before.d1, discord_calls: budget.discord - before.discord, calls: api.log.slice(before.log) }));
     before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
   }
   try {

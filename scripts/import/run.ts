@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { runImport, type Db } from './core.ts';
 import { devDatabaseId, localDb, remoteDb } from './db.ts';
 import { fetchSource } from './source.ts';
+import { alarm } from '../ci/alarm.ts';
 
 const { values: args } = parseArgs({
   options: {
@@ -43,7 +44,12 @@ try {
     requireDryRun: args.remote,
   });
   console.log(JSON.stringify({ target: args.local ? 'local' : 'remote', ...result }, null, 2));
-  if (result.status === 'failed' || result.status === 'refused') process.exitCode = 1;
+  // Order 8 alarm rule (scripts/ci/alarm.ts): state = the last real import's status; a failure after a failure does not re-notify.
+  const failed = result.status === 'failed' || result.status === 'refused';
+  const prior = failed && !args['dry-run'] && args.remote
+    ? await db.all<{ status: string }>(`SELECT status FROM data_import WHERE status <> 'dry-run' ORDER BY id DESC LIMIT 1 OFFSET ${result.status === 'failed' ? 1 : 0}`)
+    : [];
+  alarm({ job: 'import', failed, reason: result.error ?? result.status, previousFailing: prior[0] ? prior[0].status === 'failed' : null });
 } finally {
   await dispose();
 }

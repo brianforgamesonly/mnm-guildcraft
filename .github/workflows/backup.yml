@@ -1,0 +1,87 @@
+# Nightly database backup to the private repository brianforgamesonly/mnm-guildcraft-backup (order 8, ITEM 1;
+# PRD non-functional requirements). scripts/backup/run.ts does the work; scripts/backup/restore.ts is the restore test.
+#
+# Schedule: 10:37 UTC. A quiet minute, off the hour (GitHub: scheduled runs "can be delayed ... High load times include
+# the start of every hour ... some queued jobs may be dropped"), and clear of the other jobs: the 07:30 import, the
+# 08:00–08:29 board and departure runs, the 09:00 timings check, and the Worker's */15 cron slots (an export "will
+# block other database requests"). 10:37 UTC is 06:37 in New York and 03:37 in Los Angeles.
+# Expected: ~1–2 billed minutes a run (public repository: free), ~45 a month.
+#
+# Privacy: this repository, its artifacts and its logs are public. The export stays in RUNNER_TEMP, is pushed only
+# to the private repository (after the job confirms it is private), and is never uploaded or printed: logs show
+# table names, counts, sizes and hashes only.
+#
+# The alarm (ORDER-RULES order 8):
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   how often: at most once a day;
+#   state: the backup's result in backup_status. A failure after a failed run does not fail the run again
+#          (scripts/ci/alarm.ts); /guildcraft status shows it, stale after 36 hours. The token-expiry warning has its
+#          own state (more than 30 days left / 30 or fewer / expired / unknown) and fails the last step only on
+#          entering "30 or fewer" or "expired", after the backup has been pushed.
+#
+# Dispatch: dry_run (default true) exports, checks and loads into a scratch local D1, pushes nothing and prints the
+# backup_status row instead of writing it. restore_test runs the restore test only.
+name: backup
+on:
+  schedule:
+    - cron: '37 10 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: export and check, push nothing, write nothing'
+        type: boolean
+        default: true
+      restore_test:
+        description: 'Run only the restore test (latest backup → scratch local D1 → its manifest)'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency: backup-dev
+jobs:
+  backup:
+    if: ${{ !inputs.restore_test }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Back up (dry run = ${{ inputs.dry_run == true }})
+        id: backup
+        run: node scripts/backup/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }}
+      - name: Token expiry warning (after the push; never stops a backup)
+        if: steps.backup.outputs.expiry_alarm == '1'
+        env:
+          EXPIRES: ${{ steps.backup.outputs.token_expires }}
+        run: |
+          echo "::error::BACKUP_REPO_TOKEN expires $EXPIRES (30 days or fewer): Brian makes a new token and replaces the secret"
+          exit 1
+  restore-test:
+    if: ${{ inputs.restore_test }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Restore the latest backup into a scratch local D1 and compare with its manifest
+        run: node scripts/backup/restore.ts

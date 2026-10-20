@@ -220,8 +220,10 @@ export function check(command) {
 //
 // Order 7 (ITEM 1.2): fail closed. Claude Code lets the call go ahead on any exit code other than 2, so every
 // failure of our own (unreadable stdin, input that is not hook JSON, no command string, an exception, a crash)
-// exits 2 with the reason. What this script cannot cover: node failing to start at all. The documented
-// `onFailure: "block"` setting covers that, but needs Claude Code v2.1.295 or later (this machine has 2.1.278).
+// exits 2 with the reason. What this script cannot cover: node failing to start at all. Order 8: .claude/settings.json
+// sets `onFailure: "block"` for that (Claude Code v2.1.295+; the VS Code extension here is 2.1.301). Tested in a
+// child `claude -p --settings` (2.1.301): an unstartable hook command fails open without it and blocks with it.
+// The older CLI on PATH (2.1.278) accepts the key and runs the hook as before.
 // Recovery when a broken hook blocks every Bash call: README.md, "If the Bash hook blocks everything".
 const failClosed = (why) => {
   process.stderr.write(`Blocked by .claude/hooks/check-bash.mjs: the hook could not check this command (${why}), so it blocks it. See README.md, "If the Bash hook blocks everything".\n`);

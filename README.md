@@ -37,7 +37,7 @@ npm run import:local                 # mnm-tools wiki.json -> local D1 (add -- -
 
 ## If the Bash hook blocks everything
 
-`.claude/hooks/check-bash.mjs` runs before every Bash call in Claude Code and fails closed: if it cannot check a command, it blocks it. If a broken hook ever blocks every Bash call, either:
+`.claude/hooks/check-bash.mjs` runs before every Bash call in Claude Code and fails closed: if it cannot check a command, it blocks it. Since order 8 the hook entry also sets `"onFailure": "block"` (Claude Code 2.1.295 or later), so a hook that cannot even start (node missing, a bad path) blocks too. If a broken hook ever blocks every Bash call, either:
 
 - edit `.claude/settings.json` with Claude Code's file tools (Edit or Write, which the hook does not cover) to remove or fix the hook entry; or
 - start Claude Code with all hooks off: `claude --settings '{"disableAllHooks": true}'`.

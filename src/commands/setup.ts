@@ -9,6 +9,7 @@ import {
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
+import { BACKUP_SQL, backupLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -85,6 +86,33 @@ export async function computeAppPermissions(token: string, guildId: string, chan
   return bits;
 }
 
+/**
+ * Order 8 (ITEM 3.4): whether @everyone can view a channel: the @everyone role's permissions, then the channel's
+ * @everyone overwrite (the same "Permission Overwrites" order as above). Two GETs; null when either fails.
+ */
+export async function everyoneCanView(token: string, guildId: string, channelId: string): Promise<boolean | null> {
+  const get = async <T>(path: string): Promise<T | null> => {
+    try {
+      const res = await fetch(`${DISCORD_API}${path}`, { headers: { Authorization: `Bot ${token}`, 'User-Agent': 'DiscordBot (mnm-guildcraft, 1)' }, signal: AbortSignal.timeout(5000) });
+      return res.ok ? ((await res.json()) as T) : null;
+    } catch {
+      return null;
+    }
+  };
+  const [channel, roles] = await Promise.all([get<{ permission_overwrites?: Overwrite[] }>(`/channels/${channelId}`), get<{ id: string; permissions: string }[]>(`/guilds/${guildId}/roles`)]);
+  if (!channel || !roles) return null;
+  let bits = BigInt(roles.find((r) => r.id === guildId)?.permissions ?? '0');
+  if ((bits & ADMINISTRATOR) === ADMINISTRATOR) return true;
+  const everyone = (channel.permission_overwrites ?? []).find((o) => o.id === guildId);
+  if (everyone) bits = (bits & ~BigInt(everyone.deny)) | BigInt(everyone.allow);
+  return (bits & VIEW_CHANNEL) === VIEW_CHANNEL;
+}
+
+/** The setup reply's warning when the review channel is open to everyone (DRAFT copy: Brian approves it before launch). */
+export const reviewPublicWarning = (id: string) =>
+  `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) and usage warnings will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
+export const reviewUnreadWarning = (id: string) => `**Note:** I couldn't check who can see <#${id}>. Departure notices should go to a channel only officers can see.`;
+
 const CHANNEL_KINDS = {
   board: {
     type: GUILD_FORUM,
@@ -158,7 +186,13 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
   const results = await c.db.batch([...stmts, counted]);
   const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}`];
-  if (review !== undefined) lines.push(`Departure notices will go to <#${review}>: one per member who leaves the server, checked nightly, with Remove and Keep buttons for officers.`);
+  if (review !== undefined) {
+    lines.push(`Departure notices will go to <#${review}>: one per member who leaves the server, checked nightly, with Remove and Keep buttons for officers.`);
+    // Order 8: warn, never refuse, when the channel is open to everyone.
+    const open = c.botToken ? await everyoneCanView(c.botToken, c.guild.id, review) : null;
+    if (open === true) lines.push(reviewPublicWarning(review));
+    else if (open === null) lines.push(reviewUnreadWarning(review));
+  }
   if (board !== undefined) {
     const { skills, posts } = (results.at(-1)!.results as { skills: number; posts: number }[])[0];
     const toCreate = Math.max(0, skills - posts);
@@ -173,7 +207,7 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   return ephemeral(lines.join('\n'));
 }
 
-// ---------------------------------------------------------------- /guildcraft status (PRD FR-8, without usage)
+// ---------------------------------------------------------------- /guildcraft status (PRD FR-8; usage and backup from order 8)
 
 const when = (iso: string | null | undefined) => (iso ? `<t:${Math.floor(Date.parse(iso) / 1000)}:f> (<t:${Math.floor(Date.parse(iso) / 1000)}:R>)` : 'never');
 
@@ -188,9 +222,12 @@ function warningsCount(json: string | null): number | null {
 }
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
-  const [okImport, lastImport, board, posts, departures] = await c.db.batch([
+  const nowMs = Date.now();
+  const [okImport, lastImport, lastDryRun, board, posts, departures, usage, backup] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
-    c.db.prepare('SELECT status, started_at, finished_at, warnings, error FROM data_import ORDER BY id DESC LIMIT 1'),
+    // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (Brian's check of order 7).
+    c.db.prepare("SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE status <> 'dry-run' ORDER BY id DESC LIMIT 1"),
+    c.db.prepare("SELECT id, finished_at, started_at, warnings, (SELECT max(id) FROM data_import WHERE status <> 'dry-run') AS real_id FROM data_import WHERE status = 'dry-run' ORDER BY id DESC LIMIT 1"),
     c.db
       .prepare(
         `SELECT count(*) AS posts, coalesce(sum(dirty <> 0), 0) AS dirty, max(last_rendered_at) AS refreshed,
@@ -207,6 +244,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
           (SELECT detail_json FROM audit_log WHERE guild_id = ?1 AND action = 'departures.run' ORDER BY id DESC LIMIT 1) AS detail`,
       )
       .bind(c.guild.id),
+    c.db.prepare(USAGE_SQL).bind(...usageParams(nowMs)),
+    c.db.prepare(BACKUP_SQL),
   ]);
   const d = (departures.results as { left_members: number; at: string | null; detail: string | null }[])[0];
   const run = (() => {
@@ -222,17 +261,28 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const last = (lastImport.results as { status: string; started_at: string; finished_at: string | null; warnings: string | null; error: string | null }[])[0];
   const b = (board.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
   const warnings = last ? warningsCount(last.warnings) : null;
+  const dry = (lastDryRun.results as { id: number; finished_at: string | null; started_at: string; warnings: string | null; real_id: number | null }[])[0];
+  // A dry run newer than the last real import gets its own line; older ones are not shown.
+  const dryLine =
+    dry && (dry.real_id === null || dry.id > dry.real_id)
+      ? [`**Last dry run:** ${when(dry.finished_at ?? dry.started_at)} · wrote nothing · ${(() => {
+          const n = warningsCount(dry.warnings);
+          return n === null ? 'warnings unreadable' : `${n} warning${n === 1 ? '' : 's'}`;
+        })()}`]
+      : [];
   const lines = [
     '## GuildCraft status',
     `**Data version:** ${ok ? `\`${ok.source_version}\`` : 'no completed import yet'}`,
     `**Last import:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${last.status}${last.error ? ` (${last.error.slice(0, 200)})` : ''} · ${warnings === null ? 'warnings unreadable' : `${warnings} warning${warnings === 1 ? '' : 's'}`}` : 'none yet'}`,
+    ...dryLine,
     c.guild.board_channel_id
       ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
     `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
-    '**Usage against the free-tier limits:** coming soon',
+    backupLine((backup.results as (BackupRow & { last_ok: string | null })[])[0], nowMs),
+    ...usageLines(usage.results as unknown as UsageRow[], nowMs),
   ];
   return ephemeral(lines.join('\n'));
 }

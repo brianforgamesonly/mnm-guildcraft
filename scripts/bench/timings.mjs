@@ -13,8 +13,9 @@
 // string, so order 3's reader matched none of the timing lines. Both forms are read now, and the
 // population (all events in the window, by type) is counted first so a short read shows as one.
 
-import { readFileSync } from 'node:fs';
-import { INGEST_GRACE_MS, reconcile, SLOT_MS } from './logs-check.mjs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { alarm, summary } from '../ci/alarm.ts';
+import { DROP_BOUND_CONFIDENCE, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, SLOT_MS } from './logs-check.mjs';
 
 const SCRIPT = 'mnm-guildcraft-dev';
 const hours = Math.min(72, Math.max(1, Number(process.argv[2]) || 72));
@@ -268,7 +269,8 @@ if (events[0]) {
 }
 
 // ---------------------------------------------------------------- order 7, ITEM 1.1: completeness check
-// Each event type against its own record (scripts/bench/logs-check.mjs). Exits 1 on any mismatch, after printing.
+// Each event type against its own record (scripts/bench/logs-check.mjs). Order 8 (ITEM 3.1): exits 1 only on a gap
+// Cloudflare's analytics does not explain, a short read, or the 7-day drop-rate bound crossing its threshold.
 const cf = async (path, init) => {
   const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
   const json = await res.json().catch(() => ({}));
@@ -324,35 +326,68 @@ const gql = await cf('/graphql', {
   }),
 });
 const inv = gql.json?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive;
-let logsShortOfAnalytics = [];
-if (!gql.ok || !inv) console.log(`invocation analytics (GraphQL): unread, HTTP ${gql.status} ${errorsOf(gql)}`);
-else {
+const settled = to - INGEST_GRACE_MS;
+// Order 8 (ITEM 3.1): the missing events that have an independent record, to be explained by analytics or not.
+const gaps = [];
+for (const r of check.rows) {
+  if (r.type.startsWith('cron run')) for (const s of r.missing) gaps.push({ at: Date.parse(s), what: `cron run ${s}` });
+  else if (r.type.startsWith('audit ')) for (const s of r.missing) gaps.push({ at: Date.parse(s), what: `${r.type} ${s}` });
+}
+// A read that named its audit row with no row behind it is a D1 write gap, not a logs gap: analytics cannot explain it.
+const unexplained = check.rows.filter((r) => !r.type.startsWith('cron run') && !r.type.startsWith('audit ')).flatMap((r) => r.missing.map((m) => `${r.type}: ${m}`));
+let explained = { drops: 0, invocations: 0, dropSlots: [], explained: [], unexplained: [] };
+if (!gql.ok || !inv) {
+  console.log(`invocation analytics (GraphQL): unread, HTTP ${gql.status} ${errorsOf(gql)}`);
+  unexplained.push(...gaps.map((g) => `${g.what}: missing, and analytics unread`));
+} else {
   const slot = (ms) => new Date(Math.floor(ms / SLOT_MS) * SLOT_MS).toISOString().slice(0, 16);
   const analytics = new Map();
-  for (const x of inv) analytics.set(slot(Date.parse(x.dimensions.datetime)), (analytics.get(slot(Date.parse(x.dimensions.datetime))) ?? 0) + (x.sum.requests ?? 0));
+  for (const x of inv) {
+    const k = slot(Date.parse(x.dimensions.datetime));
+    const a = analytics.get(k) ?? { requests: 0, ok: 0 };
+    a.requests += x.sum.requests ?? 0;
+    if (x.dimensions.status === 'success') a.ok += x.sum.requests ?? 0;
+    analytics.set(k, a);
+  }
   const logged = new Map();
   for (const r of byRequest.values()) logged.set(slot(r.at), (logged.get(slot(r.at)) ?? 0) + 1);
   const keys = [...new Set([...analytics.keys(), ...logged.keys()])].sort();
-  const differ = keys.filter((k) => (analytics.get(k) ?? 0) !== (logged.get(k) ?? 0));
-  // Logs short of the platform's own invocation count fail the check (the newest slots may still be ingesting).
-  // A request at a slot's edge can land in the neighbouring slot on one side: an excess of logs next door
-  // offsets a shortfall here.
-  const excess = (k) => Math.max(0, (logged.get(k) ?? 0) - (analytics.get(k) ?? 0));
-  const near = (k, d) => new Date(Date.parse(`${k}Z`) + d * SLOT_MS).toISOString().slice(0, 16);
-  logsShortOfAnalytics = differ.filter(
-    (k) => (analytics.get(k) ?? 0) > (logged.get(k) ?? 0) + excess(near(k, -1)) + excess(near(k, 1)) && Date.parse(`${k}Z`) + SLOT_MS < to - INGEST_GRACE_MS,
-  );
-  console.log(`invocation analytics (GraphQL): ${[...analytics.values()].reduce((a, b) => a + b, 0)} invocations vs ${byRequest.size} logged requests; slots that differ: ${differ.length}`);
+  const differ = keys.filter((k) => (analytics.get(k)?.requests ?? 0) !== (logged.get(k) ?? 0));
+  console.log(`invocation analytics (GraphQL): ${[...analytics.values()].reduce((a, b) => a + b.requests, 0)} invocations vs ${byRequest.size} logged requests; slots that differ: ${differ.length}`);
   for (const k of differ) {
     const rows = inv.filter((x) => slot(Date.parse(x.dimensions.datetime)) === k).map((x) => `${x.dimensions.datetime.slice(11, 19)} ${x.dimensions.status} ×${x.sum.requests}`);
     const seen = [...byRequest.values()].filter((r) => slot(r.at) === k).map((r) => `${new Date(r.at).toISOString().slice(11, 19)} ${redact(pathOf(r))}`);
-    console.log(`  ${k}Z\tanalytics ${analytics.get(k) ?? 0} [${rows.join(', ')}]\tlogged ${logged.get(k) ?? 0} [${seen.join(', ')}]`);
+    console.log(`  ${k}Z\tanalytics ${analytics.get(k)?.requests ?? 0} [${rows.join(', ')}]\tlogged ${logged.get(k) ?? 0} [${seen.join(', ')}]`);
   }
+  explained = explainGaps({ analytics, logged, gaps, settled });
+  unexplained.push(...explained.unexplained);
 }
 
-if (readShort || !check.ok || !d1.ok || logsShortOfAnalytics.length) {
-  const why = [readShort && 'short read', !check.ok && 'mismatch', !d1.ok && 'audit rows unread', logsShortOfAnalytics.length && `logs short of invocation analytics in ${logsShortOfAnalytics.length} slot(s)`];
-  console.log(`\nCOMPLETENESS CHECK FAILED: ${why.filter(Boolean).join(', ')}`);
-  process.exit(1);
+// The drop rate over a rolling 7 days (the history comes from the previous scheduled run's artifact).
+let history = [];
+if (process.env.DROP_HISTORY_IN && existsSync(process.env.DROP_HISTORY_IN)) {
+  try {
+    history = JSON.parse(readFileSync(process.env.DROP_HISTORY_IN, 'utf8'));
+  } catch {
+    console.log('drop history unreadable: starting a new one');
+  }
 }
-console.log('\ncompleteness check passed');
+const previousBreach = history.length ? !!history.at(-1).breach : null;
+const rolled = rollHistory(history, { from: new Date(from).toISOString(), to: new Date(to).toISOString(), drops: explained.drops, invocations: explained.invocations }, to);
+rolled.history.at(-1).breach = rolled.breach;
+if (process.env.DROP_HISTORY_OUT) writeFileSync(process.env.DROP_HISTORY_OUT, JSON.stringify(rolled.history));
+
+const rate = (x) => `${(x * 100).toFixed(1)}%`;
+summary(`\n### Logs completeness (order 8 rule) ${new Date(from).toISOString()} → ${new Date(to).toISOString()}`);
+summary(`- platform drops (missing from Workers Logs, counted as successes by Cloudflare analytics): ${explained.drops} of ${explained.invocations} invocations${explained.dropSlots.length ? ` (${explained.dropSlots.map((d) => `${d.slot} ×${d.n}`).join(', ')})` : ''}`);
+for (const e of explained.explained) summary(`  - explained: ${e}`);
+summary(
+  `- rolling ${DROP_HISTORY_DAYS} days (${rolled.history.length} window(s)): ${rolled.drops} drops of ${rolled.invocations} invocations; ${DROP_BOUND_CONFIDENCE * 100}% upper bound ${rate(rolled.bound)} (exact binomial, one-sided) against the threshold ${rate(DROP_BOUND_THRESHOLD)}`,
+);
+for (const u of unexplained) summary(`  - UNEXPLAINED: ${u}`);
+
+const reasons = [readShort && 'the reader came up short', !d1.ok && 'audit rows unread', unexplained.length && `${unexplained.length} unexplained gap(s)`].filter(Boolean);
+// Unexplained gaps belong to their own window (scheduled windows do not overlap), so each is a new state: it notifies.
+// The drop-rate bound is one rolling state: it notifies only on crossing the threshold (scripts/ci/alarm.ts).
+if (reasons.length) alarm({ job: 'logs completeness', failed: true, reason: reasons.join('; '), previousFailing: null });
+else alarm({ job: 'logs completeness (drop-rate bound)', failed: rolled.breach, reason: `drop-rate upper bound ${rate(rolled.bound)} over ${rate(DROP_BOUND_THRESHOLD)}`, previousFailing: previousBreach });

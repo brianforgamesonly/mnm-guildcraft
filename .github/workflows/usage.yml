@@ -1,0 +1,48 @@
+# Nightly free-tier usage (order 8, ITEM 2; PRD FR-8): the previous UTC day(s), account-wide, into usage_daily
+# (scripts/usage/run.ts). /guildcraft status reads it; the Worker's */15 cron posts the usage warning from it
+# (src/usage.ts). The Worker holds no Cloudflare credential; this job uses the existing API token
+# (Account Analytics Read, Workers Observability Write).
+# Schedule: 05:43 UTC, off the hour (GitHub delays and may drop runs at the start of every hour); the previous UTC day
+# is complete by then. Expected: <1 billed minute a run (public repository: free), ~15 a month.
+#
+# The alarm (ORDER-RULES order 8):
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   how often: at most once a day;
+#   state: failing when usage_daily's newest figures are over 30 hours old; a failure while already failing does not
+#          fail the run again (scripts/ci/alarm.ts). /guildcraft status marks the figures stale after 36 hours.
+#
+# Dispatch: dry_run (default true) prints the rows it would write and writes nothing.
+name: usage
+on:
+  schedule:
+    - cron: '43 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run: print the usage_daily rows, write nothing'
+        type: boolean
+        default: true
+      days:
+        description: 'Days to measure, ending yesterday (default: 7 on the first run, then 2)'
+        default: ''
+permissions:
+  contents: read
+concurrency: usage-dev
+jobs:
+  usage:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Usage (dry run = ${{ inputs.dry_run == true }})
+        env:
+          DAYS: ${{ inputs.days }}
+        run: node scripts/usage/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }} ${{ inputs.days && '--days "$DAYS"' || '' }}
