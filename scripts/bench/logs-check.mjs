@@ -138,6 +138,11 @@ export function reconcile({ from, to, requests, audit, deploys, cronSince }) {
 export const DROP_BOUND_THRESHOLD = 0.15;
 export const DROP_BOUND_CONFIDENCE = 0.95;
 export const DROP_HISTORY_DAYS = 7;
+/**
+ * Below this many invocations the bound is not judged: with few samples the upper bound is high by construction
+ * (0 drops in 18 invocations is still over 15%). 200 is about two days of the 15-minute cron alone; 0 in 200 bounds at 1.5%.
+ */
+export const DROP_BOUND_MIN_N = 200;
 
 const near = (k, d) => new Date(Date.parse(`${k}Z`) + d * SLOT_MS).toISOString().slice(0, 16);
 export const slotKey = (ms) => new Date(slotOf(ms)).toISOString().slice(0, 16);
@@ -214,15 +219,18 @@ export function upperBound(k, n, confidence = DROP_BOUND_CONFIDENCE) {
 }
 
 /**
- * The rolling history: entries {from, to, drops, invocations, breach}, kept DROP_HISTORY_DAYS back from `now`;
- * the current window replaces any entry it overlaps.
+ * The rolling history: entries {from, to, drops, invocations, breach}, kept DROP_HISTORY_DAYS back from `now`.
+ * The current window replaces an entry whose midpoint it covers (the same window read again); the few minutes two
+ * daily windows overlap when GitHub starts a run later one day than the next do not.
  */
 export function rollHistory(history, entry, now) {
   const since = now - DROP_HISTORY_DAYS * 86_400_000;
-  const kept = (Array.isArray(history) ? history : []).filter((h) => h && Date.parse(h.to) > since && !(Date.parse(h.from) < Date.parse(entry.to) && Date.parse(h.to) > Date.parse(entry.from)));
+  const mid = (h) => (Date.parse(h.from) + Date.parse(h.to)) / 2;
+  const kept = (Array.isArray(history) ? history : []).filter((h) => h && Date.parse(h.to) > since && !(mid(h) >= Date.parse(entry.from) && mid(h) <= Date.parse(entry.to)));
   const all = [...kept, entry].sort((a, b) => Date.parse(a.from) - Date.parse(b.from));
   const drops = all.reduce((s, h) => s + h.drops, 0);
   const invocations = all.reduce((s, h) => s + h.invocations, 0);
   const bound = upperBound(drops, invocations);
-  return { history: all, drops, invocations, bound, breach: bound > DROP_BOUND_THRESHOLD };
+  const judged = invocations >= DROP_BOUND_MIN_N;
+  return { history: all, drops, invocations, bound, judged, breach: judged && bound > DROP_BOUND_THRESHOLD };
 }

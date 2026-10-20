@@ -141,7 +141,17 @@ test('the rolling history keeps 7 days, replaces an overlapping window, and flag
   assert.deepEqual(r.history.map((h) => h.from.slice(8, 10)), ['21', '22', '26']); // the 19th is over 7 days old
   assert.equal(r.drops, 6);
   assert.equal(r.breach, false);
-  const replaced = rollHistory(r.history, day(26, 40, 130), now);
+  const replaced = rollHistory(r.history, day(26, 60, 130), now);
   assert.equal(replaced.history.length, 3);
   assert.equal(replaced.breach, true);
+  // The next day's window starting a few minutes earlier overlaps yesterday's, and keeps it.
+  const shifted = rollHistory(r.history, { from: '2026-10-27T08:55:00Z', to: '2026-10-28T08:55:00Z', drops: 0, invocations: 100 }, now + 86_400_000);
+  assert.equal(shifted.history.length, 4);
+});
+
+test('the bound is not judged under the minimum sample (no false breach from a short window)', () => {
+  const r = rollHistory([], { from: '2026-10-20T08:00:00Z', to: '2026-10-20T09:00:00Z', drops: 0, invocations: 4 }, Date.parse('2026-10-20T09:00:00Z'));
+  assert.ok(r.bound > DROP_BOUND_THRESHOLD);
+  assert.equal(r.judged, false);
+  assert.equal(r.breach, false);
 });

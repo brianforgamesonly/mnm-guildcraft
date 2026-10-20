@@ -15,7 +15,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { alarm, summary } from '../ci/alarm.ts';
-import { DROP_BOUND_CONFIDENCE, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, SLOT_MS } from './logs-check.mjs';
+import { DROP_BOUND_CONFIDENCE, DROP_BOUND_MIN_N, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, SLOT_MS } from './logs-check.mjs';
 
 const SCRIPT = 'mnm-guildcraft-dev';
 const hours = Math.min(72, Math.max(1, Number(process.argv[2]) || 72));
@@ -382,7 +382,7 @@ summary(`\n### Logs completeness (order 8 rule) ${new Date(from).toISOString()} 
 summary(`- platform drops (missing from Workers Logs, counted as successes by Cloudflare analytics): ${explained.drops} of ${explained.invocations} invocations${explained.dropSlots.length ? ` (${explained.dropSlots.map((d) => `${d.slot} ×${d.n}`).join(', ')})` : ''}`);
 for (const e of explained.explained) summary(`  - explained: ${e}`);
 summary(
-  `- rolling ${DROP_HISTORY_DAYS} days (${rolled.history.length} window(s)): ${rolled.drops} drops of ${rolled.invocations} invocations; ${DROP_BOUND_CONFIDENCE * 100}% upper bound ${rate(rolled.bound)} (exact binomial, one-sided) against the threshold ${rate(DROP_BOUND_THRESHOLD)}`,
+  `- rolling ${DROP_HISTORY_DAYS} days (${rolled.history.length} window(s)): ${rolled.drops} drops of ${rolled.invocations} invocations; ${DROP_BOUND_CONFIDENCE * 100}% upper bound ${rate(rolled.bound)} (exact binomial, one-sided) against the threshold ${rate(DROP_BOUND_THRESHOLD)}${rolled.judged ? '' : ` — not judged: under ${DROP_BOUND_MIN_N} invocations`}`,
 );
 for (const u of unexplained) summary(`  - UNEXPLAINED: ${u}`);
 

@@ -9,7 +9,8 @@
 //          else 'under'; derived from usage_daily and the limit, never stored;
 //   when:  the */15 cron (src/board/refresh.ts) posts only when a metric's state differs from the state of the last
 //          line posted for it (none yet counts as 'under'), at most once per UTC day per metric. Each line posted is
-//          recorded as a usage.alert audit row (system), which is what "the last line posted" reads.
+//          recorded as a usage.alert audit row (system), which is what "the last line posted" reads. A post Discord
+//          refuses is recorded too, with the old state, so it is retried the next UTC day, not every 15 minutes.
 import { budgetLeft, type BotApi } from './board/api.ts';
 import { FREE_LIMITS, METRICS, STALE_MS, USAGE_TARGET_SHARE, type Metric } from './limits.ts';
 
@@ -111,7 +112,7 @@ export interface AlertLog {
 }
 
 /** One D1 call when nothing changed (both reads in one batch); one Discord call per line posted, then one D1 write. */
-export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now()): Promise<AlertLog> {
+export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now(), keep = 0): Promise<AlertLog> {
   const log: AlertLog = { gc: 'usage-alert', guilds: 0, posted: 0, stale: 0, errors: [] };
   const [usage, guilds] = await db.batch([db.prepare(USAGE_SQL).bind(...usageParams(nowMs)), db.prepare(ALERT_GUILDS_SQL)]);
   const latest = latestByMetric(usage.results as unknown as UsageRow[]);
@@ -142,18 +143,21 @@ export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now(
           }
         })();
         if (state === lastState || last?.at.slice(0, 10) === today) continue;
-        if (budgetLeft(api.budget) < 2 || Date.now() >= api.budget.deadline) return log;
+        // `keep`: calls left for whatever runs after (a post and the final write need 2 of their own).
+        if (budgetLeft(api.budget) < keep + 2 || Date.now() >= api.budget.deadline) return log;
         const sent = await api.call('POST', `/channels/${g.review_channel_id}/messages`, { content: alertText(m, row, state), allowed_mentions: { parse: [] } });
+        const recordAs = (s: string, extra: Record<string, unknown> = {}) =>
+          db
+            .prepare("INSERT INTO audit_log (guild_id, actor, action, target, detail_json, created_at) VALUES (?, 'system', 'usage.alert', ?, ?, ?)")
+            .bind(g.id, `usage:${m}`, JSON.stringify({ state: s, day: row.day, value: row.value, limit: FREE_LIMITS[m].limit, ...extra }), at);
         if (!sent.ok) {
           log.errors.push(`usage alert: HTTP ${sent.status}${sent.code ? ` code ${sent.code}` : ''}`);
+          // A refused post keeps the old state but counts as today's try: it is retried tomorrow, not every 15 minutes.
+          if (!sent.skipped) record.push(recordAs(lastState, { failed: sent.status, wanted: state }));
           break;
         }
         log.posted++;
-        record.push(
-          db
-            .prepare("INSERT INTO audit_log (guild_id, actor, action, target, detail_json, created_at) VALUES (?, 'system', 'usage.alert', ?, ?, ?)")
-            .bind(g.id, `usage:${m}`, JSON.stringify({ state, day: row.day, value: row.value, limit: FREE_LIMITS[m].limit }), at),
-        );
+        record.push(recordAs(state));
       }
     }
   } finally {

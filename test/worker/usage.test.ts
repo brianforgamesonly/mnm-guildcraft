@@ -158,16 +158,26 @@ describe('the usage warning (mocked Discord)', () => {
     expect((await usageAlerts(env.DB, api(), NOW)).posted).toBe(0);
     expect(posted).toEqual([]);
   });
-  it('a refused post records nothing, so the next run tries again', async () => {
+  it('a refused post keeps the old state and is retried the next UTC day, not every 15 minutes', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await withReview();
     await usage([['d1_rows_read', '2026-10-20', 612_000]]);
     const ok = botApi.handle!;
     botApi.handle = (m, p, b) => (m === 'POST' ? new Response(JSON.stringify({ message: 'Missing Access', code: 50001 }), { status: 403 }) : ok(m, p, b));
     expect((await usageAlerts(env.DB, api(), NOW)).errors).toEqual(['usage alert: HTTP 403 code 50001']);
-    expect(await alerts()).toEqual([]);
+    expect((await alerts()).map((a) => JSON.parse(a.detail_json))).toMatchObject([{ state: 'under', failed: 403, wanted: 'over' }]);
     botApi.handle = ok;
-    expect((await usageAlerts(env.DB, api(), NOW + 15 * 60_000)).posted).toBe(1);
+    expect((await usageAlerts(env.DB, api(), NOW + 15 * 60_000)).posted).toBe(0);
+    expect((await usageAlerts(env.DB, api(), NOW + 24 * H)).posted).toBe(1);
+    expect(posted).toHaveLength(1);
+  });
+  it('leaves the calls it is told to keep for what runs after it', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await withReview();
+    await usage([['d1_rows_read', '2026-10-20', 612_000]]);
+    const tight = makeApi('test-bot-token', { d1: () => 0, discord: 0, cap: 7, deadline: Date.now() + 60_000 });
+    expect((await usageAlerts(env.DB, tight, NOW, 6)).posted).toBe(0);
+    expect(posted).toEqual([]);
   });
   it('runs inside the */15 cron (job → usage_daily → cron → one line)', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);

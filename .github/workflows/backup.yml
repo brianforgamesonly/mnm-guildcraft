@@ -7,6 +7,10 @@
 # block other database requests"). 10:37 UTC is 06:37 in New York and 03:37 in Los Angeles.
 # Expected: ~1–2 billed minutes a run (public repository: free), ~45 a month.
 #
+# Retention and size: the tree keeps the last 30 dailies and the first of each month; deleted files stay in git
+# history, and that growth is accepted (no history rewrite, no force-push). One file is capped at 50 MB (GitHub blocks
+# 100 MB); GitHub recommends repositories stay within 10 GB on disk. The order 8 report carries the estimate per year.
+#
 # Privacy: this repository, its artifacts and its logs are public. The export stays in RUNNER_TEMP, is pushed only
 # to the private repository (after the job confirms it is private), and is never uploaded or printed: logs show
 # table names, counts, sizes and hashes only.
@@ -61,7 +65,7 @@ jobs:
         id: backup
         run: node scripts/backup/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }}
       - name: Token expiry warning (after the push; never stops a backup)
-        if: steps.backup.outputs.expiry_alarm == '1'
+        if: always() && steps.backup.outputs.expiry_alarm == '1'
         env:
           EXPIRES: ${{ steps.backup.outputs.token_expires }}
         run: |

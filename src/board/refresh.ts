@@ -619,19 +619,6 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length, discord_calls: budget.discord, calls: api.log.slice() }));
     before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
   }
-  // Order 8 (ITEM 2.4): the usage warning, one read per run; it posts only when a metric's state changes (src/usage.ts).
-  // The sweep keeps its share: the warning runs only while the budget leaves the sweep RESERVE + 3 and a post.
-  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= RESERVE + 6) {
-    api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
-    let line: Record<string, unknown> = { gc: 'usage-alert' };
-    try {
-      line = { ...(await usageAlerts(counted.db, api, controller.scheduledTime)) };
-    } catch (e) {
-      line.err = e instanceof Error ? e.message : String(e);
-    }
-    console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length - before.d1, discord_calls: budget.discord - before.discord, calls: api.log.slice(before.log) }));
-    before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
-  }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string }>();
     first = counted.calls.at(-1);
@@ -660,6 +647,20 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     ...isolate,
   };
   console.log(JSON.stringify(line));
+  // Order 8 (ITEM 2.4): the usage warning, after the sweep (so the sweep's first query stays the run's first after an
+  // idle gap, order 5): one read per run; it posts only when a metric's state changes (src/usage.ts). It needs a read,
+  // a post and a write; whatever the sweep left dirty waits for the next run either way.
+  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= 3) {
+    api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
+    const mark = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
+    let usage: Record<string, unknown> = { gc: 'usage-alert' };
+    try {
+      usage = { ...(await usageAlerts(counted.db, api, controller.scheduledTime)) };
+    } catch (e) {
+      usage.err = e instanceof Error ? e.message : String(e);
+    }
+    console.log(JSON.stringify({ ...usage, d1_calls: counted.calls.length - mark.d1, discord_calls: budget.discord - mark.discord, calls: api.log.slice(mark.log) }));
+  }
   return line;
 }
 

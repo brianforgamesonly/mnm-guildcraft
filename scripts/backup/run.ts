@@ -37,8 +37,12 @@ const date = startedAt.slice(0, 10);
 const file = `backups/${date}.sql`;
 const problems: string[] = [];
 const out: { size_bytes: number | null; export_ms: number | null; commit_sha: string | null; token_expires: string } = { size_bytes: null, export_ms: null, commit_sha: null, token_expires: 'unknown' };
-const [previous] = await db.all<{ result: string; token_expires: string | null; finished_at: string }>('SELECT result, token_expires, finished_at FROM backup_status ORDER BY id DESC LIMIT 1');
+let previous: { result: string; token_expires: string | null; finished_at: string } | undefined;
+let previousRead = false;
+/** Whether this run read the expiry header; if not, the last known expiry carries forward. */
+let expiryRead = false;
 const step = (name: string) => console.log(`\n== ${name}`);
+const MAX_FILE_BYTES = 50_000_000;
 
 const counts = async (): Promise<Record<string, number>> => {
   const tables = (await db.all<{ name: string }>(TABLES_SQL)).map((r) => r.name);
@@ -48,6 +52,8 @@ const counts = async (): Promise<Record<string, number>> => {
 let manifest: Manifest | null = null;
 const dump = join(tmp, 'export.sql');
 try {
+  [previous] = await db.all<{ result: string; token_expires: string | null; finished_at: string }>('SELECT result, token_expires, finished_at FROM backup_status ORDER BY id DESC LIMIT 1');
+  previousRead = true;
   step('1. virtual tables');
   const [{ n: virtual }] = await db.all<{ n: number }>(VIRTUAL_SQL);
   console.log(`virtual tables: ${virtual}`);
@@ -62,6 +68,8 @@ try {
   out.size_bytes = statSync(dump).size;
   const gz = gzipSync(readFileSync(dump)).length;
   console.log(JSON.stringify({ export_ms: out.export_ms, bytes: out.size_bytes, gzip_bytes: gz, tables: Object.keys(before).length }));
+  // GitHub blocks a file over 100 MB; stop well before (the history choice is in backup.yml's header).
+  if (out.size_bytes > MAX_FILE_BYTES) throw new Error(`the export is ${out.size_bytes} bytes, over the ${MAX_FILE_BYTES}-byte limit this job keeps under GitHub's 100 MB file limit`);
 
   step('3. load into a scratch local D1 and check against the remote counts');
   const exported = loadAndCount(join(tmp, 'scratch-d1'), dump);
@@ -87,6 +95,7 @@ try {
       headers: { Authorization: `Bearer ${process.env.BACKUP_REPO_TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'mnm-guildcraft-backup' },
     });
     const header = res.headers.get('github-authentication-token-expiration');
+    expiryRead = res.ok;
     // e.g. "2027-01-20 06:00:00 UTC" (2021 changelog); absent → unknown, never "never".
     out.token_expires = header && Number.isFinite(Date.parse(header.replace(' UTC', 'Z').replace(' ', 'T'))) ? new Date(Date.parse(header.replace(' UTC', 'Z').replace(' ', 'T'))).toISOString() : 'unknown';
     console.log(`backup repository: HTTP ${res.status}; expiry header ${header ? 'present' : 'absent'}; token_expires ${out.token_expires}`);
@@ -120,6 +129,8 @@ try {
   problems.push(e instanceof Error ? e.message : String(e));
 }
 
+// A run that did not read the header (a dry run, a failure before the push) keeps the last known expiry.
+if (!expiryRead && previous?.token_expires) out.token_expires = previous.token_expires;
 step('5. backup_status');
 const finishedAt = new Date().toISOString();
 const lit = (v: string | number | null) => (v === null ? 'NULL' : typeof v === 'number' ? String(v) : `'${v.replace(/'/g, "''")}'`);
@@ -147,5 +158,5 @@ const expiryAlarm = (nowState === 'soon' || nowState === 'expired') && nowState 
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `expiry_alarm=${expiryAlarm ? '1' : '0'}\ntoken_expires=${out.token_expires}\n`);
 console.log(JSON.stringify({ token_expires: out.token_expires, expiry_state: nowState, previous_expiry_state: prevState, expiry_alarm: expiryAlarm }));
 
-alarm({ job: 'backup', failed: problems.length > 0, reason: problems.join('; '), previousFailing: previous ? previous.result !== 'ok' : null });
+alarm({ job: 'backup', failed: problems.length > 0, reason: problems.join('; '), previousFailing: previousRead && previous ? previous.result !== 'ok' : null });
 if (!problems.length) summary(`backup: ${dryRun ? 'dry run, not pushed' : `pushed ${file}`} · ${out.size_bytes} bytes · export ${out.export_ms} ms · token expires ${out.token_expires}`);

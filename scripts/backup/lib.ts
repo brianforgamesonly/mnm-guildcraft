@@ -24,37 +24,42 @@ export interface Manifest {
   code_sha: string | null;
 }
 
-/** Runs a command, returns stdout; on failure throws with the command's name and the first lines of its stderr only. */
-export function run(cmd: string, args: string[], opts: ExecFileSyncOptions = {}): string {
+/**
+ * Runs a command, returns stdout. On failure it throws with the command's name and, unless `quiet`, the first lines
+ * of its stderr. `quiet` is for every call that reads the dump: wrangler can quote a failing statement, which would
+ * put guild data in the public log, so only the exit status is kept.
+ */
+export function run(cmd: string, args: string[], opts: ExecFileSyncOptions & { quiet?: boolean } = {}): string {
+  const { quiet, ...exec } = opts;
   try {
-    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...opts }) as string;
+    return execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024, ...exec }) as string;
   } catch (e: any) {
-    const err = String(e?.stderr ?? e?.message ?? e).split('\n').slice(0, 4).join(' | ').replace(/\d{15,}/g, '<id>').slice(0, 400);
-    throw new Error(`${cmd} ${args[0] ?? ''} ${args[1] ?? ''} failed: ${err}`);
+    const err = quiet ? `exit status ${e?.status ?? 'unknown'} (output withheld: it may quote backup rows)` : String(e?.stderr ?? e?.message ?? e).split('\n').slice(0, 4).join(' | ').replace(/\d{15,}/g, '<id>').slice(0, 400);
+    throw new Error(`${cmd === process.execPath ? 'wrangler' : cmd} ${args.find((a) => !a.includes('/') && !a.includes('\\')) ?? ''} failed: ${err}`);
   }
 }
 
 /** wrangler through node itself: no shell, so no quoting of SQL arguments on any platform. */
 const WRANGLER = fileURLToPath(new URL('../../node_modules/wrangler/bin/wrangler.js', import.meta.url));
-export const wrangler = (args: string[]) => run(process.execPath, [WRANGLER, ...args]);
+export const wrangler = (args: string[], quiet = false) => run(process.execPath, [WRANGLER, ...args], { quiet });
 
 export const sha256 =(file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 /** SQL counting every row of every table, one row per table. Names come from the database's own sqlite_master. */
 export const countSql = (tables: string[]) => tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS t, count(*) AS n FROM "${t.replace(/"/g, '""')}"`).join(' UNION ALL ');
-export const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name";
+export const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name";
 export const VIRTUAL_SQL = "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND upper(sql) LIKE 'CREATE VIRTUAL TABLE%'";
 
 /** A query against a scratch local D1 (persisted under `dir`, never the remote). Returns the result rows. */
 export function localQuery<T>(dir: string, sql: string): T[] {
-  const out = wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--json', '--command', sql]);
+  const out = wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--json', '--command', sql], true);
   const parsed = JSON.parse(out.slice(out.indexOf('['))) as { results: T[] }[];
   return parsed[0]?.results ?? [];
 }
 
 /** Loads a dump into an empty scratch local D1 and counts each table it created. */
 export function loadAndCount(dir: string, file: string): Record<string, number> {
-  wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--yes', '--file', file]);
+  wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--yes', '--file', file], true);
   const tables = localQuery<{ name: string }>(dir, TABLES_SQL).map((r) => r.name);
   if (!tables.length) return {};
   return Object.fromEntries(localQuery<{ t: string; n: number }>(dir, countSql(tables)).map((r) => [r.t, r.n]));

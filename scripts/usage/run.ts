@@ -45,17 +45,18 @@ interface TypeRef {
   ofType?: TypeRef | null;
 }
 const named = (t: TypeRef | null | undefined): string | null => (!t ? null : t.name ?? named(t.ofType));
-const typeCache = new Map<string, any>();
+// One __schema read, resolved in memory. (A walk by __type(name:) came back null on Cloudflare in the first CI run
+// of this order, 2026-10-20, run 39377921643.)
+const T = 'name kind ofType { name kind ofType { name kind ofType { name kind ofType { name kind } } } }';
+const schemaRead = (
+  await gql(`{ __schema { queryType { name } types { name kind fields { name type { ${T} } args { name type { ${T} } } } inputFields { name } } } }`)
+).__schema as { queryType: { name: string }; types: { name: string; kind: string; fields: any[] | null; inputFields: { name: string }[] | null }[] };
+const types = new Map(schemaRead.types.map((t) => [t.name, t]));
+console.log(`schema: ${types.size} types; query type ${schemaRead.queryType.name}`);
 async function typeOf(name: string) {
-  if (!typeCache.has(name))
-    typeCache.set(
-      name,
-      (
-        await gql(`query($n: String!) { __type(name: $n) { name fields { name type { name kind ofType { name kind ofType { name kind ofType { name kind } } } }
-          args { name type { name kind ofType { name kind } } } } inputFields { name } } }`, { n: name })
-      ).__type,
-    );
-  return typeCache.get(name);
+  const t = types.get(name);
+  if (!t) console.log(`introspection: type ${JSON.stringify(name)} not in the schema; types like it: ${[...types.keys()].filter((n) => n.toLowerCase().includes(String(name).toLowerCase().slice(0, 5))).slice(0, 10).join(', ')}`);
+  return t ?? null;
 }
 
 const DATASETS = ['workersInvocationsAdaptive', 'd1AnalyticsAdaptiveGroups', 'd1StorageAdaptiveGroups', 'd1QueriesAdaptiveGroups'] as const;
@@ -63,17 +64,21 @@ const WANTED = ['requests', 'rowsRead', 'rowsWritten', 'databaseSizeBytes'] as c
 
 /** dataset → block (sum, max, …) → field names; plus each dataset's dimensions and filter fields. */
 async function introspect() {
-  const schema = (await gql('{ __schema { queryType { name } } }')).__schema;
-  const query = await typeOf(schema.queryType.name);
-  const viewer = await typeOf(named(query.fields.find((f: any) => f.name === 'viewer').type)!);
-  const accounts = await typeOf(named(viewer.fields.find((f: any) => f.name === 'accounts').type)!);
+  const query = await typeOf(schemaRead.queryType.name);
+  const viewerField = query?.fields?.find((f: any) => f.name === 'viewer');
+  const viewer = viewerField ? await typeOf(named(viewerField.type)!) : null;
+  const accountsField = viewer?.fields?.find((f: any) => f.name === 'accounts');
+  const accounts = accountsField ? await typeOf(named(accountsField.type)!) : null;
+  if (!accounts?.fields)
+    throw new Error(`introspection: no accounts type (viewer field ${JSON.stringify(viewerField?.type ?? null)}, accounts field ${JSON.stringify(accountsField?.type ?? null)})`);
   const out: Record<string, { blocks: Record<string, string[]>; dimensions: string[]; filter: string[] }> = {};
   for (const ds of DATASETS) {
     const f = accounts.fields.find((x: any) => x.name === ds);
     if (!f) continue;
     const t = await typeOf(named(f.type)!);
-    const filterArg = f.args.find((a: any) => a.name === 'filter');
-    const filter = filterArg ? ((await typeOf(named(filterArg.type)!)).inputFields ?? []).map((x: any) => x.name) : [];
+    if (!t?.fields) continue;
+    const filterArg = (f.args ?? []).find((a: any) => a.name === 'filter');
+    const filter = filterArg ? ((await typeOf(named(filterArg.type)!))?.inputFields ?? []).map((x: any) => x.name) : [];
     const blocks: Record<string, string[]> = {};
     let dimensions: string[] = [];
     for (const b of t.fields) {
@@ -92,6 +97,13 @@ async function introspect() {
   return { datasets: out, logsCandidates };
 }
 
+const problems: string[] = [];
+const notes: string[] = [];
+/** null until usage_daily has been read (unknown counts as a change, scripts/ci/alarm.ts). */
+let previousFailing: boolean | null = null;
+const DAY = 86_400_000;
+let summaryLine = '';
+try {
 const found = await introspect();
 /** The first dataset/block holding each wanted field (sum before max for counts; max for a size). */
 const where: Partial<Record<(typeof WANTED)[number], { dataset: string; block: string }>> = {};
@@ -144,8 +156,9 @@ if (args['introspect-only']) {
 
 const db = remoteDb({ accountId: account, apiToken: token, databaseId: devDatabaseId() });
 const [existing] = await db.all<{ n: number; last: string | null }>('SELECT count(*) AS n, max(measured_at) AS last FROM usage_daily');
+// The previous state: failing when the last figures written are older than the alarm window.
+previousFailing = existing.last ? Date.now() - Date.parse(existing.last) > STALE_MS - 6 * 3_600_000 : null;
 const days = Number(args.days) || (existing.n ? 2 : 7);
-const DAY = 86_400_000;
 const today = Date.parse(new Date().toISOString().slice(0, 10));
 const dayList = Array.from({ length: days }, (_, i) => new Date(today - (i + 1) * DAY).toISOString().slice(0, 10)).reverse();
 const first = dayList[0];
@@ -193,8 +206,6 @@ const metricField: Record<Exclude<Metric, 'workers_logs_events'>, (typeof WANTED
 };
 const measuredAt = new Date().toISOString();
 const rows: { metric: Metric; day: string; value: number }[] = [];
-const problems: string[] = [];
-const notes: string[] = [];
 for (const [metric, field] of Object.entries(metricField) as [Metric, (typeof WANTED)[number]][]) {
   const m = await daily(field);
   for (const d of dayList) if (m.has(d)) rows.push({ metric, day: d, value: Math.round(m.get(d)!) });
@@ -222,14 +233,21 @@ const sql = rows.map(
   (r) =>
     `INSERT INTO usage_daily (day, metric, value, measured_at) VALUES (${lit(r.day)}, ${lit(r.metric)}, ${r.value}, ${lit(measuredAt)}) ON CONFLICT (metric, day) DO UPDATE SET value = excluded.value, measured_at = excluded.measured_at`,
 );
-if (args['dry-run']) {
+if (problems.length) {
+  // A failed measurement writes nothing: a false zero would read as "under" (a false "back under" warning) and
+  // would refresh measured_at, hiding the failing state from the next run's alarm.
+  console.log(`\nNOT WRITTEN: ${problems.length} implausible reading(s); usage_daily is left as it was`);
+} else if (args['dry-run']) {
   console.log(`\nDRY RUN: would upsert ${sql.length} usage_daily row(s); nothing written. First statement:\n${sql[0] ?? '(none)'}`);
 } else if (sql.length) {
   const meta = await db.run(sql);
   console.log(`\nwrote ${meta.reduce((s, m) => s + m.changes, 0)} usage_daily row change(s) for ${days} day(s), ${first}..${last}`);
 }
+summaryLine = `usage: ${rows.length} figure(s), ${first}..${last}${args['dry-run'] ? ' (dry run)' : ''}`;
+} catch (e) {
+  // A GraphQL outage or schema drift is this job's failure too, and goes through the same alarm.
+  problems.push(e instanceof Error ? e.message : String(e));
+}
 
-// The previous state: failing when the last figures written are older than the alarm window.
-const previousFailing = existing.last ? Date.now() - Date.parse(existing.last) > STALE_MS - 6 * 3_600_000 : null;
 alarm({ job: 'usage', failed: problems.length > 0, reason: problems.join('; '), previousFailing });
-if (!problems.length) summary(`usage: ${rows.length} figure(s), ${first}..${last}${args['dry-run'] ? ' (dry run)' : ''}`);
+if (!problems.length) summary(summaryLine);
