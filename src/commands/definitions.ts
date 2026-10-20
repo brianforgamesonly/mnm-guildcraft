@@ -3,6 +3,7 @@
 // and /roster skill|member|top; later orders add the rest.
 // /craft help marks every PRD command not defined here as "coming soon" (src/commands/help.ts).
 
+import { gearFindOptions } from '../gear/options.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX, REPORT_ISSUES } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
@@ -125,6 +126,21 @@ export const COMMANDS = [
     ],
   },
   {
+    // Order 13. The class choices are the copy's game_class codes, filled in at registration (commandsWith).
+    name: 'gear',
+    description: 'Find gear upgrades in the community wiki data',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'find',
+        description: 'Gear for your class, by slot, weapon type, AC, ratio, stats and source',
+        options: gearFindOptions([]),
+      },
+    ],
+  },
+  {
     name: 'recipe',
     description: 'Officers: correct recipes for this server',
     type: 1,
@@ -219,6 +235,45 @@ export const COMMANDS = [
     ],
   },
 ] as const;
+
+/** The definitions to register: /gear find's class option offers "Any" and `classes` (the copy's game_class codes). */
+export const commandsWith = (classes: readonly string[]) =>
+  COMMANDS.map((c) =>
+    c.name !== 'gear' ? c : { ...c, options: c.options.map((s) => (s.name === 'find' ? { ...s, options: gearFindOptions(classes) } : s)) },
+  );
+
+/**
+ * Discord's documented maximums for a slash command (https://docs.discord.com/developers/interactions/application-commands):
+ * "Choices for the user to pick from, max 25"; "Parameters for the command, max of 25"; option names "1-32 character
+ * name", descriptions "1-100 character description"; choice names "1-100 character choice name", values "up to 100
+ * characters if string"; "Slash commands can have a maximum of 8000 characters for combined name, description, and value
+ * properties". Checked in CI (test/worker/gear.test.ts) and before every registration (scripts/discord/register.ts).
+ */
+export const DISCORD_COMMAND_LIMITS = { choices: 25, options: 25, name: 32, description: 100, choice: 100, combined: 8000 } as const;
+type Def = { name: string; description?: string; options?: readonly Def[]; choices?: readonly { name: string; value: string | number }[] };
+
+export function commandLimitProblems(commands: readonly Def[]): string[] {
+  const L = DISCORD_COMMAND_LIMITS;
+  const out: string[] = [];
+  const visit = (d: Def, at: string): number => {
+    let chars = d.name.length + (d.description?.length ?? 0);
+    if (d.name.length > L.name) out.push(`${at}: name over ${L.name} characters`);
+    if ((d.description?.length ?? 0) > L.description) out.push(`${at}: description over ${L.description} characters`);
+    if ((d.options?.length ?? 0) > L.options) out.push(`${at}: ${d.options!.length} options, over ${L.options}`);
+    if ((d.choices?.length ?? 0) > L.choices) out.push(`${at}: ${d.choices!.length} choices, over ${L.choices}`);
+    for (const ch of d.choices ?? []) {
+      if (ch.name.length > L.choice || String(ch.value).length > L.choice) out.push(`${at}: choice ${ch.name} over ${L.choice} characters`);
+      chars += ch.name.length + String(ch.value).length;
+    }
+    for (const o of d.options ?? []) chars += visit(o, `${at} ${o.name}`);
+    return chars;
+  };
+  for (const c of commands) {
+    const n = visit(c, `/${c.name}`);
+    if (n > L.combined) out.push(`/${c.name}: ${n} combined characters, over ${L.combined}`);
+  }
+  return out;
+}
 
 /** "/name sub" for every defined subcommand: the commands that are built. */
 export const DEFINED = new Set(COMMANDS.flatMap((c) => c.options.map((o) => `/${c.name} ${o.name}`)));

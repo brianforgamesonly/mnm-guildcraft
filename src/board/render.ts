@@ -99,6 +99,8 @@ export const HOW_TO_GET_LISTED = [
   '**Also**',
   '`/craft find` who can make an item · `/craft know` mark a recipe you know · `/roster recipes` who knows the hard-to-get ones',
   '`/craft report` report wrong data · `/item image` send an item screenshot · `/craft help` every command',
+  // Order 13.
+  '`/gear find` gear for your class, by slot, stats and source',
 ].join('\n');
 
 /**

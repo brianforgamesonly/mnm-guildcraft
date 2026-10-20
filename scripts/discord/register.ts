@@ -8,8 +8,9 @@
 // CLOUDFLARE_ACCOUNT_ID. Prints names, IDs, statuses and the endpoint URL; never a credential or the guild ID.
 
 import { deflateSync } from 'node:zlib';
-import { COMMANDS } from '../../src/commands/definitions.ts';
+import { commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
 import { currentCopy } from '../copies.ts';
+import { copyDatabaseId, remoteDb } from '../import/db.ts';
 
 const COPY = currentCopy();
 const GLOBAL = COPY.name === 'production';
@@ -19,6 +20,15 @@ function need(name: string): string {
   if (!v) throw new Error(`${name} must be set`);
   return v;
 }
+
+// Order 13: /gear find's class choices are this copy's game_class codes, read now (a read; nothing is written to D1).
+const db = remoteDb({ accountId: need('CLOUDFLARE_ACCOUNT_ID'), apiToken: need('CLOUDFLARE_API_TOKEN'), databaseId: copyDatabaseId() });
+const classes = (await db.all<{ code: string }>('SELECT code FROM game_class WHERE item_count > 0 ORDER BY code')).map((r) => r.code);
+if (!classes.length) throw new Error('game_class holds no classes: run the import first; not registering');
+const COMMANDS = commandsWith(classes);
+const problems = commandLimitProblems(COMMANDS);
+if (problems.length) throw new Error(`the definitions break Discord's limits, not registering: ${problems.join('; ')}`);
+console.log(`/gear find class choices: Any + ${classes.length} from game_class (${classes.join(' ')})`);
 
 const botToken = need('DISCORD_BOT_TOKEN');
 const appId = need('DISCORD_APPLICATION_ID');

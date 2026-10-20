@@ -34,7 +34,7 @@ export const SORTS: Sort[] = [
   { key: 'AC', label: 'AC', sql: 'ac' },
   { key: 'RATIO', label: 'Ratio', sql: 'ratio' },
   ...[HP, MANA, HASTE].map((s) => ({ key: s.key, label: s.label, sql: statSql(s) })),
-  { key: 'TOTAL', label: 'Total stats', sql: TOTAL_STATS_SQL },
+  { key: 'TOTAL', label: 'Total stats', sql: 'total_stats' }, // the generated column (migrations/0011), = TOTAL_STATS_SQL
   ...[...STATS.map(stat), ...RESISTS.map(resist)].map((s) => ({ key: s.key, label: s.label, sql: statSql(s) })),
   { key: 'NAME', label: 'Name', sql: 'name COLLATE NOCASE', asc: true },
 ];
@@ -101,7 +101,7 @@ const idx = <T>(list: readonly T[], v: T | undefined) => (v === undefined ? '' :
 const at = <T>(list: readonly T[], s: string | undefined): T | undefined => (s === undefined || s === '' ? undefined : list[Number(s)]);
 
 /**
- * The query as a compact string: "<class>.<slot>.<weapon>.<min_ac>.<min_ratio>.<stats>.<source>.<sort>", each list
+ * The query as a compact string: "<class>.<slot>.<weapon>.<min_ac>.<min_ratio ×1000>.<stats>.<source>.<sort>", each list
  * value as its index (stats as up to three indexes joined by '-'). Worst case (every option set, the longest values)
  * is checked in test/worker/gear.test.ts against Discord's 100-character custom_id.
  */
@@ -111,7 +111,7 @@ export function encodeState(q: GearQuery): string {
     idx(SLOTS, q.slot),
     idx(WEAPON_TYPES, q.weaponType),
     q.minAc ?? '',
-    q.minRatio ?? '',
+    q.minRatio === undefined ? '' : Math.round(q.minRatio * 1000), // thousandths: a '.' would split the state
     q.stats.map((s) => STAT_FILTERS.indexOf(s)).join('-'),
     idx(SOURCES, q.source),
     String(SORTS.indexOf(q.sort)),
@@ -129,7 +129,7 @@ export function decodeState(s: string): GearQuery | null {
     slot: at(SLOTS, p[1]),
     weaponType: at(WEAPON_TYPES, p[2]),
     minAc: num(p[3]),
-    minRatio: num(p[4]),
+    minRatio: p[4] === '' ? undefined : Number(p[4]) / 1000,
     stats: p[5] ? p[5].split('-').map((i) => STAT_FILTERS[Number(i)]).filter(Boolean) : [],
     source: at(SOURCES, p[6]),
     sort,

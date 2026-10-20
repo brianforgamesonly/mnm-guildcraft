@@ -106,7 +106,7 @@ export interface Reply {
   data: {
     content?: string;
     flags?: number;
-    embeds?: { title?: string; description?: string }[];
+    embeds?: { title?: string; description?: string; footer?: { text: string }; fields?: { name: string; value: string }[] }[];
     components?: any[];
     choices?: { name: string; value: string }[];
     custom_id?: string;

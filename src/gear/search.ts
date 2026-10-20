@@ -1,7 +1,7 @@
 // /gear find's search (work order 13, ITEM 3): one D1 statement per page, reading the gear index (item_gear, partial on
 // slot_mask <> 0) for the class, slot and source filters. No writes: the only row a search adds is its read audit row
 // ('gear.find', src/interactions.ts).
-import { ANY, statSql, TOTAL_STATS_SQL, type GearQuery } from './options.ts';
+import { ANY, statSql, type GearQuery } from './options.ts';
 import { REMOVED_BIT, SLOTS, SOURCES } from './vocab.ts';
 
 export const PAGE_SIZE = 10;
@@ -50,22 +50,22 @@ export interface GearRow {
   source_mask: number;
   sort_value: number | string | null;
   total_stats: number;
-  total: number;
 }
 
 export const GEAR_COLS = 'id, name, slot, stats_json, origin_json, wiki_url, icon_url, source, ac, ratio, class_mask, source_mask';
 
 /**
- * One page: sorted by the sort (highest first, Name A→Z), then AC, then total stats, then name; items without the sorted
- * value last. `total` is the match count (a window over the filtered rows, before LIMIT).
+ * One page, plus one row to tell whether a next page exists: sorted by the sort (highest first, Name A→Z), then AC, then
+ * total stats, then name; items without the sorted value last. No match count: measured on the real data, a window
+ * count doubled D1's rows_read (12,469 against 6,260 for a search over all gear; scripts/bench/gear-search.ts).
  */
 export function searchStatement(db: D1Database, q: GearQuery, page: number): D1PreparedStatement {
   const fs = filters(q);
   const dir = q.sort.asc ? 'ASC' : 'DESC';
-  const sql = `SELECT ${GEAR_COLS}, ${q.sort.sql} AS sort_value, ${TOTAL_STATS_SQL} AS total_stats, count(*) OVER () AS total
+  const sql = `SELECT ${GEAR_COLS}, ${q.sort.sql} AS sort_value, total_stats
     FROM item WHERE ${[BASE, ...fs.map((x) => x.sql)].join(' AND ')}
     ORDER BY sort_value ${dir} NULLS LAST, ac DESC NULLS LAST, total_stats DESC, name COLLATE NOCASE
-    LIMIT ${PAGE_SIZE} OFFSET ?`;
+    LIMIT ${PAGE_SIZE + 1} OFFSET ?`;
   return db.prepare(sql).bind(...fs.flatMap((x) => x.binds), page * PAGE_SIZE);
 }
 

@@ -20,6 +20,7 @@
     "import:local": "node scripts/import/run.ts --local",
     "import:remote": "node scripts/import/run.ts --remote",
     "bench:import-writes": "node scripts/bench/import-writes.ts",
+    "bench:gear-search": "node scripts/bench/gear-search.mjs",
     "commands:register": "node scripts/discord/register.ts"
   },
   "dependencies": {

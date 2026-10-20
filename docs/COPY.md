@@ -673,3 +673,55 @@ Each command line shows as `` `/command` what it does ``. A line whose command i
 | **Total** | **411** |
 
 All 411 are approved (work order 11, 2026-10-20).
+
+## Work order 13: /gear find (DRAFT)
+
+Every line below is DRAFT until approved. \<label> is a filter as the member set it (for example "slot: CHEST").
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/definitions.ts:131 | `/gear`: Find gear upgrades in the community wiki data | DRAFT |
+| src/commands/definitions.ts:138 | `/gear find`: Gear for your class, by slot, weapon type, AC, ratio, stats and source | DRAFT |
+| src/gear/options.ts:64 | `class` option: Your class, or Any (required) | DRAFT |
+| src/gear/options.ts:65 | `slot` option: Only items for this slot | DRAFT |
+| src/gear/options.ts:66 | `weapon_type` option: Only weapons of this type (the code the wiki uses) | DRAFT |
+| src/gear/options.ts:67 | `min_ac` option: Only items with at least this much AC | DRAFT |
+| src/gear/options.ts:68 | `min_ratio` option: Only weapons with at least this damage ÷ delay | DRAFT |
+| src/gear/options.ts:72 | `stat1`, `stat2`, `stat3` options: Only items with all the stats you pick | DRAFT |
+| src/gear/options.ts:75 | `source` option: Where it comes from, as the wiki records it | DRAFT |
+| src/gear/options.ts:76 | `sort` option: Highest first (Name: A→Z). Default: Ratio for weapons, otherwise AC | DRAFT |
+| src/commands/gear.ts:33 | Results title: Gear finder | DRAFT |
+| src/commands/gear.ts:34 | Results footer: Page \<n> · sorted by \<sort> · Item data: Monsters and Memories Wiki, CC BY-SA 4.0 · data \<version> | DRAFT |
+| src/commands/gear.ts:53 | -# Class is required: pick yours, or Any. | DRAFT |
+| src/commands/gear.ts:54 | -# Ratio = damage ÷ delay (none when delay is 0 or missing). | DRAFT |
+| src/commands/gear.ts:55 | -# Sources come from the community wiki; Unknown means the wiki has not recorded one. | DRAFT |
+| src/commands/gear.ts:35 | No gear is loaded yet. The data arrives with the nightly import from the community wiki. | DRAFT |
+| src/commands/gear.ts:36 | No items match all of those filters. | DRAFT |
+| src/commands/gear.ts:37 | The filter that removed the most is **\<label>**: without it, \<number> item(s) match. Try relaxing it. | DRAFT |
+| src/commands/gear.ts:38 | Even with any one filter removed, nothing matches. Try fewer filters. | DRAFT |
+| src/commands/gear.ts:65 | Pick a class (or Any). | DRAFT |
+| src/commands/gear.ts:41 | Classes: All | DRAFT |
+| src/commands/gear.ts:42 | Classes: no class listed | DRAFT |
+| src/commands/gear.ts:40 | ⚠ stats may be wrong (wiki) | DRAFT |
+| src/commands/gear.ts:195 | Drop: \<mob> (L\<level>, \<zone>), … +\<n> more · zones: \<zone>, … +\<n> more | DRAFT |
+| src/commands/gear.ts:204 | Crafted: \<tradeskill>, trivial \<number>, \<number> guild character(s) can make it | DRAFT |
+| src/commands/gear.ts:49 | (trivial unknown) \<number> guild character(s) with \<tradeskill> (trivial unknown) | DRAFT |
+| src/commands/gear.ts:50 | Vendor: price \<number> · \<vendors as recorded> (or: Vendor: price not recorded) | DRAFT |
+| src/commands/gear.ts:225 | Quest | DRAFT |
+| src/commands/gear.ts:227 | Unknown: source not recorded | DRAFT |
+| src/commands/gear.ts:43 | Details menu placeholder: Details: pick an item | DRAFT |
+| src/commands/gear.ts:44 | Button: Previous | DRAFT |
+| src/commands/gear.ts:45 | Button: Next | DRAFT |
+| src/commands/gear.ts:46 | That item is no longer in the data. Run `/gear find` again. | DRAFT |
+| src/commands/gear.ts:329 | Item card field: Drop: mobs | DRAFT |
+| src/commands/gear.ts:330 | Item card field: Drop: zones | DRAFT |
+| src/commands/gear.ts:334 | Item card field: Vendor (price \<number> · shady price \<number>, then the vendors as recorded) | DRAFT |
+| src/commands/gear.ts:57 | Button: Report a problem (on the item card) | DRAFT |
+| src/commands/gear.ts:58 | Button: Stat image (on the item card) | DRAFT |
+| src/recipes.ts:27 | Item report issue: Wrong stats | DRAFT |
+| src/recipes.ts:28 | Item report issue: Wrong source | DRAFT |
+| src/recipes.ts:29 | Item report issue: Wrong class | DRAFT |
+| src/commands/reports.ts:43 | Review card title: Item report: \<item> | DRAFT |
+| src/commands/reports.ts:47 | Review card footer: Report #\<n> · item data comes from the community wiki: correct it there, then mark it fixed | DRAFT |
+| src/commands/help.ts:31 | `/craft help`: `/gear find` find gear for your class by slot, weapon type, AC, ratio, stats and source | DRAFT |
+| src/board/render.ts:103 | Board index: `/gear find` gear for your class, by slot, stats and source | DRAFT |
