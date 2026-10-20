@@ -45,8 +45,15 @@ export const wrangler = (args: string[], quiet = false) => run(process.execPath,
 
 export const sha256 =(file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 
-/** SQL counting every row of every table, one row per table. Names come from the database's own sqlite_master. */
-export const countSql = (tables: string[]) => tables.map((t) => `SELECT '${t.replace(/'/g, "''")}' AS t, count(*) AS n FROM "${t.replace(/"/g, '""')}"`).join(' UNION ALL ');
+/**
+ * SQL counting every row of every table: one SELECT of scalar subqueries, one column per table, named after it.
+ * Names come from the database's own sqlite_master. Order 9: never a compound SELECT. Remote D1 refused the order 8
+ * form, 17 SELECTs joined by UNION ALL ("too many terms in compound SELECT", observed 2026-10-20), while local SQLite
+ * allowed it; D1's limits page names no compound-SELECT limit, so lib.test.ts forbids compounds in scripts/backup/.
+ */
+export const countSql = (tables: string[]) => `SELECT ${tables.map((t) => `(SELECT count(*) FROM "${t.replace(/"/g, '""')}") AS "${t.replace(/"/g, '""')}"`).join(', ')}`;
+/** Reads countSql's single row into table → count. */
+export const countsOf = (rows: Record<string, number>[]): Record<string, number> => ({ ...rows[0] });
 export const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name";
 export const VIRTUAL_SQL = "SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND upper(sql) LIKE 'CREATE VIRTUAL TABLE%'";
 
@@ -62,7 +69,7 @@ export function loadAndCount(dir: string, file: string): Record<string, number> 
   wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--yes', '--file', file], true);
   const tables = localQuery<{ name: string }>(dir, TABLES_SQL).map((r) => r.name);
   if (!tables.length) return {};
-  return Object.fromEntries(localQuery<{ t: string; n: number }>(dir, countSql(tables)).map((r) => [r.t, r.n]));
+  return countsOf(localQuery<Record<string, number>>(dir, countSql(tables)));
 }
 
 /**
@@ -88,8 +95,11 @@ export function prune(dates: string[], keep = 30): string[] {
   return sorted.filter((d) => !recent.has(d) && !firstOfMonth.has(d));
 }
 
+/** Tables the nightly import fills: a backup holding 0 of them is a failure, not an empty guild. */
+export const MUST_HOLD_ROWS = ['item', 'recipe'];
+
 /** Each exported count must lie between the counts read just before and just after the export (live writes race it). */
-export function checkBounds(before: Record<string, number>, after: Record<string, number>, exported: Record<string, number>): string[] {
+export function checkBounds(before: Record<string, number>, after: Record<string, number>, exported: Record<string, number>, mustHold = MUST_HOLD_ROWS): string[] {
   const problems: string[] = [];
   const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
   for (const t of names) {
@@ -101,5 +111,8 @@ export function checkBounds(before: Record<string, number>, after: Record<string
   }
   const total = Object.values(exported).reduce((s, n) => s + n, 0);
   if (!names.length || total === 0) problems.push('the export holds no rows');
+  // Order 9, row 13: the game data is never legitimately empty once imported, so 0 there is a broken control.
+  // A renamed or missing table fails too, rather than skipping the check.
+  else for (const t of mustHold) if (!exported[t]) problems.push(t in exported ? `table ${t} exported 0 rows` : `table ${t} is not in the export`);
   return problems;
 }

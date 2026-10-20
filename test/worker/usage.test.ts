@@ -65,6 +65,16 @@ describe('/guildcraft status: the last import', () => {
     expect(s).toMatch(/\*\*Last import:\*\* <t:\d+:f> \(<t:\d+:R>\) · failed · 1 warning/);
     expect(s).not.toContain('Last dry run');
   });
+
+  it('order 9: a refusal is never the last import, but status shows it while it is the newest nightly run', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await imports([['ok', '2026-10-19T07:31:00Z'], ['refused', '2026-10-20T07:31:00Z']]);
+    const s = await status();
+    expect(s).toMatch(/\*\*Last import:\*\* <t:1792395060:f> \(<t:\d+:R>\) · ok/);
+    expect(s).toMatch(/\*\*Latest nightly run:\*\* <t:\d+:f> \(<t:\d+:R>\) · \*\*refused\*\*/);
+    await imports([['ok', '2026-10-21T07:31:00Z']]);
+    expect(await status()).not.toContain('Latest nightly run');
+  });
 });
 
 describe('/guildcraft status: backup and usage', () => {

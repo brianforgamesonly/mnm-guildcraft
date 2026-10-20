@@ -277,6 +277,16 @@ if (problems.length) {
   const meta = await db.run(sql);
   console.log(`\nwrote ${meta.reduce((s, m) => s + m.changes, 0)} usage_daily row change(s) for ${days} day(s), ${first}..${last}`);
 }
+// Order 9 (read only): the review channel's usage warnings as the Worker recorded them, posted or refused. The log is
+// public, so no guild id: metric, state, day and outcome only.
+const posted = await db.all<{ target: string; detail_json: string; created_at: string }>(
+  "SELECT target, detail_json, created_at FROM audit_log WHERE action = 'usage.alert' ORDER BY id DESC LIMIT 20",
+);
+console.log(`\nusage.alert rows (newest first, ${posted.length}):`);
+for (const a of posted) {
+  const d = (() => { try { return JSON.parse(a.detail_json) as { state?: string; day?: string; value?: number; failed?: number; wanted?: string }; } catch { return {}; } })();
+  console.log([a.created_at, a.target, d.failed ? `refused HTTP ${d.failed} (wanted ${d.wanted})` : `posted ${d.state}`, d.day, d.value].join('\t'));
+}
 summaryLine = `usage: ${rows.length} figure(s), ${first}..${last}${args['dry-run'] ? ' (dry run)' : ''}`;
 } catch (e) {
   // A GraphQL outage or schema drift is this job's failure too, and goes through the same alarm.
