@@ -10,7 +10,6 @@
 //
 // The file passes through as a Blob: no copy into JavaScript memory except its first 12 bytes, which are checked
 // against the PNG, JPEG and WebP signatures (the attachment's content_type is the client's claim, not checked here).
-// DRAFT copy throughout: the operator approves it before launch (docs/COPY.md).
 import { audit, now } from '../access.ts';
 import { botApi, UNKNOWN_MESSAGE } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
@@ -180,7 +179,7 @@ export async function imageButton(c: Ctx, customId: string): Promise<MessageRepl
   if (c.botToken && img.vault_channel_id && img.vault_message_id) {
     const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 });
     const del = await api.call('DELETE', `/channels/${img.vault_channel_id}/messages/${img.vault_message_id}`);
-    if (!del.ok && del.code !== UNKNOWN_MESSAGE) return ephemeral(`Rejected, but I couldn't delete the vault message (HTTP ${del.status}); you can delete it by hand.`);
+    if (!del.ok && del.code !== UNKNOWN_MESSAGE) return ephemeral("Rejected, but I couldn't delete the vault message; please delete it by hand.");
   }
   return ephemeral(`Rejected the screenshot of **${md(img.item)}** and deleted it from the vault.`);
 }

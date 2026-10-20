@@ -2,7 +2,7 @@
 // recipes, their components, the crafters and the data version; crafters are tiered by src/crafters.ts.
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -86,7 +86,7 @@ export function statFields(item: ItemRecord): EmbedField[] {
 
 /** "e19cc75… / 2026-10-19T17:35:56.514Z" → "e19cc75 (2026-10-19)". */
 export function shortVersion(v: string | null | undefined): string {
-  if (!v) return 'not imported';
+  if (!v) return 'not loaded';
   const [sha, at] = v.split(' / ');
   return `${sha.slice(0, 7)}${at && /^\d{4}-\d\d-\d\d/.test(at) ? ` (${at.slice(0, 10)})` : ''}`;
 }
@@ -116,7 +116,7 @@ export function trivialText(r: Pick<RecipeRow, 'trivial' | 'trivial_unconfirmed'
 export function ingredientsText(components: { name: string; qty: number }[], unknown: number): string {
   if (!components.length) return `Ingredients unknown (${unknown})`;
   const lines = components.map((c) => `${c.qty} × ${md(c.name)}`);
-  if (unknown > 0) lines.push(`plus ${unknown} unknown ingredient${unknown === 1 ? '' : 's'}`);
+  if (unknown > 0) lines.push(`plus ${plural(unknown, 'unknown ingredient')}`);
   return lines.join('\n');
 }
 
@@ -149,10 +149,10 @@ const TIER_TITLES: [Exclude<Tier, 'below'>, (r: RecipeRow, ts: string, w: number
 /** FR-3.1's Unknown note, kept to one short line: today every recipe is Unknown (order 9, ITEM 1). */
 export const CONFIRM_NOTE = '-# How this recipe is obtained is not recorded: check the crafter has it.';
 
-/** One line on how the recipe is obtained, per FR-3.1's table (DRAFT copy). */
+/** One line on how the recipe is obtained, per FR-3.1's table. */
 export function sourceLine(r: Pick<RecipeRow, 'acquisition' | 'faction' | 'note' | 'acquisition_corrected'>): string {
   const mark = r.acquisition_corrected && r.acquisition !== 'unknown' ? ` ${CORRECTED_MARK}` : '';
-  const note = r.note ? `: ${md(r.note)}` : '';
+  const note = r.note ? ` · Note: ${md(r.note)}` : '';
   switch (r.acquisition) {
     case 'vendor':
       return `**Vendor recipe**: may need buying first${note}.${mark}`;

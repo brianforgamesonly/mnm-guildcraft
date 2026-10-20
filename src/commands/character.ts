@@ -4,7 +4,7 @@
 import { audit, auditNewCharacter, now } from '../access.ts';
 import { markCharacterDirty } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
-import { ephemeral, md, optBool, optInt, optString, type MessageReply, type Option } from '../discord.ts';
+import { ephemeral, md, optBool, optInt, optString, plural, type MessageReply, type Option } from '../discord.ts';
 import { updateButtons } from './skills.ts';
 
 export const NAME_MAX = 32;
@@ -35,7 +35,7 @@ const snapshot = (ch: Pick<Character, 'name' | 'class' | 'level' | 'is_main' | '
 });
 
 export const OFFICERS_ONLY = "Only officers can change another member's characters.";
-export const TAKEN = (name: string) => `**${md(name)}** is already taken in this guild. Character names are unique, whatever their capitals.`;
+export const TAKEN = (name: string) => `**${md(name)}** is already taken in this guild. Character names are unique (capital letters don't count).`;
 
 export function notFound(c: Ctx, ownerId: string, name: string): string {
   return ownerId === c.userId ? `You have no character named **${md(name)}**.` : `<@${ownerId}> has no character named **${md(name)}**.`;
@@ -163,7 +163,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
     await c.db.batch(stmts);
     const skills = await c.db.prepare('SELECT count(*) AS n FROM character_skill WHERE character_id = ?').bind(existing.id).first<{ n: number }>();
     const n2 = skills?.n ?? 0;
-    return ephemeral(`Restored ${describe(after)}, which you removed earlier, with its ${n2} saved skill${n2 === 1 ? '' : 's'}.${isMain ? ' It is your main.' : ''}${notes}`, {
+    return ephemeral(`Restored ${describe(after)}, which you removed earlier, with its ${plural(n2, 'saved skill')}.${isMain ? ' It is your main.' : ''}${notes}`, {
       components: updateButtons([existing]),
     });
   }
@@ -216,7 +216,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
       const clash = await byKey(c.db, c.guild.id, key);
       if (clash && !clash.deleted_at) return ephemeral(TAKEN(n.name));
       if (clash && clash.owner_user_id === ch.owner_user_id)
-        return ephemeral(`There is a removed character named **${md(clash.name)}** on this account. \`/character add name:${inCode(clash.name)}\` restores it; or pick another name.`);
+        return ephemeral(`There is a removed character of yours named **${md(clash.name)}**. \`/character add name:${inCode(clash.name)}\` restores it; or pick another name.`);
       if (clash) return ephemeral(removedByOther(c, clash.name, clash.owner_user_id));
     }
     after.name = n.name;
@@ -234,7 +234,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   }
   if (main !== undefined) {
     if (ch.deleted_at) return ephemeral(`**${md(ch.name)}** is removed; it can't be made a main until it is restored.`);
-    if (!main && ch.is_main) return ephemeral(`**${md(ch.name)}** is the main. To change that, set \`main\` on another character.`);
+    if (!main && ch.is_main) return ephemeral(`**${md(ch.name)}** is your main. To change that, set \`main\` on another character.`);
     after.is_main = main ? 1 : 0;
   }
 
@@ -254,7 +254,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
     throw e;
   }
   const renamed = after.name !== ch.name ? ` (was **${md(ch.name)}**)` : '';
-  const mainLine = after.is_main && !ch.is_main ? ' It is now the main.' : '';
+  const mainLine = after.is_main && !ch.is_main ? ' It is now your main.' : '';
   return ephemeral([`Updated ${describe(after)}${renamed}.${mainLine}`, ...notes].join('\n'));
 }
 
@@ -277,6 +277,6 @@ export async function characterRemove(c: Ctx, opts: Option[]): Promise<MessageRe
     markCharacterDirty(c, ch.id),
   ]);
   const lines = [`Removed **${md(ch.name)}**. Its skills are kept: \`/character add name:${inCode(ch.name)}\` restores it.`];
-  if (next) lines.push(`**${md(next.name)}** is now the main.`);
+  if (next) lines.push(`**${md(next.name)}** is now your main.`);
   return ephemeral(lines.join('\n'));
 }

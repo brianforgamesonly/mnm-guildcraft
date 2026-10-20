@@ -188,20 +188,23 @@ describe('the departure run', () => {
     server.failPage = 1;
     let r = await departuresForGuild(env.DB, api(), await guildRow());
     expect(r.marked).toBe(0);
-    expect(r.stopped).toMatch(/member list refused: HTTP 500/);
+    // Order 11: status shows officers the plain note; the operator's detail stays in the run's errors (the logs).
+    expect(r.stopped).toBe('Discord refused the member list. Tell Joegandomi.');
+    expect(r.errors.join()).toMatch(/member list refused: HTTP 500/);
     server.failStatus = 403;
     server.failCode = 50001;
     r = await departuresForGuild(env.DB, api(), await guildRow());
     expect(r.marked).toBe(0);
-    expect(r.stopped).toContain('Server Members Intent');
-    expect(r.stopped).toContain('Privileged Gateway Intents');
+    expect(r.stopped).not.toContain('Server Members Intent');
+    expect(r.errors.join()).toContain('Server Members Intent');
+    expect(r.errors.join()).toContain('Privileged Gateway Intents');
     // A later page failing: the first page (1000 members) answered, the second refused.
     server.failStatus = 500;
     server.failPage = 2;
     server.members = Array.from({ length: MEMBER_PAGE + 5 }, (_, k) => `2000000000000${String(k).padStart(5, '0')}`);
     r = await departuresForGuild(env.DB, api(), await guildRow());
     expect(r).toMatchObject({ marked: 0, pages: 2 });
-    expect(r.stopped).toMatch(/HTTP 500/);
+    expect(r.errors.join()).toMatch(/HTTP 500/);
     server.failPage = undefined;
     server.members = [ANN];
     // The ceiling rule itself, then a run past it.
@@ -211,7 +214,8 @@ describe('the departure run', () => {
     expect(pastCeiling(3, 10)).toBe(false);
     for (let k = 4; k <= 12; k++) await env.DB.prepare("INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, ?, 'active', '2026-10-20T00:00:00Z')").bind(GUILD, `1000000000000001${String(k).padStart(2, '0')}`, `M${k}`).run();
     r = await departuresForGuild(env.DB, api(), await guildRow());
-    expect(r.stopped).toMatch(/^ceiling: 11 of 12/);
+    expect(r.stopped).toBe('11 of 12 members seemed to leave at once, so nobody was hidden (safety check).');
+    expect(r.errors.join()).toMatch(/^ceiling: 11 of 12/);
     expect(r.marked).toBe(0);
     expect(await count('member', "status = 'left'")).toBe(0);
     expect(await actions()).toEqual(expect.not.arrayContaining([expect.stringMatching(/^member.left/)]));
@@ -239,7 +243,7 @@ describe('the departure run', () => {
     server.members = [ANN, ...Array.from({ length: 30 }, (_, k) => `4000000000000000${String(k).padStart(2, '0')}`)];
     const first = await departuresForGuild(env.DB, api(), await guildRow());
     expect(first).toMatchObject({ marked: 12, notices_posted: MAX_NOTICES });
-    expect(first.stopped).toMatch(/2 notice\(s\) over the nightly 10/);
+    expect(first.stopped).toBe(`More notices come tomorrow night (up to ${MAX_NOTICES} a night).`);
     const second = await departuresForGuild(env.DB, api(), await guildRow());
     expect(second).toMatchObject({ marked: 0, notices_posted: 2, notices_pending: 2 });
   });

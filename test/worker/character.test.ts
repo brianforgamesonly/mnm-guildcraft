@@ -30,7 +30,7 @@ describe('/character add', () => {
     await add(ann, { name: 'Testchar' });
     const own = await add(ann, { name: 'testchar' });
     const other = await add(bo, { name: 'TESTCHAR' });
-    for (const r of [own, other]) expect(r.data.content).toMatch(/is already taken in this guild\. Character names are unique, whatever their capitals\.$/);
+    for (const r of [own, other]) expect(r.data.content).toMatch(/is already taken in this guild\. Character names are unique \(capital letters don't count\)\.$/);
     expect(await count('character')).toBe(1);
   });
 
@@ -96,9 +96,9 @@ describe('/character edit', () => {
   it('setting main clears the previous main in the same transaction; unsetting the main is refused', async () => {
     await add(ann, { name: 'One' });
     await add(ann, { name: 'Two' });
-    expect((await edit(ann, { name: 'Two', main: true })).data.content).toBe('Updated **Two**. It is now the main.');
+    expect((await edit(ann, { name: 'Two', main: true })).data.content).toBe('Updated **Two**. It is now your main.');
     expect((await chars()).map((c) => c.is_main)).toEqual([0, 1]);
-    expect((await edit(ann, { name: 'Two', main: false })).data.content).toBe('**Two** is the main. To change that, set `main` on another character.');
+    expect((await edit(ann, { name: 'Two', main: false })).data.content).toBe('**Two** is your main. To change that, set `main` on another character.');
     expect(await count('character', 'is_main = 1')).toBe(1);
   });
 
@@ -134,7 +134,7 @@ describe('/character remove', () => {
     await add(ann, { name: 'Newest', main: true });
     await send(cmd(ann, 'craft', 'set', { skill: 'Brewing', level: 7 }));
     const r = await remove(ann, { name: 'Newest' });
-    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: `/character add name:Newest` restores it.\n**Oldest** is now the main.');
+    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: `/character add name:Newest` restores it.\n**Oldest** is now your main.');
     expect((await chars()).map((c) => [c.name, c.is_main, c.deleted])).toEqual([['Oldest', 1, 0], ['Middle', 0, 0], ['Newest', 0, 1]]);
     expect(await count('character_skill')).toBe(1);
   });

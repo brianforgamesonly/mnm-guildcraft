@@ -14,15 +14,15 @@ export interface FreeLimit {
 
 export const FREE_LIMITS = {
   // "Accounts on the Workers Free plan have a daily request limit of 100,000 requests, resetting at midnight UTC."
-  workers_requests: { label: 'Worker requests', limit: 100_000, unit: 'count', source: 'https://developers.cloudflare.com/workers/platform/limits/' },
+  workers_requests: { label: 'Commands and lookups', limit: 100_000, unit: 'count', source: 'https://developers.cloudflare.com/workers/platform/limits/' },
   // D1 Free, rows read: "5 million / day" ("Free limits reset daily at 00:00 UTC").
-  d1_rows_read: { label: 'D1 rows read', limit: 5_000_000, unit: 'count', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
+  d1_rows_read: { label: 'Records read', limit: 5_000_000, unit: 'count', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
   // D1 Free, rows written: "100,000 / day".
-  d1_rows_written: { label: 'D1 rows written', limit: 100_000, unit: 'count', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
+  d1_rows_written: { label: 'Records written', limit: 100_000, unit: 'count', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
   // D1 Free, storage: "5 GB (total)" across the account's databases (decimal GB assumed: unverified, the page does not define it).
-  d1_storage_bytes: { label: 'D1 storage', limit: 5_000_000_000, unit: 'bytes', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
+  d1_storage_bytes: { label: 'Stored data', limit: 5_000_000_000, unit: 'bytes', source: 'https://developers.cloudflare.com/d1/platform/pricing/' },
   // Workers Logs, Workers Free: log events written "200,000 per day" (retention "3 Days").
-  workers_logs_events: { label: 'Workers Logs events', limit: 200_000, unit: 'count', source: 'https://developers.cloudflare.com/workers/observability/logs/workers-logs/' },
+  workers_logs_events: { label: 'Log entries', limit: 200_000, unit: 'count', source: 'https://developers.cloudflare.com/workers/observability/logs/workers-logs/' },
 } as const satisfies Record<string, FreeLimit>;
 
 export type Metric = keyof typeof FREE_LIMITS;

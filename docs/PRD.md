@@ -1,6 +1,6 @@
 # Guild Crafting Bot — PRD & Database Schema
 
-Oct 15, 2026 · @Brian
+Oct 15, 2026 · @Joegandomi
 
 ## Overview
 

@@ -1,7 +1,6 @@
 // The roster board's posts (order 5, PRD FR-5 and FR-9), rendered from rows with no I/O, so the Worker,
 // the tests and the read-only dry run (scripts/board/run.ts) all render the same way.
-// DRAFT copy — the operator approves the final text before launch (ORDER-RULES: Product; docs/COPY.md).
-import { EMBED_LIMITS, md, truncate, type Embed } from '../discord.ts';
+import { EMBED_LIMITS, md, plural, truncate, type Embed } from '../discord.ts';
 
 /** One ranked line: a live character's level in one tradeskill (removed characters and departed members are filtered in SQL). */
 export interface BoardLine {
@@ -22,8 +21,6 @@ export interface BoardMessage {
 const DAY_MS = 86_400_000;
 export const BOARD_COLOR = 0x8a6d3b;
 const NO_MENTIONS = { parse: [] as string[] };
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** "2 characters (1 member)": the count lives in the body, never the title (thread renames are tightly rate-limited). */
 export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
@@ -98,9 +95,9 @@ export const HOW_TO_GET_LISTED = [
   '2. `/craft set` a tradeskill level, or `/craft update` for several at once.',
   '3. Your tradeskill posts update within about a minute.',
   '',
-  // Order 9 (DRAFT copy): the new commands, one line each.
+  // Order 9: the new commands, one line each.
   '**Also**',
-  '`/craft find` who can make an item · `/craft know` mark a recipe you know · `/roster recipes` who knows the rare ones',
+  '`/craft find` who can make an item · `/craft know` mark a recipe you know · `/roster recipes` who knows the hard-to-get ones',
   '`/craft report` report wrong data · `/item image` send an item screenshot · `/craft help` every command',
 ].join('\n');
 

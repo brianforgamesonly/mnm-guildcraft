@@ -1,11 +1,11 @@
-// DRAFT copy — the operator approves the final text before launch (ORDER-RULES: Product; docs/COPY.md).
+// Approved copy (docs/COPY.md, order 11).
 // Lists every command in docs/PRD.md (FR-1 to FR-9). "(coming soon)" is derived, never typed: an entry
 // is marked when its commands are not in the registered definitions (src/commands/definitions.ts).
 import { DEFINED } from './definitions.ts';
 
-export const HELP_FOOTER = 'draft — more commands arrive over the next builds';
+export const HELP_FOOTER = 'Item data: Monsters and Memories Wiki (CC BY-SA 4.0)';
 export const COMING_SOON = '*(coming soon)*';
-/** Order 10: who runs GuildCraft, and how to reach them (the operator's decision of 2026-10-20). DRAFT copy. */
+/** Order 10: who runs GuildCraft, and how to reach them (the operator's decision of 2026-10-20). */
 export const CONTACT = 'Questions or problems: send a Discord message to **Joegandomi**, who runs GuildCraft.';
 
 /** A heading, or one entry: its commands and what they do. Every command in an entry shares one status. */
@@ -26,15 +26,15 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/roster skill'], text: 'everyone with a tradeskill, ranked' },
   { cmds: ['/roster member'], text: "one member's characters and skills" },
   { cmds: ['/roster top'], text: 'the top 3 in each tradeskill' },
-  { cmds: ['/roster recipes'], text: 'who knows the rare reputation and discovery recipes' },
+  { cmds: ['/roster recipes'], text: 'who knows the hard-to-get reputation and discovery recipes' },
   '**Items and data**',
   { cmds: ['/item image'], text: 'send a screenshot of an item window; it shows under **Stat image** once an officer approves it' },
-  { cmds: ['/craft report'], text: 'report a wrong trivial, component or source, or a missing recipe (or press **Report a problem**)' },
+  { cmds: ['/craft report'], text: 'report a wrong trivial, ingredient or source, or a missing recipe (or press **Report a problem**)' },
   { cmds: ['/recipe add'], text: 'record a recipe the data is missing (officer-approved)' },
   '**Officers and admins**',
   { cmds: ['/guildcraft setup'], text: 'set the member and officer roles, the roster board forum, and the review and vault channels' },
-  { cmds: ['/guildcraft status'], text: 'data version, last import, the roster board, departures, the backup and free-tier usage' },
-  { cmds: ['/recipe source', '/recipe override'], text: "set how a recipe is obtained; correct its trivial or components (this server only)" },
+  { cmds: ['/guildcraft status'], text: 'data version, last data update, the board, the channels and the backup' },
+  { cmds: ['/recipe source', '/recipe override'], text: "set how a recipe is obtained; correct its trivial or ingredients (this server only)" },
   { cmds: ['/guildcraft remove-member'], text: 'remove a departed member' },
   { cmds: ['/guildcraft rebuild-board'], text: 'recreate the roster board posts in A→Z order' },
   { cmds: ['/craft help'], text: 'this guide' },
@@ -49,5 +49,5 @@ export const HELP_TEXT = [
   ),
   '',
   CONTACT,
-  `-# ${HELP_FOOTER} · Item data: Monsters and Memories Wiki (CC BY-SA 4.0)`,
+  `-# ${HELP_FOOTER}`,
 ].join('\n');

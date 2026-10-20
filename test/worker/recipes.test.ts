@@ -96,7 +96,7 @@ describe('/craft know and /craft forget', () => {
 
   it('marks the main by default, confirms which character, and forget offers only marked recipes', async () => {
     const k = await send(cmd(ann, 'craft', 'know', { recipe: 'Copper Sword' }));
-    expect(k.data.content).toBe('Marked **Copper Sword · Blacksmithing · trivial 20** as known for **Annsmith**. `/craft find` now shows Annsmith with the known-recipe marker; `/craft forget` undoes it.');
+    expect(k.data.content).toBe('Marked **Copper Sword · Blacksmithing · trivial 20** as known for **Annsmith**: `/craft find` shows the 📜 marker. `/craft forget` undoes it.');
     expect(k.data.flags).toBe(64);
     const again = await send(cmd(ann, 'craft', 'know', { recipe: `#${swordRecipe}` }));
     expect(again.data.content).toBe('**Annsmith** already has **Copper Sword · Blacksmithing · trivial 20** marked known.');
@@ -216,7 +216,7 @@ describe('/recipe source (officers; the guild correction layer)', () => {
     expect(text(await find('Copper Sword'))).toContain('Has skill, recipe not marked known · 2');
     await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'vendor', note: 'Smith in Bastion' }));
     const v = await find('Copper Sword');
-    expect(text(v)).toContain('**Vendor recipe**: may need buying first: Smith in Bastion. (guild-corrected)');
+    expect(text(v)).toContain('**Vendor recipe**: may need buying first · Note: Smith in Bastion. (guild-corrected)');
     expect(text(v)).toContain('Reliable (Blacksmithing 20+) · 2');
     await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'unknown' }));
     const u = await find('Copper Sword');
@@ -268,7 +268,7 @@ describe('/recipe override (officers)', () => {
 
   it('corrects trivial and components (case-insensitive exact names), marks them, and reset removes it', async () => {
     const r = await send(cmd(officer, 'recipe', 'override', { item: `#${swordRecipe}`, trivial: 30, components: '2 copper bar, 1 FLUX' }));
-    expect(r.data.content).toMatch(/now shows trivial \*\*30\*\* and components 2 × copper bar, 1 × FLUX/);
+    expect(r.data.content).toMatch(/now shows trivial \*\*30\*\* and ingredients 2 × copper bar, 1 × FLUX/);
     const f = await find('Copper Sword');
     expect(f.data.embeds![1].title).toBe('Blacksmithing · trivial 30 (guild-corrected)');
     expect(f.data.embeds![1].description).toMatch(/^2 × Copper Bar\n1 × Flux\n-# Ingredients \(guild-corrected\)/);
