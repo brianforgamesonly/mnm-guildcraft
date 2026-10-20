@@ -8,8 +8,5 @@ export interface Env {
   GUILDCRAFT_COPY?: string;
 }
 
-/**
- * Order 11: operator-only information (copy markers, token and job internals, platform usage) appears only in the
- * dev copy. The one decider: any value but 'dev', unset included, is production.
- */
-export const isDevCopy = (copy: string | undefined) => copy === 'dev';
+/** Order 11's one decider of dev and production, held in src/copy.ts (order 12). */
+export { isDevCopy } from './copy.ts';

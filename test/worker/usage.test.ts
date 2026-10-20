@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';
 import { BOARD_CALL_CAP, botApi as makeApi } from '../../src/board/api.ts';
 import { FREE_LIMITS, METRICS } from '../../src/limits.ts';
+import { render } from '../../src/operator-text.ts';
 import { alertText, ofLimit, tokenExpiryText, usageAlerts, usageLines } from '../../src/usage.ts';
 import { judgesLevel, levelChanges, levelSummary, type DayFigure } from '../../scripts/usage/level-alarm.ts';
 import { all, reset } from '../db.ts';
@@ -18,6 +19,7 @@ const UNSET = { env: { ...TOKEN.env, GUILDCRAFT_COPY: undefined } };
 const REVIEW = '600000000000000010';
 const admin = as('100000000000000001', { permissions: ADMIN, nick: 'Ann' });
 const NOW = Date.parse('2026-10-21T06:00:00Z');
+const DEV = 'dev';
 const H = 3_600_000;
 
 let posted: { channel: string; body: any }[];
@@ -87,7 +89,7 @@ describe('/guildcraft status: backup and usage', () => {
     const fresh = new Date(Date.now() - 2 * H).toISOString();
     await env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, size_bytes, token_expires) VALUES (?, ?, 'ok', 2500000, '2027-10-20')").bind(fresh, fresh).run();
     let s = await status();
-    expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token expires 2027-10-20 · 2\.5 MB\n/);
+    expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · 2\.5 MB\n\*\*Backup token:\*\* expires 2027-10-20\n/);
     const old = new Date(Date.now() - 37 * H).toISOString();
     await env.DB.prepare('UPDATE backup_status SET finished_at = ?').bind(old).run();
     s = await status();
@@ -100,16 +102,17 @@ describe('/guildcraft status: backup and usage', () => {
       env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, token_expires) VALUES (?, ?, 'ok', 'unknown')").bind(t(26), t(26)),
       env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, error, token_expires) VALUES (?, ?, 'failed', 'push refused', 'unknown')").bind(t(2), t(2)),
     ]);
-    expect(await status()).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token: no expiry \(owner's note\) · latest run <t:\d+:f> \*\*failed\*\*: push refused/);
+    expect(await status()).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · latest run <t:\d+:f> \*\*failed\*\*: push refused\. If this repeats, tell Joegandomi\.\n\*\*Backup token:\*\* no expiry \(owner's note\)\n/);
   });
   it('order 10: status says which copy answered (the tests run as the dev environment)', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     expect(await status()).toMatch(/^## GuildCraft status\n\*\*Copy:\*\* dev\n/);
   });
   it('the token text: a read expiry wins; without one, the note decides', () => {
-    expect(tokenExpiryText('2027-10-20T00:00:00.000Z')).toBe('token expires 2027-10-20');
-    expect(tokenExpiryText('unknown')).toBe("token: no expiry (owner's note)");
-    expect(tokenExpiryText(null, 'unset')).toBe('token expires unknown');
+    // Order 12, ITEM 2: the three wordings of the token's own line.
+    expect(tokenExpiryText('2027-10-20T00:00:00.000Z')).toBe('expires 2027-10-20');
+    expect(tokenExpiryText('unknown')).toBe("no expiry (owner's note)");
+    expect(tokenExpiryText(null, 'unset')).toBe('expiry unknown');
   });
   it('shows each metric as N of LIMIT (P%) for the last full day, with the 7-day peak', async () => {
     const now = Date.now();
@@ -133,7 +136,8 @@ describe('/guildcraft status: backup and usage', () => {
   });
   it('marks the usage figures overdue after 36 hours', () => {
     const lines = usageLines([{ metric: 'workers_requests', day: '2026-10-19', value: 5, measured_at: new Date(NOW - 37 * H).toISOString() }], NOW);
-    expect(lines[0]).toContain('**figures overdue** (not measured in 36 hours)');
+    expect(render(DEV, lines)).toContain('**figures overdue** (not measured in 36 hours)');
+    expect(render('production', lines)).toBe('');
   });
   it('every limit names its docs page (the hand-kept list, src/limits.ts)', () => {
     for (const m of METRICS) expect(FREE_LIMITS[m].source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
@@ -146,15 +150,15 @@ describe('the usage warning (mocked Discord)', () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await withReview();
     await usage([['d1_rows_read', '2026-10-20', 612_000], ['workers_requests', '2026-10-20', 900]]);
-    let log = await usageAlerts(env.DB, api(), NOW);
+    let log = await usageAlerts(env.DB, api(), DEV, NOW);
     expect(log).toMatchObject({ guilds: 1, posted: 1, errors: [] });
-    expect(posted).toEqual([{ channel: REVIEW, body: { content: alertText('d1_rows_read', { metric: 'd1_rows_read', day: '2026-10-20', value: 612_000, measured_at: '' }, 'over'), allowed_mentions: { parse: [] } } }]);
+    expect(posted).toEqual([{ channel: REVIEW, body: { content: render(DEV, [alertText('d1_rows_read', { metric: 'd1_rows_read', day: '2026-10-20', value: 612_000, measured_at: '' }, 'over')]), allowed_mentions: { parse: [] } } }]);
     expect(posted[0].body.content).toContain('612,000 of 5,000,000 (12%)');
     expect((await alerts()).map((a) => [a.target, JSON.parse(a.detail_json).state])).toEqual([['usage:d1_rows_read', 'over']]);
     // The next cron runs, and the next day still over: nothing new.
-    log = await usageAlerts(env.DB, api(), NOW + 15 * 60_000);
+    log = await usageAlerts(env.DB, api(), DEV, NOW + 15 * 60_000);
     await usage([['d1_rows_read', '2026-10-21', 700_000]], new Date(NOW + 23 * H).toISOString());
-    log = await usageAlerts(env.DB, api(), NOW + 24 * H);
+    log = await usageAlerts(env.DB, api(), DEV, NOW + 24 * H);
     expect(log.posted).toBe(0);
     expect(posted).toHaveLength(1);
   });
@@ -162,23 +166,23 @@ describe('the usage warning (mocked Discord)', () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await withReview();
     await usage([['d1_rows_read', '2026-10-20', 612_000]]);
-    await usageAlerts(env.DB, api(), NOW);
+    await usageAlerts(env.DB, api(), DEV, NOW);
     // Same day: the figure is corrected under 10%; the change waits for the next UTC day.
     await usage([['d1_rows_read', '2026-10-20', 1_000]]);
-    expect((await usageAlerts(env.DB, api(), NOW + H)).posted).toBe(0);
-    expect((await usageAlerts(env.DB, api(), NOW + 24 * H)).posted).toBe(1);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW + H)).posted).toBe(0);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW + 24 * H)).posted).toBe(1);
     expect(posted[1].body.content).toContain('back under the 10% target');
     expect((await alerts()).map((a) => JSON.parse(a.detail_json).state)).toEqual(['over', 'under']);
   });
   it('posts nothing for figures under 10%, for stale figures, or without a review channel', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await usage([['d1_rows_read', '2026-10-20', 612_000]]);
-    expect((await usageAlerts(env.DB, api(), NOW)).guilds).toBe(0); // no review channel
+    expect((await usageAlerts(env.DB, api(), DEV, NOW)).guilds).toBe(0); // no review channel
     await withReview();
     await usage([['d1_rows_read', '2026-10-20', 612_000]], new Date(NOW - 37 * H).toISOString());
-    expect(await usageAlerts(env.DB, api(), NOW)).toMatchObject({ posted: 0, stale: 1 });
+    expect(await usageAlerts(env.DB, api(), DEV, NOW)).toMatchObject({ posted: 0, stale: 1 });
     await usage([['d1_rows_read', '2026-10-20', 1_000]]);
-    expect((await usageAlerts(env.DB, api(), NOW)).posted).toBe(0);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW)).posted).toBe(0);
     expect(posted).toEqual([]);
   });
   it('a refused post keeps the old state and is retried the next UTC day, not every 15 minutes', async () => {
@@ -187,11 +191,11 @@ describe('the usage warning (mocked Discord)', () => {
     await usage([['d1_rows_read', '2026-10-20', 612_000]]);
     const ok = botApi.handle!;
     botApi.handle = (m, p, b) => (m === 'POST' ? new Response(JSON.stringify({ message: 'Missing Access', code: 50001 }), { status: 403 }) : ok(m, p, b));
-    expect((await usageAlerts(env.DB, api(), NOW)).errors).toEqual(['usage alert: HTTP 403 code 50001']);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW)).errors).toEqual(['usage alert: HTTP 403 code 50001']);
     expect((await alerts()).map((a) => JSON.parse(a.detail_json))).toMatchObject([{ state: 'under', failed: 403, wanted: 'over' }]);
     botApi.handle = ok;
-    expect((await usageAlerts(env.DB, api(), NOW + 15 * 60_000)).posted).toBe(0);
-    expect((await usageAlerts(env.DB, api(), NOW + 24 * H)).posted).toBe(1);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW + 15 * 60_000)).posted).toBe(0);
+    expect((await usageAlerts(env.DB, api(), DEV, NOW + 24 * H)).posted).toBe(1);
     expect(posted).toHaveLength(1);
   });
   it('leaves the calls it is told to keep for what runs after it', async () => {
@@ -199,7 +203,7 @@ describe('the usage warning (mocked Discord)', () => {
     await withReview();
     await usage([['d1_rows_read', '2026-10-20', 612_000]]);
     const tight = makeApi('test-bot-token', { d1: () => 0, discord: 0, cap: 7, deadline: Date.now() + 60_000 });
-    expect((await usageAlerts(env.DB, tight, NOW, 6)).posted).toBe(0);
+    expect((await usageAlerts(env.DB, tight, DEV, NOW, 6)).posted).toBe(0);
     expect(posted).toEqual([]);
   });
   it('runs inside the */15 cron (job → usage_daily → cron → one line)', async () => {
@@ -212,6 +216,14 @@ describe('the usage warning (mocked Discord)', () => {
     expect(posted.map((p) => p.channel)).toEqual([REVIEW]);
     expect(posted[0].body.content).toContain('**Commands and lookups** was 15,000 of 100,000 (15%)');
     expect(GUILD).toBeTruthy();
+  });
+  it('order 12: usageAlerts itself posts and records nothing outside dev (the line is OperatorText)', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await withReview();
+    await usage([['d1_rows_read', '2026-10-20', 612_000]]);
+    for (const copy of ['production', undefined]) expect((await usageAlerts(env.DB, api(), copy, NOW)).posted).toBe(0);
+    expect(posted).toEqual([]);
+    expect(await alerts()).toEqual([]);
   });
   it('order 11: the production cron posts no usage warning in any channel', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
@@ -245,9 +257,11 @@ describe('/guildcraft status: production omits the operator-only lines; dev keep
     await seed();
     const s = await status();
     expect(s).toMatch(/^## GuildCraft status\n\*\*Copy:\*\* dev\n/);
-    expect(s).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 1 warning · failed: D1 HTTP 500: 7500 internal\n/);
+    // Order 12: dev shows what production shows plus the operator's segments (the raw error before the next step).
+    expect(s).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 1 warning · failed: D1 HTTP 500: 7500 internal\. If this repeats, tell Joegandomi\.\n/);
     expect(s).toContain('**Last test update:**');
-    expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token expires 2027-10-20 · latest run <t:\d+:f> \*\*failed\*\*: push refused: 403\n/);
+    expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · latest run <t:\d+:f> \*\*failed\*\*: push refused: 403\. If this repeats, tell Joegandomi\.\n\*\*Backup token:\*\* expires 2027-10-20\n/);
+    expect(s.split('\n').find((l) => l.startsWith('**Backup:**'))).not.toContain('token');
     expect(s).toContain('**Usage against the free-tier limits**');
   });
   for (const [name, opts] of [['production', PROD], ['unset (counts as production)', UNSET]] as const)

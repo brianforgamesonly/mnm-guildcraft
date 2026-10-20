@@ -657,7 +657,7 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     const mark = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
     let usage: Record<string, unknown> = { gc: 'usage-alert' };
     try {
-      usage = { ...(await usageAlerts(counted.db, api, controller.scheduledTime)) };
+      usage = { ...(await usageAlerts(counted.db, api, env.GUILDCRAFT_COPY, controller.scheduledTime)) };
     } catch (e) {
       usage.err = e instanceof Error ? e.message : String(e);
     }

@@ -14,5 +14,6 @@
     "isolatedModules": true,
     "skipLibCheck": true
   },
-  "include": ["src", "test", "scripts/import/core.ts", "scripts/import/binding.ts"]
+  "include": ["src", "test", "scripts/import/core.ts", "scripts/import/binding.ts"],
+  "exclude": ["test/fixtures/operator-text-misuse.ts"]
 }

@@ -1,0 +1,305 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`production departure notes in status, as at 2b204aa > list refused (production) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: Discord refused the member list. Tell Joegandomi."`;
+
+exports[`production departure notes in status, as at 2b204aa > list refused (unset) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: Discord refused the member list. Tell Joegandomi."`;
+
+exports[`production departure notes in status, as at 2b204aa > list unread (a skipped page) (production) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: Couldn't read the full member list, so nobody was hidden. If this repeats, tell Joegandomi."`;
+
+exports[`production departure notes in status, as at 2b204aa > list unread (a skipped page) (unset) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: Couldn't read the full member list, so nobody was hidden. If this repeats, tell Joegandomi."`;
+
+exports[`production departure notes in status, as at 2b204aa > more tomorrow (production) 1`] = `"**Departures:** 12 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 12 marked · note: More notices come tomorrow night (up to 10 a night)."`;
+
+exports[`production departure notes in status, as at 2b204aa > more tomorrow (unset) 1`] = `"**Departures:** 12 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 12 marked · note: More notices come tomorrow night (up to 10 a night)."`;
+
+exports[`production departure notes in status, as at 2b204aa > no review channel (production) 1`] = `"**Departures:** 1 member marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 1 marked · note: no review channel set: notices wait until /guildcraft setup review: is set"`;
+
+exports[`production departure notes in status, as at 2b204aa > no review channel (unset) 1`] = `"**Departures:** 1 member marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 1 marked · note: no review channel set: notices wait until /guildcraft setup review: is set"`;
+
+exports[`production departure notes in status, as at 2b204aa > the ceiling (production) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: 10 of 11 members seemed to leave at once, so nobody was hidden (safety check)."`;
+
+exports[`production departure notes in status, as at 2b204aa > the ceiling (unset) 1`] = `"**Departures:** 0 members marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 0 marked · note: 10 of 11 members seemed to leave at once, so nobody was hidden (safety check)."`;
+
+exports[`production departure notes in status, as at 2b204aa > the notice itself (posted in the review channel; at most 10 a night) 1`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "components": [
+        {
+          "custom_id": "dep:remove:100000000000000002",
+          "label": "Remove characters",
+          "style": 4,
+          "type": 2,
+        },
+        {
+          "custom_id": "dep:keep:100000000000000002",
+          "label": "Keep",
+          "style": 2,
+          "type": 2,
+        },
+      ],
+      "type": 1,
+    },
+  ],
+  "embeds": [
+    {
+      "color": 9807270,
+      "description": "**Characters**
+**Bochar** (WIZ, level 30)
+
+While they are away their characters are hidden from \`/craft find\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+**Remove characters** removes the characters (their skills are kept; \`/character add\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
+      "title": "Bo left the server",
+    },
+  ],
+}
+`;
+
+exports[`production departure notes in status, as at 2b204aa > the notice itself (posted in the review channel; at most 10 a night) 2`] = `
+{
+  "allowed_mentions": {
+    "parse": [],
+  },
+  "components": [
+    {
+      "components": [
+        {
+          "custom_id": "dep:remove:100000000000000003",
+          "label": "Remove characters",
+          "style": 4,
+          "type": 2,
+        },
+        {
+          "custom_id": "dep:keep:100000000000000003",
+          "label": "Keep",
+          "style": 2,
+          "type": 2,
+        },
+      ],
+      "type": 1,
+    },
+  ],
+  "embeds": [
+    {
+      "color": 9807270,
+      "description": "**Characters**
+No characters registered.
+
+While they are away their characters are hidden from \`/craft find\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+**Remove characters** removes the characters (their skills are kept; \`/character add\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
+      "title": "A member left the server",
+    },
+  ],
+}
+`;
+
+exports[`production departure notes in status, as at 2b204aa > the review channel refused a notice (production) 1`] = `"**Departures:** 1 member marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 1 marked · note: the review channel refused a notice; the rest wait for the next run"`;
+
+exports[`production departure notes in status, as at 2b204aa > the review channel refused a notice (unset) 1`] = `"**Departures:** 1 member marked as left · last nightly check <t:1792562400:f> (<t:1792562400:R>) · 1 marked · note: the review channel refused a notice; the rest wait for the next run"`;
+
+exports[`production status: every branch, as at 2b204aa > board set, unset review and vault (production) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** none yet
+**Roster board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
+**Board order:** A→Z
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > board set, unset review and vault (unset) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** none yet
+**Roster board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
+**Board order:** A→Z
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > dry run newer than import (production) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792555200:f>"
+`;
+
+exports[`production status: every branch, as at 2b204aa > dry run newer than import (unset) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792555200:f>"
+`;
+
+exports[`production status: every branch, as at 2b204aa > failed (production) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792468800:f> · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi."
+`;
+
+exports[`production status: every branch, as at 2b204aa > failed (unset) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792468800:f> · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi."
+`;
+
+exports[`production status: every branch, as at 2b204aa > failed without detail (production) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last never succeeded · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi. · **overdue**: no backup in over 36 hours"
+`;
+
+exports[`production status: every branch, as at 2b204aa > failed without detail (unset) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last never succeeded · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi. · **overdue**: no backup in over 36 hours"
+`;
+
+exports[`production status: every branch, as at 2b204aa > latest nightly run (production) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792396800:f> (<t:1792396800:R>) · 1 warning · ok
+**Latest nightly run:** <t:1792483200:f> (<t:1792483200:R>) · **refused**. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > latest nightly run (unset) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792396800:f> (<t:1792396800:R>) · 1 warning · ok
+**Latest nightly run:** <t:1792483200:f> (<t:1792483200:R>) · **refused**. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > latest nightly run failed, no real import (production) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > latest nightly run failed, no real import (unset) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > none yet (production) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** none yet
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > none yet (unset) 1`] = `
+"## GuildCraft status
+**Data version:** no completed import yet
+**Last data update:** none yet
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** none yet"
+`;
+
+exports[`production status: every branch, as at 2b204aa > ok (production) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
+**Board order:** A→Z
+**Review channel:** <#600000000000000010>
+**Waiting for officers:** 0 open reports · 0 pending screenshots in <#600000000000000030>
+**Departures:** 0 members marked as left · last nightly check <t:1792486800:f> (<t:1792486800:R>) · 1 marked
+**Backup:** last <t:1792555200:f> · 2.5 MB"
+`;
+
+exports[`production status: every branch, as at 2b204aa > ok (unset) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
+**Board order:** A→Z
+**Review channel:** <#600000000000000010>
+**Waiting for officers:** 0 open reports · 0 pending screenshots in <#600000000000000030>
+**Departures:** 0 members marked as left · last nightly check <t:1792486800:f> (<t:1792486800:R>) · 1 marked
+**Backup:** last <t:1792555200:f> · 2.5 MB"
+`;
+
+exports[`production status: every branch, as at 2b204aa > overdue (production) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792429200:f> · 900 B · **overdue**: no backup in over 36 hours"
+`;
+
+exports[`production status: every branch, as at 2b204aa > overdue (unset) 1`] = `
+"## GuildCraft status
+**Data version:** \`v2026.10.19\`
+**Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
+**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Review channel:** not set (\`/guildcraft setup review:\`)
+**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Departures:** 0 members marked as left · last nightly check never
+**Backup:** last <t:1792429200:f> · 900 B · **overdue**: no backup in over 36 hours"
+`;

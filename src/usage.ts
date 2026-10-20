@@ -3,6 +3,7 @@
 // The figures arrive from Actions: scripts/usage/run.ts writes usage_daily (one row per UTC day per metric,
 // account-wide) and scripts/backup/run.ts writes backup_status. The Worker holds no Cloudflare credential.
 // Order 11: the usage section, the backup token and raw errors show only in the dev copy (src/env.ts isDevCopy).
+// Order 12: each is made here as OperatorText (src/operator-text.ts), so only the dev copy's render() shows it.
 //
 // The usage warning in a channel (an alarm, ORDER-RULES order 8; order 11 override 1: the dev copy only, so the
 // operator's test server. Production's operator alarm is the usage job's failed run, scripts/usage/level-alarm.ts):
@@ -16,6 +17,7 @@
 import { budgetLeft, type BotApi } from './board/api.ts';
 import { plural } from './discord.ts';
 import { BACKUP_TOKEN_EXPIRY_NOTE, FREE_LIMITS, METRICS, STALE_MS, USAGE_TARGET_SHARE, type Metric } from './limits.ts';
+import { joinSegments, operatorText, render, type OperatorText, type Segment } from './operator-text.ts';
 
 export interface UsageRow {
   metric: string;
@@ -60,8 +62,12 @@ export function latestByMetric(rows: UsageRow[]): Map<Metric, UsageRow> {
   return out;
 }
 
-/** The status section: one line per metric for the last full day, with its 7-day peak; stale after 36 hours. */
-export function usageLines(rows: UsageRow[], nowMs: number): string[] {
+/** The status section (operator-only): one line per metric for the last full day, with its 7-day peak; stale after 36 hours. */
+export function usageLines(rows: UsageRow[], nowMs: number): OperatorText[] {
+  return usageText(rows, nowMs).map(operatorText);
+}
+
+function usageText(rows: UsageRow[], nowMs: number): string[] {
   const latest = latestByMetric(rows);
   if (!latest.size) return ['**Usage against the free-tier limits:** none yet'];
   const measured = rows.reduce((m, r) => (r.measured_at > m ? r.measured_at : m), '');
@@ -79,27 +85,30 @@ export function usageLines(rows: UsageRow[], nowMs: number): string[] {
   return lines;
 }
 
-/** The token part of the backup line: its expiry date, else the owner's note, else unknown. */
+/** The backup token's expiry: its date, else the owner's note, else unknown. */
 export function tokenExpiryText(tokenExpires: string | null | undefined, note = BACKUP_TOKEN_EXPIRY_NOTE): string {
-  if (tokenExpires && tokenExpires !== 'unknown') return `token expires ${tokenExpires.slice(0, 10)}`;
-  return note === 'none' ? "token: no expiry (owner's note)" : 'token expires unknown';
+  if (tokenExpires && tokenExpires !== 'unknown') return `expires ${tokenExpires.slice(0, 10)}`;
+  return note === 'none' ? "no expiry (owner's note)" : 'expiry unknown';
 }
 
-/**
- * What follows a failed status: in dev, the raw error ("failed: <error>"); in production, where guild officers read
- * it, the next step (order 11).
- */
-export const failureText = (error: string | null | undefined, dev: boolean, max = 200) =>
-  !error ? '' : dev ? `: ${error.slice(0, max)}` : '. If this repeats, tell Joegandomi.';
+/** Order 12, ITEM 2: the token on its own line, directly under the Backup line (operator-only). */
+export const tokenLine = (row: BackupRow | undefined): OperatorText => operatorText(`**Backup token:** ${tokenExpiryText(row?.token_expires)}`);
 
-/** "Backup: last <time>", with the token's expiry (or the owner's no-expiry note) in dev; overdue after 36 hours. */
-export function backupLine(row: (BackupRow & { last_ok: string | null }) | undefined, nowMs: number, dev: boolean): string {
-  if (!row) return '**Backup:** none yet';
-  const parts = [`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`, ...(dev ? [tokenExpiryText(row.token_expires)] : [])];
-  if (row.result !== 'ok') parts.push(`latest run ${ts(row.finished_at)} **failed**${failureText(row.error ?? 'no detail', dev, 160)}`);
-  else if (row.size_bytes) parts.push(fmtBytes(row.size_bytes));
-  if (stale(row.last_ok, nowMs)) parts.push('**overdue**: no backup in over 36 hours');
-  return `**Backup:** ${parts.join(' · ')}`;
+/**
+ * What follows a failed status: the raw error (operator-only, ": <error>"), then the next step guild officers read
+ * (order 11). Production shows only the next step.
+ */
+export const failureText = (error: string | null | undefined, max = 200): Segment[] =>
+  !error ? [] : [operatorText(`: ${error.slice(0, max)}`), '. If this repeats, tell Joegandomi.'];
+
+/** "Backup: last <time>"; overdue after 36 hours. */
+export function backupLine(row: (BackupRow & { last_ok: string | null }) | undefined, nowMs: number): Segment[] {
+  if (!row) return ['**Backup:** none yet'];
+  const parts: Segment[][] = [[`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`]];
+  if (row.result !== 'ok') parts.push([`latest run ${ts(row.finished_at)} **failed**`, ...failureText(row.error ?? 'no detail', 160)]);
+  else if (row.size_bytes) parts.push([fmtBytes(row.size_bytes)]);
+  if (stale(row.last_ok, nowMs)) parts.push(['**overdue**: no backup in over 36 hours']);
+  return ['**Backup:** ', ...joinSegments(parts, ' · ')];
 }
 
 // ---------------------------------------------------------------- the warning, in the cron
@@ -110,11 +119,13 @@ export const ALERT_GUILDS_SQL = `SELECT g.id, g.review_channel_id,
     WHERE a.id IN (SELECT max(id) FROM audit_log WHERE guild_id = g.id AND action = 'usage.alert' GROUP BY target)) AS alerts
   FROM guild g WHERE g.review_channel_id IS NOT NULL ORDER BY g.id`;
 
-/** The one line posted, in the dev copy only (order 11). */
-export function alertText(m: Metric, row: UsageRow, state: 'over' | 'under'): string {
-  return state === 'over'
-    ? `Free-tier usage: **${FREE_LIMITS[m].label}** was ${ofLimit(m, row.value)} on ${row.day}, at or over GuildCraft's ${USAGE_TARGET_SHARE * 100}% target. Nothing stops until 100%; \`/guildcraft status\` shows every figure.`
-    : `Free-tier usage: **${FREE_LIMITS[m].label}** is back under the ${USAGE_TARGET_SHARE * 100}% target: ${ofLimit(m, row.value)} on ${row.day}.`;
+/** The one line posted, in the dev copy only (order 11; operator-only, order 12). */
+export function alertText(m: Metric, row: UsageRow, state: 'over' | 'under'): OperatorText {
+  return operatorText(
+    state === 'over'
+      ? `Free-tier usage: **${FREE_LIMITS[m].label}** was ${ofLimit(m, row.value)} on ${row.day}, at or over GuildCraft's ${USAGE_TARGET_SHARE * 100}% target. Nothing stops until 100%; \`/guildcraft status\` shows every figure.`
+      : `Free-tier usage: **${FREE_LIMITS[m].label}** is back under the ${USAGE_TARGET_SHARE * 100}% target: ${ofLimit(m, row.value)} on ${row.day}.`,
+  );
 }
 
 export interface AlertLog {
@@ -126,8 +137,11 @@ export interface AlertLog {
   errors: string[];
 }
 
-/** One D1 call when nothing changed (both reads in one batch); one Discord call per line posted, then one D1 write. */
-export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now(), keep = 0): Promise<AlertLog> {
+/**
+ * One D1 call when nothing changed (both reads in one batch); one Discord call per line posted, then one D1 write.
+ * `copy`: the line is operator-only, so in any copy but dev it renders empty and nothing is posted (order 12).
+ */
+export async function usageAlerts(db: D1Database, api: BotApi, copy: string | undefined, nowMs = Date.now(), keep = 0): Promise<AlertLog> {
   const log: AlertLog = { gc: 'usage-alert', guilds: 0, posted: 0, stale: 0, errors: [] };
   const [usage, guilds] = await db.batch([db.prepare(USAGE_SQL).bind(...usageParams(nowMs)), db.prepare(ALERT_GUILDS_SQL)]);
   const latest = latestByMetric(usage.results as unknown as UsageRow[]);
@@ -149,6 +163,8 @@ export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now(
           continue;
         }
         const state = stateOf(m, row.value);
+        const content = render(copy, [alertText(m, row, state)]);
+        if (!content) continue;
         const last = alerts.find((a) => a.target === `usage:${m}`);
         const lastState = (() => {
           try {
@@ -160,7 +176,7 @@ export async function usageAlerts(db: D1Database, api: BotApi, nowMs = Date.now(
         if (state === lastState || last?.at.slice(0, 10) === today) continue;
         // `keep`: calls left for whatever runs after (a post and the final write need 2 of their own).
         if (budgetLeft(api.budget) < keep + 2 || Date.now() >= api.budget.deadline) return log;
-        const sent = await api.call('POST', `/channels/${g.review_channel_id}/messages`, { content: alertText(m, row, state), allowed_mentions: { parse: [] } });
+        const sent = await api.call('POST', `/channels/${g.review_channel_id}/messages`, { content, allowed_mentions: { parse: [] } });
         const recordAs = (s: string, extra: Record<string, unknown> = {}) =>
           db
             .prepare("INSERT INTO audit_log (guild_id, actor, action, target, detail_json, created_at) VALUES (?, 'system', 'usage.alert', ?, ?, ?)")
