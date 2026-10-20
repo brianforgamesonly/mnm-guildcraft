@@ -44,9 +44,9 @@ interface TypeRef {
   kind: string;
   ofType?: TypeRef | null;
 }
-const named = (t: TypeRef | null | undefined): string | null => (!t ? null : t.name ?? named(t.ofType));
-// One __schema read, resolved in memory. (A walk by __type(name:) came back null on Cloudflare in the first CI run
-// of this order, 2026-10-20, run 39377921643.)
+// Cloudflare names its wrapper types (NON_NULL, LIST) "" rather than null (CI run 39382439208), so `||`, never `??`.
+const named = (t: TypeRef | null | undefined): string | null => (!t ? null : t.name || named(t.ofType));
+// One __schema read, resolved in memory.
 const T = 'name kind ofType { name kind ofType { name kind ofType { name kind ofType { name kind } } } }';
 const schemaRead = (
   await gql(`{ __schema { queryType { name } types { name kind fields { name type { ${T} } args { name type { ${T} } } } inputFields { name } } } }`)
@@ -104,6 +104,17 @@ let previousFailing: boolean | null = null;
 const DAY = 86_400_000;
 let summaryLine = '';
 try {
+/**
+ * How a dataset is filtered and grouped by UTC day, from its introspected filter and dimension names: date_geq/date_leq
+ * with the date dimension (the D1 docs' example), else datetime_geq/datetime_leq with date, datetimeHour or datetime.
+ */
+function dayShape(ds: { dimensions: string[]; filter: string[] }) {
+  const dim = ['date', 'datetimeHour', 'datetime'].find((d) => ds.dimensions.includes(d));
+  if (!dim) return null;
+  if (ds.filter.includes('date_geq') && ds.filter.includes('date_leq')) return { dim, geq: 'date_geq', leq: 'date_leq', type: 'Date', day: true };
+  if (ds.filter.includes('datetime_geq') && ds.filter.includes('datetime_leq')) return { dim, geq: 'datetime_geq', leq: 'datetime_leq', type: 'Time', day: false };
+  return null;
+}
 const found = await introspect();
 /** The first dataset/block holding each wanted field (sum before max for counts; max for a size). */
 const where: Partial<Record<(typeof WANTED)[number], { dataset: string; block: string }>> = {};
@@ -121,8 +132,9 @@ console.log(
         ds,
         {
           blocks_with_wanted_fields: Object.fromEntries(Object.entries(v.blocks).map(([b, f]) => [b, f.filter((x) => (WANTED as readonly string[]).includes(x))]).filter(([, f]) => f.length)),
-          dimensions_date: v.dimensions.filter((d) => /^(date|databaseId|scriptName)$/.test(d)),
-          filter_date: v.filter.filter((x) => /^date_(geq|leq)$/.test(x)),
+          dimensions_date: v.dimensions.filter((d) => /^(date|datetimeHour|datetime|databaseId|scriptName)$/.test(d)),
+          filter_date: v.filter.filter((x) => /^(date|datetime)_(geq|leq)$/.test(x)),
+          day_shape: dayShape(v),
         },
       ]),
     ),
@@ -135,7 +147,7 @@ for (const f of WANTED) {
   const w = where[f];
   if (!w) continue;
   const ds = found.datasets[w.dataset];
-  if (!ds.dimensions.includes('date') || !ds.filter.includes('date_geq') || !ds.filter.includes('date_leq')) missing.push(f);
+  if (!dayShape(ds)) missing.push(f);
   if (f === 'databaseSizeBytes' && !ds.dimensions.includes('databaseId')) missing.push(f);
 }
 if (missing.length) throw new Error(`introspection: no usable dataset for ${[...new Set(missing)].join(', ')}`);
@@ -143,12 +155,13 @@ if (args['introspect-only']) {
   // One small query against a D1 dataset: yesterday's account-wide rows read (order 8, ITEM 0).
   const y = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
   const w = where.rowsRead!;
+  const s = dayShape(found.datasets[w.dataset])!;
   const data = await gql(
-    `query($a: String!, $d: Date!) { viewer { accounts(filter: { accountTag: $a }) { ${w.dataset}(limit: 10, filter: { date_geq: $d, date_leq: $d }) { ${w.block} { rowsRead } dimensions { date } } } } }`,
-    { a: account, d: y },
+    `query($a: String!, $f: ${s.type}!, $t: ${s.type}!) { viewer { accounts(filter: { accountTag: $a }) { ${w.dataset}(limit: 100, filter: { ${s.geq}: $f, ${s.leq}: $t }) { ${w.block} { rowsRead } dimensions { ${s.dim} } } } } }`,
+    s.day ? { a: account, f: y, t: y } : { a: account, f: `${y}T00:00:00Z`, t: `${y}T23:59:59Z` },
   );
   const rows = (data.viewer.accounts[0]?.[w.dataset] ?? []) as any[];
-  console.log(`D1 probe: ${w.dataset}.${w.block}.rowsRead for ${y}: ${rows.reduce((s, r) => s + (Number(r[w.block].rowsRead) || 0), 0)} (${rows.length} group(s))`);
+  console.log(`D1 probe: ${w.dataset}.${w.block}.rowsRead for ${y} (filter ${s.geq}, dimension ${s.dim}): ${rows.reduce((n, r) => n + (Number(r[w.block].rowsRead) || 0), 0)} (${rows.length} group(s))`);
   process.exit(0);
 }
 
@@ -166,16 +179,33 @@ const last = dayList.at(-1)!;
 
 async function daily(field: (typeof WANTED)[number]): Promise<Map<string, number>> {
   const w = where[field]!;
+  const s = dayShape(found.datasets[w.dataset])!;
   const perDb = field === 'databaseSizeBytes';
   const data = await gql(
-    `query($a: String!, $f: Date!, $t: Date!) { viewer { accounts(filter: { accountTag: $a }) {
-      ${w.dataset}(limit: 10000, filter: { date_geq: $f, date_leq: $t }) { ${w.block} { ${field} } dimensions { date ${perDb ? 'databaseId' : ''} } } } } }`,
-    { a: account, f: first, t: last },
+    `query($a: String!, $f: ${s.type}!, $t: ${s.type}!) { viewer { accounts(filter: { accountTag: $a }) {
+      ${w.dataset}(limit: 10000, filter: { ${s.geq}: $f, ${s.leq}: $t }) { ${w.block} { ${field} } dimensions { ${s.dim} ${perDb ? 'databaseId' : ''} } } } } }`,
+    s.day ? { a: account, f: first, t: last } : { a: account, f: `${first}T00:00:00Z`, t: `${last}T23:59:59Z` },
   );
   const rows = (data.viewer.accounts[0]?.[w.dataset] ?? []) as any[];
+  // A read that fills its limit may be cut short: a failed measurement, never an undercount.
+  if (rows.length >= 10000) throw new Error(`${w.dataset}: ${rows.length} groups, at the query limit: the figures may be incomplete`);
   const out = new Map<string, number>();
-  // Storage: each database's largest size that day, summed over the account's databases ("5 GB (total)").
-  for (const r of rows) out.set(r.dimensions.date, (out.get(r.dimensions.date) ?? 0) + (Number(r[w.block][field]) || 0));
+  if (perDb && s.dim !== 'date') {
+    // Storage by hour or finer: each database's largest size per day, then summed over the databases.
+    const max = new Map<string, number>();
+    for (const r of rows) {
+      const k = `${String(r.dimensions[s.dim]).slice(0, 10)}|${r.dimensions.databaseId}`;
+      max.set(k, Math.max(max.get(k) ?? 0, Number(r[w.block][field]) || 0));
+    }
+    for (const [k, v] of max) out.set(k.slice(0, 10), (out.get(k.slice(0, 10)) ?? 0) + v);
+    return out;
+  }
+  // Counts: summed per day. Storage by date: each database's size that day, summed over the account's databases
+  // ("5 GB (total)").
+  for (const r of rows) {
+    const d = String(r.dimensions[s.dim]).slice(0, 10);
+    out.set(d, (out.get(d) ?? 0) + (Number(r[w.block][field]) || 0));
+  }
   return out;
 }
 
@@ -220,10 +250,14 @@ try {
 for (const n of notes) console.log(`note: ${n}`);
 
 // An implausible control is presumed broken: the */15 cron alone makes 96 Worker requests a day, and the board
-// sweep reads D1 on each of them, so a zero (or missing) yesterday for either is a failed measurement.
+// sweep reads D1 on each of them, so a zero (or missing) yesterday for either is a failed measurement. Storage is
+// sampled on its own schedule (unverified when yesterday's lands), so a missing day there is a note: the day is not
+// written and status shows the last day measured.
 const y = dayList.at(-1)!;
-for (const m of ['workers_requests', 'd1_rows_read', 'd1_storage_bytes'] as Metric[])
+for (const m of ['workers_requests', 'd1_rows_read'] as Metric[])
   if (!(rows.find((r) => r.metric === m && r.day === y)?.value ?? 0)) problems.push(`${m} reads 0 for ${y}: implausible`);
+if (!rows.some((r) => r.metric === 'd1_storage_bytes' && r.day === y && r.value > 0)) console.log(`note: d1_storage_bytes: no figure for ${y} yet`);
+for (let i = rows.length - 1; i >= 0; i--) if (rows[i].metric === 'd1_storage_bytes' && rows[i].value <= 0) rows.splice(i, 1);
 
 console.log('\nmetric\tday\tvalue\tof limit');
 for (const r of rows) console.log([r.metric, r.day, r.value, `${((r.value / FREE_LIMITS[r.metric].limit) * 100).toFixed(2)}%`].join('\t'));
