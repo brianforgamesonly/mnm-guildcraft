@@ -7,13 +7,16 @@ import { audit, now } from '../access.ts';
 import { botApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optString, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
-import { issueLabel, REPORT_ISSUES } from '../recipes.ts';
+import { issueLabel, issuesFor, REPORT_ISSUES, type ReportKind } from '../recipes.ts';
 import { OFFICER_ONLY } from './members.ts';
 
-/** A member may have this many reports open at once (order 9, ITEM 2). */
+/** A member may have this many reports open at once, recipe and item reports together (orders 9 and 13). */
 export const MAX_OPEN_REPORTS = 5;
 export const DETAILS_MAX = 300;
 export const REPORT_MODAL_PREFIX = 'rptm:';
+/** Order 13: the item card's Report a problem (a modal at once), and that modal's submit. */
+export const ITEM_REPORT_PREFIX = 'rpi:';
+export const ITEM_REPORT_MODAL_PREFIX = 'rpim:';
 export const FIXED_PREFIX = 'rpf:';
 export const DISMISS_PREFIX = 'rpd:';
 const ISSUE_INPUT = 'issue';
@@ -21,6 +24,7 @@ const DETAILS_INPUT = 'details';
 
 interface ReportRow {
   id: number;
+  kind: ReportKind;
   item: string | null;
   reporter: string;
   issue: string;
@@ -34,18 +38,24 @@ interface ReportRow {
 const ts = (iso: string) => `<t:${Math.floor(Date.parse(iso) / 1000)}:f>`;
 
 export function reportCard(r: ReportRow): Embed {
+  const item = r.kind === 'item';
   return {
-    title: truncate(`Report: ${r.item ?? 'unknown item'}`, 256),
-    description: [`**Issue:** ${issueLabel(r.issue)}`, `**From:** <@${r.reporter}> · ${ts(r.created_at)}`, r.details ? `**Details:** ${md(r.details)}` : null].filter(Boolean).join('\n'),
-    footer: { text: `Report #${r.id} · fix the data with /recipe override or /recipe source, then mark it fixed` },
+    title: truncate(`${item ? 'Item report' : 'Report'}: ${r.item ?? 'unknown item'}`, 256),
+    description: [`**Issue:** ${issueLabel(r.issue, r.kind)}`, `**From:** <@${r.reporter}> · ${ts(r.created_at)}`, r.details ? `**Details:** ${md(r.details)}` : null].filter(Boolean).join('\n'),
+    footer: {
+      text: item
+        ? `Report #${r.id} · item data comes from the community wiki: correct it there, then mark it fixed`
+        : `Report #${r.id} · fix the data with /recipe override or /recipe source, then mark it fixed`,
+    },
   };
 }
 
 const cardButtons = (id: number) => [row([button(`${FIXED_PREFIX}${id}`, 'Mark fixed', 3), button(`${DISMISS_PREFIX}${id}`, 'Dismiss', STYLE_SECONDARY)])];
 
 /** Files a report: one row and its audit row, then the card in the review channel (when one is set). */
-async function fileReport(c: Ctx, item: { id: number; name: string }, issue: string, rawDetails: string | undefined): Promise<MessageReply> {
-  if (!REPORT_ISSUES.some((i) => i.value === issue)) return ephemeral(`Pick an issue from the list: ${REPORT_ISSUES.map((i) => i.label).join(', ')}.`);
+async function fileReport(c: Ctx, item: { id: number; name: string }, issue: string, rawDetails: string | undefined, kind: ReportKind = 'recipe'): Promise<MessageReply> {
+  const issues = issuesFor(kind);
+  if (!issues.some((i) => i.value === issue)) return ephemeral(`Pick an issue from the list: ${issues.map((i) => i.label).join(', ')}.`);
   const details = rawDetails?.trim() || null;
   if (details && details.length > DETAILS_MAX) return ephemeral(`Details can be at most ${DETAILS_MAX} characters. Nothing was saved.`);
   const open = await c.db.prepare("SELECT count(*) AS n FROM recipe_report WHERE guild_id = ? AND reporter = ? AND status = 'open'").bind(c.guild.id, c.userId).first<{ n: number }>();
@@ -54,14 +64,14 @@ async function fileReport(c: Ctx, item: { id: number; name: string }, issue: str
   const createdAt = now();
   const [inserted] = await c.db.batch([
     c.db
-      .prepare("INSERT INTO recipe_report (guild_id, item_id, reporter, issue, details, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?) RETURNING id")
-      .bind(c.guild.id, item.id, c.userId, issue, details, createdAt),
-    audit(c.db, c.guild.id, c.userId, 'report.create', `item:${item.id}`, null, { issue }),
+      .prepare("INSERT INTO recipe_report (guild_id, item_id, reporter, issue, details, status, created_at, kind) VALUES (?, ?, ?, ?, ?, 'open', ?, ?) RETURNING id")
+      .bind(c.guild.id, item.id, c.userId, issue, details, createdAt, kind),
+    audit(c.db, c.guild.id, c.userId, 'report.create', `item:${item.id}`, null, { issue, kind }),
   ]);
   const id = (inserted.results as { id: number }[])[0].id;
-  const saved = `Thanks: your report on **${md(item.name)}** (${issueLabel(issue)}) is saved`;
+  const saved = `Thanks: your report on **${md(item.name)}** (${issueLabel(issue, kind)}) is saved`;
   if (!c.guild.review_channel_id || !c.botToken) return ephemeral(`${saved} for your officers.`);
-  const card = reportCard({ id, item: item.name, reporter: c.userId, issue, details, status: 'open', resolved_by: null, resolved_at: null, created_at: createdAt });
+  const card = reportCard({ id, kind, item: item.name, reporter: c.userId, issue, details, status: 'open', resolved_by: null, resolved_at: null, created_at: createdAt });
   const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 });
   const sent = await api.call('POST', `/channels/${c.guild.review_channel_id}/messages`, { embeds: [card], components: cardButtons(id), allowed_mentions: { parse: [] } });
   if (!sent.ok) console.error('report card refused', JSON.stringify(api.log));
@@ -82,11 +92,11 @@ export async function craftReport(c: Ctx, opts: Option[]): Promise<MessageReply>
  * rpt:<item id>, the Report a problem button: a modal at once (type 9; a modal cannot follow a deferral). An issue
  * select inside a Label, then an optional details box. No D1 here beyond the caller's member gate.
  */
-export function reportModal(itemId: number): InteractionReply {
+export function reportModal(itemId: number, kind: ReportKind = 'recipe'): InteractionReply {
   return {
     type: InteractionResponseType.MODAL,
     data: {
-      custom_id: `${REPORT_MODAL_PREFIX}${itemId}`,
+      custom_id: `${kind === 'item' ? ITEM_REPORT_MODAL_PREFIX : REPORT_MODAL_PREFIX}${itemId}`,
       title: 'Report a problem',
       components: [
         {
@@ -98,7 +108,7 @@ export function reportModal(itemId: number): InteractionReply {
             min_values: 1,
             max_values: 1,
             required: true,
-            options: REPORT_ISSUES.map((i) => ({ label: i.label, value: i.value })),
+            options: issuesFor(kind).map((i) => ({ label: i.label, value: i.value })),
           },
         },
         {
@@ -124,12 +134,13 @@ export function modalValues(components: ModalComponent[] | undefined): Map<strin
   return out;
 }
 
-/** rptm:<item id>: the modal's submit (deferred, private). */
+/** rptm:<item id> (a recipe report) or rpim:<item id> (an item report): the modal's submit (deferred, private). */
 export async function reportSubmitted(c: Ctx, customId: string, components: ModalComponent[] | undefined): Promise<MessageReply> {
-  const item = await findItem(c.db, { id: Number(customId.slice(REPORT_MODAL_PREFIX.length)) });
+  const kind: ReportKind = customId.startsWith(ITEM_REPORT_MODAL_PREFIX) ? 'item' : 'recipe';
+  const item = await findItem(c.db, { id: Number(customId.slice((kind === 'item' ? ITEM_REPORT_MODAL_PREFIX : REPORT_MODAL_PREFIX).length)) });
   if (!item) return ephemeral('That item is no longer in the data. Nothing was saved.');
   const v = modalValues(components);
-  return fileReport(c, item, v.get(ISSUE_INPUT) ?? '', v.get(DETAILS_INPUT));
+  return fileReport(c, item, v.get(ISSUE_INPUT) ?? '', v.get(DETAILS_INPUT), kind);
 }
 
 /** rpf:<id> / rpd:<id>: an officer records the outcome. The card is edited to say who and when; its buttons go. */
@@ -141,7 +152,7 @@ export async function reportButton(c: Ctx, customId: string): Promise<MessageRep
   const [upd, read] = await c.db.batch([
     c.db.prepare("UPDATE recipe_report SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND guild_id = ? AND status = 'open'").bind(fixed ? 'fixed' : 'dismissed', c.userId, at, id, c.guild.id),
     c.db
-      .prepare('SELECT r.id, i.name AS item, r.reporter, r.issue, r.details, r.status, r.resolved_by, r.resolved_at, r.created_at FROM recipe_report r LEFT JOIN item i ON i.id = r.item_id WHERE r.id = ? AND r.guild_id = ?')
+      .prepare('SELECT r.id, r.kind, i.name AS item, r.reporter, r.issue, r.details, r.status, r.resolved_by, r.resolved_at, r.created_at FROM recipe_report r LEFT JOIN item i ON i.id = r.item_id WHERE r.id = ? AND r.guild_id = ?')
       .bind(id, c.guild.id),
   ]);
   const r = (read.results as ReportRow[])[0];

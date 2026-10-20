@@ -22,7 +22,16 @@ export const REPORT_ISSUES = [
   { value: 'missing', label: 'Missing recipe' },
   { value: 'other', label: 'Other' },
 ] as const;
-export const issueLabel = (v: string) => REPORT_ISSUES.find((i) => i.value === v)?.label ?? v;
+/** Order 13: issues with an item's own data (recipe_report.kind = 'item'), from /gear find's item card. */
+export const ITEM_REPORT_ISSUES = [
+  { value: 'stats', label: 'Wrong stats' },
+  { value: 'item_source', label: 'Wrong source' },
+  { value: 'class', label: 'Wrong class' },
+  { value: 'other', label: 'Other' },
+] as const;
+export type ReportKind = 'recipe' | 'item';
+export const issuesFor = (kind: ReportKind) => (kind === 'item' ? ITEM_REPORT_ISSUES : REPORT_ISSUES);
+export const issueLabel = (v: string, kind: ReportKind = 'recipe') => issuesFor(kind).find((i) => i.value === v)?.label ?? v;
 
 /** A recipe with this guild's corrections applied. */
 export interface GuildRecipe {
