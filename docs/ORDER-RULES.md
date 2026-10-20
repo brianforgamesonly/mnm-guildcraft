@@ -132,3 +132,10 @@ Treat the clock as authoritative over any date an order states.
 
 - Every FINAL lists each GitHub Actions run that failed during the order, with its id and reason; each one emails the owner. Don't dispatch a run you expect to fail. Test locally first, and dispatch only to confirm.
   Its scope: every run that failed between RECEIVED and FINAL, scheduled runs included. Each is marked "mine" or "scheduled"; a designed alarm (for example the usage job's level alarm) is marked "alarm, intended", with its reason.
+
+## Order 13
+
+- Order 13's explicit override 1 of the earlier orders' import scope (recipes, items, tradeskills and classes only): the import also keeps the source's mobs (table `mob`) and items' from, wikiZones, soldBy and categories (`item.origin_json`). The nodes section stays discarded.
+- Order 13's explicit override 3 of "Never add a column for a value the table already holds": generated columns read from `item.stats_json` (`ac`, `dmg`, `delay`, `ratio`, `skill`, `handed`), and three derived columns rewritten on every import (`item.class_mask`, `item.slot_mask`, `item.source_mask`). `game_class.bit` is a named departure (a class's bit, assigned once, never reused).
+- D1 Free allows 100,000 rows written a day, account-wide, index writes included. One import run writes at most `WRITE_CEILING` (40,000) rows, counted from D1's own rows_written as it goes (scripts/import/core.ts). It stops between whole statement groups, records status `partial`, and the next run resumes. The first import after a schema change is measured on a local database first (`npm run bench:import-writes`).
+- Whenever the source holds a value that a /gear find choice list lacks, the import warns: a new slot, weapon type, stat or resist (src/gear/vocab.ts), or a change in the class list. Commands are then re-registered. The warning never fails the run.

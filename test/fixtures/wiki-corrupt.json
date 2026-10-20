@@ -4,6 +4,7 @@
     "Copper Bar": { "hasPage": true, "icon": 42, "tradeskills": "Smelting" }
   },
   "nodes": {},
+  "mobs": {},
   "recipes": [
     { "tradeskill": "Smelting", "result": { "item": "Copper Bar" }, "components": [], "trivial": "ten" },
     { "tradeskill": "", "result": { "qty": 1, "item": "Copper Sword" }, "components": [{ "qty": "three", "item": "Copper Bar" }] }

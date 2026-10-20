@@ -7,9 +7,10 @@
 // first request after an import completes (status 'ok') reloads the list; an isolate never serves a list
 // older than the latest completed import. A key of NULL (no completed import yet) is never trusted.
 import { nocase } from './collation.ts';
+import { FINISHED_IMPORT } from './import-status.ts';
 
-/** The latest completed import, as "<id>:<source_version>". */
-const IMPORT_KEY = "(SELECT id || ':' || source_version FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1)";
+/** The latest completed import (ok, or partial: order 13), as "<id>:<source_version>". */
+const IMPORT_KEY = `(SELECT id || ':' || source_version FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1)`;
 
 const LISTS = {
   skills: 'SELECT name FROM tradeskill',

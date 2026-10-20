@@ -51,7 +51,9 @@ export function dump(db: DatabaseSync, parentsFirst: string[], ignore: readonly 
   for (const t of tables) lines.push(`${ifNotExists(t.sql)};`);
   const order = [...parentsFirst.filter((n) => tables.some((t) => t.name === n)), ...tables.map((t) => t.name).filter((n) => !parentsFirst.includes(n))];
   for (const name of order) {
-    for (const row of db.prepare(`SELECT * FROM ${q(name)}`).all() as Record<string, unknown>[]) {
+    // Order 13: generated columns (table_xinfo hidden 2 or 3) are computed by the target, and refuse an INSERT.
+    const stored = (db.prepare(`SELECT name FROM pragma_table_xinfo(?) WHERE hidden = 0 ORDER BY cid`).all(name) as { name: string }[]).map((c) => c.name);
+    for (const row of db.prepare(`SELECT ${stored.map(q).join(', ')} FROM ${q(name)}`).all() as Record<string, unknown>[]) {
       const cols = Object.keys(row);
       lines.push(`INSERT${ignore.includes(name) ? ' OR IGNORE' : ''} INTO ${q(name)} (${cols.map(q).join(', ')}) VALUES (${cols.map((c) => literal(row[c])).join(', ')});`);
     }

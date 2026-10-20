@@ -8,7 +8,7 @@ import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
 import { BACKUP_SQL, backupLine, failureText, tokenLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
-import { ALARM_IMPORT, REAL_IMPORT } from '../import-status.ts';
+import { ALARM_IMPORT, FINISHED_IMPORT, REAL_IMPORT } from '../import-status.ts';
 import { operatorText, render, type Line } from '../operator-text.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
@@ -234,7 +234,7 @@ function warningsCount(json: string | null): number | null {
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const nowMs = Date.now();
   const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup, queue] = await c.db.batch([
-    c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
+    c.db.prepare(`SELECT source_version, finished_at FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1`),
     // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (the operator's check of order 7).
     // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
     c.db.prepare(`SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`),

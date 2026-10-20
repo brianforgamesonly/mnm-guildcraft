@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
-import { buildPlan, buildStatements, IMPORT_TABLES, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
+import { buildPlan, buildStatements, IMPORT_TABLES, loadExisting, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
 import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
 import { IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
@@ -28,7 +28,7 @@ const componentsOf = (key: string) =>
 
 beforeEach(async () => {
   await env.DB.batch(
-    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class'].map((t) =>
+    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class', 'mob'].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );
@@ -47,12 +47,19 @@ describe('import', () => {
 
     const second = await load(fixture());
     expect(second.status).toBe('ok');
-    for (const t of ['tradeskill', 'item', 'recipe', 'recipe_component'] as const) {
+    for (const t of ['tradeskill', 'recipe', 'recipe_component'] as const) {
       expect(second.written![t].statements, t).toBeGreaterThan(0); // statements were sent: not a vacuous zero
       expect(second.written![t].rows_written, t).toBe(0);
       expect(second.written![t].changes, t).toBe(0);
     }
+    // Order 13: unchanged item rows are not sent at all (itemDiffers, as the dry run predicts) ...
+    expect(second.written!.item).toEqual({ statements: 0, rows_written: 0, changes: 0 });
+    expect(second.rowsWritten).toBe(2); // its own data_import row, opened then closed
     expect(Object.values(second.predicted!).flatMap((x) => Object.values(x)).every((n) => n === 0)).toBe(true);
+    // ... and when they are sent, the statements' own guards write 0: not a vacuous zero either.
+    const unfiltered = buildStatements(buildPlan(fixture(), await loadExisting(db)), now());
+    expect(unfiltered.filter((s) => s.table === 'item').length).toBeGreaterThan(0);
+    expect((await db.run(unfiltered.map((s) => s.sql))).reduce((n, m) => n + m.rows_written, 0)).toBe(0);
     const runs = await all<{ status: string; source_version: string; items: number; recipes: number }>('SELECT status, source_version, items, recipes FROM data_import ORDER BY id');
     expect(runs).toEqual([
       { status: 'ok', source_version: `${'a'.repeat(40)} / 2026-10-14T07:00:59.321Z`, items: 12, recipes: 6 },
@@ -101,7 +108,7 @@ describe('import', () => {
       { name: 'Rune of Fire', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Rune_of_Fire' },
     ]);
     const again = await load(f);
-    expect(again.written!.item.statements).toBeGreaterThan(0);
+    expect(again.predicted!.item).toEqual({ insert: 0, update: 0 });
     expect(again.written!.item.rows_written).toBe(0);
   });
 
@@ -183,7 +190,7 @@ describe('import', () => {
     await load(fixture());
     await env.DB.prepare("INSERT INTO data_import (source, source_version, status, started_at, finished_at) VALUES ('t', 'v', 'refused', 'x', 'x'), ('t', 'v', 'dry-run', 'x', 'x')").run();
     expect(await one(`SELECT status FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`)).toEqual({ status: 'ok' });
-    expect(Object.keys(IMPORT_STATUS).sort()).toEqual(['dry-run', 'failed', 'ok', 'refused', 'running']);
+    expect(Object.keys(IMPORT_STATUS).sort()).toEqual(['dry-run', 'failed', 'ok', 'partial', 'refused', 'running']);
   });
 
   it('a structure failure in a dry run does not unlock real writes', async () => {
@@ -202,6 +209,7 @@ describe('import', () => {
       recipe: { insert: 6, update: 0, deactivate: 0 },
       recipe_component: { insert: 8, update: 0, delete: 0 },
       game_class: { insert: 0, update: 0, deactivate: 0 },
+      mob: { insert: 0, update: 0, deactivate: 0 },
     });
     expect(await one('SELECT (SELECT count(*) FROM tradeskill) + (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM recipe_component) AS n')).toEqual({ n: 0 });
     expect(await all('SELECT status, items, recipes FROM data_import')).toEqual([{ status: 'dry-run', items: 12, recipes: 6 }]);
@@ -219,20 +227,23 @@ describe('game_class (classes derived at import)', () => {
   };
 
   it('order 10: every statement writes exactly the table it names, and together they cover IMPORT_TABLES (the backup reads that list)', () => {
-    const empty = { tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map() };
-    const stmts = buildStatements(buildPlan(withClasses(), empty), '2026-10-20T00:00:00Z');
+    const empty = { tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(), indexes: {} };
+    const f = withClasses();
+    f.mobs['a test mob'] = { title: 'A test mob', zone: '[[Night Harbor]]' };
+    const stmts = buildStatements(buildPlan(f, empty), '2026-10-20T00:00:00Z');
     for (const s of stmts) expect(/^(?:INSERT INTO|UPDATE|DELETE FROM) (\w+)/.exec(s.sql)?.[1], s.sql.slice(0, 60)).toBe(s.table);
     expect([...new Set(stmts.map((s) => s.table))].sort()).toEqual([...IMPORT_TABLES].sort());
   });
 
-  it('upper-cases, cuts at "<", drops ALL/NONE and keeps codes on at least 1% of class-carrying items', async () => {
+  it('upper-cases, strips markup, drops ALL/NONE and keeps codes on at least 1% of class-carrying items', async () => {
     const res = await load(withClasses());
     expect(res.status).toBe('ok');
+    // Order 13: "<br>SPB" is markup then SPB (classTokens), no longer a token with nothing before its "<".
     expect(res.classes).toEqual({
       carrying: 121,
       kept: [{ code: 'WAR', item_count: 119 }, { code: 'CLR', item_count: 60 }],
-      dropped: [{ code: 'SHB', items: 1 }],
-      ignored: [{ token: 'ALL', items: 59 }, { token: '<br>SPB', items: 1 }],
+      dropped: [{ code: 'SHB', items: 1 }, { code: 'SPB', items: 1 }],
+      ignored: [{ token: 'ALL', items: 59 }],
     });
     expect(await all('SELECT code, item_count FROM game_class ORDER BY code')).toEqual([
       { code: 'CLR', item_count: 60 },
