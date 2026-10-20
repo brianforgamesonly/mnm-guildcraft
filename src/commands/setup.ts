@@ -2,13 +2,14 @@
 // The review channel arrived in order 7; the vault channel arrives in order 9.
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { ADMINISTRATOR, ephemeral, GUILD_FORUM, GUILD_TEXT, optString, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
+import { ADMINISTRATOR, ephemeral, GUILD_FORUM, GUILD_TEXT, optString, plural, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
 import { channelPermissions } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
-import { BACKUP_SQL, backupLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
+import { BACKUP_SQL, backupLine, failureText, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
 import { ALARM_IMPORT, REAL_IMPORT } from '../import-status.ts';
+import { isDevCopy } from '../env.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -98,12 +99,12 @@ export async function everyoneCanView(token: string, guildId: string, channelId:
   return (bits & VIEW_CHANNEL) === VIEW_CHANNEL;
 }
 
-/** The setup reply's warning when the review channel is open to everyone (DRAFT copy, docs/COPY.md: approved before launch). */
+/** The setup reply's warning when the review channel is open to everyone. */
 export const reviewPublicWarning = (id: string) =>
-  `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) and usage warnings will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
-/** The vault's warning when @everyone can view it (order 9: warn, never refuse; DRAFT copy). */
+  `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
+/** The vault's warning when @everyone can view it (order 9: warn, never refuse). */
 export const vaultPublicWarning = (id: string) =>
-  `**Note:** everyone in the server can see <#${id}>, so screenshots waiting for approval will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel. The setting is saved either way.`;
+  `**Note:** everyone in the server can see <#${id}>, so screenshots waiting for approval will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
 export const reviewUnreadWarning =(id: string) => `**Note:** I couldn't check who can see <#${id}>. Departure notices should go to a channel only officers can see.`;
 
 const CHANNEL_KINDS = {
@@ -115,12 +116,12 @@ const CHANNEL_KINDS = {
   review: {
     type: GUILD_TEXT,
     permissions: REVIEW_PERMISSIONS,
-    wrongType: (id: string) => `<#${id}> is not a text channel. The review channel needs a text channel (a private one, for officers), then pick it here.`,
+    wrongType: (id: string) => `<#${id}> is not a text channel. Create a private text channel for officers, then pick it here.`,
   },
   vault: {
     type: GUILD_TEXT,
     permissions: VAULT_PERMISSIONS,
-    wrongType: (id: string) => `<#${id}> is not a text channel. The vault needs a private text channel for officers, then pick it here.`,
+    wrongType: (id: string) => `<#${id}> is not a text channel. Create a private text channel for officers, then pick it here.`,
   },
 } as const;
 
@@ -141,7 +142,7 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
   const missing = missingPermissions(bits, want.permissions);
   if (missing.length)
     return {
-      refusal: `Nothing was changed. In <#${channelId}> GuildCraft is missing: **${missing.join('**, **')}**.\nGive the GuildCraft role these in the channel's settings (Permissions), then run this again.`,
+      refusal: `Nothing was changed. In <#${channelId}> GuildCraft is missing: **${missing.join('**, **')}**.\nGive MNM-Guildcraft these permissions in the channel's settings (Permissions), then run this again.`,
     };
   return { ok: true, source };
 }
@@ -208,7 +209,7 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     c.effects.board = true;
     lines.push(
       toCreate
-        ? `Building the board now: ${toCreate} tradeskill post${toCreate === 1 ? '' : 's'} plus a pinned index post. Most appear within a minute, all within 15 minutes.`
+        ? `Building the board now: ${plural(toCreate, 'tradeskill post')} plus a pinned index post. Most appear within a minute, all within 15 minutes. If nothing shows, reload Discord.`
         : 'The board already has every tradeskill post; refreshing it now.',
     );
     if (moved) lines.push(`The old board's posts in <#${before.board_channel_id}> are left as they are.`);
@@ -281,27 +282,30 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const ok =(okImport.results as { source_version: string; finished_at: string | null }[])[0];
   const last = (lastImport.results as { status: string; started_at: string; finished_at: string | null; warnings: string | null; error: string | null }[])[0];
   const b = (board.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
-  const warnings = last ? warningsCount(last.warnings) : null;
+  // Order 11: operator-only lines (the copy marker, test updates, raw errors, the backup token, platform usage) show
+  // only in the dev copy (src/env.ts).
+  const dev = isDevCopy(c.copy);
+  const warningsText = (json: string | null) => {
+    const n = warningsCount(json);
+    return n === null ? 'warnings unreadable' : plural(n, 'warning');
+  };
   const dry = (lastDryRun.results as { id: number; finished_at: string | null; started_at: string; warnings: string | null; real_id: number | null }[])[0];
   // A dry run newer than the last real import gets its own line; older ones are not shown.
   const dryLine =
-    dry && (dry.real_id === null || dry.id > dry.real_id)
-      ? [`**Last dry run:** ${when(dry.finished_at ?? dry.started_at)} · wrote nothing · ${(() => {
-          const n = warningsCount(dry.warnings);
-          return n === null ? 'warnings unreadable' : `${n} warning${n === 1 ? '' : 's'}`;
-        })()}`]
+    dev && dry && (dry.real_id === null || dry.id > dry.real_id)
+      ? [`**Last test update:** ${when(dry.finished_at ?? dry.started_at)} (no changes saved) · ${warningsText(dry.warnings)}`]
       : [];
   const al = (alarmRow.results as { id: number; status: string; started_at: string; finished_at: string | null; error: string | null; real_id: number | null }[])[0];
   const alarmLine =
     al && (al.real_id === null || al.id > al.real_id)
-      ? [`**Latest nightly run:** ${when(al.finished_at ?? al.started_at)} · **${al.status}**${al.error ? `: ${al.error.slice(0, 200)}` : ''}`]
+      ? [`**Latest nightly run:** ${when(al.finished_at ?? al.started_at)} · **${al.status}**${failureText(al.error, dev)}`]
       : [];
   const lines = [
     '## GuildCraft status',
-    // Order 10: which copy answered, so the operator can always tell the Dev app from production.
-    `**Copy:** ${c.copy === 'production' ? 'production' : c.copy === 'dev' ? 'dev' : 'not set'}`,
+    // Order 10: which copy answered, so the operator can always tell the Dev app from production (dev only, order 11).
+    ...(dev ? ['**Copy:** dev'] : []),
     `**Data version:** ${ok ? `\`${ok.source_version}\`` : 'no completed import yet'}`,
-    `**Last import:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${last.status}${last.error ? ` (${last.error.slice(0, 200)})` : ''} · ${warnings === null ? 'warnings unreadable' : `${warnings} warning${warnings === 1 ? '' : 's'}`}` : 'none yet'}`,
+    `**Last data update:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${warningsText(last.warnings)} · ${last.status}${failureText(last.error, dev)}` : 'none yet'}`,
     ...alarmLine,
     ...dryLine,
     c.guild.board_channel_id
@@ -309,10 +313,10 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
-    `**Waiting for officers:** ${q.reports} open report${q.reports === 1 ? '' : 's'} · ${q.images} pending screenshot${q.images === 1 ? '' : 's'}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
-    `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
-    backupLine((backup.results as (BackupRow & { last_ok: string | null })[])[0], nowMs),
-    ...usageLines(usage.results as unknown as UsageRow[], nowMs),
+    `**Waiting for officers:** ${plural(q.reports, 'open report')} · ${plural(q.images, 'pending screenshot')}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
+    `**Departures:** ${plural(d?.left_members ?? 0, 'member')} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
+    backupLine((backup.results as (BackupRow & { last_ok: string | null })[])[0], nowMs, dev),
+    ...(dev ? usageLines(usage.results as unknown as UsageRow[], nowMs) : []),
   ];
   return ephemeral(lines.join('\n'));
 }
@@ -331,7 +335,7 @@ export async function guildcraftRebuildBoard(c: Ctx): Promise<MessageReply> {
     [
       `Rebuilding the roster board in <#${c.guild.board_channel_id}> in A→Z order: each tradeskill post is created again, then the old one is deleted. Posts with member replies are kept as they are.`,
       'Most of it happens within a minute, all of it within 15 minutes. `/guildcraft status` shows the board order.',
-      'For A→Z to show at the top, the forum’s Default Sort Order must be Creation Time (Edit Channel).',
+      "For A→Z to show at the top, the forum's Default Sort Order must be Creation Time (Edit Channel).",
     ].join('\n'),
   );
 }

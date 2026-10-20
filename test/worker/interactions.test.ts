@@ -80,8 +80,38 @@ describe('/craft help copy', () => {
       expect(HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${c}\``))!.endsWith(COMING_SOON), c).toBe(false);
   });
 
-  it('fits one Discord message and carries the draft footer', () => {
+  it('fits one Discord message and carries the attribution footer, with no "draft" left (order 11)', () => {
     expect(HELP_TEXT.length).toBeLessThanOrEqual(2000);
+    expect(HELP_TEXT.endsWith('-# Item data: Monsters and Memories Wiki (CC BY-SA 4.0)')).toBe(true);
     expect(HELP_TEXT).toContain(HELP_FOOTER);
+    expect(HELP_TEXT).not.toMatch(/draft/i);
   });
+});
+
+// Order 11: the copy rules, checked over every source file the Worker ships (the population is the code itself, so a
+// file added later is checked too).
+const SOURCES = import.meta.glob('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
+describe('copy rules over src/ (order 11)', () => {
+  it('reads every source file', () => {
+    expect(Object.keys(SOURCES).length).toBeGreaterThan(30);
+  });
+  const rules: [string, RegExp][] = [
+    ['plurals come from plural() in src/discord.ts', /=== 1 \? '' : 's'|[a-z]\(s\)[ ,.][a-z ]/],
+    ['"level", never "lvl" in text', /`[^`]*\blvl \$\{/],
+    ['straight apostrophes', /’/],
+    ['no DRAFT markers', /\bDRAFT\b/],
+    ['no "draft" label in member-facing text', /['"`][^'"`\n]*\bdraft\b/i],
+  ];
+  it('each rule catches its own example (a control)', () => {
+    const bad: [number, string][] = [[0, "`${n} warning${n === 1 ? '' : 's'}`"], [0, "'2 notice(s) over'"], [1, '`lvl ${level}`'], [2, 'the bot’s'], [3, '// DRAFT copy'], [4, "'-# draft — more'"]];
+    expect(bad.map(([i, s]) => rules[i][1].test(s))).toEqual(bad.map(() => true));
+    // and a lambda's (s) is not a plural
+    expect(rules[0][1].test('stmts.map((s) => originals.get(s) ?? s)')).toBe(false);
+  });
+  for (const [rule, re] of rules)
+    it(rule, () => {
+      const hits = Object.entries(SOURCES).flatMap(([file, text]) => text.split('\n').flatMap((l, i) => (re.test(l) ? [`${file}:${i + 1}: ${l.trim()}`] : [])));
+      expect(hits).toEqual([]);
+    });
 });

@@ -14,7 +14,9 @@
 // The first run (usage_daily empty) backfills 7 days; later runs re-measure the last 2 (late data settles).
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
+import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, remoteDb } from '../import/db.ts';
+import { judgesLevel, levelChanges, levelSummary, type DayFigure } from './level-alarm.ts';
 import { FREE_LIMITS, STALE_MS, type Metric } from '../../src/limits.ts';
 
 const { values: args } = parseArgs({
@@ -103,6 +105,7 @@ const notes: string[] = [];
 let previousFailing: boolean | null = null;
 const DAY = 86_400_000;
 let summaryLine = '';
+let level: { failed: boolean; line: string } | null = null;
 try {
 /**
  * How a dataset is filtered and grouped by UTC day, from its introspected filter and dimension names: date_geq/date_leq
@@ -279,8 +282,17 @@ if (problems.length) {
   const meta = await db.run(sql);
   console.log(`\nwrote ${meta.reduce((s, m) => s + m.changes, 0)} usage_daily row change(s) for ${days} day(s), ${first}..${last}`);
 }
-// Order 9 (read only): the review channel's usage warnings as the Worker recorded them, posted or refused. The log is
-// public, so no guild id: metric, state, day and outcome only.
+// Order 11 (override 1): the usage-level alarm, production's run only (scripts/usage/level-alarm.ts). It judges the
+// figures as they stand after this run: usage_daily's earlier days, with this run's figures over them (a dry run's
+// too, so a dispatch can show it). A failed measurement is left to the stale alarm above.
+if (judgesLevel(currentCopy().name) && !problems.length) {
+  const held = await db.all<DayFigure>(`SELECT metric, day, value FROM usage_daily WHERE day >= ${lit(new Date(today - 10 * DAY).toISOString().slice(0, 10))}`);
+  const merged = new Map(held.map((r) => [`${r.metric}|${r.day}`, r]));
+  for (const r of rows) merged.set(`${r.metric}|${r.day}`, r);
+  level = levelSummary(levelChanges([...merged.values()], y));
+} else console.log(`usage level: not judged (${problems.length ? 'the measurement failed' : `the ${currentCopy().name} run; the production run alarms for the account`})`);
+// Order 9 (read only): the dev review channel's usage warnings as the Worker recorded them, posted or refused. The log
+// is public, so no guild id: metric, state, day and outcome only.
 const posted = await db.all<{ target: string; detail_json: string; created_at: string }>(
   "SELECT target, detail_json, created_at FROM audit_log WHERE action = 'usage.alert' ORDER BY id DESC LIMIT 20",
 );
@@ -297,3 +309,8 @@ summaryLine = `usage: ${rows.length} figure(s), ${first}..${last}${args['dry-run
 
 alarm({ job: 'usage', failed: problems.length > 0, reason: problems.join('; '), previousFailing });
 if (!problems.length) summary(summaryLine);
+// Its own state, so one alarm never silences the other: this sets the exit code only on a crossing up.
+if (level) {
+  summary(level.failed ? `**${level.line}**` : level.line);
+  if (level.failed) process.exitCode = 1;
+}

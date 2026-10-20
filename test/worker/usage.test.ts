@@ -1,16 +1,20 @@
-// Order 8 (ITEMs 1–3; PRD FR-8): /guildcraft status's last import (dry runs apart), Backup line and Usage section,
-// and the usage warning (usage_daily → state → the cron's one line in the review channel) against a fake Discord.
-// Never a live post.
+// Order 8 (ITEMs 1–3; PRD FR-8): /guildcraft status's last data update (test updates apart), Backup line and Usage
+// section, and the usage warning (usage_daily → state → the cron's one line in the review channel) against a fake
+// Discord. Never a live post. Order 11: the operator-only lines and the channel warning are the dev copy's only (the
+// tests run as the dev environment); production's usage alarm is the usage job's (scripts/usage/level-alarm.ts).
 import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';
 import { BOARD_CALL_CAP, botApi as makeApi } from '../../src/board/api.ts';
 import { FREE_LIMITS, METRICS } from '../../src/limits.ts';
 import { alertText, ofLimit, tokenExpiryText, usageAlerts, usageLines } from '../../src/usage.ts';
+import { judgesLevel, levelChanges, levelSummary, type DayFigure } from '../../scripts/usage/level-alarm.ts';
 import { all, reset } from '../db.ts';
 import { ADMIN, as, botApi, cmd, GUILD, send, spyOnFetch, webhook } from '../discord.ts';
 
 const TOKEN = { env: { DISCORD_BOT_TOKEN: 'test-bot-token' } };
+const PROD = { env: { ...TOKEN.env, GUILDCRAFT_COPY: 'production' } };
+const UNSET = { env: { ...TOKEN.env, GUILDCRAFT_COPY: undefined } };
 const REVIEW = '600000000000000010';
 const admin = as('100000000000000001', { permissions: ADMIN, nick: 'Ann' });
 const NOW = Date.parse('2026-10-21T06:00:00Z');
@@ -44,33 +48,33 @@ const usage = (rows: [string, string, number][], measured = new Date(NOW - H).to
   env.DB.batch(rows.map(([metric, d, value]) => env.DB.prepare('INSERT OR REPLACE INTO usage_daily (day, metric, value, measured_at) VALUES (?, ?, ?, ?)').bind(d, metric, value, measured)));
 const imports = (rows: [string, string][]) =>
   env.DB.batch(rows.map(([status, at]) => env.DB.prepare("INSERT INTO data_import (source, source_version, status, warnings, started_at, finished_at) VALUES ('test', 'v', ?, ?, ?, ?)").bind(status, status === 'dry-run' ? '[1,2,3,4]' : '[1]', at, at)));
-const status = async () => (await send(cmd(admin, 'guildcraft', 'status'), TOKEN)).data.content as string;
+const status = async (opts = TOKEN) => (await send(cmd(admin, 'guildcraft', 'status'), opts)).data.content as string;
 const api = () => makeApi('test-bot-token', { d1: () => 0, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + 60_000 });
 const withReview = () => env.DB.prepare('UPDATE guild SET review_channel_id = ?').bind(REVIEW).run();
 const alerts = async () => all<{ target: string; detail_json: string }>("SELECT target, detail_json FROM audit_log WHERE action = 'usage.alert' ORDER BY id");
 
-describe('/guildcraft status: the last import', () => {
+describe('/guildcraft status: the last data update', () => {
   it("shows the last real import, never a newer dry run as if it were one (the operator's check of order 7)", async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN); // creates the guild row
     await imports([['ok', '2026-10-19T07:31:00Z'], ['dry-run', '2026-10-19T21:39:50Z']]);
     const s = await status();
-    expect(s).toMatch(/\*\*Last import:\*\* <t:1792395060:f> \(<t:\d+:R>\) · ok · 1 warning\n/);
-    expect(s).not.toMatch(/Last import:[^\n]*dry-run/);
-    expect(s).toMatch(/\*\*Last dry run:\*\* <t:\d+:f> \(<t:\d+:R>\) · wrote nothing · 4 warnings/);
+    expect(s).toMatch(/\*\*Last data update:\*\* <t:1792395060:f> \(<t:\d+:R>\) · 1 warning · ok\n/);
+    expect(s).not.toMatch(/Last data update:[^\n]*dry-run/);
+    expect(s).toMatch(/\*\*Last test update:\*\* <t:\d+:f> \(<t:\d+:R>\) \(no changes saved\) · 4 warnings/);
   });
-  it('drops the dry-run line once a real import is newer', async () => {
+  it('drops the test-update line once a real import is newer', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await imports([['dry-run', '2026-10-19T21:39:50Z'], ['failed', '2026-10-20T07:31:00Z']]);
     const s = await status();
-    expect(s).toMatch(/\*\*Last import:\*\* <t:\d+:f> \(<t:\d+:R>\) · failed · 1 warning/);
-    expect(s).not.toContain('Last dry run');
+    expect(s).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 1 warning · failed/);
+    expect(s).not.toContain('Last test update');
   });
 
   it('order 9: a refusal is never the last import, but status shows it while it is the newest nightly run', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await imports([['ok', '2026-10-19T07:31:00Z'], ['refused', '2026-10-20T07:31:00Z']]);
     const s = await status();
-    expect(s).toMatch(/\*\*Last import:\*\* <t:1792395060:f> \(<t:\d+:R>\) · ok/);
+    expect(s).toMatch(/\*\*Last data update:\*\* <t:1792395060:f> \(<t:\d+:R>\) · 1 warning · ok/);
     expect(s).toMatch(/\*\*Latest nightly run:\*\* <t:\d+:f> \(<t:\d+:R>\) · \*\*refused\*\*/);
     await imports([['ok', '2026-10-21T07:31:00Z']]);
     expect(await status()).not.toContain('Latest nightly run');
@@ -78,7 +82,7 @@ describe('/guildcraft status: the last import', () => {
 });
 
 describe('/guildcraft status: backup and usage', () => {
-  it('shows the backup line with the token expiry, and marks it stale after 36 hours', async () => {
+  it('shows the backup line with the token expiry, and marks it overdue after 36 hours', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     const fresh = new Date(Date.now() - 2 * H).toISOString();
     await env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, size_bytes, token_expires) VALUES (?, ?, 'ok', 2500000, '2027-10-20')").bind(fresh, fresh).run();
@@ -87,7 +91,7 @@ describe('/guildcraft status: backup and usage', () => {
     const old = new Date(Date.now() - 37 * H).toISOString();
     await env.DB.prepare('UPDATE backup_status SET finished_at = ?').bind(old).run();
     s = await status();
-    expect(s).toContain('**stale**: no successful backup for over 36 hours');
+    expect(s).toContain('**overdue**: no backup in over 36 hours');
   });
   it('a failed latest run says so, keeps the last good time, and an unread expiry shows the owner\'s no-expiry note', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
@@ -121,15 +125,15 @@ describe('/guildcraft status: backup and usage', () => {
     );
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     const s = await status();
-    expect(s).toContain(`- Worker requests: 1,200 of 100,000 (1.2%) on ${day(now - 86_400_000)} · 7-day peak 4,000 of 100,000 (4.0%) (${day(now - 3 * 86_400_000)}, 2 days measured)`);
-    expect(s).toContain('- D1 rows read: 612,000 of 5,000,000 (12%)');
-    expect(s).toContain('- D1 storage: 9.4 MB of 5.00 GB (0.2%)');
-    expect(s).toContain('- D1 rows written: not measured');
-    expect(s).not.toContain('stale');
+    expect(s).toContain(`- Commands and lookups: 1,200 of 100,000 (1.2%) on ${day(now - 86_400_000)} · 7-day peak 4,000 of 100,000 (4.0%) (${day(now - 3 * 86_400_000)}, 2 days measured)`);
+    expect(s).toContain('- Records read: 612,000 of 5,000,000 (12%)');
+    expect(s).toContain('- Stored data: 9.4 MB of 5.00 GB (0.2%)');
+    expect(s).toContain('- Records written: not measured');
+    expect(s).not.toContain('overdue');
   });
-  it('marks the usage figures stale after 36 hours', () => {
+  it('marks the usage figures overdue after 36 hours', () => {
     const lines = usageLines([{ metric: 'workers_requests', day: '2026-10-19', value: 5, measured_at: new Date(NOW - 37 * H).toISOString() }], NOW);
-    expect(lines[0]).toContain('**stale**');
+    expect(lines[0]).toContain('**figures overdue** (not measured in 36 hours)');
   });
   it('every limit names its docs page (the hand-kept list, src/limits.ts)', () => {
     for (const m of METRICS) expect(FREE_LIMITS[m].source).toMatch(/^https:\/\/developers\.cloudflare\.com\//);
@@ -206,7 +210,92 @@ describe('the usage warning (mocked Discord)', () => {
     await worker.scheduled(createScheduledController({ scheduledTime: Date.now(), cron: '*/15 * * * *' }), { ...env, ...TOKEN.env } as any, ctx);
     await waitOnExecutionContext(ctx);
     expect(posted.map((p) => p.channel)).toEqual([REVIEW]);
-    expect(posted[0].body.content).toContain('**Worker requests** was 15,000 of 100,000 (15%)');
+    expect(posted[0].body.content).toContain('**Commands and lookups** was 15,000 of 100,000 (15%)');
     expect(GUILD).toBeTruthy();
+  });
+  it('order 11: the production cron posts no usage warning in any channel', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await withReview();
+    await usage([['workers_requests', day(Date.now() - 86_400_000), 15_000]], new Date().toISOString());
+    for (const copy of ['production', undefined]) {
+      const ctx = createExecutionContext();
+      await worker.scheduled(createScheduledController({ scheduledTime: Date.now(), cron: '*/15 * * * *' }), { ...env, ...TOKEN.env, GUILDCRAFT_COPY: copy } as any, ctx);
+      await waitOnExecutionContext(ctx);
+    }
+    expect(posted).toEqual([]);
+    expect(await alerts()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------- order 11: operator-only lines
+
+describe('/guildcraft status: production omits the operator-only lines; dev keeps them', () => {
+  const seed = async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await imports([['ok', '2026-10-19T07:31:00Z'], ['failed', '2026-10-20T07:31:00Z'], ['dry-run', '2026-10-20T21:39:50Z']]);
+    await env.DB.prepare("UPDATE data_import SET error = 'D1 HTTP 500: 7500 internal' WHERE status = 'failed'").run();
+    const t = (h: number) => new Date(Date.now() - h * H).toISOString();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, token_expires) VALUES (?, ?, 'ok', '2027-10-20')").bind(t(26), t(26)),
+      env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, error, token_expires) VALUES (?, ?, 'failed', 'push refused: 403', '2027-10-20')").bind(t(2), t(2)),
+    ]);
+    await usage([['d1_rows_read', day(Date.now() - 86_400_000), 612_000]], new Date(Date.now() - H).toISOString());
+  };
+  it('dev: the copy marker, the test update, raw errors, the token and the usage section', async () => {
+    await seed();
+    const s = await status();
+    expect(s).toMatch(/^## GuildCraft status\n\*\*Copy:\*\* dev\n/);
+    expect(s).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 1 warning · failed: D1 HTTP 500: 7500 internal\n/);
+    expect(s).toContain('**Last test update:**');
+    expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token expires 2027-10-20 · latest run <t:\d+:f> \*\*failed\*\*: push refused: 403\n/);
+    expect(s).toContain('**Usage against the free-tier limits**');
+  });
+  for (const [name, opts] of [['production', PROD], ['unset (counts as production)', UNSET]] as const)
+    it(`${name}: none of them, and a failure names the next step instead of the raw error`, async () => {
+      await seed();
+      const s = await status(opts);
+      expect(s).toMatch(/^## GuildCraft status\n\*\*Data version:\*\*/);
+      expect(s).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 1 warning · failed\. If this repeats, tell Joegandomi\.\n/);
+      expect(s).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · latest run <t:\d+:f> \*\*failed\*\*\. If this repeats, tell Joegandomi\.$/);
+      for (const hidden of ['**Copy:**', 'Last test update', 'token', '7500 internal', 'push refused', 'Usage against', 'free-tier', 'Records read']) expect(s).not.toContain(hidden);
+    });
+});
+
+// ---------------------------------------------------------------- order 11: the usage job's level alarm
+
+describe('the usage-level alarm (the production run of the usage job)', () => {
+  const READ = 5_000_000; // d1_rows_read's Free limit
+  const fig = (day: string, share: number): DayFigure => ({ metric: 'd1_rows_read', day, value: Math.round(READ * share) });
+  const judge = (rows: DayFigure[], yesterday: string) => levelSummary(levelChanges(rows, yesterday));
+
+  it('crossing up fails once; the unchanged state the next day passes', () => {
+    const rows = [fig('2026-10-18', 0.02), fig('2026-10-19', 0.12)];
+    const first = judge(rows, '2026-10-19');
+    expect(first.failed).toBe(true);
+    expect(first.line).toBe('usage level: over the 10% target: Records read 12.0% on 2026-10-19');
+    const next = judge([...rows, fig('2026-10-20', 0.13)], '2026-10-20');
+    expect(next.failed).toBe(false);
+    expect(next.line).toContain('still over (already reported): Records read 13.0% on 2026-10-20');
+  });
+  it('dropping back under is a state change reported in the summary, and passes', () => {
+    const r = judge([fig('2026-10-19', 0.12), fig('2026-10-20', 0.03)], '2026-10-20');
+    expect(r.failed).toBe(false);
+    expect(r.line).toBe('usage level: back under 10%: Records read 3.0% on 2026-10-20');
+  });
+  it('under and staying under passes; no earlier day counts as under; a metric without yesterday is not judged again', () => {
+    expect(judge([fig('2026-10-19', 0.01), fig('2026-10-20', 0.02)], '2026-10-20')).toEqual({ failed: false, line: 'usage level: every metric under 10%' });
+    expect(judge([fig('2026-10-20', 0.5)], '2026-10-20').failed).toBe(true);
+    // Yesterday's figure missing (storage lands late): the older crossing was judged on its own day, not again.
+    expect(judge([fig('2026-10-18', 0.02), fig('2026-10-19', 0.12)], '2026-10-20').failed).toBe(false);
+  });
+  it('only the production run judges it: the dev run never fails on it (the figures are account-wide)', () => {
+    expect(judgesLevel('production')).toBe(true);
+    expect(judgesLevel('dev')).toBe(false);
+  });
+  it('per metric: one metric crossing fails even while another stays over', () => {
+    const w = (day: string, v: number): DayFigure => ({ metric: 'workers_requests', day, value: v });
+    const r = judge([fig('2026-10-19', 0.12), fig('2026-10-20', 0.12), w('2026-10-19', 1_000), w('2026-10-20', 20_000)], '2026-10-20');
+    expect(r.failed).toBe(true);
+    expect(r.line).toBe('usage level: over the 10% target: Commands and lookups 20.0% on 2026-10-20; still over (already reported): Records read 12.0% on 2026-10-20');
   });
 });

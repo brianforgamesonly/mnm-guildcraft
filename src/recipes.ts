@@ -17,7 +17,7 @@ export const isGated = (a: string) => (GATED as readonly string[]).includes(a);
 /** Report issues (FR-7 as amended by order 9 override 4), held once: the command's choices and the modal's select. */
 export const REPORT_ISSUES = [
   { value: 'trivial', label: 'Wrong trivial' },
-  { value: 'components', label: 'Wrong components' },
+  { value: 'components', label: 'Wrong ingredients' },
   { value: 'source', label: 'Wrong source (how it is obtained)' },
   { value: 'missing', label: 'Missing recipe' },
   { value: 'other', label: 'Other' },

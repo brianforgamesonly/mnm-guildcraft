@@ -3,12 +3,12 @@
 //   /recipe source item: how: [faction] [note] · /recipe override item: [trivial] [components] [reset]   (officers)
 //   /roster recipes [skill]
 // /recipe writes this guild's correction layer (src/recipes.ts, migration 0009), never the shared recipe row.
-// DRAFT copy throughout: approved by the operator before launch (ORDER-RULES, order 9; docs/COPY.md).
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, ephemeral, md, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, CORRECTED, correctionJoin, FACTION_MAX, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, type Character } from './character.ts';
+import { KNOWN_MARK } from './find.ts';
 import { postButton, postedReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { SELECT_MAX_OPTIONS, type Tradeskill } from './skills.ts';
 
@@ -44,7 +44,7 @@ function markStatements(c: Ctx, ch: Character, r: GuildRecipe): D1PreparedStatem
 const markedText = (ch: Pick<Character, 'name'>, r: GuildRecipe, already: boolean) =>
   already
     ? `**${md(ch.name)}** already has **${md(recipeLabel(r))}** marked known.`
-    : `Marked **${md(recipeLabel(r))}** as known for **${md(ch.name)}**. \`/craft find\` now shows ${md(ch.name)} with the known-recipe marker; \`/craft forget\` undoes it.`;
+    : `Marked **${md(recipeLabel(r))}** as known for **${md(ch.name)}**: \`/craft find\` shows the ${KNOWN_MARK} marker. \`/craft forget\` undoes it.`;
 
 async function markKnown(c: Ctx, ch: Character, r: GuildRecipe): Promise<string> {
   const known = await c.db.prepare('SELECT 1 FROM character_recipe WHERE character_id = ? AND recipe_id = ?').bind(ch.id, r.id).first();
@@ -187,10 +187,12 @@ export async function recipeSource(c: Ctx, opts: Option[]): Promise<MessageReply
     how === 'reputation' || how === 'discovery'
       ? `Only characters who marked it known now count as able to make it; others with ${r.tradeskill} show as ${how === 'reputation' ? `"has skill, needs reputation (${md(keepFaction!)})"` : '"has skill, recipe not marked known"'}.`
       : how === 'vendor'
-        ? '`/craft find` uses the skill tiers and says it may need buying first.'
-        : '`/craft find` uses the skill tiers, with a note to check the crafter has the recipe.';
-  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** is now **${ACQUISITION_LABEL[how]}**${keepFaction ? ` (${md(keepFaction)})` : ''}${keepNote ? ` · ${md(keepNote)}` : ''}. ${effect}\n-# Other servers and the nightly import are not affected.`);
+        ? '`/craft find` groups crafters by skill as usual (Reliable, Still learning) and says it may need buying first.'
+        : '`/craft find` groups crafters by skill as usual (Reliable, Still learning), with a note to check the crafter has the recipe.';
+  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** is now **${ACQUISITION_LABEL[how]}**${keepFaction ? ` (${md(keepFaction)})` : ''}${keepNote ? ` · ${md(keepNote)}` : ''}. ${effect}\n${SERVER_ONLY}`);
 }
+
+const SERVER_ONLY = "-# Only this server sees this, and the nightly data update won't overwrite it.";
 
 /** "2 Copper Bar, 1 Flux" → [{qty 2, name}, ...]. A missing quantity is 1. null when a part cannot be read. */
 export function parseComponents(text: string): { qty: number; name: string }[] | null {
@@ -217,7 +219,7 @@ export async function recipeOverride(c: Ctx, opts: Option[]): Promise<MessageRep
       c.db.prepare('DELETE FROM recipe_correction WHERE guild_id = ? AND recipe_id = ? AND trivial IS NULL AND acquisition IS NULL AND faction IS NULL AND note IS NULL').bind(c.guild.id, r.id),
       audit(c.db, c.guild.id, c.userId, 'recipe.override.reset', `recipe:${r.id}`, null, null),
     ]);
-    return ephemeral(`Reset **${md(recipeLabel(r))}**: its trivial and components come from the imported data again${del.meta.changes + upd.meta.changes ? '' : ' (they already did)'}.`);
+    return ephemeral(`Reset **${md(recipeLabel(r))}**: its trivial and ingredients come from the wiki data again${del.meta.changes + upd.meta.changes ? '' : ' (they already did)'}.`);
   }
   const trivial = optInt(opts, 'trivial');
   const text = optString(opts, 'components');
@@ -251,8 +253,8 @@ export async function recipeOverride(c: Ctx, opts: Option[]): Promise<MessageRep
     );
   stmts.push(audit(c.db, c.guild.id, c.userId, 'recipe.override', `recipe:${r.id}`, null, { trivial: trivial ?? null, components: parts.map((p) => [p.id, p.qty]) }));
   await c.db.batch(stmts);
-  const bits = [trivial !== undefined ? `trivial **${trivial}**` : null, text !== undefined ? `components ${parts.map((p) => `${p.qty} × ${md(p.name)}`).join(', ')}` : null].filter(Boolean);
-  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** now shows ${bits.join(' and ')}, marked guild-corrected on \`/craft find\`. \`reset:True\` removes the correction.\n-# Other servers and the nightly import are not affected.`);
+  const bits = [trivial !== undefined ? `trivial **${trivial}**` : null, text !== undefined ? `ingredients ${parts.map((p) => `${p.qty} × ${md(p.name)}`).join(', ')}` : null].filter(Boolean);
+  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** now shows ${bits.join(' and ')}, marked guild-corrected on \`/craft find\`. \`reset:True\` removes the correction.\n${SERVER_ONLY}`);
 }
 
 // ---------------------------------------------------------------- /roster recipes [skill] (FR-3.1)

@@ -1,6 +1,6 @@
 # STANDING INSTRUCTION — report contract, rev 1 (mnm-guildcraft)
 
-**Ported 2026-10-19 from Brian's Sunshine State Auctions contract (rev 4). This copy is the one that binds this repository.**
+**Ported 2026-10-19 from the owner's Sunshine State Auctions contract (rev 4). This copy is the one that binds this repository.**
 
 This document lives at `docs/STANDING-report-contract.md`. `CLAUDE.md` names it as binding, so every session reads it before anything else. It governs every order, including any already in flight. The Rules block every order carries lives at [ORDER-RULES.md](ORDER-RULES.md). Orders cite that file at a SHA and add only new rules.
 
@@ -11,13 +11,13 @@ Two sessions take part, and they cannot talk to each other.
 - **The advisory session (Cowork)** researches and writes work orders. It does not commit code.
 - **The coding session (Claude Code in VS Code)** executes orders: it commits, opens pull requests, merges and deploys.
 
-**Brian carries every message between them. Brian decides; neither session overrides him.** Each order is self-contained, because the coding session cannot see the advisory session's chat, files or memory.
+**The owner carries every message between them. The owner decides; neither session overrides the owner.** Each order is self-contained, because the coding session cannot see the advisory session's chat, files or memory.
 
 ---
 
-## A — Mark every message so Brian can tell what it is from its first line
+## A — Mark every message so the owner can tell what it is from its first line
 
-Brian cannot tell an interim statement from a finished report unless the first line says which it is. When he hands over a mid-run message, the advisory session answers work that is still moving, and the cycle is wasted.
+The owner cannot tell an interim statement from a finished report unless the first line says which it is. When the owner hands over a mid-run message, the advisory session answers work that is still moving, and the cycle is wasted.
 
 ### 1. Every message starts with one of these markers, on its own first line
 
@@ -28,7 +28,7 @@ Brian cannot tell an interim statement from a finished report unless the first l
 ## FINAL REPORT — <the order's title>
 ```
 
-Nothing else may start a message. Brian's test is the first line, and it must never require reading further.
+Nothing else may start a message. The owner's test is the first line, and it must never require reading further.
 
 ### 2. A FINAL REPORT is final only if it ends with both of these
 
@@ -75,11 +75,11 @@ Do not pick the half that seems more likely to be intended. Do not satisfy both 
 
 ## C — A fresh session per order: say which you are before you start
 
-A session's whole context is re-sent on every turn, so both its cost and its drift from these rules grow with it. Only Brian can clear a session.
+A session's whole context is re-sent on every turn, so both its cost and its drift from these rules grow with it. Only the owner can clear a session.
 
 The RECEIVED line (section A) says either "fresh session" or "CONTINUED SESSION". "Fresh" means this order is the first thing in the context after the repository's own instructions. Any other start is "continued", including a session that was compacted and one that only read files before the order arrived.
 
-**A continued session stops at that line.** It does no work, reads no files, and waits until Brian clears it and re-pastes the order, or tells it to proceed. **A fresh session proceeds at once.** If a session is compacted mid-order, the order, the repository and the job records are the state, and its next message says that a compaction happened.
+**A continued session stops at that line.** It does no work, reads no files, and waits until the owner clears it and re-pastes the order, or tells it to proceed. **A fresh session proceeds at once.** If a session is compacted mid-order, the order, the repository and the job records are the state, and its next message says that a compaction happened.
 
 ---
 

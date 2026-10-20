@@ -39,7 +39,7 @@ describe('/craft report', () => {
   it('saves the report and posts a card in the review channel with Mark fixed and Dismiss', async () => {
     await env.DB.prepare('UPDATE guild SET review_channel_id = ?').bind(REVIEW).run();
     const r = await report({ details: 'It is 25 now' });
-    expect(r.data.content).toBe('Thanks: your report on **Copper Sword** (Wrong trivial) is saved. Officers have been sent it to review.');
+    expect(r.data.content).toBe('Thanks: your report on **Copper Sword** (Wrong trivial) is saved. Your officers have it to review.');
     expect(await all('SELECT item_id, reporter, issue, details, status FROM recipe_report')).toEqual([{ item_id: swordId, reporter: ANN, issue: 'trivial', details: 'It is 25 now', status: 'open' }]);
     expect(posted).toHaveLength(1);
     const card = posted[0];
@@ -52,7 +52,7 @@ describe('/craft report', () => {
 
   it('with no review channel the report is still saved, and status shows it', async () => {
     const r = await report({ issue: 'source' });
-    expect(r.data.content).toBe('Thanks: your report on **Copper Sword** (Wrong source (how it is obtained)) is saved. Officers will see it in `/guildcraft status`.');
+    expect(r.data.content).toBe('Thanks: your report on **Copper Sword** (Wrong source (how it is obtained)) is saved for your officers.');
     expect(posted).toHaveLength(0);
     expect(await count('recipe_report')).toBe(1);
     const s = await send(cmd(officer, 'guildcraft', 'status'), TOKEN);
@@ -74,14 +74,14 @@ describe('the Report a problem button', () => {
     const data = ack.data as any;
     expect(data.custom_id).toBe(`rptm:${swordId}`);
     expect(data.components.map((c: any) => [c.type, c.component.type, c.component.custom_id])).toEqual([[18, 3, 'issue'], [18, 4, 'details']]);
-    expect(data.components[0].component.options.map((o: any) => o.label)).toEqual(['Wrong trivial', 'Wrong components', 'Wrong source (how it is obtained)', 'Missing recipe', 'Other']);
+    expect(data.components[0].component.options.map((o: any) => o.label)).toEqual(['Wrong trivial', 'Wrong ingredients','Wrong source (how it is obtained)', 'Missing recipe', 'Other']);
   });
 
   it('the submit files the same report, item pre-filled', async () => {
     const submit = { type: 5, guild_id: GUILD, member: ann, data: { custom_id: `rptm:${swordId}`, components: [{ type: 18, component: { type: 3, custom_id: 'issue', values: ['components'] } }, { type: 18, component: { type: 4, custom_id: 'details', value: '' } }] } };
     const r = await send(submit, TOKEN);
     expect(r.data.flags).toBe(64);
-    expect(r.data.content).toContain('your report on **Copper Sword** (Wrong components) is saved');
+    expect(r.data.content).toContain('your report on **Copper Sword** (Wrong ingredients) is saved');
     expect(await all('SELECT issue, details FROM recipe_report')).toEqual([{ issue: 'components', details: null }]);
   });
 });

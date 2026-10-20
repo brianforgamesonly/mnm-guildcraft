@@ -226,3 +226,6 @@ export function matchChoices(names: string[], typed: string, max = 25): string[]
 }
 
 export const truncate = (s: string, max: number): string => (s.length <= max ? s : `${s.slice(0, max - 1)}…`);
+
+/** "1 character", "3 characters": every count in a reply or post comes from here (order 11). */
+export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;

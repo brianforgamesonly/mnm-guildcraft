@@ -7,13 +7,12 @@
 // stay 'left' until they use GuildCraft themselves. Their removed characters stay removed until they run
 // /character add with the same name, which restores each one with its skills (order 2's restore path).
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optString, row, STYLE_DANGER, STYLE_SECONDARY, updateMessage, type MessageReply, type Option } from '../discord.ts';
+import { button, ephemeral, md, optString, plural, row, STYLE_DANGER, STYLE_SECONDARY, updateMessage, type MessageReply, type Option } from '../discord.ts';
 import { describeCharacter, keepMember, membersCharacters, NOTICE_PREFIX, removeMember, REMOVE_PREFIX, type CharacterBrief } from '../departures.ts';
 
 export const OFFICER_ONLY = 'Only officers can do that.';
 
 const listOf = (characters: CharacterBrief[]) => characters.map(describeCharacter).join(', ');
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** The preview: what Confirm would do, with Confirm and Cancel. Nothing changes until Confirm. */
 export async function guildcraftRemoveMember(c: Ctx, opts: Option[]): Promise<MessageReply> {
@@ -61,7 +60,7 @@ export async function noticeButton(c: Ctx, customId: string): Promise<MessageRep
   if (choice === 'keep') {
     await keepMember(c, userId);
     return updateMessage({
-      content: `${by} kept **${md(member.name)}**'s characters. They stay hidden while ${md(member.name)} is away and show again when they come back.`,
+      content: `${by} kept **${md(member.name)}**'s characters. They stay hidden while ${md(member.name)} is away and show again once they're back and use GuildCraft.`,
       embeds: [],
       components: [],
     });

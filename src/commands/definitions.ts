@@ -100,7 +100,7 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'report',
-        description: 'Report a wrong trivial, component or source, or a missing recipe, to the officers',
+        description: 'Report a wrong trivial, ingredient or source, or a missing recipe, to the officers',
         options: [
           itemOption,
           { type: STRING, name: 'issue', description: 'What is wrong', required: true, choices: REPORT_ISSUES.map((i) => ({ name: i.label, value: i.value })) },
@@ -149,11 +149,11 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'override',
-        description: "Correct a recipe's trivial or components (this server only)",
+        description: "Correct a recipe's trivial or ingredients (this server only)",
         options: [
           recipeItemOption,
           { type: INTEGER, name: 'trivial', description: 'The correct trivial', min_value: 0 },
-          { type: STRING, name: 'components', description: 'The full list, e.g. 2 Copper Bar, 1 Flux', max_length: 500 },
+          { type: STRING, name: 'components', description: 'The full ingredient list, e.g. 2 Copper Bar, 1 Flux', max_length: 500 },
           { type: BOOLEAN, name: 'reset', description: "True: remove this server's correction" },
         ],
       },
@@ -199,16 +199,16 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'setup',
-        description: 'Set the roles and the roster board (leave all out to see the current settings)',
+        description: 'Set the roles, roster board, and review and vault channels (leave all out to see them)',
         options: [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
-          { type: ROLE, name: 'officer_role', description: "Officers can edit any member's entries" },
+          { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
           { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
           { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
         ],
       },
-      { type: SUBCOMMAND, name: 'status', description: 'Data version, last import, the roster board and departures' },
+      { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },
       { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
       {
         type: SUBCOMMAND,

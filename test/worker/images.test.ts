@@ -73,7 +73,7 @@ function upload(o: { file?: string; size?: number; m?: typeof ann } = {}) {
 describe('/guildcraft setup vault:', () => {
   it('refuses, naming the missing permission', async () => {
     const r = await setupVault(String((1 << 10) | (1 << 11) | (1 << 14) | (1 << 16)));
-    expect(r.data.content).toBe(`Nothing was changed. In <#${VAULT}> GuildCraft is missing: **Attach Files**.\nGive the GuildCraft role these in the channel's settings (Permissions), then run this again.`);
+    expect(r.data.content).toBe(`Nothing was changed. In <#${VAULT}> GuildCraft is missing: **Attach Files**.\nGive MNM-Guildcraft these permissions in the channel's settings (Permissions), then run this again.`);
     expect((await one<{ v: string | null }>('SELECT vault_channel_id AS v FROM guild')).v).toBeNull();
   });
   it('saves it; a private channel gets no warning, an open one is warned, not refused', async () => {

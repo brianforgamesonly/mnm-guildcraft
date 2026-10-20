@@ -116,7 +116,7 @@ export function updateSelects(characterId: number, skills: Tradeskill[], levels:
 /** The skill-select step of /craft update, for one character. Also what an Update skills button opens. */
 async function updatePicker(c: Ctx, ch: Character): Promise<MessageReply> {
   const skills = await allTradeskills(c.db);
-  if (!skills.length) return ephemeral('The tradeskill list is empty: the recipe data has not been imported yet.');
+  if (!skills.length) return ephemeral("The tradeskill list hasn't loaded yet. Try again later.");
   return ephemeral(`Pick up to ${MAX_PICK} tradeskills for **${md(ch.name)}**. A form then opens with a level box for each.`, {
     components: updateSelects(ch.id, skills, await levelsOf(c.db, ch.id)),
   });

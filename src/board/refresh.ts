@@ -26,7 +26,7 @@
 import { now as isoNow, type WaitUntil } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { countD1, isolateSnapshot, type D1Call } from '../telemetry.ts';
-import type { Env } from '../env.ts';
+import { isDevCopy, type Env } from '../env.ts';
 import { BOARD_CALL_CAP, botApi, budgetLeft, THREAD_ARCHIVED, UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, type ApiLogEntry, type BoardBudget, type BotApi } from './api.ts';
 import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } from './data.ts';
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
@@ -471,7 +471,7 @@ export async function refreshGuildBoard(
           r.errors.push(`delete old post: ${d.status} ${d.code ?? ''}`.trim());
         }
       }
-      if (!botId) r.errors.push('rebuild: could not tell which threads are the bot’s; old posts not deleted');
+      if (!botId) r.errors.push("rebuild: could not tell which threads are the bot's; old posts not deleted");
       else if (left === 0) {
         r.rebuild = 'done';
         writes.push(db.prepare('UPDATE guild SET board_rebuild_since = NULL WHERE id = ? AND board_rebuild_since = ?').bind(guildId, since));
@@ -650,7 +650,9 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   // Order 8 (ITEM 2.4): the usage warning, after the sweep (so the sweep's first query stays the run's first after an
   // idle gap, order 5): one read per run; it posts only when a metric's state changes (src/usage.ts). It needs a read,
   // a post and a write; whatever the sweep left dirty waits for the next run either way.
-  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= 3) {
+  // Order 11 (override 1): the dev copy only. Production posts no usage warning in any guild's channel; its operator
+  // alarm is the usage job's failed run (scripts/usage/level-alarm.ts).
+  if (isDevCopy(env.GUILDCRAFT_COPY) && env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= 3) {
     api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
     const mark = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
     let usage: Record<string, unknown> = { gc: 'usage-alert' };

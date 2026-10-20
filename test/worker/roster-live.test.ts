@@ -23,7 +23,7 @@ describe('/roster skill on the live data shape', () => {
     expect('content' in calls[0].body).toBe(false);
     const r = seen(ack, calls);
     expect(r.data.flags).toBe(64);
-    expect(r.data.embeds![0]).toEqual({ title: 'Blacksmithing: 1 character', description: '**1.** **Testchar** 25 · CLR lvl 12', footer: { text: 'Page 1 of 1' } });
+    expect(r.data.embeds![0]).toEqual({ title: 'Blacksmithing: 1 character', description: '**1.** **Testchar** 25 · CLR level 12', footer: { text: 'Page 1 of 1' } });
   });
 
   it('min_level above everyone: the polite empty roster, delivered the same way', async () => {

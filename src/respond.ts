@@ -13,7 +13,7 @@ import type { Interaction, MessageData, MessageReply } from './discord.ts';
 import type { Plan } from './interactions.ts';
 
 export const DISCORD_API = 'https://discord.com/api/v10';
-export const ERROR_REPLY = 'Sorry, something went wrong on our side and GuildCraft could not answer. Please try again in a moment.';
+export const ERROR_REPLY = 'Sorry, something went wrong on our side and GuildCraft could not answer. Please try again in a moment. If it keeps happening, tell Joegandomi.';
 const DELIVERY_TIMEOUT_MS = 10_000;
 
 type Deferred = Extract<Plan, { defer: true }>;

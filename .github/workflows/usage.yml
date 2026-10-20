@@ -1,15 +1,17 @@
 # Nightly free-tier usage (order 8, ITEM 2; PRD FR-8): the previous UTC day(s), account-wide, into usage_daily
-# (scripts/usage/run.ts). /guildcraft status reads it; the Worker's */15 cron posts the usage warning from it
-# (src/usage.ts). The Worker holds no Cloudflare credential; this job uses the existing API token
-# (Account Analytics Read, Workers Observability Write).
+# (scripts/usage/run.ts). The dev copy's /guildcraft status shows it, and the dev Worker's */15 cron posts the usage
+# warning from it in the test server (src/usage.ts; order 11: production posts none). The Worker holds no Cloudflare
+# credential; this job uses the existing API token (Account Analytics Read, Workers Observability Write).
 # Schedule: 05:43 UTC, off the hour (GitHub delays and may drop runs at the start of every hour); the previous UTC day
 # is complete by then. Expected: <1 billed minute a run (public repository: free), ~15 a month.
 #
-# The alarm (ORDER-RULES order 8):
-#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
-#   how often: at most once a day;
-#   state: failing when usage_daily's newest figures are over 30 hours old; a failure while already failing does not
-#          fail the run again (scripts/ci/alarm.ts). /guildcraft status marks the figures stale after 36 hours.
+# Two alarms, each with its own state, so one never silences the other. Both notify by GitHub's failed-run mail to
+# "the user who last modified the cron syntax" (the repository owner), at most once a day:
+#   the job's own (ORDER-RULES order 8): failing when usage_daily's newest figures are over 30 hours old, or the
+#          measurement failed; a failure while already failing does not fail the run again (scripts/ci/alarm.ts);
+#   the usage level (order 11, override 1; production's run only, the figures being account-wide): fails once when a
+#          metric crosses up to 10% of its Free limit, yesterday against the day before in usage_daily; staying over
+#          passes; dropping back under is reported in the summary and passes (scripts/usage/level-alarm.ts).
 #
 # Dispatch: dry_run (default true) prints the rows it would write and writes nothing.
 name: usage

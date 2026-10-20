@@ -2,9 +2,11 @@
 //
 // The figures arrive from Actions: scripts/usage/run.ts writes usage_daily (one row per UTC day per metric,
 // account-wide) and scripts/backup/run.ts writes backup_status. The Worker holds no Cloudflare credential.
+// Order 11: the usage section, the backup token and raw errors show only in the dev copy (src/env.ts isDevCopy).
 //
-// The usage warning (an alarm, ORDER-RULES order 8):
-//   who:   the review channel of every guild that set one (/guildcraft setup review:), one line each;
+// The usage warning in a channel (an alarm, ORDER-RULES order 8; order 11 override 1: the dev copy only, so the
+// operator's test server. Production's operator alarm is the usage job's failed run, scripts/usage/level-alarm.ts):
+//   who:   the review channel of every guild in the dev copy that set one (/guildcraft setup review:), one line each;
 //   state: per metric, 'over' when the last full day's value is at least 10% of its Free limit (src/limits.ts),
 //          else 'under'; derived from usage_daily and the limit, never stored;
 //   when:  the */15 cron (src/board/refresh.ts) posts only when a metric's state differs from the state of the last
@@ -12,6 +14,7 @@
 //          recorded as a usage.alert audit row (system), which is what "the last line posted" reads. A post Discord
 //          refuses is recorded too, with the old state, so it is retried the next UTC day, not every 15 minutes.
 import { budgetLeft, type BotApi } from './board/api.ts';
+import { plural } from './discord.ts';
 import { BACKUP_TOKEN_EXPIRY_NOTE, FREE_LIMITS, METRICS, STALE_MS, USAGE_TARGET_SHARE, type Metric } from './limits.ts';
 
 export interface UsageRow {
@@ -60,9 +63,9 @@ export function latestByMetric(rows: UsageRow[]): Map<Metric, UsageRow> {
 /** The status section: one line per metric for the last full day, with its 7-day peak; stale after 36 hours. */
 export function usageLines(rows: UsageRow[], nowMs: number): string[] {
   const latest = latestByMetric(rows);
-  if (!latest.size) return ['**Usage against the free-tier limits:** no figures yet (the nightly usage job writes them)'];
+  if (!latest.size) return ['**Usage against the free-tier limits:** none yet'];
   const measured = rows.reduce((m, r) => (r.measured_at > m ? r.measured_at : m), '');
-  const lines = [`**Usage against the free-tier limits** (whole Cloudflare account, per UTC day; target under ${USAGE_TARGET_SHARE * 100}%) · measured ${ts(measured)}${stale(measured, nowMs) ? ' · **stale**: the nightly usage job has not run for over 36 hours' : ''}`];
+  const lines = [`**Usage against the free-tier limits** (whole Cloudflare account, per UTC day; target under ${USAGE_TARGET_SHARE * 100}%) · measured ${ts(measured)}${stale(measured, nowMs) ? ' · **figures overdue** (not measured in 36 hours)' : ''}`];
   for (const m of METRICS) {
     const last = latest.get(m);
     if (!last) {
@@ -71,7 +74,7 @@ export function usageLines(rows: UsageRow[], nowMs: number): string[] {
     }
     const week = rows.filter((r) => r.metric === m && r.day <= last.day && r.day > new Date(Date.parse(last.day) - 7 * 86_400_000).toISOString().slice(0, 10));
     const peak = week.reduce((p, r) => (r.value > p.value ? r : p), last);
-    lines.push(`- ${FREE_LIMITS[m].label}: ${ofLimit(m, last.value)} on ${last.day} · 7-day peak ${ofLimit(m, peak.value)} (${peak.day}, ${week.length} day${week.length === 1 ? '' : 's'} measured)`);
+    lines.push(`- ${FREE_LIMITS[m].label}: ${ofLimit(m, last.value)} on ${last.day} · 7-day peak ${ofLimit(m, peak.value)} (${peak.day}, ${plural(week.length, 'day')} measured)`);
   }
   return lines;
 }
@@ -82,13 +85,20 @@ export function tokenExpiryText(tokenExpires: string | null | undefined, note = 
   return note === 'none' ? "token: no expiry (owner's note)" : 'token expires unknown';
 }
 
-/** "Backup: last <time> · token expires <date>" (or the owner's no-expiry note); stale after 36 hours. */
-export function backupLine(row: (BackupRow & { last_ok: string | null }) | undefined, nowMs: number): string {
-  if (!row) return '**Backup:** none yet (the nightly backup job writes this line)';
-  const parts = [`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`, tokenExpiryText(row.token_expires)];
-  if (row.result !== 'ok') parts.push(`latest run ${ts(row.finished_at)} **failed**${row.error ? `: ${row.error.slice(0, 160)}` : ''}`);
+/**
+ * What follows a failed status: in dev, the raw error ("failed: <error>"); in production, where guild officers read
+ * it, the next step (order 11).
+ */
+export const failureText = (error: string | null | undefined, dev: boolean, max = 200) =>
+  !error ? '' : dev ? `: ${error.slice(0, max)}` : '. If this repeats, tell Joegandomi.';
+
+/** "Backup: last <time>", with the token's expiry (or the owner's no-expiry note) in dev; overdue after 36 hours. */
+export function backupLine(row: (BackupRow & { last_ok: string | null }) | undefined, nowMs: number, dev: boolean): string {
+  if (!row) return '**Backup:** none yet';
+  const parts = [`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`, ...(dev ? [tokenExpiryText(row.token_expires)] : [])];
+  if (row.result !== 'ok') parts.push(`latest run ${ts(row.finished_at)} **failed**${failureText(row.error ?? 'no detail', dev, 160)}`);
   else if (row.size_bytes) parts.push(fmtBytes(row.size_bytes));
-  if (stale(row.last_ok, nowMs)) parts.push('**stale**: no successful backup for over 36 hours');
+  if (stale(row.last_ok, nowMs)) parts.push('**overdue**: no backup in over 36 hours');
   return `**Backup:** ${parts.join(' · ')}`;
 }
 
@@ -100,7 +110,7 @@ export const ALERT_GUILDS_SQL = `SELECT g.id, g.review_channel_id,
     WHERE a.id IN (SELECT max(id) FROM audit_log WHERE guild_id = g.id AND action = 'usage.alert' GROUP BY target)) AS alerts
   FROM guild g WHERE g.review_channel_id IS NOT NULL ORDER BY g.id`;
 
-/** The one line posted (DRAFT copy, docs/COPY.md: approved before launch). */
+/** The one line posted, in the dev copy only (order 11). */
 export function alertText(m: Metric, row: UsageRow, state: 'over' | 'under'): string {
   return state === 'over'
     ? `Free-tier usage: **${FREE_LIMITS[m].label}** was ${ofLimit(m, row.value)} on ${row.day}, at or over GuildCraft's ${USAGE_TARGET_SHARE * 100}% target. Nothing stops until 100%; \`/guildcraft status\` shows every figure.`

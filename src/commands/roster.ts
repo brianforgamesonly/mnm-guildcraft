@@ -2,7 +2,7 @@
 // Rosters show guild roster data only: character names, classes, levels and skill levels. Removed
 // characters (deleted_at) and departed members (status 'left') never appear.
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { postButton, postedReply, searchReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { skillGroups, type Tradeskill } from './skills.ts';
 
@@ -16,7 +16,7 @@ const DAY_MS = 86_400_000;
 const LIVE = "c.deleted_at IS NULL AND m.status = 'active'";
 const JOIN_LIVE = 'JOIN character c ON c.id = cs.character_id JOIN member m ON m.guild_id = c.guild_id AND m.discord_user_id = c.owner_user_id';
 
-const charBits = (cls: string | null, level: number | null) => [cls ? md(cls) : null, level !== null ? `lvl ${level}` : null].filter(Boolean).join(' ');
+const charBits = (cls: string | null, level: number | null) => [cls ? md(cls) : null, level !== null ? `level ${level}` : null].filter(Boolean).join(' ');
 
 // ---------------------------------------------------------------- /roster skill
 
@@ -71,7 +71,7 @@ function skillEmbed(c: Ctx, d: SkillPage): Embed {
   });
   const minText = d.min > 0 ? ` at ${d.min}+` : '';
   return {
-    title: truncate(`${d.skill.name}: ${d.total} character${d.total === 1 ? '' : 's'}${minText}`, EMBED_LIMITS.title),
+    title: truncate(`${d.skill.name}: ${plural(d.total, 'character')}${minText}`, EMBED_LIMITS.title),
     description: lines.length ? lines.join('\n') : `No one in the guild has recorded ${d.skill.name}${minText} yet.`,
     footer: { text: `Page ${d.page + 1} of ${d.pages}${lines.some((l) => l.includes('*stale*')) ? ` · stale = not updated in ${c.guild.stale_days} days` : ''}` },
   };
@@ -158,7 +158,7 @@ async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; 
   const who = `<@${userId}>`;
   const content = !all.length
     ? `${who} has no characters on the roster.`
-    : `${who}: ${all.length} character${all.length === 1 ? '' : 's'}${all.length > embeds.length ? ` (showing ${embeds.length})` : ''}`;
+    : `${who}: ${plural(all.length, 'character')}${all.length > embeds.length ? ` (showing ${embeds.length})` : ''}`;
   return { embeds, content };
 }
 

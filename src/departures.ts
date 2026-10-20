@@ -70,7 +70,13 @@ export interface DepartureResult {
 
 // ---------------------------------------------------------------- the server's member list
 
-type ListOutcome = { ok: true; ids: Set<string>; pages: number } | { ok: false; pages: number; why: string };
+/** `why` is the operator's detail (logs); `note` is what /guildcraft status shows officers (order 11). */
+type ListOutcome = { ok: true; ids: Set<string>; pages: number } | { ok: false; pages: number; why: string; note: string };
+
+const LIST_UNREAD = "Couldn't read the full member list, so nobody was hidden. If this repeats, tell Joegandomi.";
+const LIST_REFUSED = 'Discord refused the member list. Tell Joegandomi.';
+/** Notices left for the next night: the call budget ran out, or more than MAX_NOTICES were owed. */
+const MORE_TOMORROW = `More notices come tomorrow night (up to ${MAX_NOTICES} a night).`;
 
 /** Every member id, or why the list is not complete. Never partial: a failed or skipped page fails the list. */
 export async function listMemberIds(api: BotApi, guildId: string): Promise<ListOutcome> {
@@ -82,13 +88,13 @@ export async function listMemberIds(api: BotApi, guildId: string): Promise<ListO
       const why = r.skipped
         ? `member list page ${pages} not read (${r.skipped})`
         : `member list refused: HTTP ${r.status}${r.code ? ` code ${r.code}` : ''}${r.status === 403 || r.code === 50001 ? ` — check the Server Members Intent (${INTENT_STEP})` : ''}`;
-      return { ok: false, pages, why };
+      return { ok: false, pages, why, note: r.skipped ? LIST_UNREAD : LIST_REFUSED };
     }
-    if (!Array.isArray(r.body)) return { ok: false, pages, why: `member list page ${pages}: not a list` };
+    if (!Array.isArray(r.body)) return { ok: false, pages, why: `member list page ${pages}: not a list`, note: LIST_UNREAD };
     for (const m of r.body) if (m.user?.id) ids.add(m.user.id);
     if (r.body.length < MEMBER_PAGE) return { ok: true, ids, pages };
     const last = r.body.at(-1)?.user?.id;
-    if (!last || last === after) return { ok: false, pages, why: `member list page ${pages}: cursor did not advance` };
+    if (!last || last === after) return { ok: false, pages, why: `member list page ${pages}: cursor did not advance`, note: LIST_UNREAD };
     after = last;
   }
 }
@@ -138,7 +144,7 @@ export const describeCharacter = (ch: CharacterBrief) => {
   return `**${md(ch.name)}**${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
 };
 
-/** The review-channel notice for one departed member (DRAFT copy, docs/COPY.md: approved before launch). */
+/** The review-channel notice for one departed member. */
 export function noticeMessage(userId: string, name: string | null, characters: CharacterBrief[]) {
   name = name?.trim() || 'A member';
   const list = characters.length ? characters.map(describeCharacter).join('\n') : 'No characters registered.';
@@ -149,7 +155,7 @@ export function noticeMessage(userId: string, name: string | null, characters: C
         `**Characters**\n${list}`,
         '',
         'While they are away their characters are hidden from `/craft find`, `/roster` and the roster board. If they come back and use GuildCraft, they show again.',
-        '**Remove** removes the characters (their skills are kept; `/character add` with the same name restores one). **Keep** leaves them as they are. Officers only.',
+        '**Remove characters** removes the characters (their skills are kept; `/character add` with the same name restores one). **Keep** leaves them as they are. Officers only.',
       ].join('\n'),
       4096,
     ),
@@ -187,14 +193,17 @@ export async function departuresForGuild(
     const list = await listMemberIds(api, guild.id);
     r.pages = list.pages;
     if (!list.ok) {
-      r.stopped = list.why;
+      r.stopped = list.note;
       r.errors.push(list.why);
     } else {
       listedNow = list.ids;
       r.listed = list.ids.size;
       const gone = active.map((m) => m.id).filter((id) => !list.ids.has(id));
       r.would_mark = gone;
-      if (pastCeiling(gone.length, active.length)) r.stopped = `ceiling: ${gone.length} of ${active.length} active members would be marked (limit ${MAX_MARK}, or ${MAX_MARK_SHARE * 100}% once ${SHARE_FLOOR}+); nobody marked`;
+      if (pastCeiling(gone.length, active.length)) {
+        r.stopped = `${gone.length} of ${active.length} members seemed to leave at once, so nobody was hidden (safety check).`;
+        r.errors.push(`ceiling: ${gone.length} of ${active.length} active members would be marked (limit ${MAX_MARK}, or ${MAX_MARK_SHARE * 100}% once ${SHARE_FLOOR}+); nobody marked`);
+      }
       else if (gone.length && !opts.dryRun) {
         const ids = JSON.stringify(gone);
         // The member.left rows go first: if a non-atomic caller (the workflow's HTTP adapter) stops halfway, an
@@ -239,7 +248,7 @@ export async function departuresForGuild(
     for (const p of pending.slice(0, MAX_NOTICES)) {
       // One call for the post, one for the final D1 write.
       if (budgetLeft(api.budget) < 2 || Date.now() >= api.budget.deadline) {
-        r.stopped ??= 'call budget: remaining notices carry to the next run';
+        r.stopped ??= MORE_TOMORROW;
         break;
       }
       const sent = await api.call<{ id: string }>('POST', `/channels/${guild.review_channel_id}/messages`, noticeMessage(p.id, p.name, parseCharacters(p.characters)));
@@ -251,7 +260,7 @@ export async function departuresForGuild(
       r.notices_posted++;
       notified.push(auditRow(db, guild.id, 'system', 'member.notified', `member:${p.id}`, { message_id: sent.body?.id ?? null }, at));
     }
-    if (pending.length > MAX_NOTICES && !r.stopped) r.stopped = `${pending.length - MAX_NOTICES} notice(s) over the nightly ${MAX_NOTICES} carry to the next run`;
+    if (pending.length > MAX_NOTICES && !r.stopped) r.stopped = MORE_TOMORROW;
   }
 }
 

@@ -2,7 +2,6 @@
 //   /craft report item: issue: [details], and the "Report a problem" button on /craft find (a modal, at once);
 //   the report card in the review channel (order 9 override 1: posted by the Worker after a member's report), with
 //   Mark fixed and Dismiss for officers. The officer fixes the data with /recipe; the buttons only record it.
-// DRAFT copy throughout: the operator approves it before launch (docs/COPY.md).
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import { botApi } from '../board/api.ts';
@@ -60,13 +59,13 @@ async function fileReport(c: Ctx, item: { id: number; name: string }, issue: str
     audit(c.db, c.guild.id, c.userId, 'report.create', `item:${item.id}`, null, { issue }),
   ]);
   const id = (inserted.results as { id: number }[])[0].id;
-  const saved = `Thanks: your report on **${md(item.name)}** (${issueLabel(issue)}) is saved.`;
-  if (!c.guild.review_channel_id || !c.botToken) return ephemeral(`${saved} Officers will see it in \`/guildcraft status\`.`);
+  const saved = `Thanks: your report on **${md(item.name)}** (${issueLabel(issue)}) is saved`;
+  if (!c.guild.review_channel_id || !c.botToken) return ephemeral(`${saved} for your officers.`);
   const card = reportCard({ id, item: item.name, reporter: c.userId, issue, details, status: 'open', resolved_by: null, resolved_at: null, created_at: createdAt });
   const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 });
   const sent = await api.call('POST', `/channels/${c.guild.review_channel_id}/messages`, { embeds: [card], components: cardButtons(id), allowed_mentions: { parse: [] } });
   if (!sent.ok) console.error('report card refused', JSON.stringify(api.log));
-  return ephemeral(sent.ok ? `${saved} Officers have been sent it to review.` : `${saved} Officers will see it in \`/guildcraft status\`.`);
+  return ephemeral(sent.ok ? `${saved}. Your officers have it to review.` : `${saved} for your officers.`);
 }
 
 const findItem = (db: D1Database, by: { key: string } | { id: number }) =>
