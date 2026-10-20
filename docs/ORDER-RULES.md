@@ -127,3 +127,8 @@ Treat the clock as authoritative over any date an order states.
 
 - Operator-only information (copy markers, token and job internals, platform usage) appears only in the dev copy, or in the operator's email. Never in a guild's channels or a production reply. (The one decider is `isDevCopy` in `src/env.ts`: any `GUILDCRAFT_COPY` but `dev`, unset included, is production.)
 - Order 11's override 1, replacing order 8's usage warnings in the review channel: the production Worker posts no usage warning in any guild's channel. The usage job carries it to the operator instead: its production run fails once when a metric's state changes upward (yesterday at or over 10% of its Free limit, the day before under), so GitHub mails the owner; staying over passes, and dropping back under is reported in the job summary and passes. Its state is derived from `usage_daily`'s earlier days (never from `usage.alert` rows), separate from the job's stale/GraphQL alarm, and judged at most once a day per metric (`scripts/usage/level-alarm.ts`). The dev run never fails on it. The dev copy may keep posting usage warnings in the test server's review channel (`src/usage.ts`), the operator's own server.
+
+## Order 12
+
+- Every FINAL lists each GitHub Actions run that failed during the order, with its id and reason; each one emails the owner. Don't dispatch a run you expect to fail. Test locally first, and dispatch only to confirm.
+  Its scope: every run that failed between RECEIVED and FINAL, scheduled runs included. Each is marked "mine" or "scheduled"; a designed alarm (for example the usage job's level alarm) is marked "alarm, intended", with its reason.

@@ -7,9 +7,9 @@ import { channelPermissions } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
-import { BACKUP_SQL, backupLine, failureText, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
+import { BACKUP_SQL, backupLine, failureText, tokenLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
 import { ALARM_IMPORT, REAL_IMPORT } from '../import-status.ts';
-import { isDevCopy } from '../env.ts';
+import { operatorText, render, type Line } from '../operator-text.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -283,8 +283,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const last = (lastImport.results as { status: string; started_at: string; finished_at: string | null; warnings: string | null; error: string | null }[])[0];
   const b = (board.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
   // Order 11: operator-only lines (the copy marker, test updates, raw errors, the backup token, platform usage) show
-  // only in the dev copy (src/env.ts).
-  const dev = isDevCopy(c.copy);
+  // only in the dev copy. Order 12: each is OperatorText from its source (src/operator-text.ts); render() drops it
+  // outside dev.
   const warningsText = (json: string | null) => {
     const n = warningsCount(json);
     return n === null ? 'warnings unreadable' : plural(n, 'warning');
@@ -292,20 +292,21 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const dry = (lastDryRun.results as { id: number; finished_at: string | null; started_at: string; warnings: string | null; real_id: number | null }[])[0];
   // A dry run newer than the last real import gets its own line; older ones are not shown.
   const dryLine =
-    dev && dry && (dry.real_id === null || dry.id > dry.real_id)
-      ? [`**Last test update:** ${when(dry.finished_at ?? dry.started_at)} (no changes saved) · ${warningsText(dry.warnings)}`]
+    dry && (dry.real_id === null || dry.id > dry.real_id)
+      ? [operatorText(`**Last test update:** ${when(dry.finished_at ?? dry.started_at)} (no changes saved) · ${warningsText(dry.warnings)}`)]
       : [];
   const al = (alarmRow.results as { id: number; status: string; started_at: string; finished_at: string | null; error: string | null; real_id: number | null }[])[0];
-  const alarmLine =
+  const alarmLine: Line[] =
     al && (al.real_id === null || al.id > al.real_id)
-      ? [`**Latest nightly run:** ${when(al.finished_at ?? al.started_at)} · **${al.status}**${failureText(al.error, dev)}`]
+      ? [[`**Latest nightly run:** ${when(al.finished_at ?? al.started_at)} · **${al.status}**`, ...failureText(al.error)]]
       : [];
-  const lines = [
+  const backupRow = (backup.results as (BackupRow & { last_ok: string | null })[])[0];
+  const lines: Line[] = [
     '## GuildCraft status',
     // Order 10: which copy answered, so the operator can always tell the Dev app from production (dev only, order 11).
-    ...(dev ? ['**Copy:** dev'] : []),
+    operatorText(`**Copy:** ${c.copy}`),
     `**Data version:** ${ok ? `\`${ok.source_version}\`` : 'no completed import yet'}`,
-    `**Last data update:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${warningsText(last.warnings)} · ${last.status}${failureText(last.error, dev)}` : 'none yet'}`,
+    last ? [`**Last data update:** ${when(last.finished_at ?? last.started_at)} · ${warningsText(last.warnings)} · ${last.status}`, ...failureText(last.error)] : '**Last data update:** none yet',
     ...alarmLine,
     ...dryLine,
     c.guild.board_channel_id
@@ -315,10 +316,11 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
     `**Waiting for officers:** ${plural(q.reports, 'open report')} · ${plural(q.images, 'pending screenshot')}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
     `**Departures:** ${plural(d?.left_members ?? 0, 'member')} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
-    backupLine((backup.results as (BackupRow & { last_ok: string | null })[])[0], nowMs, dev),
-    ...(dev ? usageLines(usage.results as unknown as UsageRow[], nowMs) : []),
+    backupLine(backupRow, nowMs),
+    tokenLine(backupRow),
+    ...usageLines(usage.results as unknown as UsageRow[], nowMs),
   ];
-  return ephemeral(lines.join('\n'));
+  return ephemeral(render(c.copy, lines));
 }
 
 // ---------------------------------------------------------------- /guildcraft rebuild-board (order 6)

@@ -2,7 +2,7 @@
 // fixed data and a fixed clock: /guildcraft status in every branch, the departure notes it shows, and the departure
 // notice. Each runs as production and with GUILDCRAFT_COPY unset (which counts as production, src/env.ts). The
 // snapshots (__snapshots__/production-snapshot.test.ts.snap) were written by the unchanged code; after the change the
-// outputs must match them byte for byte. CI never writes a snapshot (vitest --ci), so a missing one fails.
+// outputs must match them byte for byte. A mismatch always fails; on GitHub (CI=true) a missing snapshot fails too.
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BOARD_CALL_CAP, botApi as makeApi } from '../../src/board/api.ts';
@@ -53,7 +53,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const status = async (opts: (typeof COPIES)[number][1]) => (await send(cmd(admin, 'guildcraft', 'status'), opts)).data.content as string;
+const status = async (opts: { env: Record<string, unknown> }) => (await send(cmd(admin, 'guildcraft', 'status'), opts)).data.content as string;
 const run = (sql: string, ...binds: unknown[]) => env.DB.prepare(sql).bind(...binds).run();
 const importRow = (status: string, at: string, error: string | null = null, warnings = '[1]') =>
   run("INSERT INTO data_import (source, source_version, status, warnings, error, started_at, finished_at) VALUES ('test', 'v2026.10.19', ?, ?, ?, ?, ?)", status, warnings, error, at, at);
@@ -118,6 +118,22 @@ describe('production status: every branch, as at 2b204aa', () => {
         await seed();
         expect(await status(opts)).toMatchSnapshot();
       });
+});
+
+// The control: the same seeds as dev must differ (copy marker, raw errors, token, usage), or the snapshots above could
+// not tell a leak from no leak.
+describe('control: dev on the same seeds shows the operator text production drops', () => {
+  for (const [name, seed] of BRANCHES)
+    it(name, async () => {
+      await seed();
+      const prod = await status(COPIES[0][1]);
+      const dev = await status({ env: { DISCORD_BOT_TOKEN: 'test-bot-token', GUILDCRAFT_COPY: 'dev' } });
+      expect(dev).not.toBe(prod);
+      expect(dev).toMatch(/\*\*Copy:\*\* dev\n/);
+      expect(dev).toMatch(/\*\*Backup token:\*\* /);
+      if (name === 'failed') for (const raw of ['7500 internal', 'push refused: 403']) expect([dev.includes(raw), prod.includes(raw)]).toEqual([true, false]);
+      if (name === 'ok') expect([dev.includes('Records read'), prod.includes('Records read')]).toEqual([true, false]);
+    });
 });
 
 /** Every departure note the nightly run can leave for status to show. */
