@@ -316,7 +316,7 @@ describe('overflow into bot-owned follow-up messages', () => {
 });
 
 describe('/guildcraft status', () => {
-  it('shows the data version, the last import with warnings, the board, and usage as coming soon', async () => {
+  it('shows the data version, the last import with warnings, the board, and no backup or usage figures yet', async () => {
     await liveShape();
     await env.DB.prepare(
       "INSERT INTO data_import (source, source_version, status, started_at, finished_at, warnings) VALUES ('test', 'abc1234 / 2026-10-19T07:00:00Z', 'ok', '2026-10-19T07:30:00Z', '2026-10-19T07:31:00Z', '[1,2,3]')",
@@ -329,7 +329,8 @@ describe('/guildcraft status', () => {
     expect(r.data.content).toContain('**Data version:** `abc1234 / 2026-10-19T07:00:00Z`');
     expect(r.data.content).toMatch(/\*\*Last import:\*\* <t:\d+:f> \(<t:\d+:R>\) · ok · 3 warnings/);
     expect(r.data.content).toMatch(new RegExp(`\\*\\*Roster board:\\*\\* <#${FORUM}> · 5 of 5 posts · last refresh <t:\\d+:f> \\(<t:\\d+:R>\\) · 0 waiting to refresh`));
-    expect(r.data.content).toContain('**Usage against the free-tier limits:** coming soon');
+    expect(r.data.content).toContain('**Backup:** none yet');
+    expect(r.data.content).toContain('**Usage against the free-tier limits:** no figures yet');
   });
 
   it('is admin only', async () => {

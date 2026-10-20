@@ -10,7 +10,8 @@
           {
             "type": "command",
             "command": "node",
-            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/check-bash.mjs"]
+            "args": ["${CLAUDE_PROJECT_DIR}/.claude/hooks/check-bash.mjs"],
+            "onFailure": "block"
           }
         ]
       }

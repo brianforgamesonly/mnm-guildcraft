@@ -121,3 +121,116 @@ export function reconcile({ from, to, requests, audit, deploys, cronSince }) {
   });
   return { rows, ok: rows.every((r) => r.missing.length === 0) };
 }
+
+// ---------------------------------------------------------------- order 8, ITEM 3.1: explained and unexplained gaps
+//
+// A Workers Logs event that is missing, but whose invocation Cloudflare's own analytics (a separate pipeline) counts
+// as a success in the same 15-minute slot, is a PLATFORM DROP: counted and tracked, never a failure. A gap the
+// analytics does not explain fails. Per slot k (settled slots only):
+//   shortfall(k) = analytics(k) − logged(k) − excess logs in k−1 and k+1 (a request at a slot edge lands next door)
+//   drops(k)     = min(shortfall(k), analytics successes in k): only a success can be a confirmed drop
+//   a non-success shortfall (shortfall − drops) is unexplained.
+// Each missing event with an independent record (a cron slot without its run, an audit row without its request) is
+// explained by one drop in its slot, or failing that a neighbouring slot; otherwise it is unexplained. Drops that match
+// no such record (an autocomplete, say) still count as drops.
+
+/** The drop-rate alarm: the one-sided 95% upper confidence bound on the rate, over a rolling 7 days, above this. */
+export const DROP_BOUND_THRESHOLD = 0.15;
+export const DROP_BOUND_CONFIDENCE = 0.95;
+export const DROP_HISTORY_DAYS = 7;
+/**
+ * Below this many invocations the bound is not judged: with few samples the upper bound is high by construction
+ * (0 drops in 18 invocations is still over 15%). 200 is about two days of the 15-minute cron alone; 0 in 200 bounds at 1.5%.
+ */
+export const DROP_BOUND_MIN_N = 200;
+
+const near = (k, d) => new Date(Date.parse(`${k}Z`) + d * SLOT_MS).toISOString().slice(0, 16);
+export const slotKey = (ms) => new Date(slotOf(ms)).toISOString().slice(0, 16);
+
+/**
+ * @param {object} a
+ * @param {Map<string,{requests:number, ok:number}>} a.analytics  per slot key (YYYY-MM-DDTHH:MM, UTC): invocations, and those with status success
+ * @param {Map<string,number>} a.logged  requests seen in the logs, per slot key
+ * @param {{at:number, what:string}[]} a.gaps  missing events that have an independent record
+ * @param {number} a.settled  slots ending after this (epoch ms) are not judged
+ * @returns {{ drops:number, invocations:number, dropSlots:{slot:string,n:number}[], explained:string[], unexplained:string[] }}
+ */
+export function explainGaps({ analytics, logged, gaps, settled }) {
+  const keys = [...new Set([...analytics.keys(), ...logged.keys()])].sort();
+  const excess = (k) => Math.max(0, (logged.get(k) ?? 0) - (analytics.get(k)?.requests ?? 0));
+  const budget = new Map();
+  const unexplained = [];
+  const dropSlots = [];
+  let drops = 0;
+  for (const k of keys) {
+    if (Date.parse(`${k}Z`) + SLOT_MS > settled) continue;
+    const a = analytics.get(k) ?? { requests: 0, ok: 0 };
+    const shortfall = Math.max(0, a.requests - (logged.get(k) ?? 0) - excess(near(k, -1)) - excess(near(k, 1)));
+    if (!shortfall) continue;
+    const d = Math.min(shortfall, a.ok);
+    if (d) {
+      budget.set(k, d);
+      dropSlots.push({ slot: `${k}Z`, n: d });
+      drops += d;
+    }
+    if (shortfall > d) unexplained.push(`${k}Z: logs short of analytics by ${shortfall - d} invocation(s) that did not succeed`);
+  }
+  const explained = [];
+  for (const g of gaps) {
+    const k = slotKey(g.at);
+    const hit = [k, near(k, -1), near(k, 1)].find((s) => (budget.get(s) ?? 0) > 0);
+    if (hit) {
+      budget.set(hit, budget.get(hit) - 1);
+      explained.push(`${g.what} (platform drop: analytics counts a success in ${hit}Z)`);
+    } else unexplained.push(`${g.what}: missing, and analytics shows no unlogged success to explain it`);
+  }
+  let invocations = 0;
+  for (const [k, a] of analytics) if (Date.parse(`${k}Z`) + SLOT_MS <= settled) invocations += a.requests;
+  return { drops, invocations, dropSlots, explained, unexplained };
+}
+
+const logChoose = (() => {
+  const lg = [0];
+  return (n, k) => {
+    for (let i = lg.length; i <= n; i++) lg[i] = lg[i - 1] + Math.log(i);
+    return lg[n] - lg[k] - lg[n - k];
+  };
+})();
+/** P(X ≤ k) for X ~ Binomial(n, p). */
+function binomCdf(k, n, p) {
+  if (p <= 0) return 1;
+  if (p >= 1) return k >= n ? 1 : 0;
+  let s = 0;
+  for (let i = 0; i <= k; i++) s += Math.exp(logChoose(n, i) + i * Math.log(p) + (n - i) * Math.log1p(-p));
+  return Math.min(1, s);
+}
+/** The exact (Clopper–Pearson) one-sided upper confidence bound on a binomial rate: k drops in n invocations. */
+export function upperBound(k, n, confidence = DROP_BOUND_CONFIDENCE) {
+  if (n <= 0) return 1;
+  if (k >= n) return 1;
+  let lo = k / n;
+  let hi = 1;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (binomCdf(k, n, mid) > 1 - confidence) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+/**
+ * The rolling history: entries {from, to, drops, invocations, breach}, kept DROP_HISTORY_DAYS back from `now`.
+ * The current window replaces an entry whose midpoint it covers (the same window read again); the few minutes two
+ * daily windows overlap when GitHub starts a run later one day than the next do not.
+ */
+export function rollHistory(history, entry, now) {
+  const since = now - DROP_HISTORY_DAYS * 86_400_000;
+  const mid = (h) => (Date.parse(h.from) + Date.parse(h.to)) / 2;
+  const kept = (Array.isArray(history) ? history : []).filter((h) => h && Date.parse(h.to) > since && !(mid(h) >= Date.parse(entry.from) && mid(h) <= Date.parse(entry.to)));
+  const all = [...kept, entry].sort((a, b) => Date.parse(a.from) - Date.parse(b.from));
+  const drops = all.reduce((s, h) => s + h.drops, 0);
+  const invocations = all.reduce((s, h) => s + h.invocations, 0);
+  const bound = upperBound(drops, invocations);
+  const judged = invocations >= DROP_BOUND_MIN_N;
+  return { history: all, drops, invocations, bound, judged, breach: judged && bound > DROP_BOUND_THRESHOLD };
+}

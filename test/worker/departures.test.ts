@@ -99,11 +99,45 @@ describe('/guildcraft setup review:', () => {
     const r = await setupReview();
     expect(r.data.content).toContain(`Review channel: <#${REVIEW}>`);
     expect((await guildRow()).review_channel_id).toBe(REVIEW);
-    expect(server.calls.filter((c) => c.includes('/channels/') || c.includes('/roles'))).toEqual([]); // no permission fallback calls
+    // No permission fallback (its third call reads the bot's member); order 8's privacy check reads the channel and roles.
+    expect(server.calls.filter((c) => c.includes('/channels/') || c.includes('/roles') || c.includes('/members/'))).toEqual(['GET /channels/{id}', 'GET /guilds/{id}/roles']);
     expect(await actions()).toContain(`guild.setup guild:${GUILD}`);
     const s = await send(cmd(admin, 'guildcraft', 'status'), TOKEN);
     expect(s.data.content).toContain(`**Review channel:** <#${REVIEW}>`);
     expect(s.data.content).toContain('**Departures:** 0 members marked as left · last nightly check never');
+  });
+
+  // Order 8, ITEM 3.4: warn (never refuse) when @everyone can view the review channel.
+  const VIEW = 1n << 10n;
+  const privacy = (everyoneRole: bigint, overwrite?: { allow: bigint; deny: bigint }) => {
+    const base = botApi.handle!;
+    botApi.handle = (method, path, body) => {
+      if (method === 'GET' && path === `/channels/${REVIEW}`)
+        return new Response(JSON.stringify({ id: REVIEW, permission_overwrites: overwrite ? [{ id: GUILD, type: 0, allow: String(overwrite.allow), deny: String(overwrite.deny) }] : [] }), { status: 200 });
+      if (method === 'GET' && path === `/guilds/${GUILD}/roles`) return new Response(JSON.stringify([{ id: GUILD, permissions: String(everyoneRole) }]), { status: 200 });
+      return base(method, path, body);
+    };
+  };
+  it('warns when @everyone can view the channel, and still saves it', async () => {
+    privacy(VIEW);
+    const r = await setupReview();
+    expect(r.data.content).toContain('everyone in the server can see');
+    expect((await guildRow()).review_channel_id).toBe(REVIEW);
+  });
+  it('says nothing when the channel denies @everyone View Channel', async () => {
+    privacy(VIEW, { allow: 0n, deny: VIEW });
+    const r = await setupReview();
+    expect(r.data.content).not.toContain('**Note:**');
+    expect((await guildRow()).review_channel_id).toBe(REVIEW);
+  });
+  it('warns when the channel overwrite opens a hidden server to @everyone', async () => {
+    privacy(0n, { allow: VIEW, deny: 0n });
+    expect((await setupReview()).data.content).toContain('everyone in the server can see');
+  });
+  it('says it could not check when Discord does not answer', async () => {
+    const r = await setupReview();
+    expect(r.data.content).toContain("I couldn't check who can see");
+    expect((await guildRow()).review_channel_id).toBe(REVIEW);
   });
 });
 

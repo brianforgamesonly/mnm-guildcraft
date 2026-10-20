@@ -32,6 +32,7 @@ import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } 
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
+import { usageAlerts } from '../usage.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
 const AUTO_ARCHIVE_MINUTES = 10080;
@@ -646,6 +647,20 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     ...isolate,
   };
   console.log(JSON.stringify(line));
+  // Order 8 (ITEM 2.4): the usage warning, after the sweep (so the sweep's first query stays the run's first after an
+  // idle gap, order 5): one read per run; it posts only when a metric's state changes (src/usage.ts). It needs a read,
+  // a post and a write; whatever the sweep left dirty waits for the next run either way.
+  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= 3) {
+    api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
+    const mark = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
+    let usage: Record<string, unknown> = { gc: 'usage-alert' };
+    try {
+      usage = { ...(await usageAlerts(counted.db, api, controller.scheduledTime)) };
+    } catch (e) {
+      usage.err = e instanceof Error ? e.message : String(e);
+    }
+    console.log(JSON.stringify({ ...usage, d1_calls: counted.calls.length - mark.d1, discord_calls: budget.discord - mark.discord, calls: api.log.slice(mark.log) }));
+  }
   return line;
 }
 
