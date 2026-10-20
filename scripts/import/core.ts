@@ -9,6 +9,7 @@
 //   rows_written = 0 for a re-run on unchanged data.
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
+import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
 
 export const SOURCE = 'mnm-tools/wiki.json';
 
@@ -45,7 +46,13 @@ export type Warning =
   | { kind: 'unknown_field'; path: string; count: number }
   | { kind: 'scroll'; tradeskill: string; result: string; product: string; decision: string }
   | { kind: 'placeholder_result'; tradeskill: string; result: string }
-  | { kind: 'unmatched_component_names'; count: number; names: string[] };
+  | { kind: 'unmatched_component_names'; count: number; names: string[] }
+  // Order 13: class tokens that match no game_class code (joined codes, typos), kept in stats_json and given no class bit.
+  | { kind: 'unrecognised_class_tokens'; tokens: { token: string; items: number }[] }
+  // Order 13: a value the data holds that a /gear find choice list lacks (or a class list change): re-register commands.
+  | { kind: 'vocab_drift'; list: 'class' | 'slot' | 'weapon_type' | 'stat' | 'resist'; values: { value: string; items: number }[]; note: string }
+  // Order 13: the run stopped at the write ceiling; the rest is written by the next run (the differs guards resume it).
+  | { kind: 'write_ceiling'; ceiling: number; written: number; deferredStatements: number; deferredBound: number };
 
 // The source's fields as of mnm-tools e19cc75 (2026-10-19). A field outside these lists is a
 // warning, not a failure, so the next source change names itself in data_import.warnings.
@@ -56,6 +63,8 @@ const KNOWN_FIELDS = {
   item: ['ac', 'categories', 'class', 'container', 'delay', 'dmg', 'effect', 'flags', 'from', 'fromImport', 'fromTrade',
     'handed', 'harvestedBy', 'hasPage', 'haste', 'hp', 'hpRegen', 'icon', 'iconId', 'instr', 'mana', 'manaRegen', 'race',
     'resists', 'size', 'skill', 'slot', 'soldBy', 'stats', 'statsV', 'tradeskills', 'weight', 'wikiOnly', 'wikiZones'],
+  // Order 13: as of mnm-tools 7b17117 (2026-10-20). Kept: title, level, race, class, image, zone, loot.
+  mob: ['ac', 'class', 'hasPage', 'hp', 'image', 'imageFile', 'level', 'loot', 'race', 'special', 'title', 'zone'],
 } as const;
 
 /** A component name the source uses for "not known": counted on the recipe, never stored as an item. */
@@ -67,11 +76,21 @@ export type WikiItem = Record<string, unknown> & {
   tradeskills?: string[];
   harvestedBy?: string;
 };
+export interface WikiMob {
+  title?: string | null;
+  level?: string | number | null;
+  race?: string | null;
+  class?: string | null;
+  image?: string | null;
+  zone?: string | null;
+  loot?: string[] | null;
+}
 export interface WikiData {
   generatedAt: string;
   items: Record<string, WikiItem>;
   recipes: WikiRecipe[];
   nodes: Record<string, { yields?: { section?: string }[] }>;
+  mobs: Record<string, WikiMob>;
 }
 
 export class StructureError extends Error {
@@ -85,6 +104,7 @@ export class StructureError extends Error {
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isName = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0 && !v.includes('\u0000');
 const isPosInt = (v: unknown): v is number => Number.isInteger(v) && (v as number) > 0;
+const isNullish = (v: unknown) => v === undefined || v === null;
 
 /**
  * Checks top-level keys and the recipe and item shapes. Throws StructureError; never partially accepts.
@@ -106,6 +126,7 @@ export function checkStructure(raw: unknown, warnings: Warning[] = []): WikiData
   if (!isObj(raw.items) || Object.keys(raw.items).length === 0) p.push('items is not a non-empty object');
   if (!Array.isArray(raw.recipes) || raw.recipes.length === 0) p.push('recipes is not a non-empty array');
   if (!isObj(raw.nodes)) p.push('nodes is not an object');
+  if (!isObj(raw.mobs)) p.push('mobs is not an object');
   if (p.length) {
     flush();
     throw new StructureError(p);
@@ -141,6 +162,30 @@ export function checkStructure(raw: unknown, warnings: Warning[] = []): WikiData
     if (it.tradeskills !== undefined && !(Array.isArray(it.tradeskills) && it.tradeskills.every(isName)))
       p.push(`${at}.tradeskills is not an array of names`);
     if (it.harvestedBy !== undefined && it.harvestedBy !== null && !isName(it.harvestedBy)) p.push(`${at}.harvestedBy is not a name`);
+    // Order 13: the fields the gear finder reads.
+    for (const k of ['class', 'skill', 'handed'] as const)
+      if (!isNullish(it[k]) && typeof it[k] !== 'string') p.push(`${at}.${k} is not a string or null`);
+    for (const k of ['ac', 'dmg', 'delay', 'hp', 'mana', 'haste', 'hpRegen', 'manaRegen'] as const)
+      if (!isNullish(it[k]) && typeof it[k] !== 'number') p.push(`${at}.${k} is not a number or null`);
+    for (const k of ['from', 'wikiZones', 'categories', 'flags'] as const)
+      if (!isNullish(it[k]) && !(Array.isArray(it[k]) && (it[k] as unknown[]).every((v) => typeof v === 'string'))) p.push(`${at}.${k} is not a list of strings`);
+    for (const k of ['stats', 'resists'] as const)
+      if (!isNullish(it[k]) && !(isObj(it[k]) && Object.values(it[k]).every((v) => typeof v === 'number'))) p.push(`${at}.${k} is not an object of numbers`);
+    if (!isNullish(it.soldBy) && !(isObj(it.soldBy) && Array.isArray(it.soldBy.vendors) && it.soldBy.vendors.every((v) => typeof v === 'string')))
+      p.push(`${at}.soldBy is not {base, shady, vendors[]}`);
+  }
+  for (const [key, m] of Object.entries(raw.mobs as Record<string, unknown>)) {
+    const at = `mobs[${JSON.stringify(key)}]`;
+    if (!isName(key)) p.push(`${at} has an invalid key`);
+    if (!isObj(m)) {
+      p.push(`${at} is not an object`);
+      continue;
+    }
+    note(m, KNOWN_FIELDS.mob, '$.mobs[]');
+    for (const k of ['title', 'race', 'class', 'image', 'zone'] as const)
+      if (!isNullish(m[k]) && typeof m[k] !== 'string') p.push(`${at}.${k} is not a string or null`);
+    if (!isNullish(m.level) && typeof m.level !== 'string' && typeof m.level !== 'number') p.push(`${at}.level is not text or null`);
+    if (!isNullish(m.loot) && !(Array.isArray(m.loot) && m.loot.every((v) => typeof v === 'string'))) p.push(`${at}.loot is not a list of strings`);
   }
   flush();
   if (p.length) throw new StructureError(p);
@@ -175,7 +220,20 @@ export function deriveGatheringCandidates(data: WikiData, crafting: string[]): s
 
 /** Share of the items carrying a class value that a code must appear on to be kept. */
 export const CLASS_MIN_SHARE = 0.01;
-const CLASS_IGNORED = new Set(['ALL', 'NONE']);
+const CLASS_ALL = 'ALL';
+const CLASS_NONE = 'NONE';
+const CLASS_IGNORED = new Set([CLASS_ALL, CLASS_NONE]);
+
+/**
+ * An item's class text as tokens (order 13): wiki markup removed ("<br>", and a cut-off "SHD<"), split on whitespace
+ * and commas, upper-cased. Joined codes ("INQNEC") and typos stay whole: they are never split or guessed.
+ */
+export const classTokens = (text: string): string[] =>
+  text
+    .replace(/<[^>]*>/g, ' ')
+    .split(/[\s,]+/)
+    .map((t) => t.replace(/<.*$/s, '').toUpperCase())
+    .filter(Boolean);
 
 export interface ClassDerivation {
   /** Items whose class is a non-empty string (the denominator). */
@@ -183,14 +241,13 @@ export interface ClassDerivation {
   kept: { code: string; item_count: number }[];
   /** Codes below CLASS_MIN_SHARE, with the items carrying them. */
   dropped: { code: string; items: number }[];
-  /** Raw tokens that yield no code: ALL, NONE, or nothing left before a '<'. */
+  /** Tokens that yield no code: ALL and NONE. */
   ignored: { token: string; items: number }[];
 }
 
 /**
- * The game's classes, derived from items' class tokens (never typed): upper-case each token, cut it
- * at the first '<' (wiki markup such as "SHD<br>"), drop ALL and NONE, and keep a code carried by at
- * least CLASS_MIN_SHARE of the items that carry a class. Counts are items, not token occurrences.
+ * The game's classes, derived from items' class tokens (never typed; classTokens), dropping ALL and NONE, and keeping
+ * a code carried by at least CLASS_MIN_SHARE of the items that carry a class. Counts are items, not token occurrences.
  */
 export function deriveClasses(data: WikiData): ClassDerivation {
   let carrying = 0;
@@ -200,10 +257,8 @@ export function deriveClasses(data: WikiData): ClassDerivation {
     if (typeof it.class !== 'string' || it.class.trim() === '') continue;
     carrying++;
     const seen = new Set<string>();
-    for (const token of it.class.split(/\s+/)) {
-      if (!token) continue;
-      const code = token.toUpperCase().replace(/<.*$/s, '');
-      if (!code || CLASS_IGNORED.has(code)) ignored.set(token, (ignored.get(token) ?? 0) + 1);
+    for (const code of classTokens(it.class)) {
+      if (CLASS_IGNORED.has(code)) ignored.set(code, (ignored.get(code) ?? 0) + 1);
       else seen.add(code);
     }
     for (const c of seen) codes.set(c, (codes.get(c) ?? 0) + 1);
@@ -237,6 +292,124 @@ export function statsJson(it: WikiItem): string | null {
   return Object.keys(out).length ? stableStringify(out) : null;
 }
 
+// ---------------------------------------------------------------- gear (order 13)
+
+// Where an item comes from, as the source records it (item.origin_json): kept whole, read by /gear find's source line.
+const ORIGIN_KEYS = ['from', 'wikiZones', 'soldBy', 'categories'] as const;
+
+export function originJson(it: WikiItem): string | null {
+  const out: Record<string, unknown> = {};
+  for (const k of ORIGIN_KEYS) if (!isEmpty(it[k])) out[k] = it[k];
+  return Object.keys(out).length ? stableStringify(out) : null;
+}
+
+const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+export const slotTokens = (slot: string | null | undefined): string[] => (slot ?? '').trim().toUpperCase().split(/\s+/).filter(Boolean);
+
+/**
+ * An item's sources (order 13, ITEM 2), derived on every import and never typed by hand:
+ *   Drop: from or wikiZones is present. Crafted: the result of an active recipe. Vendor: soldBy is present.
+ *   Quest: a category in QUEST_CATEGORIES. Unknown: none of these.
+ * The "Removed Items" category adds REMOVED_BIT, which is not a source.
+ */
+export function sourceMask(it: WikiItem, crafted: boolean): number {
+  const cats = strings(it.categories);
+  const has: Record<Source, boolean> = {
+    Drop: strings(it.from).length > 0 || strings(it.wikiZones).length > 0,
+    Crafted: crafted,
+    Vendor: !isEmpty(it.soldBy),
+    Quest: cats.some((c) => (QUEST_CATEGORIES as readonly string[]).includes(c)),
+    Unknown: false,
+  };
+  has.Unknown = !SOURCES.some((s) => has[s]);
+  let mask = 0;
+  SOURCES.forEach((s, i) => {
+    if (has[s]) mask |= 1 << i;
+  });
+  return cats.includes(REMOVED_CATEGORY) ? mask | REMOVED_BIT : mask;
+}
+
+export function slotMask(it: WikiItem): number {
+  let mask = 0;
+  for (const t of slotTokens(it.slot)) {
+    const i = (SLOTS as readonly string[]).indexOf(t);
+    if (i >= 0) mask |= 1 << i;
+  }
+  return mask;
+}
+
+/**
+ * class_mask: ALL anywhere means every class (-1). Otherwise the bit of each token that is a kept game_class code;
+ * NONE, no class, and unrecognised tokens add no bit, so such an item matches only "Any".
+ */
+export function classMask(it: WikiItem, bits: Map<string, number>): number {
+  if (typeof it.class !== 'string') return 0;
+  const tokens = classTokens(it.class);
+  if (tokens.includes(CLASS_ALL)) return ALL_CLASSES;
+  let mask = 0;
+  for (const t of tokens) {
+    const b = bits.get(t);
+    if (b !== undefined) mask |= 1 << b;
+  }
+  return mask;
+}
+
+/** Highest bit a class may take: masks are handled as 32-bit signed integers in the Worker, and -1 means ALL. */
+export const MAX_CLASS_BIT = 30;
+
+/**
+ * Each kept class's bit. A code keeps the bit it was given (even while not kept, so a bit is never reused); a newly kept
+ * code takes the next free bit, in code order. A new class therefore never changes another class's bit.
+ */
+export function assignClassBits(kept: string[], existing: Map<string, { item_count: number; bit: number | null }>): Map<string, number> {
+  const bits = new Map<string, number>();
+  let next = Math.max(-1, ...[...existing.values()].map((c) => c.bit ?? -1)) + 1;
+  for (const code of [...kept].sort()) {
+    const held = existing.get(code)?.bit;
+    if (held !== null && held !== undefined) bits.set(code, held);
+    else {
+      if (next > MAX_CLASS_BIT) throw new Error(`no class bit left for ${code}: bits 0..${MAX_CLASS_BIT} are taken`);
+      bits.set(code, next++);
+    }
+  }
+  return bits;
+}
+
+export interface MobRow {
+  key: string;
+  title: string;
+  level: string | null;
+  race: string | null;
+  class: string | null;
+  image_url: string | null;
+  zones_json: string | null;
+  loot_json: string | null;
+}
+
+/** "[[Tomb of the Last Wyrmsbane]]" or "Night Harbor, Shaded Dunes": link text kept, comma lists split, repeats dropped. */
+export function mobZones(zone: string | null | undefined): string[] {
+  if (typeof zone !== 'string') return [];
+  const text = zone.replace(/\[\[(?:[^\]|]*\|)?([^\]]*)\]\]/g, '$1');
+  return [...new Set(text.split(',').map((z) => z.trim()).filter(Boolean))];
+}
+
+const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v : typeof v === 'number' ? String(v) : null);
+
+export function mobRow(key: string, m: WikiMob): MobRow {
+  const zones = mobZones(m.zone);
+  const loot = strings(m.loot);
+  return {
+    key,
+    title: text(m.title) ?? key,
+    level: text(m.level),
+    race: text(m.race),
+    class: text(m.class),
+    image_url: text(m.image),
+    zones_json: zones.length ? JSON.stringify(zones) : null,
+    loot_json: loot.length ? JSON.stringify(loot) : null,
+  };
+}
+
 // ---------------------------------------------------------------- plan
 
 export interface ItemRow {
@@ -248,7 +421,20 @@ export interface ItemRow {
   /** The item's wiki page, only when the source marks hasPage (order 3, 1.2: fills the existing column). */
   wiki_url: string | null;
   source: 'wiki';
+  // Order 13 (migrations/0010_gear.sql).
+  class_mask: number;
+  slot_mask: number;
+  source_mask: number;
+  origin_json: string | null;
 }
+type StoredItem = Omit<ItemRow, 'name_key' | 'source'> & { source: string };
+const ITEM_FIELDS = ['name', 'icon_url', 'slot', 'stats_json', 'wiki_url', 'class_mask', 'slot_mask', 'source_mask', 'origin_json'] as const;
+/** The one comparison the dry run's prediction and the statements' row filter share. */
+export const itemDiffers = (o: StoredItem | undefined, it: ItemRow) => !o || o.source !== 'wiki' || ITEM_FIELDS.some((f) => o[f] !== it[f]);
+
+type StoredMob = MobRow & { active: number };
+const MOB_FIELDS = ['key', 'title', 'level', 'race', 'class', 'image_url', 'zones_json', 'loot_json'] as const;
+export const mobDiffers = (o: StoredMob | undefined, m: MobRow) => !o || o.active !== 1 || MOB_FIELDS.some((f) => o[f] !== m[f]);
 
 /** The wiki link as mnm-tools builds it (mnmdb/app.js:179-180). Checked live in order 3: 21 of 21 sampled pages 200, no redirect. */
 export const WIKI_BASE = 'https://monstersandmemories.miraheze.org/wiki/';
@@ -279,10 +465,30 @@ interface ExistingRecipe {
 }
 export interface ExistingState {
   tradeskills: Map<string, { kind: string; sort_order: number }>;
-  items: Map<string, { name: string; icon_url: string | null; slot: string | null; stats_json: string | null; wiki_url: string | null; source: string }>;
+  items: Map<string, StoredItem>;
   recipes: Map<string, ExistingRecipe>; // by source_key, source = 'wiki' only
   activeWikiRecipes: number;
-  classes: Map<string, number>; // game_class code -> item_count (0 = no longer kept)
+  classes: Map<string, { item_count: number; bit: number | null }>; // game_class code (item_count 0 = no longer kept)
+  mobs: Map<string, StoredMob>; // by lower(key)
+  /** Indexes per table, from the live schema: each written row can also write one entry in each (the write bound). */
+  indexes: Record<string, number>;
+}
+
+/** Order 13's summary of gear (items with a slot): sources, overlaps, classes, and how from-names meet the mobs. */
+export interface GearSummary {
+  gear: number;
+  removed: number;
+  bySource: Record<Source, number>;
+  /** Each combination of sources, as "Drop+Crafted", with its count. */
+  combinations: Record<string, number>;
+  /** Gear whose class text yields no class bit (no class, NONE, or only unrecognised tokens): matches only "Any". */
+  classMaskZero: number;
+  slotMaskZero: number;
+  unrecognisedClassTokens: { token: string; items: number }[];
+  /** Distinct from-names on gear, and how many match a mob by key, or (failing that) by title; case-insensitive. */
+  fromNames: number;
+  fromMatchKey: number;
+  fromMatchTitle: number;
 }
 
 export interface Plan {
@@ -302,6 +508,12 @@ export interface Plan {
   classes: ClassDerivation;
   /** Stored codes that no longer meet the class rule: set to item_count 0, never deleted. */
   classDeactivate: string[];
+  /** Each kept code's bit in item.class_mask (assignClassBits). */
+  classBits: Map<string, number>;
+  mobs: MobRow[];
+  /** Stored active mobs missing upstream: set active = 0, never deleted (by key). */
+  mobDeactivate: string[];
+  gear: GearSummary;
 }
 
 /** A recipe's identity within its (tradeskill, result) group, excluding the variant number. */
@@ -394,6 +606,11 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
       stats_json: statsJson(it),
       wiki_url: it.hasPage === true ? wikiUrl(name) : null,
       source: 'wiki',
+      // Set below, once the recipes (Crafted) and the class bits are known.
+      class_mask: 0,
+      slot_mask: 0,
+      source_mask: 0,
+      origin_json: originJson(it),
     });
   }
 
@@ -511,11 +728,82 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
 
   const classes = deriveClasses(data);
   const keptCodes = new Set(classes.kept.map((c) => c.code));
-  const classDeactivate = [...existing.classes].filter(([code, n]) => n > 0 && !keptCodes.has(code)).map(([code]) => code).sort();
+  const classDeactivate = [...existing.classes].filter(([code, c]) => c.item_count > 0 && !keptCodes.has(code)).map(([code]) => code).sort();
+  const classBits = assignClassBits([...keptCodes], existing.classes);
+
+  // Order 13: each wiki item's masks. Crafted = the result of an active recipe in this plan.
+  const crafted = new Set(recipes.map((r) => r.result_key));
+  const unrecognised = new Map<string, number>();
+  const drift = { slot: new Map<string, number>(), weapon_type: new Map<string, number>(), stat: new Map<string, number>(), resist: new Map<string, number>() };
+  const bump = (m: Map<string, number>, k: string) => m.set(k, (m.get(k) ?? 0) + 1);
+  for (const row of items.values()) {
+    const it = data.items[row.name];
+    row.class_mask = classMask(it, classBits);
+    row.slot_mask = slotMask(it);
+    row.source_mask = sourceMask(it, crafted.has(row.name_key));
+    if (typeof it.class === 'string')
+      for (const t of new Set(classTokens(it.class))) if (!CLASS_IGNORED.has(t) && !classBits.has(t)) bump(unrecognised, t);
+    for (const t of new Set(slotTokens(it.slot))) if (!(SLOTS as readonly string[]).includes(t)) bump(drift.slot, t);
+    if (typeof it.skill === 'string' && !(WEAPON_TYPES as readonly string[]).includes(it.skill)) bump(drift.weapon_type, it.skill);
+    if (isObj(it.stats)) for (const k of Object.keys(it.stats)) if (!(STATS as readonly string[]).includes(k)) bump(drift.stat, k);
+    if (isObj(it.resists)) for (const k of Object.keys(it.resists)) if (!(RESISTS as readonly string[]).includes(k)) bump(drift.resist, k);
+  }
+  const counted = (m: Map<string, number>) => [...m].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'en'));
+  if (unrecognised.size) warnings.push({ kind: 'unrecognised_class_tokens', tokens: counted(unrecognised).map(([token, items]) => ({ token, items })) });
+  for (const [list, m] of Object.entries(drift) as [keyof typeof drift, Map<string, number>][])
+    if (m.size)
+      warnings.push({ kind: 'vocab_drift', list, values: counted(m).map(([value, items]) => ({ value, items })), note: `not in src/gear/vocab.ts: add it there and re-register commands` });
+  const newCodes = [...keptCodes].filter((c) => !((existing.classes.get(c)?.item_count ?? 0) > 0));
+  if (existing.classes.size && (newCodes.length || classDeactivate.length))
+    warnings.push({
+      kind: 'vocab_drift',
+      list: 'class',
+      values: [...newCodes.map((c) => ({ value: `+${c}`, items: classes.kept.find((k) => k.code === c)!.item_count })), ...classDeactivate.map((c) => ({ value: `-${c}`, items: 0 }))],
+      note: 'the class list changed: re-register commands so /gear find offers it',
+    });
+
+  // Order 13: mobs. name key is case-insensitive (mob.key COLLATE NOCASE); on a case-only collision keep the first.
+  const mobs = new Map<string, MobRow>();
+  for (const key of Object.keys(data.mobs).sort()) if (!mobs.has(nameKey(key))) mobs.set(nameKey(key), mobRow(key, data.mobs[key]));
+  const mobDeactivate = [...existing.mobs].filter(([k, m]) => m.active === 1 && !mobs.has(k)).map(([, m]) => m.key).sort();
+
+  const gearRows = [...items.values()].filter((r) => slotTokens(data.items[r.name].slot).length > 0);
+  const bySource = Object.fromEntries(SOURCES.map((s) => [s, 0])) as Record<Source, number>;
+  const combinations: Record<string, number> = {};
+  const gearUnrecognised = new Map<string, number>();
+  const fromNames = new Set<string>();
+  for (const r of gearRows) {
+    const names = SOURCES.filter((_, i) => r.source_mask & (1 << i));
+    for (const s of names) bySource[s]++;
+    combinations[names.join('+')] = (combinations[names.join('+')] ?? 0) + 1;
+    const it = data.items[r.name];
+    if (typeof it.class === 'string')
+      for (const t of new Set(classTokens(it.class))) if (!CLASS_IGNORED.has(t) && !classBits.has(t)) bump(gearUnrecognised, t);
+    for (const f of strings(it.from)) fromNames.add(nameKey(f));
+  }
+  const titles = new Set([...mobs.values()].map((m) => nameKey(m.title)));
+  const fromMatchKey = [...fromNames].filter((f) => mobs.has(f)).length;
+  const fromMatchTitle = [...fromNames].filter((f) => !mobs.has(f) && titles.has(f)).length;
+  const gear: GearSummary = {
+    gear: gearRows.length,
+    removed: gearRows.filter((r) => r.source_mask & REMOVED_BIT).length,
+    bySource,
+    combinations,
+    classMaskZero: gearRows.filter((r) => r.class_mask === 0).length,
+    slotMaskZero: gearRows.filter((r) => r.slot_mask === 0).length,
+    unrecognisedClassTokens: counted(gearUnrecognised).map(([token, items]) => ({ token, items })),
+    fromNames: fromNames.size,
+    fromMatchKey,
+    fromMatchTitle,
+  };
 
   return {
     classes,
     classDeactivate,
+    classBits,
+    mobs: [...mobs.values()],
+    mobDeactivate,
+    gear,
     tradeskills: crafting.map((name, i) => ({ name, sort_order: i + 1 })),
     items: [...items.values()],
     stubs: [...stubs.values()],
@@ -541,6 +829,7 @@ export interface Predicted {
   recipe: { insert: number; update: number; deactivate: number };
   recipe_component: { insert: number; update: number; delete: number };
   game_class: { insert: number; update: number; deactivate: number };
+  mob: { insert: number; update: number; deactivate: number };
 }
 
 export function predict(plan: Plan, ex: ExistingState): Predicted {
@@ -551,11 +840,17 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
     recipe: { insert: 0, update: 0, deactivate: plan.deactivate.length },
     recipe_component: { insert: 0, update: 0, delete: plan.componentDeletes.reduce((n, d) => n + d.item_keys.length, 0) },
     game_class: { insert: 0, update: 0, deactivate: plan.classDeactivate.length },
+    mob: { insert: 0, update: 0, deactivate: plan.mobDeactivate.length },
   };
   for (const c of plan.classes.kept) {
     const o = ex.classes.get(c.code);
     if (o === undefined) p.game_class.insert++;
-    else if (o !== c.item_count) p.game_class.update++;
+    else if (o.item_count !== c.item_count || o.bit !== plan.classBits.get(c.code)) p.game_class.update++;
+  }
+  for (const m of plan.mobs) {
+    const o = ex.mobs.get(nameKey(m.key));
+    if (!o) p.mob.insert++;
+    else if (mobDiffers(o, m)) p.mob.update++;
   }
   for (const t of plan.tradeskills) {
     const o = ex.tradeskills.get(t.name);
@@ -565,8 +860,7 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
   for (const it of plan.items) {
     const o = ex.items.get(it.name_key);
     if (!o) p.item.insert++;
-    else if (o.name !== it.name || o.icon_url !== it.icon_url || o.slot !== it.slot || o.stats_json !== it.stats_json || o.wiki_url !== it.wiki_url || o.source !== 'wiki')
-      p.item.update++;
+    else if (itemDiffers(o, it)) p.item.update++;
   }
   for (const s of plan.stubs) if (!ex.items.has(s.name_key)) p.stub.insert++;
   for (const r of plan.recipes) {
@@ -607,52 +901,102 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
  * The game-data tables the import writes: every Statement names one, and import.test.ts checks each statement's SQL
  * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
  */
-export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class'] as const;
+export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob'] as const;
 export type Table = (typeof IMPORT_TABLES)[number];
 /** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
 export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
 export interface Statement {
   table: Table;
   sql: string;
+  /** Most rows it can write: its rows, each with one entry in every index on its table (D1 counts index writes). */
+  bound: number;
 }
 
 const ROWS_PER_STATEMENT = 40;
 
-export function buildStatements(plan: Plan, importedAt: string): Statement[] {
-  const out: Statement[] = [];
+/** Order 13, section D: rows a run may write, index writes included. A run stops before a group that would pass it. */
+export const WRITE_CEILING = 40_000;
+
+/**
+ * The import's statements in groups, in write order. A run that reaches the write ceiling stops between groups, never
+ * inside one, and never skips ahead (a later group can depend on an earlier one: recipes name items). Each item and mob
+ * row is written whole by one statement; the recipes and their components are one group.
+ * With `ex`, item and mob rows that would not change are left out (itemDiffers / mobDiffers, as the dry run predicts);
+ * the statements' own "differs" guards still apply, so a re-run on unchanged data writes 0 rows.
+ */
+export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState): Statement[][] {
+  const groups: Statement[][] = [];
   const at = lit(importedAt);
-  for (const rows of chunk(plan.tradeskills, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'tradeskill',
-      sql:
+  const bound = (table: Table, rows: number) => rows * (1 + (ex?.indexes[table] ?? 0));
+  const stmt = (table: Table, rows: number, sql: string): Statement => ({ table, sql, bound: bound(table, rows) });
+
+  groups.push(
+    chunk(plan.tradeskills, ROWS_PER_STATEMENT).map((rows) =>
+      stmt(
+        'tradeskill',
+        rows.length,
         `INSERT INTO tradeskill (name, kind, sort_order) VALUES ${rows.map((t) => `(${lit(t.name)}, 'crafting', ${t.sort_order})`).join(', ')} ` +
-        `ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, sort_order = excluded.sort_order ` +
-        `WHERE tradeskill.kind IS NOT excluded.kind OR tradeskill.sort_order IS NOT excluded.sort_order`,
-    });
-  for (const rows of chunk(plan.items, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'item',
-      sql:
-        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, wiki_url, source, imported_at) VALUES ` +
-        rows.map((i) => `(${lit(i.name)}, ${lit(i.name_key)}, ${lit(i.icon_url)}, ${lit(i.slot)}, ${lit(i.stats_json)}, ${lit(i.wiki_url)}, 'wiki', ${at})`).join(', ') +
-        ` ON CONFLICT(name_key) DO UPDATE SET name = excluded.name, icon_url = excluded.icon_url, slot = excluded.slot, ` +
-        `stats_json = excluded.stats_json, wiki_url = excluded.wiki_url, source = excluded.source, imported_at = excluded.imported_at ` +
-        `WHERE item.name IS NOT excluded.name OR item.icon_url IS NOT excluded.icon_url OR item.slot IS NOT excluded.slot ` +
-        `OR item.stats_json IS NOT excluded.stats_json OR item.wiki_url IS NOT excluded.wiki_url OR item.source IS NOT excluded.source`,
-    });
+          `ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, sort_order = excluded.sort_order ` +
+          `WHERE tradeskill.kind IS NOT excluded.kind OR tradeskill.sort_order IS NOT excluded.sort_order`,
+      ),
+    ),
+  );
+  // Classes before items: an item's class_mask names bits that game_class holds. Bits are never reassigned.
+  groups.push([
+    ...chunk(plan.classes.kept, ROWS_PER_STATEMENT).map((rows) =>
+      stmt(
+        'game_class',
+        rows.length,
+        `INSERT INTO game_class (code, item_count, bit) VALUES ${rows.map((c) => `(${lit(c.code)}, ${c.item_count}, ${lit(plan.classBits.get(c.code) ?? null)})`).join(', ')} ` +
+          `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count, bit = excluded.bit ` +
+          `WHERE game_class.item_count IS NOT excluded.item_count OR game_class.bit IS NOT excluded.bit`,
+      ),
+    ),
+    ...chunk(plan.classDeactivate, ROWS_PER_STATEMENT).map((codes) =>
+      stmt('game_class', codes.length, `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`),
+    ),
+  ]);
+  groups.push(...mobGroups(plan, ex, stmt));
+  const items = ex ? plan.items.filter((i) => itemDiffers(ex.items.get(i.name_key), i)) : plan.items;
+  for (const rows of chunk(items, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'item',
+        rows.length,
+        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, wiki_url, source, imported_at, class_mask, slot_mask, source_mask, origin_json) VALUES ` +
+          rows
+            .map(
+              (i) =>
+                `(${lit(i.name)}, ${lit(i.name_key)}, ${lit(i.icon_url)}, ${lit(i.slot)}, ${lit(i.stats_json)}, ${lit(i.wiki_url)}, 'wiki', ${at}, ` +
+                `${i.class_mask}, ${i.slot_mask}, ${i.source_mask}, ${lit(i.origin_json)})`,
+            )
+            .join(', ') +
+          ` ON CONFLICT(name_key) DO UPDATE SET name = excluded.name, icon_url = excluded.icon_url, slot = excluded.slot, ` +
+          `stats_json = excluded.stats_json, wiki_url = excluded.wiki_url, source = excluded.source, imported_at = excluded.imported_at, ` +
+          `class_mask = excluded.class_mask, slot_mask = excluded.slot_mask, source_mask = excluded.source_mask, origin_json = excluded.origin_json ` +
+          `WHERE item.name IS NOT excluded.name OR item.icon_url IS NOT excluded.icon_url OR item.slot IS NOT excluded.slot ` +
+          `OR item.stats_json IS NOT excluded.stats_json OR item.wiki_url IS NOT excluded.wiki_url OR item.source IS NOT excluded.source ` +
+          `OR item.class_mask IS NOT excluded.class_mask OR item.slot_mask IS NOT excluded.slot_mask ` +
+          `OR item.source_mask IS NOT excluded.source_mask OR item.origin_json IS NOT excluded.origin_json`,
+      ),
+    ]);
   // Stub rows are only created, never overwritten: a stored record (wiki or stub) always wins.
-  for (const rows of chunk(plan.stubs, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'item',
-      sql:
-        `INSERT INTO item (name, name_key, source, imported_at) VALUES ` +
-        rows.map((s) => `(${lit(s.name)}, ${lit(s.name_key)}, 'stub', ${at})`).join(', ') +
-        ` ON CONFLICT(name_key) DO NOTHING`,
-    });
+  const stubs = ex ? plan.stubs.filter((s) => !ex.items.has(s.name_key)) : plan.stubs;
+  for (const rows of chunk(stubs, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'item',
+        rows.length,
+        `INSERT INTO item (name, name_key, source, imported_at) VALUES ` + rows.map((s) => `(${lit(s.name)}, ${lit(s.name_key)}, 'stub', ${at})`).join(', ') + ` ON CONFLICT(name_key) DO NOTHING`,
+      ),
+    ]);
+  const out: Statement[] = [];
+  groups.push(out);
   const recipeId = (k: string) => `(SELECT id FROM recipe WHERE source_key = ${lit(k)})`;
   const itemId = (k: string) => `(SELECT id FROM item WHERE name_key = ${lit(k)})`;
   for (const rows of chunk(plan.recipes, ROWS_PER_STATEMENT))
     out.push({
+      bound: bound('recipe', rows.length),
       table: 'recipe',
       sql:
         `INSERT INTO recipe (source_key, tradeskill_id, result_item_id, result_qty, trivial, trivial_unconfirmed, unknown_components, source, active, imported_at) VALUES ` +
@@ -673,45 +1017,69 @@ export function buildStatements(plan: Plan, importedAt: string): Statement[] {
     });
   const comps = plan.recipes.flatMap((r) => [...r.components].map(([k, q]) => ({ r: r.source_key, k, q })));
   for (const rows of chunk(comps, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'recipe_component',
-      sql:
+    out.push(
+      stmt(
+        'recipe_component',
+        rows.length,
         `INSERT INTO recipe_component (recipe_id, item_id, qty) VALUES ` +
-        rows.map((c) => `(${recipeId(c.r)}, ${itemId(c.k)}, ${c.q})`).join(', ') +
-        ` ON CONFLICT(recipe_id, item_id) DO UPDATE SET qty = excluded.qty WHERE recipe_component.qty IS NOT excluded.qty`,
-    });
+          rows.map((c) => `(${recipeId(c.r)}, ${itemId(c.k)}, ${c.q})`).join(', ') +
+          ` ON CONFLICT(recipe_id, item_id) DO UPDATE SET qty = excluded.qty WHERE recipe_component.qty IS NOT excluded.qty`,
+      ),
+    );
   for (const d of plan.componentDeletes)
-    out.push({
-      table: 'recipe_component',
-      sql: `DELETE FROM recipe_component WHERE recipe_id = ${recipeId(d.source_key)} AND item_id IN (${d.item_keys.map(itemId).join(', ')})`,
-    });
+    out.push(
+      stmt(
+        'recipe_component',
+        d.item_keys.length,
+        `DELETE FROM recipe_component WHERE recipe_id = ${recipeId(d.source_key)} AND item_id IN (${d.item_keys.map(itemId).join(', ')})`,
+      ),
+    );
   for (const keys of chunk(plan.deactivate, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'recipe',
-      sql: `UPDATE recipe SET active = 0 WHERE source = 'wiki' AND active = 1 AND source_key IN (${keys.map(lit).join(', ')})`,
-    });
-  for (const rows of chunk(plan.classes.kept, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'game_class',
-      sql:
-        `INSERT INTO game_class (code, item_count) VALUES ${rows.map((c) => `(${lit(c.code)}, ${c.item_count})`).join(', ')} ` +
-        `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count WHERE game_class.item_count IS NOT excluded.item_count`,
-    });
-  for (const codes of chunk(plan.classDeactivate, ROWS_PER_STATEMENT))
-    out.push({
-      table: 'game_class',
-      sql: `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`,
-    });
-  return out;
+    out.push(stmt('recipe', keys.length, `UPDATE recipe SET active = 0 WHERE source = 'wiki' AND active = 1 AND source_key IN (${keys.map(lit).join(', ')})`));
+  return groups.filter((g) => g.length > 0);
 }
+
+/**
+ * Mobs depend on nothing else, so they go early (after the classes): the backup's must-hold-rows check
+ * (scripts/backup/lib.ts) counts `mob` as soon as the table exists, and a run stopped at the ceiling has written them.
+ */
+function mobGroups(plan: Plan, ex: ExistingState | undefined, stmt: (table: Table, rows: number, sql: string) => Statement): Statement[][] {
+  const groups: Statement[][] = [];
+  const mobs = ex ? plan.mobs.filter((m) => mobDiffers(ex.mobs.get(nameKey(m.key)), m)) : plan.mobs;
+  for (const rows of chunk(mobs, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'mob',
+        rows.length,
+        `INSERT INTO mob (key, title, level, race, class, image_url, zones_json, loot_json, active) VALUES ` +
+          rows
+            .map((m) => `(${lit(m.key)}, ${lit(m.title)}, ${lit(m.level)}, ${lit(m.race)}, ${lit(m.class)}, ${lit(m.image_url)}, ${lit(m.zones_json)}, ${lit(m.loot_json)}, 1)`)
+            .join(', ') +
+          ` ON CONFLICT(key) DO UPDATE SET key = excluded.key, title = excluded.title, level = excluded.level, race = excluded.race, class = excluded.class, ` +
+          `image_url = excluded.image_url, zones_json = excluded.zones_json, loot_json = excluded.loot_json, active = 1 ` +
+          // key and title are NOCASE columns: compared as written, so a case change is written (as mobDiffers sees it).
+          `WHERE mob.key IS NOT excluded.key COLLATE BINARY OR mob.title IS NOT excluded.title COLLATE BINARY OR mob.level IS NOT excluded.level OR mob.race IS NOT excluded.race ` +
+          `OR mob.class IS NOT excluded.class OR mob.image_url IS NOT excluded.image_url OR mob.zones_json IS NOT excluded.zones_json ` +
+          `OR mob.loot_json IS NOT excluded.loot_json OR mob.active IS NOT 1`,
+      ),
+    ]);
+  for (const keys of chunk(plan.mobDeactivate, ROWS_PER_STATEMENT))
+    groups.push([stmt('mob', keys.length, `UPDATE mob SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)]);
+  return groups;
+}
+
+export const buildStatements = (plan: Plan, importedAt: string, ex?: ExistingState): Statement[] => buildGroups(plan, importedAt, ex).flat();
 
 // ---------------------------------------------------------------- existing state
 
 export async function loadExisting(db: Db): Promise<ExistingState> {
   const ts = await db.all<{ name: string; kind: string; sort_order: number }>('SELECT name, kind, sort_order FROM tradeskill');
-  const its = await db.all<{ name: string; name_key: string; icon_url: string | null; slot: string | null; stats_json: string | null; wiki_url: string | null; source: string }>(
-    'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source FROM item',
+  const its = await db.all<StoredItem & { name_key: string }>(
+    'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source, class_mask, slot_mask, source_mask, origin_json FROM item',
   );
+  const ms = await db.all<StoredMob>('SELECT key, title, level, race, class, image_url, zones_json, loot_json, active FROM mob');
+  // The live schema's indexes per table (the write bound): every index, partial or not, counts.
+  const idx = await db.all<{ t: string; n: number }>("SELECT tbl_name AS t, count(*) AS n FROM sqlite_master WHERE type = 'index' GROUP BY tbl_name");
   const rs = await db.all<{
     source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null;
     trivial_unconfirmed: number; unknown_components: number; item_key: string | null; qty: number | null;
@@ -722,7 +1090,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
      LEFT JOIN recipe_component c ON c.recipe_id = r.id LEFT JOIN item ci ON ci.id = c.item_id
      WHERE r.source = 'wiki'`,
   );
-  const cls = await db.all<{ code: string; item_count: number }>('SELECT code, item_count FROM game_class');
+  const cls = await db.all<{ code: string; item_count: number; bit: number | null }>('SELECT code, item_count, bit FROM game_class');
   const recipes = new Map<string, ExistingRecipe>();
   for (const row of rs) {
     let r = recipes.get(row.source_key);
@@ -746,10 +1114,15 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
   }
   return {
     tradeskills: new Map(ts.map((t) => [t.name, { kind: t.kind, sort_order: t.sort_order }])),
-    items: new Map(its.map((i) => [i.name_key, i])),
+    // Masks read back as integers so the comparison with the plan is exact (second run writes 0).
+    items: new Map(
+      its.map(({ name_key, ...i }) => [name_key, { ...i, class_mask: Number(i.class_mask), slot_mask: Number(i.slot_mask), source_mask: Number(i.source_mask) }]),
+    ),
     recipes,
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
-    classes: new Map(cls.map((c) => [c.code, Number(c.item_count)])),
+    classes: new Map(cls.map((c) => [c.code, { item_count: Number(c.item_count), bit: c.bit === null ? null : Number(c.bit) }])),
+    mobs: new Map(ms.map((m) => [nameKey(m.key), { ...m, active: Number(m.active) }])),
+    indexes: Object.fromEntries(idx.map((r) => [r.t, Number(r.n)])),
   };
 }
 
@@ -763,6 +1136,8 @@ export interface ImportOptions {
   dryRun?: boolean;
   /** Refuse a real write while data_import holds no completed dry-run row (the remote database). */
   requireDryRun?: boolean;
+  /** Rows this run may write (default WRITE_CEILING). */
+  writeCeiling?: number;
 }
 
 export interface ImportResult {
@@ -795,6 +1170,13 @@ export interface ImportResult {
   predicted?: Predicted;
   /** D1 response metadata summed per table (absent on dry runs and failures). */
   written?: Record<Table, { statements: number; rows_written: number; changes: number }>;
+  /** Order 13: gear sources, overlaps, classes and mob matches. */
+  gear?: GearSummary;
+  /** Every row the run wrote (D1 rows_written, index writes included), its own data_import rows too. */
+  rowsWritten?: number;
+  /** Dry run: the most rows the planned statements could write (rows × (1 + indexes on their table)). */
+  writeBound?: number;
+  ceiling?: number;
 }
 
 /**
@@ -806,8 +1188,10 @@ export async function previousImportFailing(db: Db): Promise<boolean | null> {
   return prior ? isFailing(prior.status) : null;
 }
 
-/** Refuse a run that would deactivate most of the stored recipes: a truncated source looks like this. */
+/** Refuse a run that would deactivate most of the stored recipes (or mobs): a truncated source looks like this. */
 const MIN_RECIPE_RATIO = 0.5;
+/** Statements sent per D1 call while the write ceiling is not near (each call is measured before the next). */
+const GROUP_BATCH = 50;
 
 export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Promise<ImportResult> {
   const startedAt = opts.now();
@@ -848,6 +1232,9 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   warnings.push(...plan.warnings);
   if (existing.activeWikiRecipes > 0 && plan.recipes.length < existing.activeWikiRecipes * MIN_RECIPE_RATIO)
     return fail(`implausible drop: ${plan.recipes.length} recipes against ${existing.activeWikiRecipes} active stored`);
+  const activeMobs = [...existing.mobs.values()].filter((m) => m.active === 1).length;
+  if (activeMobs > 0 && plan.mobs.length < activeMobs * MIN_RECIPE_RATIO)
+    return fail(`implausible drop: ${plan.mobs.length} mobs against ${activeMobs} active stored`);
 
   const counts: NonNullable<ImportResult['counts']> = {
     sourceItems: Object.keys(data.items).length,
@@ -872,37 +1259,90 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     await db.run([
       `INSERT INTO data_import (source, source_version, items, recipes, status, warnings, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, ${counts.items + counts.stubItems}, ${counts.recipes}, 'dry-run', ${warningsJson()}, ${lit(startedAt)}, ${lit(opts.now())})`,
     ]);
-    return { status: 'dry-run', sourceVersion, counts, warnings, classes: plan.classes, gatheringCandidates: plan.gatheringCandidates, predicted };
+    const bound = buildGroups(plan, startedAt, existing).flat().reduce((n, s) => n + s.bound, 0);
+    return {
+      status: 'dry-run',
+      sourceVersion,
+      counts,
+      warnings,
+      classes: plan.classes,
+      gear: plan.gear,
+      gatheringCandidates: plan.gatheringCandidates,
+      predicted,
+      writeBound: bound,
+      ceiling: opts.writeCeiling ?? WRITE_CEILING,
+    };
   }
 
-  await db.run([
+  const [opened] = await db.run([
     `INSERT INTO data_import (source, source_version, status, warnings, started_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'running', ${warningsJson()}, ${lit(startedAt)})`,
   ]);
   const runRow = `(SELECT max(id) FROM data_import WHERE status = 'running' AND started_at = ${lit(startedAt)})`;
-  const statements = buildStatements(plan, startedAt);
-  const written = {
-    tradeskill: { statements: 0, rows_written: 0, changes: 0 },
-    item: { statements: 0, rows_written: 0, changes: 0 },
-    recipe: { statements: 0, rows_written: 0, changes: 0 },
-    recipe_component: { statements: 0, rows_written: 0, changes: 0 },
-    game_class: { statements: 0, rows_written: 0, changes: 0 },
-  };
+  const written = Object.fromEntries(IMPORT_TABLES.map((t) => [t, { statements: 0, rows_written: 0, changes: 0 }])) as NonNullable<ImportResult['written']>;
+  // Order 13, section D: spent counts every row this run writes, its own data_import rows included. A group runs only
+  // when spent plus the group's bound stays within the ceiling; groups are sent together while their bounds fit.
+  const ceiling = opts.writeCeiling ?? WRITE_CEILING;
+  const CLOSE_BOUND = 1 + (existing.indexes.data_import ?? 0); // the closing data_import UPDATE
+  let spent = opened.rows_written;
+  const groups = buildGroups(plan, startedAt, existing);
+  let next = 0;
   try {
-    const metas = await db.run(statements.map((s) => s.sql));
-    if (metas.length !== statements.length) throw new Error(`D1 returned ${metas.length} results for ${statements.length} statements`);
-    metas.forEach((m, i) => {
-      const w = written[statements[i].table];
-      w.statements++;
-      w.rows_written += m.rows_written;
-      w.changes += m.changes;
-    });
+    while (next < groups.length) {
+      const batch: Statement[] = [];
+      let bound = 0;
+      while (next < groups.length) {
+        const g = groups[next];
+        const b = g.reduce((n, s) => n + s.bound, 0);
+        if (spent + bound + b + CLOSE_BOUND > ceiling) break;
+        batch.push(...g);
+        bound += b;
+        next++;
+        if (batch.length >= GROUP_BATCH) break;
+      }
+      if (!batch.length) break; // the next group does not fit what is left: stop here, resume on the next run
+      const metas = await db.run(batch.map((s) => s.sql));
+      if (metas.length !== batch.length) throw new Error(`D1 returned ${metas.length} results for ${batch.length} statements`);
+      metas.forEach((m, i) => {
+        const w = written[batch[i].table];
+        w.statements++;
+        w.rows_written += m.rows_written;
+        w.changes += m.changes;
+        spent += m.rows_written;
+      });
+    }
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     await db.run([`UPDATE data_import SET status = 'failed', error = ${lit(error.slice(0, 2000))}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`]);
-    return { status: 'failed', sourceVersion, error, counts, warnings, predicted };
+    return { status: 'failed', sourceVersion, error, counts, warnings, predicted, written };
   }
-  await db.run([
-    `UPDATE data_import SET status = 'ok', items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
+  const deferred = groups.slice(next).flat();
+  if (deferred.length) {
+    const deferredBound = deferred.reduce((n, s) => n + s.bound, 0);
+    const stuck = groups[next].reduce((n, s) => n + s.bound, 0);
+    if (stuck > ceiling - opened.rows_written - CLOSE_BOUND) {
+      // A group that would not fit even a fresh run would stop every run here: fail loudly instead of stalling every night.
+      const error = `write ceiling ${ceiling} is below the bound of statement group ${next + 1} of ${groups.length} (${stuck} rows); ${spent} rows written before it`;
+      await db.run([`UPDATE data_import SET status = 'failed', error = ${lit(error)}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`]);
+      return { status: 'failed', sourceVersion, error, counts, warnings, predicted, written };
+    }
+    warnings.push({ kind: 'write_ceiling', ceiling, written: spent, deferredStatements: deferred.length, deferredBound });
+  }
+  const status = deferred.length ? 'partial' : 'ok';
+  const [closed] = await db.run([
+    `UPDATE data_import SET status = '${status}', items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, warnings = ${warningsJson()}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
   ]);
-  return { status: 'ok', sourceVersion, counts, warnings, classes: plan.classes, gatheringCandidates: plan.gatheringCandidates, predicted, written };
+  spent += closed.rows_written;
+  return {
+    status,
+    sourceVersion,
+    counts,
+    warnings,
+    classes: plan.classes,
+    gear: plan.gear,
+    gatheringCandidates: plan.gatheringCandidates,
+    predicted,
+    written,
+    rowsWritten: spent,
+    ceiling,
+  };
 }

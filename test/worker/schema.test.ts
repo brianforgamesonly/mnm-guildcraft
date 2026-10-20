@@ -15,7 +15,7 @@ const prdIndexes = [...prdSchema.matchAll(/CREATE INDEX (\w+)/g)].map((m) => m[1
 // Order 7: indexes added by later migrations, derived the same way (0007: the departure run's audit_log reads).
 const departureIndexes = Object.entries(laterMigrations)
   .filter(([path]) => !path.endsWith('/0001_init.sql'))
-  .flatMap(([, sql]) => [...sql.matchAll(/CREATE INDEX (\w+)/g)].map((m) => m[1]));
+  .flatMap(([, sql]) => [...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (\w+)/g)].map((m) => m[1]));
 
 describe('schema (migrations/0001_init.sql)', () => {
   it('is the PRD schema byte for byte', () => {
@@ -30,9 +30,11 @@ describe('schema (migrations/0001_init.sql)', () => {
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
-    expect(departureTables).toEqual(['game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component']);
+    expect(departureTables).toEqual(['game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob']);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
-    expect(departureIndexes.sort()).toEqual(['audit_by_action', 'audit_by_target']);
+    expect(departureIndexes.sort()).toEqual([
+      'audit_by_action', 'audit_by_target', 'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+    ]);
     expect(indexes.map((i) => i.name)).toEqual([...prdIndexes, ...departureIndexes].sort());
     expect(prdIndexes).toEqual(['character_by_owner', 'image_by_item', 'recipe_by_result', 'skill_ranking']);
   });

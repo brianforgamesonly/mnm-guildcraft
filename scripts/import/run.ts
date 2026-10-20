@@ -47,6 +47,14 @@ try {
     requireDryRun: args.remote,
   });
   console.log(JSON.stringify({ target: args.local ? 'local' : 'remote', ...result }, null, 2));
+  // Order 13: a new value for a /gear find choice list, or a stop at the write ceiling, shows in the run's summary as a
+  // warning annotation; neither fails the run.
+  for (const w of result.warnings ?? [])
+    if (w.kind === 'vocab_drift') console.log(`::warning::/gear find ${w.list} list: ${w.values.map((v) => `${v.value} (${v.items})`).join(', ')} — ${w.note}`);
+    else if (w.kind === 'write_ceiling')
+      console.log(`::warning::import stopped at the write ceiling (${w.written} of ${w.ceiling} rows); ${w.deferredStatements} statements left for the next run`);
+  if (result.rowsWritten !== undefined) console.log(`rows written: ${result.rowsWritten} (ceiling ${result.ceiling})`);
+  if (result.writeBound !== undefined) console.log(`dry run: at most ${result.writeBound} rows (ceiling ${result.ceiling}; the bound counts every index for every row)`);
   // Order 8 alarm rule (scripts/ci/alarm.ts): state = the newest row in the alarm state (src/import-status.ts); a
   // failure after a failure does not re-notify. Order 9: a refused run is failing, and now leaves its own row.
   const failed = isFailing(result.status);

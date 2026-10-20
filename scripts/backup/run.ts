@@ -21,6 +21,7 @@ import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { remoteDb } from '../import/db.ts';
+import { FINISHED_IMPORT } from '../../src/import-status.ts';
 import { BACKUP_REPO, backupDir, checkBounds, commitToBackupRepo, countsOf, countSql, expiryAlarms, expiryState, loadAndCount, prune, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
 
 const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
@@ -83,7 +84,7 @@ try {
   const bad = checkBounds(before, after, exported);
   if (bad.length) throw new Error(`integrity: ${bad.join('; ')}`);
 
-  const [src] = await db.all<{ v: string | null }>("SELECT (SELECT source_version FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1) AS v");
+  const [src] = await db.all<{ v: string | null }>(`SELECT (SELECT source_version FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1) AS v`);
   const [mig] = await db.all<{ name: string | null }>('SELECT max(name) AS name FROM d1_migrations');
   manifest = {
     date, file, created_at: startedAt, bytes: out.size_bytes, sha256: sha256(dump), tables: exported,

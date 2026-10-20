@@ -3,6 +3,7 @@
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -237,7 +238,7 @@ export async function loadFind(db: D1Database, guildId: string, by: { key: strin
       )
       .bind(arg, guildId),
     db.prepare(craftersSql(`(${sel})`)).bind(arg, guildId),
-    db.prepare("SELECT source_version FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
+    db.prepare(`SELECT source_version FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1`),
   ]);
   const recipeRows = (recipes.results as RecipeRow[]) ?? [];
   return {

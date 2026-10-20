@@ -1,6 +1,8 @@
 # Loads mnm-tools wiki.json into each copy's remote D1 (order 10: dev and production).
 # Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~1 billed minute per run, ~30 min/month.
 # Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
+# Order 13: a run writes at most 40,000 D1 rows, index writes included (scripts/import/core.ts WRITE_CEILING). At that
+# point it stops between whole groups with status 'partial' and a warning annotation, and the next run resumes.
 #
 # The alarm (ORDER-RULES order 8; scripts/ci/alarm.ts):
 #   who:   GitHub's failed-run mail to the user who last modified the cron syntax (the repository owner);
