@@ -35,7 +35,11 @@ jobs:
       list: ${{ steps.c.outputs.list }}
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
       - id: c
+        shell: bash
         env:
           WANT: ${{ inputs.copy || 'both' }}
         run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"

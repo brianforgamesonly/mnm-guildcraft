@@ -70,7 +70,7 @@ describe('/guildcraft setup board: checks, then builds', () => {
     expect(r.data.content).toMatch(/is not a forum channel/);
     r = await reply(setupBoard(FORUM, 15, String(1n << 10n)));
     expect(r.data.content).toContain('Nothing was changed');
-    for (const name of ['Send Messages (Create Posts)', 'Send Messages in Threads', 'Embed Links', 'Read Message History', 'Manage Threads']) expect(r.data.content).toContain(name);
+    for (const name of ['Send Messages (in a forum: Create Posts)', 'Send Messages in Threads', 'Embed Links', 'Read Message History', 'Manage Threads']) expect(r.data.content).toContain(name);
     expect(r.data.content).not.toContain('View Channel');
     expect((await one<{ b: string | null }>('SELECT board_channel_id AS b FROM guild')).b).toBeNull();
     expect(forum.calls.filter((c) => c.path !== `/guilds/${GUILD}`)).toEqual([]); // only the guild-name lookup

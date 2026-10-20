@@ -51,11 +51,15 @@ jobs:
           sleep 20
       - name: Register commands and set the endpoint
         env:
-          DISCORD_BOT_TOKEN: ${{ inputs.copy == 'production' && secrets.PROD_DISCORD_BOT_TOKEN || secrets.DISCORD_BOT_TOKEN }}
-          DISCORD_APPLICATION_ID: ${{ inputs.copy == 'production' && secrets.PROD_DISCORD_APPLICATION_ID || secrets.DISCORD_APPLICATION_ID }}
-          DISCORD_TEST_GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+          # The copy's own secrets only: a missing production secret stops the run, never falls back to the Dev app's.
+          DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', inputs.copy == 'production' && 'PROD_' || '')] }}
+          DISCORD_APPLICATION_ID: ${{ secrets[format('{0}DISCORD_APPLICATION_ID', inputs.copy == 'production' && 'PROD_' || '')] }}
+          DISCORD_TEST_GUILD_ID: ${{ inputs.copy == 'dev' && secrets.DISCORD_TEST_GUILD_ID || '' }}
           READ_ONLY: ${{ inputs.read_only && '1' || '' }}
-        run: node scripts/discord/register.ts
+        run: |
+          test -n "$DISCORD_BOT_TOKEN" || { echo "::error::the ${{ inputs.copy }} bot token secret is not set"; exit 1; }
+          test -n "$DISCORD_APPLICATION_ID" || { echo "::error::the ${{ inputs.copy }} application id secret is not set"; exit 1; }
+          node scripts/discord/register.ts
       - name: Discord validation requests seen by the Worker (status and CPU time only)
         if: always()
         run: |

@@ -5,6 +5,8 @@ import { DEFINED } from './definitions.ts';
 
 export const HELP_FOOTER = 'draft — more commands arrive over the next builds';
 export const COMING_SOON = '*(coming soon)*';
+/** Order 10: who runs GuildCraft, and how to reach them (the operator's decision of 2026-10-20). DRAFT copy. */
+export const CONTACT = 'Questions or problems: send a Discord message to **Joegandomi**, who runs GuildCraft.';
 
 /** A heading, or one entry: its commands and what they do. Every command in an entry shares one status. */
 export type HelpLine = string | { cmds: string[]; text: string };
@@ -46,5 +48,6 @@ export const HELP_TEXT = [
     typeof l === 'string' ? l : `${l.cmds.map((c) => `\`${c}\``).join(' · ')} ${l.text}${l.cmds.every(isBuilt) ? '' : ` ${COMING_SOON}`}`,
   ),
   '',
+  CONTACT,
   `-# ${HELP_FOOTER} · Item data: Monsters and Memories Wiki (CC BY-SA 4.0)`,
 ].join('\n');

@@ -46,13 +46,20 @@ test('order 10: MUST_HOLD_ROWS is the import\'s own table list, and every one of
 
 test('order 10: the copies are wrangler.jsonc environments; each marks itself and names its own Worker and database', () => {
   const all = copies(fileURLToPath(new URL('../../wrangler.jsonc', import.meta.url)));
-  assert.deepEqual(all.map((c) => [c.name, c.worker, c.database]), [
-    ['dev', 'mnm-guildcraft-dev', 'mnm-guildcraft-dev'],
-    ['production', 'mnm-guildcraft', 'mnm-guildcraft-prod'],
-  ]);
+  // The names order 10 gave each copy (a fork that deletes the production block keeps only dev).
+  const named: Record<string, [string, string]> = { dev: ['mnm-guildcraft-dev', 'mnm-guildcraft-dev'], production: ['mnm-guildcraft', 'mnm-guildcraft-prod'] };
+  assert.ok(all.some((c) => c.name === 'dev'));
+  for (const c of all) if (named[c.name]) assert.deepEqual([c.worker, c.database], named[c.name], c.name);
+  // A trailing comma left by deleting a block still parses.
+  const dir = mkdtempSync(join(tmpdir(), 'copies-'));
+  writeFileSync(join(dir, 'w.jsonc'), '{ "env": { "dev": { "name": "w", "vars": { "GUILDCRAFT_COPY": "dev" }, "d1_databases": [{ "binding": "DB", "database_name": "d", "database_id": "x" }] }, } }');
+  assert.deepEqual(copies(join(dir, 'w.jsonc')).map((c) => c.name), ['dev']);
+  rmSync(dir, { recursive: true, force: true });
   assert.equal(new Set(all.map((c) => c.database)).size, all.length, 'no two copies share a database');
   assert.equal(new Set(all.map((c) => c.worker)).size, all.length, 'no two copies share a Worker');
-  assert.match(all[0].databaseId(), /^[0-9a-f-]{36}$/);
+  // Every copy is provisioned (the merge deploys each one), and no two share a database id.
+  for (const c of all) assert.match(c.databaseId(), /^[0-9a-f-]{36}$/, c.name);
+  assert.equal(new Set(all.map((c) => c.databaseId())).size, all.length);
   assert.equal(backupDir('production'), 'backups/production');
 });
 

@@ -138,9 +138,15 @@ console.log(`registered (${GLOBAL ? 'global' : 'guild-scoped'}):`, JSON.stringif
 
 // Discord sends the Worker a PING to validate the URL; the Worker answers it with this copy's public key.
 console.log('setting interactions_endpoint_url:', url);
-const patch = await call('PATCH', '/applications/@me', GLOBAL ? { interactions_endpoint_url: url, icon: plainIcon() } : { interactions_endpoint_url: url });
-console.log(`PATCH /applications/@me: HTTP ${patch.status}`);
+const patch = await call('PATCH', '/applications/@me', { interactions_endpoint_url: url });
+console.log(`PATCH /applications/@me (interactions_endpoint_url): HTTP ${patch.status}`);
 if (patch.status !== 200) throw new Error(`PATCH /applications/@me refused: HTTP ${patch.status}`);
+// The icon separately, after the endpoint: a refused icon never leaves the endpoint unset; it only warns.
+if (GLOBAL) {
+  const icon = await call('PATCH', '/applications/@me', { icon: plainIcon() });
+  console.log(`PATCH /applications/@me (icon): HTTP ${icon.status}`);
+  if (icon.status !== 200) console.log(`::warning::the production app's icon was not set (HTTP ${icon.status})`);
+}
 
 const me = (await discord('GET', '/applications/@me')) as { id: string; interactions_endpoint_url?: string; icon?: string | null };
 console.log('read back GET /applications/@me:', JSON.stringify({ id: me.id, interactions_endpoint_url: me.interactions_endpoint_url, icon_set: Boolean(me.icon) }));

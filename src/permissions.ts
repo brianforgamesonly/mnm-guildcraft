@@ -47,7 +47,7 @@ export const ROUTES: Route[] = [
 /** Discord's settings names for the bits the routes use. */
 export const PERMISSION_NAMES = new Map<bigint, string>([
   [VIEW_CHANNEL, 'View Channel'],
-  [SEND_MESSAGES, 'Send Messages (Create Posts)'],
+  [SEND_MESSAGES, 'Send Messages (in a forum: Create Posts)'],
   [SEND_MESSAGES_IN_THREADS, 'Send Messages in Threads (Send Messages in Posts)'],
   [EMBED_LINKS, 'Embed Links'],
   [ATTACH_FILES, 'Attach Files'],

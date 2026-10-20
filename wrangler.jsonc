@@ -4,7 +4,8 @@
   // config (scripts/copies.ts reads this file): dev (the Dev app, the test server) and production (the MNM-Guildcraft app).
   // What differs between them is only what is below each environment: the Worker name, the D1 database and
   // GUILDCRAFT_COPY; plus, set at deploy (.github/workflows/deploy.yml), DISCORD_PUBLIC_KEY and the DISCORD_BOT_TOKEN secret.
-  "name": "mnm-guildcraft",
+  // Not a real Worker's name: a deploy that forgets --env must never land on production (mnm-guildcraft).
+  "name": "mnm-guildcraft-no-env",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "env": {
@@ -42,8 +43,8 @@
         {
           "binding": "DB",
           "database_name": "mnm-guildcraft-prod",
-          // Printed by .github/workflows/provision.yml (not a secret); zeros until it has run.
-          "database_id": "00000000-0000-0000-0000-000000000000",
+          // Printed by .github/workflows/provision.yml run 39432367927 (not a secret).
+          "database_id": "b37d930b-5137-4cdc-9dca-65abe10e327d",
           "migrations_dir": "migrations"
         }
       ]

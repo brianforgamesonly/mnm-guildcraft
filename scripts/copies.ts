@@ -20,7 +20,8 @@ export interface Copy {
 }
 
 function config(configPath: string): Record<string, EnvConfig> {
-  const text = readFileSync(configPath, 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  // JSONC: line comments, and trailing commas (wrangler accepts them; a fork that deletes a block may leave one).
+  const text = readFileSync(configPath, 'utf8').replace(/^\s*\/\/.*$/gm, '').replace(/,(\s*[}\]])/g, '$1');
   return (JSON.parse(text) as { env: Record<string, EnvConfig> }).env;
 }
 

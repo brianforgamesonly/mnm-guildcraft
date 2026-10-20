@@ -7,7 +7,7 @@ Steps a server admin follows when GuildCraft is added to a guild's server. Start
 A server admin (someone with **Manage Server**) opens this link, chooses the server and presses **Authorize**:
 
 ```
-https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot+applications.commands&permissions=292057893888
+https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=292057893888
 ```
 
 Discord shows the permissions GuildCraft asks for before you authorize. Each is there because GuildCraft calls something that needs it, and nothing else is asked for:
