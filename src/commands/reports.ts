@@ -139,15 +139,16 @@ export async function reportButton(c: Ctx, customId: string): Promise<MessageRep
   const fixed = customId.startsWith(FIXED_PREFIX);
   const id = Number(customId.slice((fixed ? FIXED_PREFIX : DISMISS_PREFIX).length));
   const at = now();
-  const [, , read] = await c.db.batch([
+  const [upd, read] = await c.db.batch([
     c.db.prepare("UPDATE recipe_report SET status = ?, resolved_by = ?, resolved_at = ? WHERE id = ? AND guild_id = ? AND status = 'open'").bind(fixed ? 'fixed' : 'dismissed', c.userId, at, id, c.guild.id),
-    audit(c.db, c.guild.id, c.userId, fixed ? 'report.fixed' : 'report.dismissed', `report:${id}`, null, null),
     c.db
       .prepare('SELECT r.id, i.name AS item, r.reporter, r.issue, r.details, r.status, r.resolved_by, r.resolved_at, r.created_at FROM recipe_report r LEFT JOIN item i ON i.id = r.item_id WHERE r.id = ? AND r.guild_id = ?')
       .bind(id, c.guild.id),
   ]);
   const r = (read.results as ReportRow[])[0];
   if (!r) return ephemeral('That report is no longer recorded.');
+  // Audited only when this press resolved it; a second press re-shows the outcome and writes nothing.
+  if (upd.meta.changes) await audit(c.db, c.guild.id, c.userId, fixed ? 'report.fixed' : 'report.dismissed', `report:${id}`, null, null).run();
   const outcome = `${r.status === 'fixed' ? '✅ Marked fixed' : '✖️ Dismissed'} by <@${r.resolved_by}> · ${ts(r.resolved_at ?? at)}`;
   return updateMessage({ content: outcome, embeds: [reportCard(r)], components: [] });
 }

@@ -211,14 +211,14 @@ export async function recipeOverride(c: Ctx, opts: Option[]): Promise<MessageRep
   if ('reply' in found) return found.reply;
   const r = found.recipe;
   if (optBool(opts, 'reset')) {
-    const [del] = await c.db.batch([
+    const [del, upd] = await c.db.batch([
       c.db.prepare('DELETE FROM recipe_correction_component WHERE guild_id = ? AND recipe_id = ?').bind(c.guild.id, r.id),
-      c.db.prepare('UPDATE recipe_correction SET trivial = NULL, updated_by = ?, updated_at = ? WHERE guild_id = ? AND recipe_id = ?').bind(c.userId, now(), c.guild.id, r.id),
+      c.db.prepare('UPDATE recipe_correction SET trivial = NULL, updated_by = ?, updated_at = ? WHERE guild_id = ? AND recipe_id = ? AND trivial IS NOT NULL').bind(c.userId, now(), c.guild.id, r.id),
       // The source (/recipe source) is its own correction; a row left with nothing corrected goes.
       c.db.prepare('DELETE FROM recipe_correction WHERE guild_id = ? AND recipe_id = ? AND trivial IS NULL AND acquisition IS NULL AND faction IS NULL AND note IS NULL').bind(c.guild.id, r.id),
       audit(c.db, c.guild.id, c.userId, 'recipe.override.reset', `recipe:${r.id}`, null, null),
     ]);
-    return ephemeral(`Reset **${md(recipeLabel(r))}**: its trivial and components come from the imported data again${del.meta.changes ? '' : ' (they already did)'}.`);
+    return ephemeral(`Reset **${md(recipeLabel(r))}**: its trivial and components come from the imported data again${del.meta.changes + upd.meta.changes ? '' : ' (they already did)'}.`);
   }
   const trivial = optInt(opts, 'trivial');
   const text = optString(opts, 'components');

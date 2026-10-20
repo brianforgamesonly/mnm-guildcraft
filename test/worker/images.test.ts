@@ -175,6 +175,33 @@ describe('Approve, Reject and Stat image', () => {
     expect((await one<{ g: string | null }>('SELECT gone_at AS g FROM item_image')).g).not.toBeNull();
   });
 
+  it('order 9 review: an upload that throws leaves nothing pending, so the member can send again', async () => {
+    await setupVault();
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (b instanceof FormData ? Promise.reject(new Error('timed out')) : handle(m, p, b));
+    expect((await upload()).data.content).toBe("Sorry, I couldn't post that screenshot to the vault. Nothing is waiting for review.");
+    expect(await all('SELECT status, reviewed_by FROM item_image')).toEqual([{ status: 'rejected', reviewed_by: 'upload-failed' }]);
+    botApi.handle = handle;
+    expect((await upload()).data.content).toMatch(/^Thanks: your screenshot/);
+  });
+
+  it('order 9 review: a pending vault message deleted by hand no longer blocks a new screenshot', async () => {
+    await setupVault();
+    await upload();
+    vaultMessage = { status: 404, body: { message: 'Unknown Message', code: 10008 } };
+    expect((await upload()).data.content).toMatch(/^Thanks: your screenshot/);
+    expect(await all('SELECT status, gone_at IS NOT NULL AS gone FROM item_image ORDER BY id')).toEqual([{ status: 'pending', gone: 1 }, { status: 'pending', gone: 0 }]);
+  });
+
+  it('order 9 review: a second press on a reviewed screenshot writes no audit row', async () => {
+    await setupVault();
+    await upload();
+    await send(press(officer, approveId()), TOKEN);
+    const audits = await count('audit_log', "action LIKE 'image.%'");
+    expect((await send(press(officer, approveId()), TOKEN)).data.content).toBe('That screenshot was already approved.');
+    expect(await count('audit_log', "action LIKE 'image.%'")).toBe(audits);
+  });
+
   it('status counts pending screenshots', async () => {
     await setupVault();
     await upload();
