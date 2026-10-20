@@ -46,6 +46,7 @@ const MAX_FILE_BYTES = 50_000_000;
 
 const counts = async (): Promise<Record<string, number>> => {
   const tables = (await db.all<{ name: string }>(TABLES_SQL)).map((r) => r.name);
+  if (!tables.length) return {};
   return countsOf(await db.all<Record<string, number>>(countSql(tables)));
 };
 

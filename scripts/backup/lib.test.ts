@@ -20,14 +20,16 @@ test('prune keeps the last 30 dailies and the first file of each month', () => {
 });
 
 test('an exported count must lie between the counts before and after the export', () => {
-  assert.deepEqual(checkBounds({ a: 10, b: 5 }, { a: 12, b: 5 }, { a: 11, b: 5 }), []);
-  assert.deepEqual(checkBounds({ a: 10 }, { a: 12 }, { a: 13 }), ['table a: exported 13, outside 10..12']);
-  assert.deepEqual(checkBounds({ a: 10, b: 1 }, { a: 10, b: 1 }, { a: 10 }), ['table b missing from the export']);
+  assert.deepEqual(checkBounds({ a: 10, b: 5 }, { a: 12, b: 5 }, { a: 11, b: 5 }, []), []);
+  assert.deepEqual(checkBounds({ a: 10 }, { a: 12 }, { a: 13 }, []), ['table a: exported 13, outside 10..12']);
+  assert.deepEqual(checkBounds({ a: 10, b: 1 }, { a: 10, b: 1 }, { a: 10 }, []), ['table b missing from the export']);
   // A backup that "succeeds" with 0 rows is a failure (order 8, row 13).
   assert.deepEqual(checkBounds({ a: 0 }, { a: 0 }, { a: 0 }), ['the export holds no rows']);
   assert.deepEqual(checkBounds({}, {}, {}), ['the export holds no rows']);
   // Order 9: an empty recipe or item table is a failure even when the remote agrees.
   assert.deepEqual(checkBounds({ item: 5, recipe: 0 }, { item: 5, recipe: 0 }, { item: 5, recipe: 0 }), ['table recipe exported 0 rows']);
+  // ...and a renamed or dropped game-data table fails rather than skipping the check (order 9 review).
+  assert.deepEqual(checkBounds({ item: 5 }, { item: 5 }, { item: 5 }), ['table recipe is not in the export']);
 });
 
 test('order 9: no compound SELECT anywhere in scripts/backup/ (remote D1 refused 17 UNION ALL terms)', () => {

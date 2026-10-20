@@ -7,7 +7,8 @@
 export const IMPORT_STATUS = {
   ok: { real: true, alarm: true, failing: false },
   failed: { real: true, alarm: true, failing: true },
-  running: { real: true, alarm: true, failing: false },
+  // A 'running' row seen by a later run is a run that crashed mid-write: failing (order 9 review).
+  running: { real: true, alarm: true, failing: true },
   refused: { real: false, alarm: true, failing: true },
   'dry-run': { real: false, alarm: false, failing: false },
 } as const;

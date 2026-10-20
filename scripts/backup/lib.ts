@@ -99,7 +99,7 @@ export function prune(dates: string[], keep = 30): string[] {
 export const MUST_HOLD_ROWS = ['item', 'recipe'];
 
 /** Each exported count must lie between the counts read just before and just after the export (live writes race it). */
-export function checkBounds(before: Record<string, number>, after: Record<string, number>, exported: Record<string, number>): string[] {
+export function checkBounds(before: Record<string, number>, after: Record<string, number>, exported: Record<string, number>, mustHold = MUST_HOLD_ROWS): string[] {
   const problems: string[] = [];
   const names = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
   for (const t of names) {
@@ -112,6 +112,7 @@ export function checkBounds(before: Record<string, number>, after: Record<string
   const total = Object.values(exported).reduce((s, n) => s + n, 0);
   if (!names.length || total === 0) problems.push('the export holds no rows');
   // Order 9, row 13: the game data is never legitimately empty once imported, so 0 there is a broken control.
-  else for (const t of MUST_HOLD_ROWS) if (names.includes(t) && !exported[t]) problems.push(`table ${t} exported 0 rows`);
+  // A renamed or missing table fails too, rather than skipping the check.
+  else for (const t of mustHold) if (!exported[t]) problems.push(t in exported ? `table ${t} exported 0 rows` : `table ${t} is not in the export`);
   return problems;
 }

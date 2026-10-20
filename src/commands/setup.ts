@@ -10,7 +10,7 @@ import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
 import { BACKUP_SQL, backupLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
-import { REAL_IMPORT } from '../import-status.ts';
+import { ALARM_IMPORT, REAL_IMPORT } from '../import-status.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -224,12 +224,15 @@ function warningsCount(json: string | null): number | null {
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const nowMs = Date.now();
-  const [okImport, lastImport, lastDryRun, board, posts, departures, usage, backup] = await c.db.batch([
+  const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
     // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (Brian's check of order 7).
     // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
     c.db.prepare(`SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`),
     c.db.prepare(`SELECT id, finished_at, started_at, warnings, (SELECT max(id) FROM data_import WHERE ${REAL_IMPORT}) AS real_id FROM data_import WHERE status = 'dry-run' ORDER BY id DESC LIMIT 1`),
+    // The import alarm's state, when it is newer than the last real import (a refusal): the alarm stays quiet on a
+    // repeat, so status is where it keeps showing (scripts/ci/alarm.ts).
+    c.db.prepare(`SELECT id, status, started_at, finished_at, error, (SELECT max(id) FROM data_import WHERE ${REAL_IMPORT}) AS real_id FROM data_import WHERE ${ALARM_IMPORT} ORDER BY id DESC LIMIT 1`),
     c.db
       .prepare(
         `SELECT count(*) AS posts, coalesce(sum(dirty <> 0), 0) AS dirty, max(last_rendered_at) AS refreshed,
@@ -272,10 +275,16 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
           return n === null ? 'warnings unreadable' : `${n} warning${n === 1 ? '' : 's'}`;
         })()}`]
       : [];
+  const al = (alarmRow.results as { id: number; status: string; started_at: string; finished_at: string | null; error: string | null; real_id: number | null }[])[0];
+  const alarmLine =
+    al && (al.real_id === null || al.id > al.real_id)
+      ? [`**Latest nightly run:** ${when(al.finished_at ?? al.started_at)} · **${al.status}**${al.error ? `: ${al.error.slice(0, 200)}` : ''}`]
+      : [];
   const lines = [
     '## GuildCraft status',
     `**Data version:** ${ok ? `\`${ok.source_version}\`` : 'no completed import yet'}`,
     `**Last import:** ${last ? `${when(last.finished_at ?? last.started_at)} · ${last.status}${last.error ? ` (${last.error.slice(0, 200)})` : ''} · ${warnings === null ? 'warnings unreadable' : `${warnings} warning${warnings === 1 ? '' : 's'}`}` : 'none yet'}`,
+    ...alarmLine,
     ...dryLine,
     c.guild.board_channel_id
       ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
