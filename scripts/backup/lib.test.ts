@@ -1,11 +1,12 @@
 // Order 8, ITEM 1: retention, the before/after integrity bounds, and a real load into a scratch local D1.
 //   node --test scripts/backup/lib.test.ts
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { checkBounds, loadAndCount, prune } from './lib.ts';
+import { fileURLToPath } from 'node:url';
+import { checkBounds, countSql, loadAndCount, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
 
 test('prune keeps the last 30 dailies and the first file of each month', () => {
   const dates: string[] = [];
@@ -25,6 +26,39 @@ test('an exported count must lie between the counts before and after the export'
   // A backup that "succeeds" with 0 rows is a failure (order 8, row 13).
   assert.deepEqual(checkBounds({ a: 0 }, { a: 0 }, { a: 0 }), ['the export holds no rows']);
   assert.deepEqual(checkBounds({}, {}, {}), ['the export holds no rows']);
+  // Order 9: an empty recipe or item table is a failure even when the remote agrees.
+  assert.deepEqual(checkBounds({ item: 5, recipe: 0 }, { item: 5, recipe: 0 }, { item: 5, recipe: 0 }), ['table recipe exported 0 rows']);
+});
+
+test('order 9: no compound SELECT anywhere in scripts/backup/ (remote D1 refused 17 UNION ALL terms)', () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const compound = /\b(UNION|INTERSECT|EXCEPT)\b/i;
+  // Code only: comments may name the refused form.
+  const code = (f: string) => readFileSync(join(dir, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  const files = readdirSync(dir).filter((f) => /\.(ts|mjs|js)$/.test(f) && f !== 'lib.test.ts');
+  assert.ok(files.includes('lib.ts') && files.includes('run.ts'), 'the scan reached the backup scripts');
+  for (const f of files) assert.doesNotMatch(code(f), compound, f);
+  const names = Array.from({ length: 200 }, (_, i) => `t${i}`);
+  for (const sql of [countSql(names), TABLES_SQL, VIRTUAL_SQL]) {
+    assert.doesNotMatch(sql, compound);
+    assert.equal(sql.match(/^\s*SELECT\b/gi)?.length, 1);
+  }
+});
+
+test('the counts are one row of one column per table, read back by name', { timeout: 120_000 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gc-count-'));
+  try {
+    const file = join(dir, 'dump.sql');
+    const names = Array.from({ length: 20 }, (_, i) => `t${i}`).concat([`it's "odd"`]);
+    writeFileSync(file, names.map((t, i) => `CREATE TABLE "${t.replace(/"/g, '""')}" (id INTEGER);${i % 3 ? '' : ` INSERT INTO "${t.replace(/"/g, '""')}" VALUES (1),(2);`}`).join('\n'));
+    const counts = loadAndCount(join(dir, 'd1'), file);
+    assert.equal(Object.keys(counts).length, 21);
+    assert.equal(counts.t0, 2);
+    assert.equal(counts.t1, 0);
+    assert.equal(counts[`it's "odd"`], 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('a dump in D1 export form loads into a scratch local D1 and is counted per table', { timeout: 120_000 }, () => {

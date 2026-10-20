@@ -7,6 +7,7 @@
 // timings drop history). A failure while the state was already failing does not fail the run again: it prints an
 // ::error annotation and a FAILED summary, and /guildcraft status keeps showing it (stale after 36 hours).
 import { appendFileSync } from 'node:fs';
+import { alarmOutcome } from './alarm-outcome.ts';
 
 export interface AlarmInput {
   job: string;
@@ -24,11 +25,12 @@ export function summary(text: string) {
 
 /** Sets the exit code: 1 only when this run turns the state to failing. */
 export function alarm({ job, failed, reason, previousFailing }: AlarmInput): void {
-  if (!failed) {
-    summary(`${job}: passed${previousFailing ? ' (recovered from a failing state)' : ''}`);
+  const outcome = alarmOutcome(failed, previousFailing, process.env.GITHUB_EVENT_NAME === 'schedule');
+  if (outcome === 'pass' || outcome === 'recovered') {
+    summary(`${job}: passed${outcome === 'recovered' ? ' (recovered from a failing state)' : ''}`);
     return;
   }
-  if (previousFailing === true && process.env.GITHUB_EVENT_NAME === 'schedule') {
+  if (outcome === 'quiet') {
     console.log(`::error::${job} FAILED: ${reason} (state unchanged: already failing, so not re-notified)`);
     summary(`**${job} FAILED** — ${reason}. Already failing before this run, so this run does not notify again (order 8 alarm rule).`);
     return;

@@ -8,6 +8,8 @@
 // - only changed rows are written: every upsert carries a "differs" guard, so D1 reports
 //   rows_written = 0 for a re-run on unchanged data.
 
+import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
+
 export const SOURCE = 'mnm-tools/wiki.json';
 
 // ---------------------------------------------------------------- database port
@@ -757,7 +759,7 @@ export interface ImportOptions {
 }
 
 export interface ImportResult {
-  status: 'ok' | 'failed' | 'dry-run' | 'refused';
+  status: Exclude<ImportStatus, 'running'>;
   sourceVersion: string;
   error?: string;
   counts?: {
@@ -788,6 +790,15 @@ export interface ImportResult {
   written?: Record<Table, { statements: number; rows_written: number; changes: number }>;
 }
 
+/**
+ * The alarm's state before the run that just finished: the newest earlier row in the alarm state (src/import-status.ts).
+ * Every real run (ok, failed, refused) has written its own row by then, so that row is skipped. null: no earlier run.
+ */
+export async function previousImportFailing(db: Db): Promise<boolean | null> {
+  const [prior] = await db.all<{ status: string }>(`SELECT status FROM data_import WHERE ${ALARM_IMPORT} ORDER BY id DESC LIMIT 1 OFFSET 1`);
+  return prior ? isFailing(prior.status) : null;
+}
+
 /** Refuse a run that would deactivate most of the stored recipes: a truncated source looks like this. */
 const MIN_RECIPE_RATIO = 0.5;
 
@@ -808,8 +819,14 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   // The first real write to a database (e.g. by the nightly cron) must follow a dispatched dry run.
   if (!opts.dryRun && opts.requireDryRun) {
     const [row] = await db.all<{ n: number }>("SELECT count(*) AS n FROM data_import WHERE status = 'dry-run' AND finished_at IS NOT NULL");
-    if (!row || row.n === 0)
-      return { status: 'refused', sourceVersion, error: 'no completed dry run in data_import: dispatch the import with dry_run first' };
+    if (!row || row.n === 0) {
+      // Order 9: a refused run leaves its own row, so the alarm can compare one refusal with the next.
+      const error = 'no completed dry run in data_import: dispatch the import with dry_run first';
+      await db.run([
+        `INSERT INTO data_import (source, source_version, status, error, started_at, finished_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'refused', ${lit(error)}, ${lit(startedAt)}, ${lit(opts.now())})`,
+      ]);
+      return { status: 'refused', sourceVersion, error };
+    }
   }
 
   let data: WikiData;

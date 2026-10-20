@@ -20,7 +20,7 @@ import { gzipSync } from 'node:zlib';
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
 import { devDatabaseId, remoteDb } from '../import/db.ts';
-import { BACKUP_REPO, checkBounds, countSql, DATABASE, git, loadAndCount, prune, REPO_URL, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
+import { BACKUP_REPO, checkBounds, countsOf, countSql, DATABASE, git, loadAndCount, prune, REPO_URL, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
 
 const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
 const dryRun = args['dry-run'];
@@ -46,7 +46,7 @@ const MAX_FILE_BYTES = 50_000_000;
 
 const counts = async (): Promise<Record<string, number>> => {
   const tables = (await db.all<{ name: string }>(TABLES_SQL)).map((r) => r.name);
-  return Object.fromEntries((await db.all<{ t: string; n: number }>(countSql(tables))).map((r) => [r.t, r.n]));
+  return countsOf(await db.all<Record<string, number>>(countSql(tables)));
 };
 
 let manifest: Manifest | null = null;

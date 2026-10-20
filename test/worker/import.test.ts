@@ -1,7 +1,9 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
-import { runImport, type WikiData } from '../../scripts/import/core.ts';
+import { previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
+import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
+import { IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
 import small from '../fixtures/wiki-small.json';
 
@@ -152,13 +154,36 @@ describe('import', () => {
     const guarded = (dryRun: boolean) => runImport(db, fixture(), { sourceSha: 'b'.repeat(40), now, dryRun, requireDryRun: true });
     const refused = await guarded(false);
     expect(refused.status).toBe('refused');
-    expect(await one('SELECT (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) + (SELECT count(*) FROM data_import) AS n')).toEqual({ n: 0 });
+    expect(await one('SELECT (SELECT count(*) FROM item) + (SELECT count(*) FROM recipe) AS n')).toEqual({ n: 0 });
+    // Order 9: the refusal leaves its own row, with its reason, for the alarm.
+    expect(await all('SELECT status, error FROM data_import')).toEqual([{ status: 'refused', error: refused.error }]);
 
     expect((await guarded(true)).status).toBe('dry-run');
     const allowed = await guarded(false);
     expect(allowed.status).toBe('ok');
     expect(await one('SELECT count(*) AS n FROM recipe')).toEqual({ n: 6 });
-    expect(await all('SELECT status FROM data_import ORDER BY id')).toEqual([{ status: 'dry-run' }, { status: 'ok' }]);
+    expect(await all('SELECT status FROM data_import ORDER BY id')).toEqual([{ status: 'refused' }, { status: 'dry-run' }, { status: 'ok' }]);
+  });
+
+  it('order 9 alarm: refused then refused alerts once; refused then ok is a recovery', async () => {
+    const guarded = () => runImport(db, fixture(), { sourceSha: 'd'.repeat(40), now, requireDryRun: true });
+    // The nightly run is scheduled; what it does is alarmOutcome(failed, previousFailing, scheduled).
+    const nightly = async () => {
+      const r = await guarded();
+      return alarmOutcome(isFailing(r.status), await previousImportFailing(db), true);
+    };
+    expect(await nightly()).toBe('notify'); // first refusal: no earlier state, so it alerts
+    expect(await nightly()).toBe('quiet'); // second refusal: already failing, no second alert
+    await runImport(db, fixture(), { sourceSha: 'd'.repeat(40), now, dryRun: true }); // dry runs are not alarm state
+    expect(await nightly()).toBe('recovered');
+    expect(await nightly()).toBe('pass');
+  });
+
+  it('order 9: "Last import" is a positive rule: a refused or dry run is never the last import', async () => {
+    await load(fixture());
+    await env.DB.prepare("INSERT INTO data_import (source, source_version, status, started_at, finished_at) VALUES ('t', 'v', 'refused', 'x', 'x'), ('t', 'v', 'dry-run', 'x', 'x')").run();
+    expect(await one(`SELECT status FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`)).toEqual({ status: 'ok' });
+    expect(Object.keys(IMPORT_STATUS).sort()).toEqual(['dry-run', 'failed', 'ok', 'refused', 'running']);
   });
 
   it('a structure failure in a dry run does not unlock real writes', async () => {

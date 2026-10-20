@@ -10,6 +10,7 @@ import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
 import { BACKUP_SQL, backupLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
+import { REAL_IMPORT } from '../import-status.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -226,8 +227,9 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const [okImport, lastImport, lastDryRun, board, posts, departures, usage, backup] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
     // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (Brian's check of order 7).
-    c.db.prepare("SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE status <> 'dry-run' ORDER BY id DESC LIMIT 1"),
-    c.db.prepare("SELECT id, finished_at, started_at, warnings, (SELECT max(id) FROM data_import WHERE status <> 'dry-run') AS real_id FROM data_import WHERE status = 'dry-run' ORDER BY id DESC LIMIT 1"),
+    // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
+    c.db.prepare(`SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`),
+    c.db.prepare(`SELECT id, finished_at, started_at, warnings, (SELECT max(id) FROM data_import WHERE ${REAL_IMPORT}) AS real_id FROM data_import WHERE status = 'dry-run' ORDER BY id DESC LIMIT 1`),
     c.db
       .prepare(
         `SELECT count(*) AS posts, coalesce(sum(dirty <> 0), 0) AS dirty, max(last_rendered_at) AS refreshed,
