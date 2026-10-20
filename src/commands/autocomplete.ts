@@ -6,10 +6,11 @@
 // - recipe (order 9): every recipe, one choice each, labelled with its tradeskill and trivial so an item's recipes
 //   can be told apart (public game data, cached like the item list). /recipe source and /recipe override pick a
 //   recipe through their item: option. /craft forget offers only the recipes that character has marked known.
+// - faction (order 10): /recipe source's free-text faction, with this guild's earlier factions as suggestions.
 import { SQL_IS_OFFICER, SQL_PASSES_MEMBER_GATE, sqlAccessParams } from '../access.ts';
 import { focused, matchChoices, optString, subcommand, truncate, type Choice, type Interaction } from '../discord.ts';
 import { gameList, type GameList } from '../gamedata.ts';
-import { recipeLabel, recipeValue } from '../recipes.ts';
+import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
 
 const CHOICE_MAX = 100;
 
@@ -45,6 +46,19 @@ function recipeChoices(rows: { item: string; tradeskill: string; trivial: number
   return matchChoices([...byLabel.keys()], typed).map((label) => ({ name: truncate(label, CHOICE_MAX), value: recipeValue(byLabel.get(label)!) }));
 }
 
+/** The factions this guild's corrections already name (the correction layer; read only). */
+const FACTIONS_SQL = 'SELECT min(faction) AS faction FROM recipe_correction WHERE guild_id = ?1 AND faction IS NOT NULL GROUP BY lower(faction) ORDER BY faction COLLATE NOCASE';
+
+/**
+ * /recipe source faction: the typed name first, exactly as typed (up to FACTION_MAX), then this guild's factions that
+ * match it. Discord accepts free text in an autocomplete option anyway; echoing it keeps a pick from replacing it.
+ */
+export function factionChoices(used: string[], typed: string): Choice[] {
+  const own = typed.trim().slice(0, FACTION_MAX);
+  const rest = matchChoices(used, own).filter((n) => n.toLowerCase() !== own.toLowerCase());
+  return [...(own ? [own] : []), ...rest].slice(0, 25).map((n) => ({ name: truncate(n, CHOICE_MAX), value: n }));
+}
+
 const parseRecipe = (s: string) => {
   const [item, tradeskill, trivial, id] = s.split('\u001f');
   return { item, tradeskill, trivial: trivial === '' ? null : Number(trivial), id: Number(id) };
@@ -65,6 +79,10 @@ export async function autocomplete(db: D1Database, i: Interaction): Promise<Choi
     return recipeChoices(results, typed);
   }
   if (f.name === 'recipe' || (command === 'recipe' && f.name === 'item')) return recipeChoices((await gameList(db, 'recipes')).map(parseRecipe), typed);
+  if (command === 'recipe' && f.name === 'faction') {
+    const { results } = await db.prepare(FACTIONS_SQL).bind(i.guild_id).all<{ faction: string }>();
+    return factionChoices(results.map((r) => r.faction), typed);
+  }
   const list = GAME_OPTIONS[f.name];
   if (list) return asChoices(matchChoices(await gameList(db, list), typed));
   if (f.name === 'name' || f.name === 'character') {

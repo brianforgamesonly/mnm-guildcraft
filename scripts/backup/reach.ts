@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 if (!process.env.BACKUP_REPO_TOKEN) {
-  console.log('BACKUP_REPO_TOKEN: not set (setup step missing); the backup cannot push until Brian adds it');
+  console.log('BACKUP_REPO_TOKEN: not set (setup step missing); the backup cannot push until the repository owner adds it');
   process.exit(0);
 }
 console.log(`BACKUP_REPO_TOKEN: set (${process.env.BACKUP_REPO_TOKEN.length} characters)`);

@@ -33,3 +33,11 @@ export const USAGE_TARGET_SHARE = 0.1;
 
 /** A figure older than this is marked stale: GitHub can delay or drop a scheduled run (order 8). */
 export const STALE_MS = 36 * 3_600_000;
+
+/**
+ * The backup token's expiry, as its owner chose it: none. Joegandomi's note of 2026-10-20 (work order 10, section A):
+ * BACKUP_REPO_TOKEN was made with no expiration, so GitHub sends no GitHub-Authentication-Token-Expiration header and
+ * the backup records 'unknown'. Status then reads "no expiry (owner's note)", and the 30-day warning never fires.
+ * A header, when GitHub sends one, still wins: a replacement token with an expiry is warned about as before.
+ */
+export const BACKUP_TOKEN_EXPIRY_NOTE: 'none' | 'unset' = 'none';

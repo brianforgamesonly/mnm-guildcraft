@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { checkBounds, countSql, loadAndCount, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
+import { IMPORT_TABLES } from '../import/core.ts';
+import { checkBounds, countSql, expiryAlarms, expiryState, loadAndCount, MUST_HOLD_ROWS, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
 
 test('prune keeps the last 30 dailies and the first file of each month', () => {
   const dates: string[] = [];
@@ -27,9 +28,32 @@ test('an exported count must lie between the counts before and after the export'
   assert.deepEqual(checkBounds({ a: 0 }, { a: 0 }, { a: 0 }), ['the export holds no rows']);
   assert.deepEqual(checkBounds({}, {}, {}), ['the export holds no rows']);
   // Order 9: an empty recipe or item table is a failure even when the remote agrees.
-  assert.deepEqual(checkBounds({ item: 5, recipe: 0 }, { item: 5, recipe: 0 }, { item: 5, recipe: 0 }), ['table recipe exported 0 rows']);
+  assert.deepEqual(checkBounds({ item: 5, recipe: 0 }, { item: 5, recipe: 0 }, { item: 5, recipe: 0 }, ['item', 'recipe']), ['table recipe exported 0 rows']);
   // ...and a renamed or dropped game-data table fails rather than skipping the check (order 9 review).
-  assert.deepEqual(checkBounds({ item: 5 }, { item: 5 }, { item: 5 }), ['table recipe is not in the export']);
+  assert.deepEqual(checkBounds({ item: 5 }, { item: 5 }, { item: 5 }, ['item', 'recipe']), ['table recipe is not in the export']);
+});
+
+test('order 10: MUST_HOLD_ROWS is the import\'s own table list, and every one of those tables is in the schema', () => {
+  assert.deepEqual([...MUST_HOLD_ROWS], [...IMPORT_TABLES]);
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '../../migrations');
+  const schema = readdirSync(dir).map((f) => readFileSync(join(dir, f), 'utf8')).join('\n');
+  for (const t of MUST_HOLD_ROWS) assert.match(schema, new RegExp(`CREATE TABLE ${t} \\(`), t);
+  const full = Object.fromEntries(MUST_HOLD_ROWS.map((t) => [t, 3]));
+  assert.deepEqual(checkBounds(full, full, full), []);
+  assert.deepEqual(checkBounds(full, full, { ...full, game_class: 0 }, undefined).filter((p) => p.includes('game_class')).length, 2);
+});
+
+test('order 10: the token-expiry warning never fires for the owner\'s "no expiry" note', () => {
+  const at = Date.parse('2026-10-20T00:00:00Z');
+  assert.equal(expiryState('unknown', at), 'none');
+  assert.equal(expiryState(null, at), 'none');
+  assert.equal(expiryState('unknown', at, 'unset'), 'unknown');
+  assert.equal(expiryState('2026-11-01T00:00:00Z', at), 'soon');
+  assert.equal(expiryState('2027-11-01T00:00:00Z', at), 'ok');
+  assert.equal(expiryState('2026-10-01T00:00:00Z', at), 'expired');
+  for (const prev of ['ok', 'none', 'unknown', 'soon'] as const) assert.equal(expiryAlarms('none', prev), false);
+  assert.equal(expiryAlarms('soon', 'none'), true);
+  assert.equal(expiryAlarms('soon', 'soon'), false);
 });
 
 test('order 9: no compound SELECT anywhere in scripts/backup/ (remote D1 refused 17 UNION ALL terms)', () => {

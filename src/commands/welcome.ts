@@ -1,4 +1,4 @@
-// DRAFT copy — Brian approves the final text before launch (ORDER-RULES: Product).
+// DRAFT copy — the operator approves the final text before launch (ORDER-RULES: Product; docs/COPY.md).
 // Shown once, privately, with a new member's first command reply (PRD FR-9).
 // "(coming soon)" is derived from the registered definitions, as in /craft help.
 import type { Embed } from '../discord.ts';

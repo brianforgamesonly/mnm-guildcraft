@@ -3,11 +3,11 @@
 //   /recipe source item: how: [faction] [note] · /recipe override item: [trivial] [components] [reset]   (officers)
 //   /roster recipes [skill]
 // /recipe writes this guild's correction layer (src/recipes.ts, migration 0009), never the shared recipe row.
-// DRAFT copy throughout: Brian approves it before launch (ORDER-RULES, order 9).
+// DRAFT copy throughout: approved by the operator before launch (ORDER-RULES, order 9; docs/COPY.md).
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, ephemeral, md, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
-import { ACQUISITION_LABEL, ACQUISITIONS, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
+import { ACQUISITION_LABEL, ACQUISITIONS, CORRECTED, correctionJoin, FACTION_MAX, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, type Character } from './character.ts';
 import { postButton, postedReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { SELECT_MAX_OPTIONS, type Tradeskill } from './skills.ts';
@@ -164,7 +164,6 @@ const upsertCorrection = (c: Ctx, recipeId: number, set: string, binds: unknown[
     )
     .bind(c.guild.id, recipeId, c.userId, now(), ...binds);
 
-const FACTION_MAX = 80;
 const NOTE_MAX = 200;
 
 export async function recipeSource(c: Ctx, opts: Option[]): Promise<MessageReply> {
@@ -273,13 +272,13 @@ interface KnownRare {
 async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
   const { results } = await c.db
     .prepare(
-      `SELECT r.id, i.name AS item, t.name AS tradeskill, coalesce(rc.acquisition, r.acquisition) AS acquisition, coalesce(rc.faction, r.faction) AS faction,
+      `SELECT r.id, i.name AS item, t.name AS tradeskill, ${CORRECTED.acquisition} AS acquisition, ${CORRECTED.faction} AS faction,
          group_concat(ch.name, ', ') AS who
        FROM character_recipe k JOIN character ch ON ch.id = k.character_id AND ch.deleted_at IS NULL
        JOIN member m ON m.guild_id = ch.guild_id AND m.discord_user_id = ch.owner_user_id AND m.status = 'active'
        JOIN recipe r ON r.id = k.recipe_id JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id
-       LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = ?1
-       WHERE ch.guild_id = ?1 AND ${visibleTo('?1')} AND coalesce(rc.acquisition, r.acquisition) IN (SELECT value FROM json_each(?2))
+       ${correctionJoin('?1')}
+       WHERE ch.guild_id = ?1 AND ${visibleTo('?1')} AND ${CORRECTED.acquisition} IN (SELECT value FROM json_each(?2))
          AND (?3 IS NULL OR r.tradeskill_id = ?3)
        GROUP BY r.id ORDER BY i.name COLLATE NOCASE, t.name COLLATE NOCASE`,
     )

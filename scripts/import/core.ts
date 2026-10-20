@@ -160,7 +160,7 @@ export function deriveCraftingSkills(data: WikiData): string[] {
 }
 
 /**
- * Gathering candidates — reported only, never inserted (CHECKLIST A6 is Brian's open question).
+ * Gathering candidates — reported only, never inserted (CHECKLIST A6 is the operator's open question).
  * Proposed rule: a nodes key that has its own skill page (a "Getting Started" section), plus every
  * item.harvestedBy value, minus the crafting skills. Resource nodes (Ore/Wood sections) drop out.
  */
@@ -603,7 +603,14 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
   return out;
 };
 
-export type Table = 'tradeskill' | 'item' | 'recipe' | 'recipe_component' | 'game_class';
+/**
+ * The game-data tables the import writes: every Statement names one, and import.test.ts checks each statement's SQL
+ * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
+ */
+export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class'] as const;
+export type Table = (typeof IMPORT_TABLES)[number];
+/** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
+export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
 export interface Statement {
   table: Table;
   sql: string;

@@ -12,7 +12,7 @@
 //          recorded as a usage.alert audit row (system), which is what "the last line posted" reads. A post Discord
 //          refuses is recorded too, with the old state, so it is retried the next UTC day, not every 15 minutes.
 import { budgetLeft, type BotApi } from './board/api.ts';
-import { FREE_LIMITS, METRICS, STALE_MS, USAGE_TARGET_SHARE, type Metric } from './limits.ts';
+import { BACKUP_TOKEN_EXPIRY_NOTE, FREE_LIMITS, METRICS, STALE_MS, USAGE_TARGET_SHARE, type Metric } from './limits.ts';
 
 export interface UsageRow {
   metric: string;
@@ -76,11 +76,16 @@ export function usageLines(rows: UsageRow[], nowMs: number): string[] {
   return lines;
 }
 
-/** "Backup: last <time> · token expires <date|unknown>"; stale after 36 hours. */
+/** The token part of the backup line: its expiry date, else the owner's note, else unknown. */
+export function tokenExpiryText(tokenExpires: string | null | undefined, note = BACKUP_TOKEN_EXPIRY_NOTE): string {
+  if (tokenExpires && tokenExpires !== 'unknown') return `token expires ${tokenExpires.slice(0, 10)}`;
+  return note === 'none' ? "token: no expiry (owner's note)" : 'token expires unknown';
+}
+
+/** "Backup: last <time> · token expires <date>" (or the owner's no-expiry note); stale after 36 hours. */
 export function backupLine(row: (BackupRow & { last_ok: string | null }) | undefined, nowMs: number): string {
   if (!row) return '**Backup:** none yet (the nightly backup job writes this line)';
-  const expires = row.token_expires && row.token_expires !== 'unknown' ? row.token_expires.slice(0, 10) : 'unknown';
-  const parts = [`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`, `token expires ${expires}`];
+  const parts = [`last ${row.last_ok ? ts(row.last_ok) : 'never succeeded'}`, tokenExpiryText(row.token_expires)];
   if (row.result !== 'ok') parts.push(`latest run ${ts(row.finished_at)} **failed**${row.error ? `: ${row.error.slice(0, 160)}` : ''}`);
   else if (row.size_bytes) parts.push(fmtBytes(row.size_bytes));
   if (stale(row.last_ok, nowMs)) parts.push('**stale**: no successful backup for over 36 hours');
@@ -95,7 +100,7 @@ export const ALERT_GUILDS_SQL = `SELECT g.id, g.review_channel_id,
     WHERE a.id IN (SELECT max(id) FROM audit_log WHERE guild_id = g.id AND action = 'usage.alert' GROUP BY target)) AS alerts
   FROM guild g WHERE g.review_channel_id IS NOT NULL ORDER BY g.id`;
 
-/** The one line posted (DRAFT copy: Brian approves it before launch). */
+/** The one line posted (DRAFT copy, docs/COPY.md: approved before launch). */
 export function alertText(m: Metric, row: UsageRow, state: 'over' | 'under'): string {
   return state === 'over'
     ? `Free-tier usage: **${FREE_LIMITS[m].label}** was ${ofLimit(m, row.value)} on ${row.day}, at or over GuildCraft's ${USAGE_TARGET_SHARE * 100}% target. Nothing stops until 100%; \`/guildcraft status\` shows every figure.`

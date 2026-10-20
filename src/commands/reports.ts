@@ -2,7 +2,7 @@
 //   /craft report item: issue: [details], and the "Report a problem" button on /craft find (a modal, at once);
 //   the report card in the review channel (order 9 override 1: posted by the Worker after a member's report), with
 //   Mark fixed and Dismiss for officers. The officer fixes the data with /recipe; the buttons only record it.
-// DRAFT copy throughout: Brian approves it before launch.
+// DRAFT copy throughout: the operator approves it before launch (docs/COPY.md).
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import { botApi } from '../board/api.ts';

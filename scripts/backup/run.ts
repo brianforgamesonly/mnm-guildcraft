@@ -20,7 +20,7 @@ import { gzipSync } from 'node:zlib';
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
 import { devDatabaseId, remoteDb } from '../import/db.ts';
-import { BACKUP_REPO, checkBounds, countsOf, countSql, DATABASE, git, loadAndCount, prune, REPO_URL, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
+import { BACKUP_REPO, checkBounds, countsOf, countSql, DATABASE, expiryAlarms, expiryState, git, loadAndCount, prune, REPO_URL, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
 
 const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
 const dryRun = args['dry-run'];
@@ -149,13 +149,10 @@ else {
   }
 }
 
-// The expiry warning's state: inside 30 days of expiry. It alarms (in the workflow's last step) only on entering that
-// window, or on passing the expiry itself.
-const DAY = 86_400_000;
-const windowOf = (iso: string | null | undefined, at: number) => (!iso || iso === 'unknown' ? 'unknown' : Date.parse(iso) <= at ? 'expired' : Date.parse(iso) - at <= 30 * DAY ? 'soon' : 'ok');
-const nowState = windowOf(out.token_expires, Date.now());
-const prevState = previous ? windowOf(previous.token_expires, Date.parse(previous.finished_at)) : 'unknown';
-const expiryAlarm = (nowState === 'soon' || nowState === 'expired') && nowState !== prevState;
+// The expiry warning's state (scripts/backup/lib.ts expiryState): it alarms only on entering "30 days or fewer" or "expired".
+const nowState = expiryState(out.token_expires, Date.now());
+const prevState = previous ? expiryState(previous.token_expires, Date.parse(previous.finished_at)) : 'unknown';
+const expiryAlarm = expiryAlarms(nowState, prevState);
 if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `expiry_alarm=${expiryAlarm ? '1' : '0'}\ntoken_expires=${out.token_expires}\n`);
 console.log(JSON.stringify({ token_expires: out.token_expires, expiry_state: nowState, previous_expiry_state: prevState, expiry_alarm: expiryAlarm }));
 

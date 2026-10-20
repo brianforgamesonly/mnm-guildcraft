@@ -16,7 +16,7 @@
 # table names, counts, sizes and hashes only.
 #
 # The alarm (ORDER-RULES order 8):
-#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
 #   how often: at most once a day;
 #   state: the backup's result in backup_status. A failure after a failed run does not fail the run again
 #          (scripts/ci/alarm.ts); /guildcraft status shows it, stale after 36 hours. The token-expiry warning has its
@@ -41,7 +41,8 @@ on:
         default: false
 permissions:
   contents: read
-concurrency: backup-dev
+# Shared with export.yml: both push to the backup repository's main.
+concurrency: backup-repo
 jobs:
   backup:
     if: ${{ !inputs.restore_test }}
@@ -69,7 +70,7 @@ jobs:
         env:
           EXPIRES: ${{ steps.backup.outputs.token_expires }}
         run: |
-          echo "::error::BACKUP_REPO_TOKEN expires $EXPIRES (30 days or fewer): Brian makes a new token and replaces the secret"
+          echo "::error::BACKUP_REPO_TOKEN expires $EXPIRES (30 days or fewer): the repository owner makes a new token and replaces the secret"
           exit 1
   restore-test:
     if: ${{ inputs.restore_test }}

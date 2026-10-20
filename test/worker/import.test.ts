@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
-import { previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
+import { buildPlan, buildStatements, IMPORT_TABLES, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
 import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
 import { IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
@@ -217,6 +217,13 @@ describe('game_class (classes derived at import)', () => {
     f.items['Class Test null'] = { class: null };
     return f;
   };
+
+  it('order 10: every statement writes exactly the table it names, and together they cover IMPORT_TABLES (the backup reads that list)', () => {
+    const empty = { tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map() };
+    const stmts = buildStatements(buildPlan(withClasses(), empty), '2026-10-20T00:00:00Z');
+    for (const s of stmts) expect(/^(?:INSERT INTO|UPDATE|DELETE FROM) (\w+)/.exec(s.sql)?.[1], s.sql.slice(0, 60)).toBe(s.table);
+    expect([...new Set(stmts.map((s) => s.table))].sort()).toEqual([...IMPORT_TABLES].sort());
+  });
 
   it('upper-cases, cuts at "<", drops ALL/NONE and keeps codes on at least 1% of class-carrying items', async () => {
     const res = await load(withClasses());

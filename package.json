@@ -12,6 +12,7 @@
     "test:actions": "node --test scripts/ci/action-runtimes.test.mjs",
     "test:logs": "node --test scripts/bench/logs-check.test.mjs",
     "test:backup": "node --test scripts/backup/lib.test.ts",
+    "test:export": "node --test scripts/export/lib.test.ts",
     "dev": "wrangler dev --env dev",
     "db:migrate:local": "wrangler d1 migrations apply mnm-guildcraft-dev --local --env dev",
     "import:local": "node scripts/import/run.ts --local",

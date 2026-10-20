@@ -6,7 +6,7 @@
 # when an event type does not reconcile with its own record. The daily schedule runs it over the last 24 hours,
 # so a mismatch arrives as a failed run (GitHub mails the repository owner). Expected: <1 billed minute a day.
 # Order 8 (ITEM 3.1), the alarm (ORDER-RULES order 8):
-#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
 #   how often: at most once a day (one scheduled run a day);
 #   state: (a) gaps Cloudflare's analytics does not explain, the reader coming up short, or audit rows unread: each
 #          scheduled window is new, so each fails; (b) the 7-day drop-rate bound over its threshold

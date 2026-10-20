@@ -10,7 +10,7 @@
 //
 // The file passes through as a Blob: no copy into JavaScript memory except its first 12 bytes, which are checked
 // against the PNG, JPEG and WebP signatures (the attachment's content_type is the client's claim, not checked here).
-// DRAFT copy throughout: Brian approves it before launch.
+// DRAFT copy throughout: the operator approves it before launch (docs/COPY.md).
 import { audit, now } from '../access.ts';
 import { botApi, UNKNOWN_MESSAGE } from '../board/api.ts';
 import type { Ctx } from '../context.ts';

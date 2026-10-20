@@ -1,0 +1,55 @@
+# One guild's data, exported to the private backup repository (order 10, ITEM 1.2: the continuity promise; the
+# runbook is docs/SELF-HOSTING.md). scripts/export/run.ts does the work. Dispatch only: no schedule, no push or
+# pull_request trigger. Expected: ~1 billed minute per run (public repository: free).
+#
+# Privacy: this repository, its artifacts and its logs are public. The guild ID is masked before any step runs and
+# never appears in the run name (the default name, the workflow's). The log shows table names, rules and counts;
+# the files go only to guild-exports/<guild>/ in the private backup repository, after the job confirms it is private.
+# Nothing is uploaded as an artifact.
+#
+# guild_id: a Discord server ID, or "test" for the test server (the DISCORD_TEST_GUILD_ID secret).
+name: export
+on:
+  workflow_dispatch:
+    inputs:
+      guild_id:
+        description: 'Discord server ID to export, or "test" for the test server'
+        required: true
+      dry_run:
+        description: 'Dry run: export and check, push nothing'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+# Shared with backup.yml: both push to the backup repository's main, so they never race.
+concurrency: backup-repo
+jobs:
+  export:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      # The input is read from the event file, not an expression or env: a step's script and env are printed in the log
+      # before a mask can apply.
+      - name: Mask the guild ID
+        env:
+          TEST_GUILD: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+        run: |
+          id="$(jq -r '.inputs.guild_id' "$GITHUB_EVENT_PATH")"
+          if [ "$id" = "test" ]; then id="$TEST_GUILD"; fi
+          echo "::add-mask::$id"
+          echo "EXPORT_GUILD_ID=$id" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Export (dry run = ${{ inputs.dry_run == true }})
+        run: node scripts/export/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }}
