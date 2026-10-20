@@ -52,8 +52,9 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'craft report': { access: 'member', run: craftReport },
   'roster recipes': { access: 'member', search: true, audit: 'roster.view', run: rosterRecipes },
   // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
-  // search's only write (its read audit row, after delivery).
-  'gear find': { access: 'member', search: true, audit: 'gear.find', run: gearFind },
+  // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),
+  // whatever SEARCH_REPLIES_PRIVATE says, and Previous/Next edit them in place; the item card has Post to channel.
+  'gear find': { access: 'member', audit: 'gear.find', run: gearFind },
   'item image': { access: 'member', run: itemImage },
   'recipe source': { access: 'officer', run: recipeSource },
   'recipe override': { access: 'officer', run: recipeOverride },

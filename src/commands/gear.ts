@@ -255,12 +255,14 @@ export function pageEmbed(rows: GearRow[], q: GearQuery, d: PageData, page: numb
   const footer = { text: GEAR_COPY.footer(page + 1, q.sort.label, d.version) };
   const title = GEAR_COPY.title;
   const budget = Math.min(EMBED_LIMITS.description, EMBED_LIMITS.total - WELCOME_RESERVE - title.length - footer.text.length);
-  let description = '';
+  let entries: string[] = [];
   for (const caps of CAPS) {
-    description = rows.map((r) => resultEntry(r, q, d, window, caps)).join('\n\n');
-    if (description.length <= budget) break;
+    entries = rows.map((r) => resultEntry(r, q, d, window, caps));
+    if (entries.join('\n\n').length <= budget) break;
   }
-  return { title, description: truncate(description, budget), footer };
+  // Still over: whole entries are left off the end (the details menu still lists every row), never cut mid-markdown.
+  while (entries.length > 1 && entries.join('\n\n').length > budget) entries.pop();
+  return { title, description: truncate(entries.join('\n\n'), budget), footer };
 }
 
 function pageComponents(rows: GearRow[], q: GearQuery, page: number, hasNext: boolean): unknown[] {
@@ -341,6 +343,7 @@ function cardSourceFields(r: GearRow, d: PageData): EmbedField[] {
 
 /** Lines that fit one field value, then "+N more". */
 function fitLinesBy(lines: string[], maxChars = 600): string {
+  lines = lines.map((l) => truncate(l, 200)); // one very long name never leaves the field with no entries
   const out: string[] = [];
   let used = 0;
   for (const l of lines) {

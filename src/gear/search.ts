@@ -57,7 +57,7 @@ export const GEAR_COLS = 'id, name, slot, stats_json, origin_json, wiki_url, ico
 /**
  * One page, plus one row to tell whether a next page exists: sorted by the sort (highest first, Name A→Z), then AC, then
  * total stats, then name; items without the sorted value last. No match count: measured on the real data, a window
- * count doubled D1's rows_read (12,469 against 6,260 for a search over all gear; scripts/bench/gear-search.ts).
+ * count doubled D1's rows_read (12,469 against 6,260 for a search over all gear; scripts/bench/gear-search.mjs).
  */
 export function searchStatement(db: D1Database, q: GearQuery, page: number): D1PreparedStatement {
   const fs = filters(q);

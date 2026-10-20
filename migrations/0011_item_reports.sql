@@ -7,6 +7,6 @@ ALTER TABLE recipe_report ADD COLUMN kind TEXT NOT NULL DEFAULT 'recipe' CHECK (
 
 -- item.total_stats: the sum of the seven stats, a VIRTUAL generated column (override 3; adding it writes no rows) that
 -- /gear find sorts and breaks ties by. Its expression is src/gear/options.ts TOTAL_STATS_SQL (test/worker/gear.test.ts
--- checks the two are the same). Not indexed: measured on the real data, an index holding the sort keys did not lower
+-- checks the two are the same). Not indexed (scripts/bench/gear-search.mjs): measured on the real data, an index holding the sort keys did not lower
 -- D1's rows_read (SQLite still reads the rows to sort on a virtual column), and it cost 3,162 rows written per copy.
 ALTER TABLE item ADD COLUMN total_stats INTEGER GENERATED ALWAYS AS ((ifnull(json_extract(stats_json, '$.stats.STR'), 0) + ifnull(json_extract(stats_json, '$.stats.STA'), 0) + ifnull(json_extract(stats_json, '$.stats.DEX'), 0) + ifnull(json_extract(stats_json, '$.stats.AGI'), 0) + ifnull(json_extract(stats_json, '$.stats.INT'), 0) + ifnull(json_extract(stats_json, '$.stats.WIS'), 0) + ifnull(json_extract(stats_json, '$.stats.CHA'), 0))) VIRTUAL;
