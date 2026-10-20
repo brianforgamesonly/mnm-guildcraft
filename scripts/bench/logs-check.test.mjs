@@ -61,6 +61,13 @@ test('one log event never satisfies two audit rows', () => {
   assert.equal(missingOf(r, 'audit skill.set → log').length, 1);
 });
 
+test('rows and reads in the last minutes of the window are not judged yet (their other half may still be ingesting)', () => {
+  const late = [...audit, { action: 'skill.set', actor: 'u', at: to - 30_000 }];
+  const read = { at: to - 20_000, path: 'command craft find', kind: 'interaction', audit: 'craft.find' };
+  const r = reconcile({ from, to, requests: [...crons([...seenSlots, t('2026-10-19T23:30:00Z')]), ...interactions, read], audit: late, deploys, cronSince });
+  assert.equal(r.ok, true, JSON.stringify(r.rows));
+});
+
 test('system rows (the departure run) are not matched to interactions', () => {
   const r = reconcile({ from, to, requests: [...crons([...seenSlots, t('2026-10-19T23:30:00Z')]), ...interactions], audit: [...audit, { action: 'member.left', actor: 'system', at: t('2026-10-20T00:15:40Z') }], deploys, cronSince });
   assert.equal(r.ok, true);

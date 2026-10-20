@@ -70,7 +70,12 @@ for (const key of ['$workers.scriptName', 'dataset', '$metadata.type']) {
     dry: true,
     parameters: { calculations: [{ operator: 'count', alias: 'n' }], groupBys: [{ type: 'string', value: key }], limit: 50 },
   });
-  unfilteredGroups[key] = (u.calculations?.[0]?.aggregates ?? []).map((a) => ({ value: a.groups?.[0]?.value ?? null, n: a.count ?? a.value }));
+  const rows = (u.calculations?.[0]?.aggregates ?? []).map((a) => ({ value: a.groups?.[0]?.value ?? null, n: Number(a.count ?? a.value) || 0 }));
+  // Public logs: other Workers in the account are never named, only counted together.
+  unfilteredGroups[key] =
+    key === '$workers.scriptName'
+      ? [...rows.filter((x) => x.value === SCRIPT || x.value === null), { value: '(other scripts)', n: rows.filter((x) => x.value !== SCRIPT && x.value !== null).reduce((s, x) => s + x.n, 0) }]
+      : rows;
 }
 
 // 2. The events themselves, paged by cursor. Order 7: a read that stops at the page cap is reported, never silent.
@@ -277,7 +282,7 @@ const databaseId = cfg.env.dev.d1_databases[0].database_id;
 const auditSql = 'SELECT action, actor, created_at FROM audit_log WHERE created_at >= ? AND created_at <= ? ORDER BY id';
 const d1 = await cf(`/accounts/${account}/d1/database/${databaseId}/query`, {
   method: 'POST',
-  body: JSON.stringify({ sql: auditSql, params: [new Date(from - 60_000).toISOString(), new Date(to).toISOString()] }),
+  body: JSON.stringify({ sql: auditSql, params: [new Date(from - 60_000).toISOString(), new Date(to + 60_000).toISOString()] }),
 });
 const deploysRes = await cf(`/accounts/${account}/workers/scripts/${SCRIPT}/deployments`);
 const schedulesRes = await cf(`/accounts/${account}/workers/scripts/${SCRIPT}/schedules`);
@@ -330,7 +335,13 @@ else {
   const keys = [...new Set([...analytics.keys(), ...logged.keys()])].sort();
   const differ = keys.filter((k) => (analytics.get(k) ?? 0) !== (logged.get(k) ?? 0));
   // Logs short of the platform's own invocation count fail the check (the newest slots may still be ingesting).
-  logsShortOfAnalytics = differ.filter((k) => (analytics.get(k) ?? 0) > (logged.get(k) ?? 0) && Date.parse(`${k}Z`) + SLOT_MS < to - INGEST_GRACE_MS);
+  // A request at a slot's edge can land in the neighbouring slot on one side: an excess of logs next door
+  // offsets a shortfall here.
+  const excess = (k) => Math.max(0, (logged.get(k) ?? 0) - (analytics.get(k) ?? 0));
+  const near = (k, d) => new Date(Date.parse(`${k}Z`) + d * SLOT_MS).toISOString().slice(0, 16);
+  logsShortOfAnalytics = differ.filter(
+    (k) => (analytics.get(k) ?? 0) > (logged.get(k) ?? 0) + excess(near(k, -1)) + excess(near(k, 1)) && Date.parse(`${k}Z`) + SLOT_MS < to - INGEST_GRACE_MS,
+  );
   console.log(`invocation analytics (GraphQL): ${[...analytics.values()].reduce((a, b) => a + b, 0)} invocations vs ${byRequest.size} logged requests; slots that differ: ${differ.length}`);
   for (const k of differ) {
     const rows = inv.filter((x) => slot(Date.parse(x.dimensions.datetime)) === k).map((x) => `${x.dimensions.datetime.slice(11, 19)} ${x.dimensions.status} ×${x.sum.requests}`);

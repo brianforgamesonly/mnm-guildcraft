@@ -231,7 +231,7 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
-    `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.stopped ? `stopped: ${run.stopped.slice(0, 200)}` : `${run.marked ?? 0} marked`}` : ''}`,
+    `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
     '**Usage against the free-tier limits:** coming soon',
   ];
   return ephemeral(lines.join('\n'));

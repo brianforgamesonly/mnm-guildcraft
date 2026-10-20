@@ -234,6 +234,17 @@ describe('the departure run', () => {
     expect(line).not.toContain('Bo');
   });
 
+  it('a member back in the server before their notice went out is owed no notice', async () => {
+    await members();
+    server.members = [ANN, CY];
+    await departuresForGuild(env.DB, api(), await guildRow()); // no review channel yet: the notice waits
+    await setupReview();
+    server.members = [ANN, BO, CY];
+    const r = await departuresForGuild(env.DB, api(), await guildRow());
+    expect(r).toMatchObject({ notices_pending: 0, notices_posted: 0 });
+    expect(server.posted).toEqual([]);
+  });
+
   it('a member marked left comes back on their own next command; the run never reactivates anyone', async () => {
     await members();
     server.members = [ANN, CY];

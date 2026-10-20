@@ -62,7 +62,9 @@ export function reconcile({ from, to, requests, audit, deploys, cronSince }) {
 
   // Writes and reads: audit row → its interaction (one-to-one, nearest first).
   const byKind = new Map();
-  for (const row of audit.filter((x) => x.at >= from && x.at <= to && x.actor !== SYSTEM_ACTOR)) {
+  // Rows and claims in the last INGEST_GRACE_MS are not judged: the other half may not be ingested yet.
+  const settled = to - INGEST_GRACE_MS;
+  for (const row of audit.filter((x) => x.at >= from && x.at <= settled && x.actor !== SYSTEM_ACTOR)) {
     const re = ACTION_PATHS[row.action] ?? /^(command|component|modal) /;
     const hit = interactions
       .map((r, i) => ({ r, i }))
@@ -79,7 +81,7 @@ export function reconcile({ from, to, requests, audit, deploys, cronSince }) {
   for (const [action, k] of [...byKind].sort()) rows.push({ type: `audit ${action} → log`, ...k });
 
   // Reads that say they wrote an audit row → the row.
-  const claimed = interactions.filter((r) => r.audit);
+  const claimed = interactions.filter((r) => r.audit && r.at <= settled);
   const rowsLeft = audit.filter((x) => x.actor !== SYSTEM_ACTOR).map((x) => ({ ...x }));
   const claimMissing = [];
   for (const r of claimed) {

@@ -139,7 +139,8 @@ export const describeCharacter = (ch: CharacterBrief) => {
 };
 
 /** The review-channel notice for one departed member (DRAFT copy: Brian approves it before launch). */
-export function noticeMessage(userId: string, name: string, characters: CharacterBrief[]) {
+export function noticeMessage(userId: string, name: string | null, characters: CharacterBrief[]) {
+  name = name?.trim() || 'A member';
   const list = characters.length ? characters.map(describeCharacter).join('\n') : 'No characters registered.';
   const embed: Embed = {
     title: truncate(`${name} left the server`, 256),
@@ -176,36 +177,45 @@ export async function departuresForGuild(
       ? Promise.resolve()
       : db.batch([...extra, auditRow(db, guild.id, 'system', 'departures.run', `guild:${guild.id}`, { active: r.active, listed: r.listed, pages: r.pages, marked: r.marked, notices_posted: r.notices_posted, stopped: r.stopped }, at)]);
 
-  const active = (await db.prepare("SELECT discord_user_id AS id FROM member WHERE guild_id = ? AND status = 'active'").bind(guild.id).all<{ id: string }>()).results;
+  const everyone = (await db.prepare('SELECT discord_user_id AS id, status FROM member WHERE guild_id = ?').bind(guild.id).all<{ id: string; status: string }>()).results;
+  const active = everyone.filter((m) => m.status === 'active');
   r.active = active.length;
+  // The list is read whenever someone could be marked or is owed a notice (a member back in the server is owed none).
+  let listedNow: Set<string> | null = null;
 
-  if (active.length) {
+  if (everyone.length) {
     const list = await listMemberIds(api, guild.id);
     r.pages = list.pages;
     if (!list.ok) {
       r.stopped = list.why;
       r.errors.push(list.why);
     } else {
+      listedNow = list.ids;
       r.listed = list.ids.size;
       const gone = active.map((m) => m.id).filter((id) => !list.ids.has(id));
       r.would_mark = gone;
       if (pastCeiling(gone.length, active.length)) r.stopped = `ceiling: ${gone.length} of ${active.length} active members would be marked (limit ${MAX_MARK}, or ${MAX_MARK_SHARE * 100}% once ${SHARE_FLOOR}+); nobody marked`;
       else if (gone.length && !opts.dryRun) {
         const ids = JSON.stringify(gone);
+        // The member.left rows go first: if a non-atomic caller (the workflow's HTTP adapter) stops halfway, an
+        // orphan row is harmless (pending notices also need status 'left'), a hidden member without one never is.
         const results = await db.batch([
-          dirtyFor(db, guild.id, gone),
-          db.prepare("UPDATE member SET status = 'left' WHERE guild_id = ? AND status = 'active' AND discord_user_id IN (SELECT value FROM json_each(?))").bind(guild.id, ids),
           db
             .prepare("INSERT INTO audit_log (guild_id, actor, action, target, detail_json, created_at) SELECT ?1, 'system', 'member.left', 'member:' || value, '{}', ?3 FROM json_each(?2)")
             .bind(guild.id, ids, at),
+          dirtyFor(db, guild.id, gone),
+          db.prepare("UPDATE member SET status = 'left' WHERE guild_id = ? AND status = 'active' AND discord_user_id IN (SELECT value FROM json_each(?))").bind(guild.id, ids),
         ]);
-        r.marked = results[1].meta.changes ?? gone.length;
+        r.marked = results[2].meta.changes ?? gone.length;
       }
     }
   }
 
   // Notices still owed (this run's and any carried from earlier nights), posted only when a review channel is set.
-  const pending = (await db.prepare(PENDING_SQL).bind(guild.id).all<{ id: string; name: string; characters: string | null }>()).results;
+  // A member back in the server (seen in this run's complete list) is owed no "left the server" notice.
+  const pending = (await db.prepare(PENDING_SQL).bind(guild.id).all<{ id: string; name: string | null; characters: string | null }>()).results.filter(
+    (p) => !listedNow?.has(p.id),
+  );
   // In a dry run the members this run would mark are owed a notice too.
   const marking = r.stopped ? [] : r.would_mark;
   const owed = opts.dryRun ? [...pending.map((p) => p.id), ...marking.filter((id) => !pending.some((p) => p.id === id))] : pending.map((p) => p.id);
@@ -214,6 +224,18 @@ export async function departuresForGuild(
   if (!guild.review_channel_id) {
     if (owed.length && !r.stopped) r.stopped = 'no review channel set: notices wait until /guildcraft setup review: is set';
   } else if (!opts.dryRun) {
+    try {
+      await postNotices();
+    } finally {
+      // Whatever was posted is recorded, even if a later step threw: a posted notice is never posted twice.
+      await record(notified);
+    }
+    return r;
+  }
+  await record(notified);
+  return r;
+
+  async function postNotices() {
     for (const p of pending.slice(0, MAX_NOTICES)) {
       // One call for the post, one for the final D1 write.
       if (budgetLeft(api.budget) < 2 || Date.now() >= api.budget.deadline) {
@@ -227,12 +249,10 @@ export async function departuresForGuild(
         break;
       }
       r.notices_posted++;
-      notified.push(auditRow(db, guild.id, 'system', 'member.notified', `member:${p.id}`, { message_id: sent.body.id }, at));
+      notified.push(auditRow(db, guild.id, 'system', 'member.notified', `member:${p.id}`, { message_id: sent.body?.id ?? null }, at));
     }
     if (pending.length > MAX_NOTICES && !r.stopped) r.stopped = `${pending.length - MAX_NOTICES} notice(s) over the nightly ${MAX_NOTICES} carry to the next run`;
   }
-  await record(notified);
-  return r;
 }
 
 /** The run over every guild, sharing one call budget; a guild not reached waits for the next night. */

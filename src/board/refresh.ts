@@ -603,6 +603,8 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   let api: BotApi | null = null;
   // Order 7: in its own slot (08:15–08:29 UTC) the departure run goes first, on the same 40-call budget; the
   // sweep below gets what is left (it needs RESERVE + 3) and anything it cannot reach stays dirty.
+  /** The departure run's calls, so the board line below counts the sweep's own. */
+  let before = { d1: 0, discord: 0, log: 0 };
   if (isDepartureRun(controller.scheduledTime) && env.DISCORD_BOT_TOKEN) {
     api = botApi(env.DISCORD_BOT_TOKEN, budget);
     let line: Record<string, unknown> = { gc: 'departures', results: [] };
@@ -614,6 +616,7 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       line.err = e instanceof Error ? e.message : String(e);
     }
     console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length, discord_calls: budget.discord, calls: api.log.slice() }));
+    before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
   }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string }>();
@@ -633,9 +636,9 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   const line = {
     ...log,
     cron: controller.cron ?? null,
-    d1_calls: counted.calls.length,
-    discord_calls: budget.discord,
-    calls: api?.log ?? [],
+    d1_calls: counted.calls.length - before.d1,
+    discord_calls: budget.discord - before.discord,
+    calls: (api?.log ?? []).slice(before.log),
     // ITEM 2: the sweep's own first query, with the isolate's state before it.
     first_query_ms: first?.ms ?? null,
     first_sql_ms: first?.sql_ms ?? null,
