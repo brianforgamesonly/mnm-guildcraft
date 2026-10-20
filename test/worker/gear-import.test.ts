@@ -192,8 +192,24 @@ describe('order 13: the write ceiling', () => {
   it('fails loudly, writing nothing, when the first group alone exceeds the ceiling', async () => {
     const res = await load(gearFixture(), { writeCeiling: 3 });
     expect(res.status).toBe('failed');
-    expect(res.error).toMatch(/write ceiling 3 is below the first group's bound/);
+    expect(res.error).toMatch(/write ceiling 3 is below the bound of statement group 1 of /);
     expect(await one<{ n: number }>('SELECT count(*) AS n FROM item')).toEqual({ n: 0 });
+  });
+
+  it('review: a later group that could never fit fails the run loudly instead of closing partial every night', async () => {
+    await load(gearFixture());
+    // Unchanged items and mobs are not sent, so the groups are tradeskills, classes, then the recipe group (bound 34).
+    const res = await load(gearFixture(), { writeCeiling: 30 });
+    expect(res.status).toBe('failed');
+    expect(res.error).toMatch(/below the bound of statement group 3 of 3 \(34 rows\)/);
+    expect(await one("SELECT status FROM data_import ORDER BY id DESC LIMIT 1")).toEqual({ status: 'failed' });
+  });
+
+  it('mobs are written right after the classes, so a stopped first run already holds them', async () => {
+    const res = await load(gearFixture(), { writeCeiling: 600 }); // one item group fits, not all of them
+    expect(res.status).toBe('partial');
+    expect(res.written!.recipe.statements).toBe(0);
+    expect(await one<{ n: number }>('SELECT count(*) AS n FROM mob')).toEqual({ n: 2 });
   });
 
   it('a dry run reports the write bound and the ceiling, and writes only its own row', async () => {

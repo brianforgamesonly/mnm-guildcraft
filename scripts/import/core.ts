@@ -956,6 +956,7 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
       stmt('game_class', codes.length, `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`),
     ),
   ]);
+  groups.push(...mobGroups(plan, ex, stmt));
   const items = ex ? plan.items.filter((i) => itemDiffers(ex.items.get(i.name_key), i)) : plan.items;
   for (const rows of chunk(items, ROWS_PER_STATEMENT))
     groups.push([
@@ -1035,6 +1036,15 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
     );
   for (const keys of chunk(plan.deactivate, ROWS_PER_STATEMENT))
     out.push(stmt('recipe', keys.length, `UPDATE recipe SET active = 0 WHERE source = 'wiki' AND active = 1 AND source_key IN (${keys.map(lit).join(', ')})`));
+  return groups.filter((g) => g.length > 0);
+}
+
+/**
+ * Mobs depend on nothing else, so they go early (after the classes): the backup's must-hold-rows check
+ * (scripts/backup/lib.ts) counts `mob` as soon as the table exists, and a run stopped at the ceiling has written them.
+ */
+function mobGroups(plan: Plan, ex: ExistingState | undefined, stmt: (table: Table, rows: number, sql: string) => Statement): Statement[][] {
+  const groups: Statement[][] = [];
   const mobs = ex ? plan.mobs.filter((m) => mobDiffers(ex.mobs.get(nameKey(m.key)), m)) : plan.mobs;
   for (const rows of chunk(mobs, ROWS_PER_STATEMENT))
     groups.push([
@@ -1055,7 +1065,7 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
     ]);
   for (const keys of chunk(plan.mobDeactivate, ROWS_PER_STATEMENT))
     groups.push([stmt('mob', keys.length, `UPDATE mob SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)]);
-  return groups.filter((g) => g.length > 0);
+  return groups;
 }
 
 export const buildStatements = (plan: Plan, importedAt: string, ex?: ExistingState): Statement[] => buildGroups(plan, importedAt, ex).flat();
@@ -1308,9 +1318,10 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   const deferred = groups.slice(next).flat();
   if (deferred.length) {
     const deferredBound = deferred.reduce((n, s) => n + s.bound, 0);
-    if (next === 0 && groups[0].reduce((n, s) => n + s.bound, 0) > ceiling) {
-      // A group larger than the whole ceiling would never be written: fail loudly instead of stalling every night.
-      const error = `write ceiling ${ceiling} is below the first group's bound; nothing written`;
+    const stuck = groups[next].reduce((n, s) => n + s.bound, 0);
+    if (stuck > ceiling - opened.rows_written - CLOSE_BOUND) {
+      // A group that would not fit even a fresh run would stop every run here: fail loudly instead of stalling every night.
+      const error = `write ceiling ${ceiling} is below the bound of statement group ${next + 1} of ${groups.length} (${stuck} rows); ${spent} rows written before it`;
       await db.run([`UPDATE data_import SET status = 'failed', error = ${lit(error)}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`]);
       return { status: 'failed', sourceVersion, error, counts, warnings, predicted, written };
     }
