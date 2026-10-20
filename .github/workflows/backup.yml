@@ -41,7 +41,8 @@ on:
         default: false
 permissions:
   contents: read
-concurrency: backup-dev
+# Shared with export.yml: both push to the backup repository's main.
+concurrency: backup-repo
 jobs:
   backup:
     if: ${{ !inputs.restore_test }}

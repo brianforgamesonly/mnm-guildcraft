@@ -21,7 +21,8 @@ on:
         default: true
 permissions:
   contents: read
-concurrency: export
+# Shared with backup.yml: both push to the backup repository's main, so they never race.
+concurrency: backup-repo
 jobs:
   export:
     runs-on: ubuntu-26.04

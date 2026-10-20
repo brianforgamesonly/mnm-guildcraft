@@ -41,10 +41,11 @@ const ifNotExists = (sql: string) => sql.replace(/^CREATE\s+(UNIQUE\s+)?(TABLE|I
 
 /**
  * The database as SQL: schema, then rows parents first, then indexes. It loads into an empty database, or into one
- * whose migrations already ran (the schema statements are IF NOT EXISTS, and a row already there, such as a
- * d1_migrations entry, is kept: INSERT OR IGNORE).
+ * whose migrations already ran: the schema statements are IF NOT EXISTS, and in the `ignore` tables (d1_migrations
+ * and the game data) a row already there is kept (INSERT OR IGNORE). Every other row is a plain INSERT, so a guild
+ * row the target refuses fails the load instead of vanishing.
  */
-export function dump(db: DatabaseSync, parentsFirst: string[]): string {
+export function dump(db: DatabaseSync, parentsFirst: string[], ignore: readonly string[] = []): string {
   const tables = db.prepare(TABLES).all() as unknown as TableSql[];
   const lines = ['PRAGMA defer_foreign_keys = TRUE;'];
   for (const t of tables) lines.push(`${ifNotExists(t.sql)};`);
@@ -52,10 +53,10 @@ export function dump(db: DatabaseSync, parentsFirst: string[]): string {
   for (const name of order) {
     for (const row of db.prepare(`SELECT * FROM ${q(name)}`).all() as Record<string, unknown>[]) {
       const cols = Object.keys(row);
-      lines.push(`INSERT OR IGNORE INTO ${q(name)} (${cols.map(q).join(', ')}) VALUES (${cols.map((c) => literal(row[c])).join(', ')});`);
+      lines.push(`INSERT${ignore.includes(name) ? ' OR IGNORE' : ''} INTO ${q(name)} (${cols.map(q).join(', ')}) VALUES (${cols.map((c) => literal(row[c])).join(', ')});`);
     }
   }
-  for (const { sql } of db.prepare("SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger', 'view') AND sql IS NOT NULL ORDER BY rowid").all() as { sql: string }[]) lines.push(`${ifNotExists(sql)};`);
+  for (const { sql } of db.prepare("SELECT sql FROM sqlite_master WHERE type IN ('index', 'trigger', 'view') AND sql IS NOT NULL AND tbl_name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND tbl_name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY rowid").all() as { sql: string }[]) lines.push(`${ifNotExists(sql)};`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -72,7 +73,7 @@ export function guildDump(fullSql: string, guildId: string, referenceTables: rea
   const dangling = db.prepare('PRAGMA foreign_key_check').all();
   if (dangling.length) throw new Error(`${dangling.length} row(s) would point at rows outside the export`);
   const kept = counts(db);
-  const sql = dump(db, [...plan.map((p) => p.table)].reverse());
+  const sql = dump(db, [...plan.map((p) => p.table)].reverse(), plan.filter((p) => p.scope === 'reference' || referenceTables.includes(p.table)).map((p) => p.table));
   const back = counts(load(sql));
   if (JSON.stringify(back) !== JSON.stringify(kept)) throw new Error('the guild copy does not load back with the same counts');
   return { sql, plan, counts: kept };

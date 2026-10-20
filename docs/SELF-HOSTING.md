@@ -10,6 +10,8 @@ Everything here stays on free plans. No step asks for a credit card. If a page e
 
 **What you need from Joegandomi:** the link to the GuildCraft repository (ask Joegandomi for the link), and your guild's export: two files, `<date>.sql` and `<date>.json`.
 
+Do the steps in order: several of them depend on the one before.
+
 Steps marked *(unverified)* describe a screen or a behaviour that could not be checked when this was written. The rest cite the page they follow.
 
 ---
@@ -71,11 +73,13 @@ In your fork: **Settings → Secrets and variables → Actions → New repositor
 ## Step 5 — The database
 
 1. **Actions → provision → Run workflow.** It creates the database and prints a line `database_id=...` (not a secret).
-2. In your fork, open `wrangler.jsonc` (press the pencil to edit it on GitHub), replace the `database_id` value with yours, and commit to `main`. That commit also starts a deploy; let it fail or finish, either is fine at this point, and carry on.
+2. In your fork, open `wrangler.jsonc` (press the pencil to edit it on GitHub), replace the `database_id` value with yours, and commit to `main`.
+3. That commit starts a **deploy** run (Actions tab). **Wait until it has finished**, whether it succeeds or fails, before Step 6: it sets up the database's tables, and the export must not load while that is still running.
+4. In `src/limits.ts`, set `BACKUP_TOKEN_EXPIRY_NOTE` to `'unset'` unless your `BACKUP_REPO_TOKEN` really has no expiry date. (It records the original operator's choice; with `'unset'`, `/guildcraft status` warns you 30 days before your token expires.)
 
 ## Step 6 — Load your guild's export
 
-Load it before you add the bot to your server (Step 9), so nothing is written in between. It loads into the new database whether or not the deploy above has already set up its tables: the export's tables are created only if missing, and a row already there is kept.
+Load it before you add the bot to your server (Step 8), so nothing is written in between. The export's tables are created only if missing, so it loads whether or not the deploy has already set them up.
 
 The export loads with one command from your own computer:
 
@@ -85,30 +89,62 @@ The export loads with one command from your own computer:
    ```
    npx wrangler d1 execute mnm-guildcraft-dev --remote --file <date>.sql
    ```
-   The database name is the one in your `wrangler.jsonc`. The `.json` file lists how many rows each table should hold. To check, run `npx wrangler d1 execute mnm-guildcraft-dev --remote --command "SELECT count(*) FROM character"` and compare with `tables.character`.
+   The database name is the one in your `wrangler.jsonc`. Running it from a folder without a `wrangler.jsonc` finds the database by name in your account *(unverified)*; if it says it cannot find it, run the command from your fork's folder instead.
+4. Check it. The `.json` file's `tables` lists how many rows each table should hold. A guild row the database refuses stops the load with an error rather than being skipped, so an error here means: stop and ask. To compare, run this and check each number against `tables`:
+   ```
+   npx wrangler d1 execute mnm-guildcraft-dev --remote --command "SELECT (SELECT count(*) FROM guild) AS guild, (SELECT count(*) FROM member) AS member, (SELECT count(*) FROM character) AS character, (SELECT count(*) FROM character_skill) AS character_skill, (SELECT count(*) FROM character_recipe) AS character_recipe, (SELECT count(*) FROM recipe_correction) AS recipe_correction, (SELECT count(*) FROM audit_log) AS audit_log"
+   ```
 
-The export holds your guild's rows only, plus the shared game data your rows point to (items, recipes, tradeskills, classes). It holds nothing from any other guild.
+The export holds your guild's rows, and all of the shared game data (every item, recipe, tradeskill and class), which your rows point to. It holds nothing from any other guild.
 
-No export? A brand-new copy skips this step: Step 8 fills in the game data, and your members register their characters again.
+No export? A brand-new copy skips this step: Step 10 fills in the game data, and your members register their characters again.
 
-## Step 7 — Deploy and register
+## Step 7 — Deploy
 
-1. **Actions → deploy → Run workflow.** It applies any database updates newer than the export and starts the bot on Cloudflare.
-2. **Actions → register-commands → Run workflow** (leave *read only* off). It checks the bot answers safely, registers the commands in your server, and sets the bot's Interactions Endpoint URL in the Developer Portal for you.
+**Actions → deploy → Run workflow.** It applies any database updates newer than the export and starts the bot on Cloudflare.
 
-## Step 8 — Game data
+## Step 8 — Add the bot to your server
+
+Discord only lets the bot's commands into a server the bot has been added to, so this comes before Step 9. Open this link, with your Application ID in place of `<APP ID>`, choose your server and press **Authorize** (Discord: https://docs.discord.com/developers/topics/oauth2, bot authorization flow):
+
+```
+https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=292057893888
+```
+
+`292057893888` is these permissions together, each one because GuildCraft calls something that needs it:
+
+| Permission | Why |
+|---|---|
+| View Channel | to see the roster board, review and vault channels |
+| Send Messages | to create the roster board's posts (in a forum, a post) and post in the review and vault channels |
+| Send Messages in Threads | to add messages inside board posts |
+| Embed Links | GuildCraft's posts are embeds |
+| Attach Files | to re-post item screenshots in the vault channel |
+| Read Message History | to read archived board posts and the vault's screenshots back |
+| Manage Threads | to keep board posts open, pin the index post, and remove old board posts on a rebuild |
+
+## Step 9 — Register the commands
+
+**Actions → register-commands → Run workflow** (leave *read only* off). It checks the bot answers safely, registers the commands in your server, and sets the bot's Interactions Endpoint URL in the Developer Portal for you.
+
+## Step 10 — Game data
 
 **Actions → import → Run workflow** with *dry run* on: it prints what it would write. Run it again with *dry run* off. After that it runs every morning by itself (07:30 UTC). Expect about 1,200 recipes and 5,500 items (the numbers grow with the community data).
 
-## Step 9 — Add the bot to your server
+## Step 11 — Settings and the roster board
 
-Open this link, with your Application ID in place of `<APP ID>`, choose your server and press **Authorize**:
+Run `/guildcraft status` in your server. If you loaded an export, your roles and channels are already set.
 
-```
-https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=<PERMISSIONS>
-```
+The roster board's posts, the screenshots waiting in the vault and the report cards were posted by the old bot, and your bot cannot edit another bot's messages. So, if you loaded an export, do this once, best before Step 8:
 
-Use the `permissions` number from `docs/LAUNCH-GUIDE.md` in the repository: it lists each permission and why GuildCraft needs it. Then run `/guildcraft setup` in your server. If you loaded an export, your roles and channels are already set; `/guildcraft status` shows them.
+1. Make the bot forget the old board posts, so it creates its own on its next 15-minute run:
+   ```
+   npx wrangler d1 execute mnm-guildcraft-dev --remote --command "DELETE FROM board_post; UPDATE guild SET board_index_thread_id = NULL"
+   ```
+   Then delete the old bot's board posts in the forum by hand (right-click a post → **Delete Post** *(unverified: menu wording)*).
+2. Screenshots that were still waiting for approval, and open reports, cannot be answered with the old bot's buttons. Ask members to send those again; the old messages can be deleted by hand. Approved screenshots keep working.
+
+Without an export, run `/guildcraft setup` to choose the roles and channels.
 
 ## Afterwards
 
