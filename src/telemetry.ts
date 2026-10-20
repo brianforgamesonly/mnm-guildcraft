@@ -113,13 +113,28 @@ export interface Outcome {
   err?: string | null;
   /** The isolate's state when the request arrived (isolateSnapshot). */
   isolate?: ReturnType<typeof isolateSnapshot>;
+  /** When the Worker received the request, epoch ms (order 6: compared with the interaction id's creation time). */
+  receivedAt?: number;
+}
+
+const DISCORD_EPOCH = 1420070400000n;
+
+/**
+ * Order 6, ITEM 2: milliseconds from Discord creating the interaction (its id is a snowflake carrying that
+ * time) to this Worker receiving it. This is the leg before our wall time starts: Discord's own work and the
+ * network to Cloudflare. Clock skew between Discord and Cloudflare is in it too (small, unmeasured).
+ */
+export function discordLagMs(id: string | undefined, receivedAt: number | undefined): number | null {
+  if (!id || receivedAt === undefined || !/^\d{15,25}$/.test(id)) return null;
+  return receivedAt - Number((BigInt(id) >> 22n) + DISCORD_EPOCH);
 }
 
 /** The one structured line per interaction. Read back from Workers Logs (see .github/workflows/timings.yml). */
-export function timingLine(i: Parameters<typeof describeInteraction>[0], calls: D1Call[], colo: string | undefined, totalMs: number, outcome: Outcome = { ack: null }): string {
+export function timingLine(i: Parameters<typeof describeInteraction>[0] & { id?: string }, calls: D1Call[], colo: string | undefined, totalMs: number, outcome: Outcome = { ack: null }): string {
   return JSON.stringify({
     gc: 'interaction',
     ...describeInteraction(i),
+    discord_lag_ms: discordLagMs(i.id, outcome.receivedAt),
     q: calls.length,
     d1_ms: calls.map((c) => c.ms),
     sql_ms: calls.map((c) => c.sql_ms ?? null),

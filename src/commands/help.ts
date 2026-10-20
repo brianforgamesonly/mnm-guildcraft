@@ -33,7 +33,8 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/guildcraft setup'], text: 'set the member and officer roles, and the roster board forum' },
   { cmds: ['/guildcraft status'], text: 'data version, last import and the roster board' },
   { cmds: ['/recipe source', '/recipe override'], text: 'set how a recipe is obtained; correct a recipe' },
-  { cmds: ['/guildcraft remove-member', '/guildcraft rebuild-board'], text: 'remove a departed member; rebuild the board' },
+  { cmds: ['/guildcraft remove-member'], text: 'remove a departed member' },
+  { cmds: ['/guildcraft rebuild-board'], text: 'recreate the roster board posts in A→Z order' },
   { cmds: ['/craft help'], text: 'this guide' },
 ];
 

@@ -180,7 +180,18 @@ if (perRequest) {
   // Order 5 (ITEM 2): sql_ms / d1_dur are D1's own server-side times, rows its rows read (a game-list cache
   // reload reads the whole list), first = the isolate's first request, idle = ms since this isolate's last D1 call.
   // gap_s = seconds since the previous request of any kind (from the logs, across isolates).
-  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tsql_ms\td1_dur\trows\tfirst\tidle_ms\tgap_s\tcolo\td1_region\tack\tdeliveries\tfailed\terrors');
+  // Order 6: lag_ms = Discord creating the interaction (its snowflake id) → the Worker receiving it; board = the
+  // board run in this request (a sweep, or the refresh after a command): its trigger, calls and what it did.
+  const boardOf = (b) => {
+    if (!b) return '';
+    const res = (b.results ?? []).map((x) =>
+      x.locked ? 'locked' : x.no_board ? 'no_board' :
+      Object.entries({ c: x.created, e: x.edited, u: x.unarchived, s: x.skipped_unchanged, b: x.bumped, rep: x.replaced, del: x.deleted_old, dirty: x.left_dirty, gone: x.gone, g: x.guarded?.length })
+        .filter(([, v]) => v).map(([k, v]) => `${k}${v}`).join(' ') + ` idx:${x.index}${x.rebuild && x.rebuild !== 'none' ? ` rebuild:${x.rebuild}` : ''}${x.in_order === false ? ' OUT_OF_ORDER' : ''}${x.errors?.length ? ` errors:${x.errors.length}` : ''}`,
+    );
+    return `${b.trigger} d1=${b.d1_calls} discord=${b.discord_calls} [${res.join('; ')}]`;
+  };
+  console.log('time\tpath\toutcome\tstatus\twall\tcpu\tio\tq\td1_ms\tsql_ms\td1_dur\trows\tfirst\tidle_ms\tgap_s\tlag_ms\tcolo\td1_region\tack\tdeliveries\tboard\tfailed\terrors');
   let prev = null;
   for (const r of [...byRequest.values()].sort((a, b) => a.at - b.at)) {
     const l = r.line ?? r.board;
@@ -188,8 +199,9 @@ if (perRequest) {
       [
         new Date(r.at).toISOString(), redact(pathOf(r)), r.outcome, r.status, r.wall, r.cpu, r.line?.io_ms, r.line?.q ?? r.board?.d1_calls, JSON.stringify(r.line?.d1_ms ?? (r.board ? [r.board.first_query_ms] : null)),
         JSON.stringify(r.line?.sql_ms ?? (r.board ? [r.board.first_sql_ms] : null)), JSON.stringify(r.line?.d1_duration ?? null), JSON.stringify(r.line?.rows_read ?? (r.board ? [r.board.first_rows_read] : null)),
-        l?.isolate_first_request ?? '', l?.ms_since_last_d1_in_isolate ?? '', prev === null ? '' : ((r.at - prev) / 1000).toFixed(1), r.line?.colo, r.line?.d1_region,
-        r.line?.ack ?? '', redact(JSON.stringify(r.line?.deliveries ?? r.board?.calls ?? [])), failed(r) ? 'FAILED' : '', [...r.errors, r.line?.err, r.board?.err].filter(Boolean).map(redact).join(' | '),
+        l?.isolate_first_request ?? '', l?.ms_since_last_d1_in_isolate ?? '', prev === null ? '' : ((r.at - prev) / 1000).toFixed(1), r.line?.discord_lag_ms ?? '', r.line?.colo, r.line?.d1_region,
+        r.line?.ack ?? '', redact(JSON.stringify(r.line?.deliveries ?? r.board?.calls ?? [])), redact(boardOf(r.board)), failed(r) ? 'FAILED' : '',
+        [...r.errors, r.line?.err, r.board?.err, ...(r.board?.results ?? []).flatMap((x) => x.errors ?? [])].filter(Boolean).map(redact).join(' | '),
       ].join('\t'),
     );
     prev = r.at;

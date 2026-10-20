@@ -90,3 +90,7 @@ Treat the clock as authoritative over any date an order states.
 - The session never creates channels or posts on Brian's server. Live board posts start from Brian's own `/guildcraft setup board:`; before that, board code is verified in workerd against a mocked Discord API, and the dry run is a read-only render from live D1 (`.github/workflows/board.yml`, action `render`), with `delete` as the rollback.
 - A Worker invocation that does board work (after a command, or a cron run) stops at about 40 external calls (D1 and Discord together), below the Free plan's 50 subrequests; work beyond that stays dirty for the next sweep (`src/board/api.ts` BOARD_CALL_CAP).
 - This repository is public, so Actions logs are public: a log that would show guild data (display names, character names) prints pseudonyms instead.
+
+## Added by work order 6 (alphabetical board and first keystroke)
+
+- The bot never deletes a post or message that a member wrote, or that has member replies, without Brian's explicit approval for that action.

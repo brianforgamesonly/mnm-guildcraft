@@ -6,6 +6,7 @@
 // current import key, and returns the list rows only when that key differs from the cached one. So the
 // first request after an import completes (status 'ok') reloads the list; an isolate never serves a list
 // older than the latest completed import. A key of NULL (no completed import yet) is never trusted.
+import { nocase } from './collation.ts';
 
 /** The latest completed import, as "<id>:<source_version>". */
 const IMPORT_KEY = "(SELECT id || ':' || source_version FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1)";
@@ -20,13 +21,6 @@ export type GameList = keyof typeof LISTS;
 
 const NEVER = '\u0000no-import';
 const cache = new Map<GameList, { key: string; names: string[] }>();
-
-/** SQLite NOCASE order (ASCII case folded). */
-const nocase = (a: string, b: string) => {
-  const x = a.toLowerCase();
-  const y = b.toLowerCase();
-  return x < y ? -1 : x > y ? 1 : 0;
-};
 
 /**
  * The statement: the import key, then the list only when ?1 (the cached key) differs. The check sits in

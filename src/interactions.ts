@@ -3,7 +3,7 @@ import { ensureGuild, isAdmin, isOfficer, loadGuild, passesMemberGate, touchMemb
 import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
 import { HELP_TEXT } from './commands/help.ts';
-import { guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
+import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
 import { craftFind, postFind } from './commands/find.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
@@ -38,6 +38,7 @@ const ROUTES: Record<string, { access: Access; search?: true; run: (c: Ctx, opts
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
   'guildcraft status': { access: 'admin', run: guildcraftStatus },
+  'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
 };
 
 const routeOf = (i: Interaction) => ROUTES[`${i.data?.name} ${subcommand(i).name}`];

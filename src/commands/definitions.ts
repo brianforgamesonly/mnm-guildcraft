@@ -127,6 +127,7 @@ export const COMMANDS = [
         ],
       },
       { type: SUBCOMMAND, name: 'status', description: 'Data version, last import and the roster board' },
+      { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
     ],
   },
 ] as const;
