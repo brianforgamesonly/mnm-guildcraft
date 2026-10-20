@@ -3,7 +3,7 @@
 // and /roster skill|member|top; later orders add the rest.
 // /craft help marks every PRD command not defined here as "coming soon" (src/commands/help.ts).
 
-import { ACQUISITION_LABEL, ACQUISITIONS, REPORT_ISSUES } from '../recipes.ts';
+import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX, REPORT_ISSUES } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
 const STRING = 3;
@@ -141,7 +141,8 @@ export const COMMANDS = [
         options: [
           recipeItemOption,
           { type: STRING, name: 'how', description: 'How it is obtained', required: true, choices: ACQUISITIONS.map((a) => ({ name: ACQUISITION_LABEL[a], value: a })) },
-          { type: STRING, name: 'faction', description: 'Reputation recipes: the faction that sells it', max_length: 80 },
+          // Order 10, ITEM 0: free text up to FACTION_MAX; autocomplete suggests this server's factions and echoes the typed name first.
+          { type: STRING, name: 'faction', description: 'Reputation recipes: the faction that sells it (type any name)', autocomplete: true, max_length: FACTION_MAX },
           { type: STRING, name: 'note', description: 'Optional: vendor, standing needed, or a hint', max_length: 200 },
         ],
       },

@@ -1,4 +1,4 @@
-// DRAFT copy — Brian approves the final text before launch (ORDER-RULES: Product).
+// DRAFT copy — the operator approves the final text before launch (ORDER-RULES: Product; docs/COPY.md).
 // Lists every command in docs/PRD.md (FR-1 to FR-9). "(coming soon)" is derived, never typed: an entry
 // is marked when its commands are not in the registered definitions (src/commands/definitions.ts).
 import { DEFINED } from './definitions.ts';

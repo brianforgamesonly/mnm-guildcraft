@@ -120,7 +120,7 @@ export async function everyoneCanView(token: string, guildId: string, channelId:
   return (bits & VIEW_CHANNEL) === VIEW_CHANNEL;
 }
 
-/** The setup reply's warning when the review channel is open to everyone (DRAFT copy: Brian approves it before launch). */
+/** The setup reply's warning when the review channel is open to everyone (DRAFT copy, docs/COPY.md: approved before launch). */
 export const reviewPublicWarning = (id: string) =>
   `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) and usage warnings will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
 /** The vault's warning when @everyone can view it (order 9: warn, never refuse; DRAFT copy). */
@@ -256,7 +256,7 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const nowMs = Date.now();
   const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup, queue] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
-    // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (Brian's check of order 7).
+    // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (the operator's check of order 7).
     // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
     c.db.prepare(`SELECT status, started_at, finished_at, warnings, error FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`),
     c.db.prepare(`SELECT id, finished_at, started_at, warnings, (SELECT max(id) FROM data_import WHERE ${REAL_IMPORT}) AS real_id FROM data_import WHERE status = 'dry-run' ORDER BY id DESC LIMIT 1`),

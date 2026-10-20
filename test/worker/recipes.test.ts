@@ -5,8 +5,8 @@ import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport, type WikiData } from '../../scripts/import/core.ts';
-import { KNOWN_MARK } from '../../src/commands/find.ts';
-import { RARE_EMPTY, parseComponents } from '../../src/commands/recipes.ts';
+import { KNOWN_MARK, loadFind } from '../../src/commands/find.ts';
+import { RARE_EMPTY, parseComponents, resolveRecipe } from '../../src/commands/recipes.ts';
 import { crafterTier } from '../../src/crafters.ts';
 import { ACQUISITIONS } from '../../src/recipes.ts';
 import migration0009 from '../../migrations/0009_corrections_reports_images.sql?raw';
@@ -184,6 +184,33 @@ describe('/recipe source (officers; the guild correction layer)', () => {
     expect(await one('SELECT acquisition, faction FROM recipe WHERE id = ?', swordRecipe)).toEqual({ acquisition: 'unknown', faction: null });
   });
 
+  it('order 10, ITEM 0: a new faction name typed freely saves, /craft find names it, and unknown clears it', async () => {
+    const name = 'The Order of the Unlisted Lantern';
+    const s = await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: name }));
+    expect(s.data.content).toContain(`is now **Reputation** (${name})`);
+    expect(text(await find('Copper Sword'))).toContain(`Has skill, needs reputation (${name}) · 2`);
+    await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'unknown' }));
+    const back = text(await find('Copper Sword'));
+    expect(back).not.toContain('needs reputation');
+    expect(back).toContain('Reliable (Blacksmithing 20+) · 2');
+    expect(await one('SELECT acquisition, faction FROM recipe_correction')).toEqual({ acquisition: 'unknown', faction: null });
+  });
+
+  it('faction autocomplete: the typed name first, as typed, then this server\'s factions; it never writes', async () => {
+    await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: 'Red Mantle' }));
+    const writes = await count('audit_log');
+    const ac = (typed: string) => send(auto(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: typed }, 'faction'));
+    expect((await ac('')).data.choices).toEqual([{ name: 'Red Mantle', value: 'Red Mantle' }]);
+    expect((await ac('red')).data.choices).toEqual([{ name: 'red', value: 'red' }, { name: 'Red Mantle', value: 'Red Mantle' }]);
+    expect((await ac('Test Faction')).data.choices).toEqual([{ name: 'Test Faction', value: 'Test Faction' }]);
+    expect((await ac('red mantle')).data.choices).toEqual([{ name: 'red mantle', value: 'red mantle' }]);
+    expect(await count('audit_log')).toBe(writes);
+    // Another guild's factions are never offered.
+    await env.DB.prepare("INSERT OR IGNORE INTO guild (id, name, created_at) VALUES ('999', 'other', ?)").bind(at).run();
+    await env.DB.prepare("INSERT INTO recipe_correction (guild_id, recipe_id, acquisition, faction, updated_by, updated_at) VALUES ('999', ?, 'reputation', 'Elsewhere', 'x', ?)").bind(swordRecipe, at).run();
+    expect(JSON.stringify((await ac('')).data.choices)).not.toContain('Elsewhere');
+  });
+
   it('discovery, vendor and back to unknown', async () => {
     await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'discovery' }));
     expect(text(await find('Copper Sword'))).toContain('Has skill, recipe not marked known · 2');
@@ -195,6 +222,25 @@ describe('/recipe source (officers; the guild correction layer)', () => {
     const u = await find('Copper Sword');
     expect(u.data.embeds![1].description).toContain('-# How this recipe is obtained is not recorded: check the crafter has it.');
     expect(await one('SELECT acquisition, faction, note FROM recipe_correction')).toEqual({ acquisition: 'unknown', faction: null, note: null });
+  });
+});
+
+describe('one correction rule (order 10, ITEM 1.3)', () => {
+  it('resolveRecipe (src/recipes.ts) and loadFind read the same corrected values, before and after a correction', async () => {
+    const pick = (r: any) => ({ trivial: r.trivial, acquisition: r.acquisition, faction: r.faction, note: r.note, trivial_corrected: !!r.trivial_corrected, acquisition_corrected: !!r.acquisition_corrected });
+    const both = async () => {
+      const a = await resolveRecipe(env.DB, GUILD, `#${swordRecipe}`);
+      const b = (await loadFind(env.DB, GUILD, { id: sword })).recipes.find((r) => r.id === swordRecipe);
+      return [pick((a as any).recipe), pick(b)];
+    };
+    const [a0, b0] = await both();
+    expect(a0).toEqual(b0);
+    expect(a0).toMatchObject({ trivial: 20, acquisition: 'unknown', trivial_corrected: false });
+    await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: 'Red Mantle', note: 'Revered' }));
+    await send(cmd(officer, 'recipe', 'override', { item: `#${swordRecipe}`, trivial: 31 }));
+    const [a1, b1] = await both();
+    expect(a1).toEqual(b1);
+    expect(a1).toEqual({ trivial: 31, acquisition: 'reputation', faction: 'Red Mantle', note: 'Revered', trivial_corrected: true, acquisition_corrected: true });
   });
 });
 

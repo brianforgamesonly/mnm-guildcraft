@@ -6,7 +6,7 @@
 # is complete by then. Expected: <1 billed minute a run (public repository: free), ~15 a month.
 #
 # The alarm (ORDER-RULES order 8):
-#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (Brian);
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
 #   how often: at most once a day;
 #   state: failing when usage_daily's newest figures are over 30 hours old; a failure while already failing does not
 #          fail the run again (scripts/ci/alarm.ts). /guildcraft status marks the figures stale after 36 hours.

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';
 import { BOARD_CALL_CAP, botApi as makeApi } from '../../src/board/api.ts';
 import { FREE_LIMITS, METRICS } from '../../src/limits.ts';
-import { alertText, ofLimit, usageAlerts, usageLines } from '../../src/usage.ts';
+import { alertText, ofLimit, tokenExpiryText, usageAlerts, usageLines } from '../../src/usage.ts';
 import { all, reset } from '../db.ts';
 import { ADMIN, as, botApi, cmd, GUILD, send, spyOnFetch, webhook } from '../discord.ts';
 
@@ -50,7 +50,7 @@ const withReview = () => env.DB.prepare('UPDATE guild SET review_channel_id = ?'
 const alerts = async () => all<{ target: string; detail_json: string }>("SELECT target, detail_json FROM audit_log WHERE action = 'usage.alert' ORDER BY id");
 
 describe('/guildcraft status: the last import', () => {
-  it("shows the last real import, never a newer dry run as if it were one (Brian's check of order 7)", async () => {
+  it("shows the last real import, never a newer dry run as if it were one (the operator's check of order 7)", async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN); // creates the guild row
     await imports([['ok', '2026-10-19T07:31:00Z'], ['dry-run', '2026-10-19T21:39:50Z']]);
     const s = await status();
@@ -89,14 +89,19 @@ describe('/guildcraft status: backup and usage', () => {
     s = await status();
     expect(s).toContain('**stale**: no successful backup for over 36 hours');
   });
-  it('a failed latest run says so, keeps the last good time, and an unread expiry is "unknown"', async () => {
+  it('a failed latest run says so, keeps the last good time, and an unread expiry shows the owner\'s no-expiry note', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     const t = (h: number) => new Date(Date.now() - h * H).toISOString();
     await env.DB.batch([
       env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, token_expires) VALUES (?, ?, 'ok', 'unknown')").bind(t(26), t(26)),
       env.DB.prepare("INSERT INTO backup_status (started_at, finished_at, result, error, token_expires) VALUES (?, ?, 'failed', 'push refused', 'unknown')").bind(t(2), t(2)),
     ]);
-    expect(await status()).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token expires unknown · latest run <t:\d+:f> \*\*failed\*\*: push refused/);
+    expect(await status()).toMatch(/\*\*Backup:\*\* last <t:\d+:f> · token: no expiry \(owner's note\) · latest run <t:\d+:f> \*\*failed\*\*: push refused/);
+  });
+  it('the token text: a read expiry wins; without one, the note decides', () => {
+    expect(tokenExpiryText('2027-10-20T00:00:00.000Z')).toBe('token expires 2027-10-20');
+    expect(tokenExpiryText('unknown')).toBe("token: no expiry (owner's note)");
+    expect(tokenExpiryText(null, 'unset')).toBe('token expires unknown');
   });
   it('shows each metric as N of LIMIT (P%) for the last full day, with the 7-day peak', async () => {
     const now = Date.now();

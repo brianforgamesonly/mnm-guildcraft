@@ -1,5 +1,5 @@
 // Order 5, ITEM 1.1: the roster board (PRD FR-5), against a fake Discord forum (test/fake-forum.ts).
-// The live board does not exist until Brian runs setup; these tests are the local verification, and the
+// The live board does not exist until a server admin runs setup; these tests are the local verification, and the
 // live checks (the sweep on dev, a real archived-post edit) are order 6's.
 import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';

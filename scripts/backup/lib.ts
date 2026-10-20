@@ -5,8 +5,11 @@ import { execFileSync, type ExecFileSyncOptions } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { BACKUP_TOKEN_EXPIRY_NOTE } from '../../src/limits.ts';
+import { IMPORT_TABLES } from '../import/core.ts';
 
-export const BACKUP_REPO = 'brianforgamesonly/mnm-guildcraft-backup';
+/** The private backup repository: <the owner of this repository>/mnm-guildcraft-backup, so a fork backs up to its own. */
+export const BACKUP_REPO = `${process.env.GITHUB_REPOSITORY_OWNER || 'brianforgamesonly'}/mnm-guildcraft-backup`;
 export const DATABASE = 'mnm-guildcraft-dev';
 
 export interface Manifest {
@@ -82,6 +85,36 @@ export function git(cwd: string, args: string[]): string {
 }
 export const REPO_URL = `https://github.com/${BACKUP_REPO}.git`;
 
+/** Confirms the backup repository is private, with BACKUP_REPO_TOKEN. Returns the token-expiry header, if any. */
+export async function confirmPrivate(): Promise<{ status: number; expiryHeader: string | null }> {
+  if (!process.env.BACKUP_REPO_TOKEN) throw new Error('BACKUP_REPO_TOKEN is not set: nothing pushed');
+  const res = await fetch(`https://api.github.com/repos/${BACKUP_REPO}`, {
+    headers: { Authorization: `Bearer ${process.env.BACKUP_REPO_TOKEN}`, Accept: 'application/vnd.github+json', 'User-Agent': 'mnm-guildcraft-backup' },
+  });
+  const repo = (await res.json().catch(() => ({}))) as { private?: boolean };
+  if (!res.ok) throw new Error(`backup repository unreadable: HTTP ${res.status}`);
+  if (repo.private !== true) throw new Error('the backup repository is not private: nothing pushed');
+  return { status: res.status, expiryHeader: res.headers.get('github-authentication-token-expiration') };
+}
+
+/**
+ * Clones the backup repository's main (shallow) into `work`, lets `change` write files there, then commits every
+ * change under `paths` and pushes. Returns the new commit. The commit message must not carry guild data.
+ */
+export function commitToBackupRepo(work: string, paths: string[], message: string, change: (work: string) => void): string {
+  git(work, ['init', '-q', '-b', 'main']);
+  git(work, ['remote', 'add', 'origin', REPO_URL]);
+  if (git(work, ['ls-remote', '--heads', 'origin', 'main']).trim()) {
+    git(work, ['fetch', '-q', '--depth=1', 'origin', 'main']);
+    git(work, ['checkout', '-q', '-B', 'main', 'FETCH_HEAD']);
+  }
+  change(work);
+  git(work, ['add', '-A', ...paths]);
+  git(work, ['-c', 'user.name=mnm-guildcraft backup', '-c', 'user.email=backup@users.noreply.github.com', 'commit', '-q', '-m', message]);
+  git(work, ['push', '-q', 'origin', 'main']);
+  return git(work, ['rev-parse', 'HEAD']).trim();
+}
+
 /**
  * Keeps the last `keep` daily files and the first file of each month; returns the dates to delete.
  * Dates are the files' own names (YYYY-MM-DD), sorted.
@@ -95,8 +128,22 @@ export function prune(dates: string[], keep = 30): string[] {
   return sorted.filter((d) => !recent.has(d) && !firstOfMonth.has(d));
 }
 
-/** Tables the nightly import fills: a backup holding 0 of them is a failure, not an empty guild. */
-export const MUST_HOLD_ROWS = ['item', 'recipe'];
+const DAY = 86_400_000;
+export type ExpiryState = 'ok' | 'soon' | 'expired' | 'unknown' | 'none';
+/**
+ * The token-expiry warning's state at `at`: 'soon' is 30 days or fewer. No expiry read and the owner's note "none"
+ * (src/limits.ts BACKUP_TOKEN_EXPIRY_NOTE, order 10) is 'none'.
+ */
+export const expiryState = (iso: string | null | undefined, at: number, note = BACKUP_TOKEN_EXPIRY_NOTE): ExpiryState =>
+  !iso || iso === 'unknown' ? (note === 'none' ? 'none' : 'unknown') : Date.parse(iso) <= at ? 'expired' : Date.parse(iso) - at <= 30 * DAY ? 'soon' : 'ok';
+/** The warning fires only on entering 'soon' or 'expired'; never for 'none' or 'unknown'. */
+export const expiryAlarms = (now: ExpiryState, prev: ExpiryState) => (now === 'soon' || now === 'expired') && now !== prev;
+
+/**
+ * Tables the nightly import fills: a backup holding 0 of them is a failure, not an empty guild. Order 10: derived,
+ * the import's own table list (scripts/import/core.ts IMPORT_TABLES), not typed here.
+ */
+export const MUST_HOLD_ROWS: readonly string[] = IMPORT_TABLES;
 
 /** Each exported count must lie between the counts read just before and just after the export (live writes race it). */
 export function checkBounds(before: Record<string, number>, after: Record<string, number>, exported: Record<string, number>, mustHold = MUST_HOLD_ROWS): string[] {

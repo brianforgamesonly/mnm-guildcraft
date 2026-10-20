@@ -1,5 +1,5 @@
 // Search and roster replies (/craft find, /roster ...): private by default, with a Post to channel button
-// that re-posts the same content publicly (PRD FR-3). Brian's open question A6 may flip the default:
+// that re-posts the same content publicly (PRD FR-3). The operator's open question A6 may flip the default:
 // SEARCH_REPLIES_PRIVATE is the single setting.
 import { InteractionResponseFlags, InteractionResponseType } from 'discord-interactions';
 import { button, publicReply, row, type MessageData, type MessageReply } from '../discord.ts';

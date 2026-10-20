@@ -4,7 +4,14 @@
 # sends to validate the endpoint (PING and invalid signatures), never /craft help.
 # Expected: ~1 billed minute per run.
 name: register-commands
-on: workflow_dispatch
+# Order 10: read_only reads the registered definitions back and compares them with the code; nothing is written.
+on:
+  workflow_dispatch:
+    inputs:
+      read_only:
+        description: 'Only read the registered commands back (no PUT, no endpoint change)'
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -39,6 +46,7 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
           DISCORD_TEST_GUILD_ID: ${{ secrets.DISCORD_TEST_GUILD_ID }}
+          READ_ONLY: ${{ inputs.read_only && '1' || '' }}
         run: node scripts/discord/register.ts
       - name: Discord validation requests seen by the Worker (status and CPU time only)
         if: always()

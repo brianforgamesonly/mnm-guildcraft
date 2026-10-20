@@ -1,5 +1,5 @@
 // Order 6, ITEM 1.1–1.2: the board in A→Z order, against the fake forum (test/fake-forum.ts). The forum's
-// default sort is creation date, newest first (Brian sets it), so posts created Z→A show A→Z from the top.
+// default sort is creation date, newest first (the server admin sets it), so posts created Z→A show A→Z from the top.
 import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';

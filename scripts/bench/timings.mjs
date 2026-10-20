@@ -37,7 +37,7 @@ async function query(body) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok || json.success === false) {
     console.log(JSON.stringify({ http: res.status, errors: (json.errors ?? []).map((e) => ({ code: e.code, message: redact(e.message) })) }));
-    console.log('Read-back failed. If this is an authorization error, the API token needs the account permission "Workers Observability Write" (Brian adds it).');
+    console.log('Read-back failed. If this is an authorization error, the API token needs the account permission "Workers Observability Write" (the repository owner adds it).');
     process.exit(1);
   }
   return json.result ?? {};

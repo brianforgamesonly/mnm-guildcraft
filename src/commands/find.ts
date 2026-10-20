@@ -3,7 +3,7 @@
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
-import { isGated, type Acquisition } from '../recipes.ts';
+import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { postedReply, searchReply } from './share.ts';
 
 export interface ItemRecord {
@@ -218,11 +218,9 @@ export async function loadFind(db: D1Database, guildId: string, by: { key: strin
     db.prepare(`SELECT ${ITEM_COLS} FROM item WHERE id = (${sel})`).bind(arg),
     db
       .prepare(
-        `SELECT r.id, t.name AS tradeskill, coalesce(rc.trivial, r.trivial) AS trivial, CASE WHEN rc.trivial IS NULL THEN r.trivial_unconfirmed ELSE 0 END AS trivial_unconfirmed,
-           r.unknown_components, r.result_qty, r.station, coalesce(rc.acquisition, r.acquisition) AS acquisition,
-           coalesce(rc.faction, r.faction) AS faction, coalesce(rc.note, r.acquisition_note) AS note,
-           rc.trivial IS NOT NULL AS trivial_corrected, rc.acquisition IS NOT NULL AS acquisition_corrected
-         FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = ?2
+        `SELECT r.id, t.name AS tradeskill, ${CORRECTED_COLS}, CASE WHEN rc.trivial IS NULL THEN r.trivial_unconfirmed ELSE 0 END AS trivial_unconfirmed,
+           r.unknown_components, r.result_qty, r.station
+         FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id ${correctionJoin('?2')}
          WHERE r.result_item_id = (${sel}) AND r.active = 1 AND ${shared} ORDER BY t.name COLLATE NOCASE, r.source_key`,
       )
       .bind(arg, guildId),

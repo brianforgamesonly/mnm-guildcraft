@@ -3,7 +3,7 @@
 // The guild correction layer (migration 0009, order 9 override 2): recipe_correction holds one guild's acquisition,
 // faction, note and trivial for a recipe, and recipe_correction_component its corrected component list. Every reader
 // uses the guild's value where one is set and the imported value otherwise; the import never touches the layer.
-// The SQL here is the one place that rule is written. Pure: the command definitions (scripts/discord/register.ts)
+// CORRECTED below is the one place that rule is written. Pure: the command definitions (scripts/discord/register.ts)
 // read the lists from this file.
 
 /** How a recipe is obtained (PRD FR-3.1), held once: command choices, the CHECK in migration 0009 and the tiers. */
@@ -39,17 +39,30 @@ export interface GuildRecipe {
   acquisition_corrected: number;
 }
 
+/** Longest faction name /recipe source accepts: the command option's max_length and the handler's check. */
+export const FACTION_MAX = 80;
+
 /**
- * The columns of a GuildRecipe for recipe `r` joined to tradeskill `t`, item `i` and correction `rc`
- * (LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = <the guild>).
+ * "Guild value, else imported", for recipe `r` and its correction `rc` (correctionJoin): the one place the rule is
+ * written (order 10, ITEM 1.3). `CORRECTED.acquisition` is the bare expression, for WHERE clauses.
  */
-export const GUILD_RECIPE_COLS = `r.id, r.result_item_id AS item_id, i.name AS item, t.name AS tradeskill,
-  coalesce(rc.trivial, r.trivial) AS trivial, coalesce(rc.acquisition, r.acquisition) AS acquisition,
-  coalesce(rc.faction, r.faction) AS faction, coalesce(rc.note, r.acquisition_note) AS note,
+export const CORRECTED = {
+  trivial: 'coalesce(rc.trivial, r.trivial)',
+  acquisition: 'coalesce(rc.acquisition, r.acquisition)',
+  faction: 'coalesce(rc.faction, r.faction)',
+  note: 'coalesce(rc.note, r.acquisition_note)',
+} as const;
+/** Every corrected column, aliased, with the "guild-corrected" markers. */
+export const CORRECTED_COLS = `${Object.entries(CORRECTED).map(([k, e]) => `${e} AS ${k}`).join(', ')},
   rc.trivial IS NOT NULL AS trivial_corrected, rc.acquisition IS NOT NULL AS acquisition_corrected`;
+/** This guild's correction for recipe `r`; `guild` is the guild id's parameter. */
+export const correctionJoin = (guild: string) => `LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = ${guild}`;
+
+/** The columns of a GuildRecipe for recipe `r` joined to tradeskill `t`, item `i` and correction `rc`. */
+export const GUILD_RECIPE_COLS = `r.id, r.result_item_id AS item_id, i.name AS item, t.name AS tradeskill, ${CORRECTED_COLS}`;
 /** The joins for GUILD_RECIPE_COLS; `guild` is the guild id's parameter. */
 export const guildRecipeFrom = (guild: string) => `FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id JOIN item i ON i.id = r.result_item_id
-  LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = ${guild}`;
+  ${correctionJoin(guild)}`;
 /** Recipes this guild can see: shared ones and its own (guild-private recipes arrive after launch). */
 export const visibleTo = (guild: string) => `r.active = 1 AND (r.guild_id IS NULL OR r.guild_id = ${guild})`;
 

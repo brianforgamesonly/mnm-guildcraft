@@ -138,7 +138,7 @@ export const describeCharacter = (ch: CharacterBrief) => {
   return `**${md(ch.name)}**${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
 };
 
-/** The review-channel notice for one departed member (DRAFT copy: Brian approves it before launch). */
+/** The review-channel notice for one departed member (DRAFT copy, docs/COPY.md: approved before launch). */
 export function noticeMessage(userId: string, name: string | null, characters: CharacterBrief[]) {
   name = name?.trim() || 'A member';
   const list = characters.length ? characters.map(describeCharacter).join('\n') : 'No characters registered.';

@@ -1,6 +1,6 @@
 // The roster board's posts (order 5, PRD FR-5 and FR-9), rendered from rows with no I/O, so the Worker,
 // the tests and the read-only dry run (scripts/board/run.ts) all render the same way.
-// DRAFT copy — Brian approves the final text before launch (ORDER-RULES: Product).
+// DRAFT copy — the operator approves the final text before launch (ORDER-RULES: Product; docs/COPY.md).
 import { EMBED_LIMITS, md, truncate, type Embed } from '../discord.ts';
 
 /** One ranked line: a live character's level in one tradeskill (removed characters and departed members are filtered in SQL). */

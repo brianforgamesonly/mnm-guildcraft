@@ -3,7 +3,7 @@
 # Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
 #
 # The alarm (ORDER-RULES order 8; scripts/ci/alarm.ts):
-#   who:   GitHub's failed-run mail to the user who last modified the cron syntax (Brian);
+#   who:   GitHub's failed-run mail to the user who last modified the cron syntax (the repository owner);
 #   how often: at most once a day;
 #   state: the newest data_import row in the alarm state (src/import-status.ts: ok, failed, running, refused); failed
 #          and refused count as failing. Order 9: a refused run writes its own 'refused' row, so a refusal after a
