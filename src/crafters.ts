@@ -2,7 +2,9 @@
 // decision has one decider). The query is docs/PRD-core-query.sql's joins and filters; the tier CASE of
 // that file, plus the 25-point window and the "further below" count it leaves to code, is crafterTier.
 
-export type Tier = 'reliable' | 'learning' | 'below' | 'unknown' | 'unconfirmed';
+import { isGated } from './recipes.ts';
+
+export type Tier ='reliable' | 'learning' | 'below' | 'unknown' | 'unconfirmed';
 
 export interface TierRecipe {
   trivial: number | null;
@@ -10,6 +12,9 @@ export interface TierRecipe {
 }
 
 /**
+ * FR-3.1, with this guild's acquisition (src/recipes.ts): vendor and unknown recipes use the skill tiers for
+ * everyone; reputation and discovery recipes use them only for characters who marked the recipe known (a known recipe
+ * never skips the tiers), and everyone else with the skill is 'unconfirmed'.
  * - unconfirmed: a reputation or discovery recipe the character has not marked known (FR-3.1);
  * - unknown: the recipe's trivial is unknown (everyone with the tradeskill, by level);
  * - reliable: skill at or above the trivial;
@@ -17,7 +22,7 @@ export interface TierRecipe {
  * - below: further below; shown as a count only.
  */
 export function crafterTier(level: number, recipe: TierRecipe, knowsRecipe: boolean, window: number): Tier {
-  if ((recipe.acquisition === 'reputation' || recipe.acquisition === 'discovery') && !knowsRecipe) return 'unconfirmed';
+  if (isGated(recipe.acquisition) && !knowsRecipe) return 'unconfirmed';
   if (recipe.trivial === null) return 'unknown';
   if (level >= recipe.trivial) return 'reliable';
   if (level >= recipe.trivial - window) return 'learning';

@@ -97,6 +97,11 @@ export const HOW_TO_GET_LISTED = [
   '1. `/character add` your character.',
   '2. `/craft set` a tradeskill level, or `/craft update` for several at once.',
   '3. Your tradeskill posts update within about a minute.',
+  '',
+  // Order 9 (DRAFT copy): the new commands, one line each.
+  '**Also**',
+  '`/craft find` who can make an item · `/craft know` mark a recipe you know · `/roster recipes` who knows the rare ones',
+  '`/craft report` report wrong data · `/item image` send an item screenshot · `/craft help` every command',
 ].join('\n');
 
 /**

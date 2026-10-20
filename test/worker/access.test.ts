@@ -64,8 +64,8 @@ describe('/guildcraft setup', () => {
     const rows = await all<{ actor: string; action: string; detail_json: string }>('SELECT actor, action, detail_json FROM audit_log ORDER BY id');
     expect(rows.map((x) => [x.actor, x.action])).toEqual([[ANN, 'guild.setup'], [BO, 'guild.setup']]);
     expect(JSON.parse(rows[1].detail_json)).toEqual({
-      before: { member_role_id: MEMBER_ROLE, officer_role_id: OFFICER_ROLE, board_channel_id: null, review_channel_id: null },
-      after: { member_role_id: MEMBER_ROLE, officer_role_id: '700000000000000009', board_channel_id: null, review_channel_id: null },
+      before: { member_role_id: MEMBER_ROLE, officer_role_id: OFFICER_ROLE, board_channel_id: null, review_channel_id: null, vault_channel_id: null },
+      after: { member_role_id: MEMBER_ROLE, officer_role_id: '700000000000000009', board_channel_id: null, review_channel_id: null, vault_channel_id: null },
     });
   });
 

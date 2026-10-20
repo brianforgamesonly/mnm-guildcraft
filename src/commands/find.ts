@@ -2,7 +2,8 @@
 // recipes, their components, the crafters and the data version; crafters are tiered by src/crafters.ts.
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
-import { EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { isGated, type Acquisition } from '../recipes.ts';
 import { postedReply, searchReply } from './share.ts';
 
 export interface ItemRecord {
@@ -15,6 +16,7 @@ export interface ItemRecord {
   source: string;
 }
 
+/** One recipe with this guild's corrections applied (src/recipes.ts). */
 interface RecipeRow {
   id: number;
   tradeskill: string;
@@ -23,7 +25,11 @@ interface RecipeRow {
   unknown_components: number;
   result_qty: number;
   station: string | null;
-  acquisition: string;
+  acquisition: Acquisition;
+  faction: string | null;
+  note: string | null;
+  trivial_corrected: number;
+  acquisition_corrected: number;
 }
 
 // ---------------------------------------------------------------- links (FR-6 layer 3)
@@ -98,8 +104,12 @@ function itemCard(item: ItemRecord, version: string | null): Embed {
 
 // ---------------------------------------------------------------- recipes and crafters
 
-export function trivialText(r: Pick<RecipeRow, 'trivial' | 'trivial_unconfirmed'>): string {
+/** The marker on a field the guild has corrected (order 9, ITEM 2). */
+export const CORRECTED_MARK = '(guild-corrected)';
+
+export function trivialText(r: Pick<RecipeRow, 'trivial' | 'trivial_unconfirmed'> & { trivial_corrected?: number }): string {
   if (r.trivial === null) return 'trivial unknown';
+  if (r.trivial_corrected) return `trivial ${r.trivial} ${CORRECTED_MARK}`;
   return `trivial ${r.trivial}${r.trivial_unconfirmed ? '?' : ''}`;
 }
 
@@ -125,31 +135,52 @@ export function fitLines(lines: string[], maxLines: number, maxChars = EMBED_LIM
   return hidden > 0 ? [...out, `+${hidden} more`].join('\n') : out.join('\n');
 }
 
-const crafterLine = (r: CrafterRow) => `**${md(r.character)}** ${r.level}`;
+/** Carried by every character who marked the recipe known, in every tier (FR-3.1). */
+export const KNOWN_MARK = '📜';
+const crafterLine = (r: CrafterRow) => `**${md(r.character)}** ${r.level}${r.knows_recipe ? ` ${KNOWN_MARK}` : ''}`;
 
 const TIER_TITLES: [Exclude<Tier, 'below'>, (r: RecipeRow, ts: string, w: number) => string][] = [
   ['reliable', (r, ts) => `Reliable (${ts} ${r.trivial}+)`],
   ['learning', (r, ts, w) => `Still learning (${ts} ${Math.max(0, r.trivial! - w)}–${r.trivial! - 1})`],
   ['unknown', (_r, ts) => `Trivial unknown: everyone with ${ts}`],
-  ['unconfirmed', () => 'Has the skill, recipe not confirmed'],
+  ['unconfirmed', (r) => (r.acquisition === 'reputation' ? `Has skill, needs reputation${r.faction ? ` (${r.faction})` : ''}` : 'Has skill, recipe not marked known')],
 ];
 
-export const CONFIRM_NOTE = '*How this recipe is obtained is not recorded yet: confirm the crafter has the recipe.*';
+/** FR-3.1's Unknown note, kept to one short line: today every recipe is Unknown (order 9, ITEM 1). */
+export const CONFIRM_NOTE = '-# How this recipe is obtained is not recorded: check the crafter has it.';
 
-function recipeEmbed(r: RecipeRow, index: number, total: number, components: { name: string; qty: number }[], crafters: CrafterRow[], window: number, maxLines: number): Embed {
+/** One line on how the recipe is obtained, per FR-3.1's table (DRAFT copy). */
+export function sourceLine(r: Pick<RecipeRow, 'acquisition' | 'faction' | 'note' | 'acquisition_corrected'>): string {
+  const mark = r.acquisition_corrected && r.acquisition !== 'unknown' ? ` ${CORRECTED_MARK}` : '';
+  const note = r.note ? `: ${md(r.note)}` : '';
+  switch (r.acquisition) {
+    case 'vendor':
+      return `**Vendor recipe**: may need buying first${note}.${mark}`;
+    case 'reputation':
+      return `**Reputation recipe**${r.faction ? ` (${md(r.faction)})` : ''}: only characters who marked it known (${KNOWN_MARK}) count as able${note}.${mark}`;
+    case 'discovery':
+      return `**Discovery recipe**: only characters who marked it known (${KNOWN_MARK}) count as able${note}.${mark}`;
+    default:
+      return CONFIRM_NOTE;
+  }
+}
+
+function recipeEmbed(r: RecipeRow, index: number, total: number, comps: { components: { name: string; qty: number }[]; corrected: boolean }, crafters: CrafterRow[], window: number, maxLines: number): Embed {
   const tiers = tierCrafters(crafters, r, window);
   const head = [
-    ingredientsText(components, r.unknown_components),
+    comps.corrected ? `${ingredientsText(comps.components, 0)}\n-# Ingredients ${CORRECTED_MARK}` : ingredientsText(comps.components, r.unknown_components),
     r.result_qty > 1 ? `Makes ${r.result_qty}` : null,
     r.station ? `Station: ${md(r.station)}` : null,
   ].filter(Boolean);
   const fields: EmbedField[] = [];
   for (const [tier, title] of TIER_TITLES)
     if (tiers[tier].length) fields.push({ name: truncate(`${title(r, r.tradeskill, window)} · ${tiers[tier].length}`, EMBED_LIMITS.fieldName), value: fitLines(tiers[tier].map(crafterLine), maxLines) });
+  const anyKnown = crafters.some((c) => c.recipe_id === r.id && c.knows_recipe);
   const tail = [
     tiers.below.length ? `Further below: ${tiers.below.length}` : null,
     !crafters.length ? `No one in the guild has recorded ${r.tradeskill} yet.` : null,
-    r.acquisition === 'unknown' ? CONFIRM_NOTE : null,
+    sourceLine(r),
+    anyKnown && !isGated(r.acquisition) ? `-# ${KNOWN_MARK} marked this recipe known` : null,
   ].filter(Boolean);
   return {
     title: truncate(`${total > 1 ? `Recipe ${index + 1} of ${total}: ` : ''}${r.tradeskill} · ${trivialText(r)}`, EMBED_LIMITS.title),
@@ -165,8 +196,16 @@ export interface FindData {
   isResult: boolean;
   recipes: RecipeRow[];
   components: { recipe_id: number; name: string; qty: number }[];
+  /** This guild's corrected component lists (recipe_correction_component); a recipe listed here ignores `components`. */
+  corrected: { recipe_id: number; name: string; qty: number }[];
   crafters: CrafterRow[];
   version: string | null;
+}
+
+/** The component list a recipe shows: the guild's correction when it has one, otherwise the imported list. */
+export function componentsFor(d: Pick<FindData, 'components' | 'corrected'>, recipeId: number): { components: { name: string; qty: number }[]; corrected: boolean } {
+  const fixed = d.corrected.filter((c) => c.recipe_id === recipeId);
+  return fixed.length ? { components: fixed, corrected: true } : { components: d.components.filter((c) => c.recipe_id === recipeId), corrected: false };
 }
 
 const ITEM_COLS = 'id, name, icon_url, slot, stats_json, wiki_url, source';
@@ -175,12 +214,15 @@ export async function loadFind(db: D1Database, guildId: string, by: { key: strin
   const sel = 'key' in by ? 'SELECT id FROM item WHERE name_key = ?1' : 'SELECT id FROM item WHERE id = ?1';
   const arg = 'key' in by ? by.key : by.id;
   const shared = '(r.guild_id IS NULL OR r.guild_id = ?2)';
-  const [item, recipes, components, crafters, version] = await db.batch([
+  const [item, recipes, components, corrected, crafters, version] = await db.batch([
     db.prepare(`SELECT ${ITEM_COLS} FROM item WHERE id = (${sel})`).bind(arg),
     db
       .prepare(
-        `SELECT r.id, t.name AS tradeskill, r.trivial, r.trivial_unconfirmed, r.unknown_components, r.result_qty, r.station, r.acquisition
-         FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id
+        `SELECT r.id, t.name AS tradeskill, coalesce(rc.trivial, r.trivial) AS trivial, CASE WHEN rc.trivial IS NULL THEN r.trivial_unconfirmed ELSE 0 END AS trivial_unconfirmed,
+           r.unknown_components, r.result_qty, r.station, coalesce(rc.acquisition, r.acquisition) AS acquisition,
+           coalesce(rc.faction, r.faction) AS faction, coalesce(rc.note, r.acquisition_note) AS note,
+           rc.trivial IS NOT NULL AS trivial_corrected, rc.acquisition IS NOT NULL AS acquisition_corrected
+         FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id LEFT JOIN recipe_correction rc ON rc.recipe_id = r.id AND rc.guild_id = ?2
          WHERE r.result_item_id = (${sel}) AND r.active = 1 AND ${shared} ORDER BY t.name COLLATE NOCASE, r.source_key`,
       )
       .bind(arg, guildId),
@@ -188,6 +230,12 @@ export async function loadFind(db: D1Database, guildId: string, by: { key: strin
       .prepare(
         `SELECT rc.recipe_id, i.name, rc.qty FROM recipe_component rc JOIN recipe r ON r.id = rc.recipe_id JOIN item i ON i.id = rc.item_id
          WHERE r.result_item_id = (${sel}) AND r.active = 1 AND ${shared} ORDER BY i.name COLLATE NOCASE`,
+      )
+      .bind(arg, guildId),
+    db
+      .prepare(
+        `SELECT cc.recipe_id, i.name, cc.qty FROM recipe_correction_component cc JOIN recipe r ON r.id = cc.recipe_id JOIN item i ON i.id = cc.item_id
+         WHERE cc.guild_id = ?2 AND r.result_item_id = (${sel}) AND r.active = 1 ORDER BY i.name COLLATE NOCASE`,
       )
       .bind(arg, guildId),
     db.prepare(craftersSql(`(${sel})`)).bind(arg, guildId),
@@ -199,6 +247,7 @@ export async function loadFind(db: D1Database, guildId: string, by: { key: strin
     isResult: recipeRows.length > 0,
     recipes: recipeRows,
     components: (components.results as FindData['components']) ?? [],
+    corrected: (corrected.results as FindData['corrected']) ?? [],
     crafters: (crafters.results as CrafterRow[]) ?? [],
     version: ((version.results as { source_version: string }[]) ?? [])[0]?.source_version ?? null,
   };
@@ -218,7 +267,7 @@ export function findEmbeds(d: FindData, window: number): { embeds: Embed[]; note
   for (const maxLines of LINE_STEPS) {
     embeds = [
       itemCard(item, d.version),
-      ...shown.map((r, i) => recipeEmbed(r, i, d.recipes.length, d.components.filter((c) => c.recipe_id === r.id), d.crafters, window, maxLines)),
+      ...shown.map((r, i) => recipeEmbed(r, i, d.recipes.length, componentsFor(d, r.id), d.crafters, window, maxLines)),
     ];
     if (embedChars(embeds) <= EMBED_LIMITS.total - WELCOME_RESERVE) break;
   }
@@ -235,13 +284,25 @@ export async function craftFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
     return ephemeral(noRecipe(typed || '(nothing)'), wiki ? { components: [{ type: 1, components: [linkButton('Wiki', wiki)] }] } : {});
   }
   const { embeds, note } = findEmbeds(d, c.guild.learning_window);
-  return searchReply({ content: note ?? undefined, embeds }, `find:${d.item.id}`, itemLinks(d.item));
+  return searchReply({ content: note ?? undefined, embeds }, `find:${d.item.id}`, itemLinks(d.item), [findActions(d.item.id)]);
 }
+
+// ---------------------------------------------------------------- the reply's action buttons (order 9)
+
+export const KNOW_PREFIX = 'know:';
+export const REPORT_PREFIX = 'rpt:';
+export const IMAGE_PREFIX = 'img:';
+/**
+ * I know this recipe, Report a problem, Stat image. They work for whoever presses them, on the private reply and on a
+ * posted copy alike, and always answer with a new private message: one member's press never changes a public post.
+ */
+export const findActions = (itemId: number) =>
+  row([button(`${KNOW_PREFIX}${itemId}`, 'I know this recipe', STYLE_PRIMARY), button(`${REPORT_PREFIX}${itemId}`, 'Report a problem'), button(`${IMAGE_PREFIX}${itemId}`, 'Stat image')]);
 
 /** Post to channel: the same reply, rebuilt now, posted publicly. */
 export async function postFind(c: Ctx, itemId: number): Promise<MessageReply> {
   const d = await loadFind(c.db, c.guild.id, { id: itemId });
   if (!d.item || !d.isResult) return ephemeral('That item no longer has a recipe. Run `/craft find` again.');
   const { embeds, note } = findEmbeds(d, c.guild.learning_window);
-  return postedReply({ content: note ?? undefined, embeds }, c.userId, itemLinks(d.item));
+  return postedReply({ content: note ?? undefined, embeds }, c.userId, itemLinks(d.item), [findActions(d.item.id)]);
 }

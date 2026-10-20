@@ -3,7 +3,7 @@
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import {
-  ADMINISTRATOR, EMBED_LINKS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL,
+  ADMINISTRATOR, ATTACH_FILES, EMBED_LINKS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL,
   type MessageReply, type Option,
 } from '../discord.ts';
 import { DISCORD_API } from '../respond.ts';
@@ -20,7 +20,9 @@ const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
 
 const describeBoard = (g: Pick<Guild, 'board_channel_id'>) => `Roster board: ${g.board_channel_id ? `<#${g.board_channel_id}>` : 'not set (`board:` picks a forum channel)'}`;
 const describeReview = (g: Pick<Guild, 'review_channel_id'>) =>
-  `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices)'}`;
+  `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices and reports)'}`;
+const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
+  `Vault channel: ${g.vault_channel_id ? `<#${g.vault_channel_id}>` : 'not set (`vault:` picks a private text channel for item screenshots)'}`;
 
 // ---------------------------------------------------------------- the board channel's permissions
 
@@ -41,7 +43,16 @@ export const REVIEW_PERMISSIONS: [bigint, string][] = [
   [EMBED_LINKS, 'Embed Links'],
 ];
 
-export const missingPermissions = (bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
+/** What the bot needs in the vault channel (order 9): it re-uploads screenshots there and reads them back for fresh links. */
+export const VAULT_PERMISSIONS: [bigint, string][] = [
+  [VIEW_CHANNEL, 'View Channel'],
+  [SEND_MESSAGES, 'Send Messages'],
+  [ATTACH_FILES, 'Attach Files'],
+  [EMBED_LINKS, 'Embed Links'],
+  [READ_MESSAGE_HISTORY, 'Read Message History'],
+];
+
+export const missingPermissions =(bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
   (bits & ADMINISTRATOR) === ADMINISTRATOR ? [] : needed.filter(([b]) => (bits & b) !== b).map(([, name]) => name);
 
 interface Overwrite {
@@ -112,7 +123,10 @@ export async function everyoneCanView(token: string, guildId: string, channelId:
 /** The setup reply's warning when the review channel is open to everyone (DRAFT copy: Brian approves it before launch). */
 export const reviewPublicWarning = (id: string) =>
   `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) and usage warnings will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
-export const reviewUnreadWarning = (id: string) => `**Note:** I couldn't check who can see <#${id}>. Departure notices should go to a channel only officers can see.`;
+/** The vault's warning when @everyone can view it (order 9: warn, never refuse; DRAFT copy). */
+export const vaultPublicWarning = (id: string) =>
+  `**Note:** everyone in the server can see <#${id}>, so screenshots waiting for approval will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel. The setting is saved either way.`;
+export const reviewUnreadWarning =(id: string) => `**Note:** I couldn't check who can see <#${id}>. Departure notices should go to a channel only officers can see.`;
 
 const CHANNEL_KINDS = {
   board: {
@@ -124,6 +138,11 @@ const CHANNEL_KINDS = {
     type: GUILD_TEXT,
     permissions: REVIEW_PERMISSIONS,
     wrongType: (id: string) => `<#${id}> is not a text channel. The review channel needs a text channel (a private one, for officers), then pick it here.`,
+  },
+  vault: {
+    type: GUILD_TEXT,
+    permissions: VAULT_PERMISSIONS,
+    wrongType: (id: string) => `<#${id}> is not a text channel. The vault needs a private text channel for officers, then pick it here.`,
   },
 } as const;
 
@@ -156,26 +175,31 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const officerRole = optString(opts, 'officer_role');
   const board = optString(opts, 'board');
   const review = optString(opts, 'review');
-  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined)
-    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}`);
+  const vault = optString(opts, 'vault');
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined)
+    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}`);
 
-  for (const [id, kind] of [[board, 'board'], [review, 'review']] as const) {
+  for (const [id, kind] of [[board, 'board'], [review, 'review'], [vault, 'vault']] as const) {
     if (id === undefined) continue;
     const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
-  const before = { member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id };
+  const before = {
+    member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id,
+    vault_channel_id: c.guild.vault_channel_id,
+  };
   const after = {
     member_role_id: memberRole ?? before.member_role_id,
     officer_role_id: officerRole ?? before.officer_role_id,
     board_channel_id: board ?? before.board_channel_id,
     review_channel_id: review ?? before.review_channel_id,
+    vault_channel_id: vault ?? before.vault_channel_id,
   };
   const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
   const stmts = [
     c.db
-      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ? WHERE id = ?')
-      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, c.guild.id),
+      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ? WHERE id = ?')
+      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, c.guild.id),
     audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
   ];
   // A new forum starts a new board: the old posts are forgotten here (they stay in the old channel).
@@ -186,7 +210,13 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     );
   const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
   const results = await c.db.batch([...stmts, counted]);
-  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}`];
+  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}`];
+  if (vault !== undefined) {
+    lines.push(`Screenshots from \`/item image\` will wait in <#${vault}> for an officer's Approve or Reject. Screenshots already in an earlier vault stay where they are.`);
+    const open = c.botToken ? await everyoneCanView(c.botToken, c.guild.id, vault) : null;
+    if (open === true) lines.push(vaultPublicWarning(vault));
+    else if (open === null) lines.push(`**Note:** I couldn't check who can see <#${vault}>. The vault should be a channel only officers can see.`);
+  }
   if (review !== undefined) {
     lines.push(`Departure notices will go to <#${review}>: one per member who leaves the server, checked nightly, with Remove and Keep buttons for officers.`);
     // Order 8: warn, never refuse, when the channel is open to everyone.
@@ -224,7 +254,7 @@ function warningsCount(json: string | null): number | null {
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const nowMs = Date.now();
-  const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup] = await c.db.batch([
+  const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup, queue] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
     // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (Brian's check of order 7).
     // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
@@ -251,7 +281,15 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       .bind(c.guild.id),
     c.db.prepare(USAGE_SQL).bind(...usageParams(nowMs)),
     c.db.prepare(BACKUP_SQL),
+    // Order 9: what is waiting for officers.
+    c.db
+      .prepare(
+        `SELECT (SELECT count(*) FROM recipe_report WHERE guild_id = ?1 AND status = 'open') AS reports,
+          (SELECT count(*) FROM item_image WHERE guild_id = ?1 AND status = 'pending' AND gone_at IS NULL AND vault_message_id IS NOT NULL) AS images`,
+      )
+      .bind(c.guild.id),
   ]);
+  const q = (queue.results as { reports: number; images: number }[])[0];
   const d = (departures.results as { left_members: number; at: string | null; detail: string | null }[])[0];
   const run = (() => {
     try {
@@ -291,6 +329,7 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
+    `**Waiting for officers:** ${q.reports} open report${q.reports === 1 ? '' : 's'} · ${q.images} pending screenshot${q.images === 1 ? '' : 's'}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
     `**Departures:** ${d?.left_members ?? 0} member${d?.left_members === 1 ? '' : 's'} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
     backupLine((backup.results as (BackupRow & { last_ok: string | null })[])[0], nowMs),
     ...usageLines(usage.results as unknown as UsageRow[], nowMs),

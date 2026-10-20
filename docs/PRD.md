@@ -184,9 +184,9 @@ Discord dropdowns hold at most 25 options, so the tradeskill switcher lists only
 
 ### FR-7 Data quality
 
-- /craft report item: issue: files a report (wrong trivial, wrong components, missing recipe) into an officer review queue channel with Approve/Dismiss buttons.
+- /craft report item: issue: \[details\] files a report (wrong trivial, wrong components, wrong source, missing recipe, other) into an officer review queue channel with Mark fixed/Dismiss buttons. The officer fixes the data with /recipe; the buttons only record the outcome. (Amended by work order 9, override 4: "wrong source" and "other" added; the buttons were "Approve/Dismiss".)
 
-- Officers can add or override a recipe with /recipe override. Overrides survive the nightly re-import.
+- Officers can override an existing recipe's trivial or components with /recipe override, for their own server only. Overrides survive the nightly re-import. (Work order 9: adding a recipe, /recipe add, moves to after launch.)
 
 ### FR-8 Administration
 
@@ -465,7 +465,7 @@ knows_recipe DESC, cs.level DESC;
 
 - Item autocomplete is a prefix range scan on item.name_key (about 5,350 items), well under the 3-second reply limit.
 
-- Officer overrides are rows with source = 'override'. The import never touches them and sets the matching wiki recipe to active = 0.
+- Officer corrections are a guild-scoped layer (work order 9, override 2; migration 0009): recipe_correction, keyed (guild_id, recipe_id), holds a guild's acquisition, faction, note and trivial, and recipe_correction_component its corrected component list, which replaces the whole imported list for that guild. Readers use the guild's value where one is set and the imported value otherwise; the import never touches the layer. One deployment serves many guilds, so corrections are never written to the shared recipe row. This replaces the earlier design (override rows with source = 'override', the wiki recipe set to active = 0); source = 'override' is unused, and recipe.acquisition stays at its default, unknown.
 
 - Discord IDs are stored as TEXT because they exceed JavaScript's safe integer range.
 
@@ -499,7 +499,7 @@ Many items without stats are components (bars, thread, leather), which have no c
 
 - /item image item: image: accepts an image attachment. The bot re-posts it to a private vault channel and files it as pending; officers approve or reject with a button.
 
-- Discord attachment links now expire. Each link carries an expiry timestamp and stops working after it passes, and apps get a fresh one from Discord's attachments/refresh-urls API ([how expiring links work](https://dev.to/useapi/discord-cdn-proxy-211c)).
+- Discord attachment links now expire. Each link carries an expiry timestamp and stops working after it passes. The bot gets a fresh one by reading the vault message again (Get Channel Message): Discord's reference says "when your app receives a payload with a signed URL (like when you fetch a message), it will be valid" ([Signed Attachment CDN URLs](https://docs.discord.com/developers/reference)). (Amended by work order 9, override 5: the refresh-urls endpoint named here before is not in Discord's reference and is not used.)
 
 - The bot therefore stores the vault message and attachment IDs, caches the current link with its expiry, and refreshes it on demand. Storage stays free and needs no credit card.
 

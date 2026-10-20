@@ -5,6 +5,7 @@ import { markSkillsDirty } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
+import { knownLine, knownRecipesOf } from './recipes.ts';
 
 export interface Tradeskill {
   id: number;
@@ -260,6 +261,7 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
     )
     .bind(...shown.map((ch) => ch.id))
     .all<{ character_id: number; name: string; level: number; updated_at: string }>();
+  const known = await knownRecipesOf(c.db, c.guild.id, shown.map((ch) => ch.id));
   const staleBefore = Date.now() - c.guild.stale_days * DAY_MS;
   let anyStale = false;
   const embeds: Embed[] = shown.map((ch) => {
@@ -274,7 +276,7 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
       });
     return {
       title: truncate(`${ch.name}${ch.is_main ? ' (main)' : ''}`, 256),
-      description: [head, lines.length ? lines.join('\n') : 'No skills yet: `/craft set` or `/craft update`.'].filter(Boolean).join('\n'),
+      description: truncate([head, lines.length ? lines.join('\n') : 'No skills yet: `/craft set` or `/craft update`.', knownLine(known.get(ch.id))].filter(Boolean).join('\n'), 4096),
     };
   });
   const notes = [

@@ -1,4 +1,4 @@
-# Launch guide (DRAFT: Brian approves all copy at launch, order 10)
+# Launch guide (DRAFT: Joegandomi approves all copy at launch, order 10)
 
 Steps a server admin follows when GuildCraft is added to a guild's server. Started in order 8.
 
@@ -29,3 +29,24 @@ That is safe, because GuildCraft checks every subcommand itself, whatever Discor
 An officer who tries `setup`, `status` or `rebuild-board` gets a private "admins only" reply, and nothing changes.
 
 **Keep the grant.** Discord's documentation warns: "Deleting or renaming a command will permanently delete all permissions for the command" (same page, "Edit Application Command Permissions"). GuildCraft registers its commands with Discord's bulk overwrite (`PUT …/commands`, `scripts/discord/register.ts`), which should update `/guildcraft` under the same name rather than delete it, so a grant ought to survive a re-registration (**unverified** against a live grant). If `/guildcraft` is ever renamed or deleted, repeat the steps above.
+
+## Letting officers use `/recipe source` and `/recipe override` (order 9)
+
+`/recipe` is its own top-level command, registered with `default_member_permissions` = Manage Server, like `/guildcraft` (`src/commands/definitions.ts`). Granting it to the officer role shows officers `/recipe` without showing them `/guildcraft`.
+
+1. Open **Server Settings → Integrations**, and next to **MNM-Guildcraft** click **Manage**.
+2. Choose **`/recipe`** in the command list and unsync its permissions.
+3. Add your **officer role**, allowed (✓). Save.
+
+GuildCraft re-checks the officer role on every `/recipe` call (`src/interactions.ts`, access `officer`), so a member without the officer role who somehow sees it gets "Only officers can do that." and nothing changes. The same source and the same **unverified** labels apply as in the section above.
+
+## The vault channel for item screenshots (order 9)
+
+Screenshots sent with `/item image` wait in a private channel until an officer presses Approve or Reject there.
+
+1. Create a private text channel (for example `guildcraft-vault`) that only officers and MNM-Guildcraft can see.
+2. Run `/guildcraft setup vault:#guildcraft-vault`. GuildCraft checks it can View Channel, Send Messages, Attach Files, Embed Links and Read Message History there, and names any permission it is missing. It warns (and still saves) if @everyone can see the channel.
+
+## Coming soon
+
+- `/recipe add`: members record a recipe the community data lacks, kept private to the guild until an officer approves it (PRD FR-3.1). Moved to after launch by order 9.
