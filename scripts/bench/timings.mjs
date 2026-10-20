@@ -13,6 +13,9 @@
 // string, so order 3's reader matched none of the timing lines. Both forms are read now, and the
 // population (all events in the window, by type) is counted first so a short read shows as one.
 
+import { readFileSync } from 'node:fs';
+import { reconcile, SLOT_MS } from './logs-check.mjs';
+
 const SCRIPT = 'mnm-guildcraft-dev';
 const hours = Math.min(72, Math.max(1, Number(process.argv[2]) || 72));
 const token = process.env.CLOUDFLARE_API_TOKEN;
@@ -55,10 +58,31 @@ const counted = await query({
 const groups = (counted.calculations?.[0]?.aggregates ?? []).map((a) => ({ type: a.groups?.[0]?.value ?? null, n: a.count ?? a.value }));
 const population = groups.reduce((s, g) => s + (Number(g.n) || 0), 0);
 
-// 2. The events themselves, paged by cursor.
+// Order 7 (ITEM 1.1): the same count with no filter at all, by script, dataset and type, so an event that lacks
+// $workers.scriptName (and so escapes the filter above) shows as a group of its own.
+const unfiltered = await query({
+  queryId: `timings-unfiltered-${to}`,
+  timeframe: { from, to },
+  view: 'calculations',
+  dry: true,
+  parameters: {
+    filters: [],
+    calculations: [{ operator: 'count', alias: 'n' }],
+    groupBys: [{ type: 'string', value: '$workers.scriptName' }, { type: 'string', value: 'dataset' }, { type: 'string', value: '$metadata.type' }],
+    limit: 50,
+  },
+});
+const unfilteredGroups = (unfiltered.calculations?.[0]?.aggregates ?? []).map((a) => ({ groups: (a.groups ?? []).map((g) => `${g.key}=${g.value}`), n: a.count ?? a.value }));
+
+// 2. The events themselves, paged by cursor. Order 7: a read that stops at the page cap is reported, never silent.
+const PAGE_CAP = 50;
 const events = [];
 let offset;
-for (let page = 0; page < 50; page++) {
+let pages = 0;
+let pageCapHit = false;
+for (let page = 0; page < PAGE_CAP; page++) {
+  pages++;
+  if (page === PAGE_CAP - 1) pageCapHit = true;
   const result = await query({
     queryId: `timings-events-${to}`,
     timeframe: { from, to },
@@ -69,10 +93,16 @@ for (let page = 0; page < 50; page++) {
     parameters: { filters: [SCRIPT_FILTER] },
   });
   const batch = result.events?.events ?? (Array.isArray(result.events) ? result.events : []);
-  if (!batch.length) break;
+  if (!batch.length) {
+    pageCapHit = false;
+    break;
+  }
   events.push(...batch);
   const next = batch.at(-1)?.$metadata?.id;
-  if (!next || next === offset) break;
+  if (!next || next === offset || batch.length < 2000) {
+    pageCapHit = false;
+    break;
+  }
   offset = next;
 }
 
@@ -103,6 +133,7 @@ function timingOf(e, gc = 'interaction') {
 
 // Group by request: the invocation event carries wall/cpu/outcome/status, the log event our timing line.
 const byRequest = new Map();
+let maxEventSize = 0;
 for (const e of events) {
   const id = e.$workers?.requestId ?? e.$metadata?.requestId ?? find(e, 'requestId');
   if (id === undefined) continue;
@@ -114,6 +145,10 @@ for (const e of events) {
   const status = w.event?.response?.status ?? e.$metadata?.statusCode;
   if (typeof status === 'number') r.status = status;
   if (w.event?.request?.method) r.method = w.event.request.method;
+  if (w.eventType) r.eventType = w.eventType;
+  if (w.truncated) r.truncated = true;
+  const size = Number(e.$metadata?.eventSize);
+  if (size > maxEventSize) maxEventSize = size;
   r.at = Math.min(r.at ?? Infinity, Number(e.timestamp) || Infinity);
   const t = timingOf(e);
   if (t) r.line = t;
@@ -156,9 +191,23 @@ console.log(
     requests_with_timing_line: [...byRequest.values()].filter((r) => r.line).length,
     worker_colos: [...meta.colos],
     d1_regions: [...meta.d1Regions],
+    // Order 7: the unfiltered population, the pages read, and the largest event against the 256 KB limit.
+    unfiltered_by_script_dataset_type: unfilteredGroups,
+    pages,
+    page_cap_hit: pageCapHit,
+    max_event_size_bytes: maxEventSize || null,
+    truncated_events: [...byRequest.values()].filter((r) => r.truncated).length,
   }),
 );
-if (population && events.length < population) console.log(`WARNING: read ${events.length} of ${population} events in the window; figures below cover only those read.`);
+let readShort = false;
+if (population && events.length < population) {
+  readShort = true;
+  console.log(`WARNING: read ${events.length} of ${population} events in the window; figures below cover only those read.`);
+}
+if (pageCapHit) {
+  readShort = true;
+  console.log(`WARNING: stopped at the ${PAGE_CAP}-page cap; the read is incomplete.`);
+}
 // p95 only from 20 samples up (order 4, ITEM 2.1).
 const p95 = (xs, n) => (n >= 20 ? pct(xs, 95) : '-');
 console.log('path\tn\twall_p50\twall_p95\tcpu_p50\tcpu_p95\tio_p50\tio_p95\tqueries_max');
@@ -210,4 +259,80 @@ if (perRequest) {
 if (events[0]) {
   const e = events.find((x) => x.source && Object.keys(x.source).length) ?? events[0];
   console.log('field mapping (keys only):', JSON.stringify({ top: Object.keys(e), workers: Object.keys(e.$workers ?? {}), metadata: Object.keys(e.$metadata ?? {}), source: Object.keys(e.source ?? {}) }));
+  const cronEvent = events.find((x) => x.$workers?.eventType && x.$workers.eventType !== 'fetch');
+  if (cronEvent) console.log('non-fetch event (keys only):', JSON.stringify({ eventType: cronEvent.$workers.eventType, event: Object.keys(cronEvent.$workers.event ?? {}) }));
 }
+
+// ---------------------------------------------------------------- order 7, ITEM 1.1: completeness check
+// Each event type against its own record (scripts/bench/logs-check.mjs). Exits 1 on any mismatch, after printing.
+const cf = async (path, init) => {
+  const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+  const json = await res.json().catch(() => ({}));
+  return { ok: res.ok && json.success !== false && !json.errors?.length, status: res.status, json };
+};
+const errorsOf = (r) => redact(JSON.stringify((r.json.errors ?? []).map((x) => x.message ?? x).slice(0, 3)));
+
+// The independent records: audit_log rows (D1), deploy times and the schedule's creation (Workers API).
+const cfg = JSON.parse(readFileSync(new URL('../../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+const databaseId = cfg.env.dev.d1_databases[0].database_id;
+const auditSql = 'SELECT action, actor, created_at FROM audit_log WHERE created_at >= ? AND created_at <= ? ORDER BY id';
+const d1 = await cf(`/accounts/${account}/d1/database/${databaseId}/query`, {
+  method: 'POST',
+  body: JSON.stringify({ sql: auditSql, params: [new Date(from - 60_000).toISOString(), new Date(to).toISOString()] }),
+});
+const deploysRes = await cf(`/accounts/${account}/workers/scripts/${SCRIPT}/deployments`);
+const schedulesRes = await cf(`/accounts/${account}/workers/scripts/${SCRIPT}/schedules`);
+const audit = d1.ok ? d1.json.result[0].results.map((x) => ({ action: x.action, actor: x.actor === 'system' ? 'system' : 'member', at: Date.parse(x.created_at) })) : [];
+const deploys = (deploysRes.json.result?.deployments ?? []).map((d) => Date.parse(d.created_on)).filter(Number.isFinite);
+const schedule = (schedulesRes.json.result?.schedules ?? [])[0];
+const cronSince = schedule?.created_on ? Date.parse(schedule.created_on) : null;
+console.log(
+  JSON.stringify({
+    records: {
+      audit_rows: d1.ok ? audit.length : `unread: HTTP ${d1.status} ${errorsOf(d1)}`,
+      deployments: deploysRes.ok ? deploys.filter((d) => d >= from - 86_400_000).map((d) => new Date(d).toISOString()) : `unread: HTTP ${deploysRes.status} ${errorsOf(deploysRes)}`,
+      schedule: schedulesRes.ok ? (schedulesRes.json.result?.schedules ?? []).map((s) => ({ cron: s.cron, created_on: s.created_on, modified_on: s.modified_on })) : `unread: HTTP ${schedulesRes.status} ${errorsOf(schedulesRes)}`,
+    },
+  }),
+);
+
+const requestsForCheck = [...byRequest.values()].map((r) => ({
+  at: r.at,
+  path: pathOf(r),
+  kind: r.board || (r.eventType && r.eventType !== 'fetch') ? 'cron' : r.line && r.line.kind !== 'ping' ? 'interaction' : 'other',
+  audit: r.line?.audit ?? null,
+}));
+const check = reconcile({ from, to, requests: requestsForCheck, audit, deploys, cronSince });
+console.log('\ncompleteness check (order 7): expected vs found per event type');
+console.log('type\texpected\tfound\tmissing\tnote');
+for (const r of check.rows) console.log([r.type, r.expected, r.found, r.missing.join(' ') || '-', r.note ?? ''].join('\t'));
+
+// A second, separate pipeline: Cloudflare's invocation analytics (GraphQL), per 15-minute slot, against the logs.
+// Not every token can read it; a refusal is printed and does not fail the check.
+const gql = await cf('/graphql', {
+  method: 'POST',
+  body: JSON.stringify({
+    query: `query($a: String!, $s: String!, $f: Time!, $t: Time!) { viewer { accounts(filter: { accountTag: $a }) {
+      workersInvocationsAdaptive(limit: 5000, filter: { scriptName: $s, datetime_geq: $f, datetime_leq: $t }) { sum { requests errors } dimensions { datetime status } } } } }`,
+    variables: { a: account, s: SCRIPT, f: new Date(from).toISOString(), t: new Date(to).toISOString() },
+  }),
+});
+const inv = gql.json?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive;
+if (!gql.ok || !inv) console.log(`invocation analytics (GraphQL): unread, HTTP ${gql.status} ${errorsOf(gql)}`);
+else {
+  const slot = (ms) => new Date(Math.floor(ms / SLOT_MS) * SLOT_MS).toISOString().slice(0, 16);
+  const analytics = new Map();
+  for (const x of inv) analytics.set(slot(Date.parse(x.dimensions.datetime)), (analytics.get(slot(Date.parse(x.dimensions.datetime))) ?? 0) + (x.sum.requests ?? 0));
+  const logged = new Map();
+  for (const r of byRequest.values()) logged.set(slot(r.at), (logged.get(slot(r.at)) ?? 0) + 1);
+  const keys = [...new Set([...analytics.keys(), ...logged.keys()])].sort();
+  const differ = keys.filter((k) => (analytics.get(k) ?? 0) !== (logged.get(k) ?? 0));
+  console.log(`invocation analytics (GraphQL): ${[...analytics.values()].reduce((a, b) => a + b, 0)} invocations vs ${byRequest.size} logged requests; slots that differ: ${differ.length}`);
+  for (const k of differ) console.log(`  ${k}Z\tanalytics ${analytics.get(k) ?? 0}\tlogged ${logged.get(k) ?? 0}`);
+}
+
+if (readShort || !check.ok || !d1.ok) {
+  console.log(`\nCOMPLETENESS CHECK FAILED: ${[readShort && 'short read', !check.ok && 'mismatch', !d1.ok && 'audit rows unread'].filter(Boolean).join(', ')}`);
+  process.exit(1);
+}
+console.log('\ncompleteness check passed');

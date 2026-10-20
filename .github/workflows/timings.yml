@@ -2,8 +2,13 @@
 # p50/p95 per path. Dispatch only; reads, writes nothing. Expected: <1 billed minute per run.
 # Needs the API token permission "Workers Observability Write" (the telemetry query API's only listed
 # permission); if missing, the run says so and fails.
+# Order 7 (ITEM 1.1): every run ends with the logs completeness check (scripts/bench/logs-check.mjs) and fails
+# when an event type does not reconcile with its own record. The daily schedule runs it over the last 24 hours,
+# so a mismatch arrives as a failed run (GitHub mails the repository owner). Expected: <1 billed minute a day.
 name: timings
 on:
+  schedule:
+    - cron: '0 9 * * *'
   workflow_dispatch:
     inputs:
       hours:
@@ -40,7 +45,7 @@ jobs:
           cache: npm
       - name: Timings per path
         env:
-          HOURS: ${{ inputs.hours }}
+          HOURS: ${{ inputs.hours || '24' }}
           FROM: ${{ inputs.from }}
           TO: ${{ inputs.to }}
           REQUESTS: ${{ inputs.requests && '1' || '' }}
