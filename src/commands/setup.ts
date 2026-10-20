@@ -7,6 +7,8 @@ import {
   type MessageReply, type Option,
 } from '../discord.ts';
 import { DISCORD_API } from '../respond.ts';
+import { boardInOrder, boardOrderLine } from '../board/order.ts';
+import { requestRebuild } from '../board/refresh.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -153,7 +155,7 @@ function warningsCount(json: string | null): number | null {
 }
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
-  const [okImport, lastImport, board] = await c.db.batch([
+  const [okImport, lastImport, board, posts] = await c.db.batch([
     c.db.prepare("SELECT source_version, finished_at FROM data_import WHERE status = 'ok' ORDER BY id DESC LIMIT 1"),
     c.db.prepare('SELECT status, started_at, finished_at, warnings, error FROM data_import ORDER BY id DESC LIMIT 1'),
     c.db
@@ -162,8 +164,12 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
           (SELECT count(*) FROM tradeskill) AS skills FROM board_post WHERE guild_id = ?`,
       )
       .bind(c.guild.id),
+    // Order 6: the board order is derived from the thread ids (src/board/order.ts), never stored.
+    c.db.prepare('SELECT t.id, t.name, p.thread_id FROM tradeskill t LEFT JOIN board_post p ON p.tradeskill_id = t.id AND p.guild_id = ?').bind(c.guild.id),
   ]);
-  const ok = (okImport.results as { source_version: string; finished_at: string | null }[])[0];
+  const threadOf = new Map((posts.results as { id: number; name: string; thread_id: string | null }[]).map((p) => [p.id, p.thread_id]));
+  const inOrder = boardInOrder(posts.results as { id: number; name: string }[], (id) => threadOf.get(id));
+  const ok =(okImport.results as { source_version: string; finished_at: string | null }[])[0];
   const last = (lastImport.results as { status: string; started_at: string; finished_at: string | null; warnings: string | null; error: string | null }[])[0];
   const b = (board.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
   const warnings = last ? warningsCount(last.warnings) : null;
@@ -174,7 +180,27 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
     c.guild.board_channel_id
       ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
+    ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     '**Usage against the free-tier limits:** coming soon',
   ];
   return ephemeral(lines.join('\n'));
+}
+
+// ---------------------------------------------------------------- /guildcraft rebuild-board (order 6)
+// Named departure: PRD FR-8 says only "Forces a full board rebuild". Here it recreates the tradeskill posts
+// in A→Z order (src/board/refresh.ts): new posts first, then the old ones deleted; posts with member
+// messages are kept as they are.
+
+export async function guildcraftRebuildBoard(c: Ctx): Promise<MessageReply> {
+  if (!c.guild.board_channel_id) return ephemeral('There is no roster board yet. Set one up first with `/guildcraft setup board:`.');
+  await c.db.batch([requestRebuild(c.db, c.guild.id), audit(c.db, c.guild.id, c.userId, 'board.rebuild', `guild:${c.guild.id}`, null, null)]);
+  c.effects.board = true;
+  c.effects.rebuild = true;
+  return ephemeral(
+    [
+      `Rebuilding the roster board in <#${c.guild.board_channel_id}> in A→Z order: each tradeskill post is created again, then the old one is deleted. Posts with member replies are kept as they are.`,
+      'Most of it happens within a minute, all of it within 15 minutes. `/guildcraft status` shows the board order.',
+      'For A→Z to show at the top, the forum’s Default Sort Order must be Creation Time (Edit Channel).',
+    ].join('\n'),
+  );
 }

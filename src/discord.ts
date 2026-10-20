@@ -47,6 +47,8 @@ export interface Resolved {
 
 export interface Interaction {
   type: number;
+  /** A snowflake: it carries the time Discord created the interaction (order 6: discord_lag_ms). */
+  id?: string;
   /** Both present on every interaction Discord sends; the deferred path edits the reply with them. */
   application_id?: string;
   token?: string;

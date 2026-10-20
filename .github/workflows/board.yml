@@ -1,21 +1,33 @@
-# The roster board's dry run and rollback (work order 5, ITEM 1.1; scripts/board/run.mjs).
-#   render: read-only; renders every board post and the index from the remote dev D1 (names pseudonymised).
-#   delete: the rollback; deletes the bot-owned board posts and clears the board channel. dry_run (default)
-#           prints what it would delete and changes nothing.
+# The roster board's dry runs, live checks and rollback (work orders 5 and 6; scripts/board/run.mjs).
+#   render:  read-only; renders every board post and the index from the remote dev D1 (names pseudonymised).
+#   inspect: read-only; the live posts (creation time, message_count, archived), the board order, and what a
+#            rebuild would create and guard.
+#   archive: live check; archives the post of `skill` and marks it for the next refresh (dry_run must be off).
+#   refresh: one board invocation with the Worker's own code and 40-call budget; `rebuild` asks for and
+#            continues the A→Z rebuild (dry_run must be off).
+#   delete:  the rollback; deletes the bot-owned board posts and clears the board channel. dry_run (default)
+#            prints what it would delete and changes nothing.
 # Dispatch only. Expected: <1 billed minute per run.
 name: board
 on:
   workflow_dispatch:
     inputs:
       action:
-        description: 'render (read-only) or delete (rollback)'
+        description: 'render / inspect (read-only), archive / refresh (live), delete (rollback)'
         type: choice
-        options: [render, delete]
+        options: [render, inspect, archive, refresh, delete]
         default: render
       dry_run:
-        description: 'delete only: print what would be deleted, change nothing'
+        description: 'delete: print what would be deleted, change nothing. archive and refresh need this off.'
         type: boolean
         default: true
+      skill:
+        description: 'archive only: the tradeskill whose post is archived'
+        default: ''
+      rebuild:
+        description: 'refresh only: ask for (or continue) the A→Z rebuild'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency: board-dev
@@ -33,9 +45,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Board ${{ inputs.action }} (dry run = ${{ inputs.action == 'render' || inputs.dry_run }})
+      - name: Board ${{ inputs.action }} (dry run = ${{ inputs.action == 'render' || inputs.action == 'inspect' || inputs.dry_run }})
         env:
           ACTION: ${{ inputs.action }}
-          DRY_RUN: ${{ (inputs.action == 'render' || inputs.dry_run) && '1' || '0' }}
-          DISCORD_BOT_TOKEN: ${{ inputs.action == 'delete' && !inputs.dry_run && secrets.DISCORD_BOT_TOKEN || '' }}
+          DRY_RUN: ${{ (inputs.action == 'render' || inputs.action == 'inspect' || inputs.dry_run) && '1' || '0' }}
+          SKILL: ${{ inputs.skill }}
+          REBUILD: ${{ inputs.rebuild && '1' || '0' }}
+          DISCORD_BOT_TOKEN: ${{ (inputs.action == 'inspect' || ((inputs.action == 'archive' || inputs.action == 'refresh' || inputs.action == 'delete') && !inputs.dry_run)) && secrets.DISCORD_BOT_TOKEN || '' }}
         run: node scripts/board/run.mjs

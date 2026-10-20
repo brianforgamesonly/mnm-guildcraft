@@ -12,16 +12,32 @@
 // first sets archived:false (one extra call; only SEND_MESSAGES is needed for an unlocked thread), which
 // also brings the post back from "Older Posts". The index post is pinned; a pinned post never auto-archives,
 // and a run that finds it unpinned or archived pins it again.
+//
+// A→Z (order 6, ITEM 1.1; src/board/order.ts). With the forum sorted by creation date (newest first):
+// - missing posts are created Z→A, and a run that fails or skips a create creates nothing after it, so
+//   no post is ever created out of sequence;
+// - the nightly run keeps every tradeskill post active, so none drops into "Older Posts": an archived post
+//   is unarchived, and a post within KEEP_ACTIVE_MS of auto-archiving has its auto-archive time changed
+//   (Discord counts that change as activity);
+// - /guildcraft rebuild-board sets guild.board_rebuild_since. Until it is done, the posts older than it
+//   are replaced Z→A (create first), then the old ones are deleted. A post with member messages
+//   (message_count > 0) is never replaced or deleted (ORDER-RULES, order 6). A refresh after an ordinary
+//   command creates and deletes nothing while a rebuild is in progress; a sweep or a rebuild run continues it.
 import { now as isoNow, type WaitUntil } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { countD1, isolateSnapshot, type D1Call } from '../telemetry.ts';
 import type { Env } from '../env.ts';
 import { BOARD_CALL_CAP, botApi, budgetLeft, THREAD_ARCHIVED, UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, type ApiLogEntry, type BoardBudget, type BotApi } from './api.ts';
 import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } from './data.ts';
+import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
 const AUTO_ARCHIVE_MINUTES = 10080;
+/** The keep-active bump alternates between these two (Discord's allowed values include 4320 and 10080). */
+const BUMP_MINUTES = 4320;
+/** The nightly run bumps any post that would auto-archive within this long (2 days: one missed night is covered). */
+export const KEEP_ACTIVE_MS = 2 * 86_400_000;
 /** Channel flag PINNED (1 << 1): only one post per forum can carry it. */
 export const PINNED = 1 << 1;
 /** Longer than either run's deadline, so a lease never lapses while its run is still calling Discord. */
@@ -32,6 +48,8 @@ export const NIGHTLY_HOUR_UTC = 8;
 export const AFTER_COMMAND_MS = 25_000;
 /** A cron run may take longer (15 minutes of wall time); a minute is ample for one guild's posts. */
 export const CRON_RUN_MS = 60_000;
+
+export type Trigger = 'command' | 'sweep' | 'nightly' | 'rebuild';
 
 export interface RefreshResult {
   locked?: true;
@@ -46,11 +64,22 @@ export interface RefreshResult {
   gone: number;
   index: 'created' | 'edited' | 'unchanged' | 'not_reached' | 'failed' | 'none';
   repinned: boolean;
+  /** Order 6: keep-active bumps (auto-archive time changed). */
+  bumped: number;
+  /** Order 6, rebuild: old posts replaced by a new post, and old posts deleted. */
+  replaced: number;
+  deleted_old: number;
+  /** Tradeskills whose post has member messages: never replaced or deleted (names are game data). */
+  guarded: string[];
+  rebuild: 'none' | 'in_progress' | 'done' | 'held';
+  /** Whether the posts that exist show A→Z after this run (src/board/order.ts). */
+  in_order: boolean;
   errors: string[];
 }
 
 const emptyResult = (): RefreshResult => ({
-  created: 0, edited: 0, unarchived: 0, skipped_unchanged: 0, messages_added: 0, messages_deleted: 0, left_dirty: 0, gone: 0, index: 'none', repinned: false, errors: [],
+  created: 0, edited: 0, unarchived: 0, skipped_unchanged: 0, messages_added: 0, messages_deleted: 0, left_dirty: 0, gone: 0, index: 'none', repinned: false,
+  bumped: 0, replaced: 0, deleted_old: 0, guarded: [], rebuild: 'none', in_order: true, errors: [],
 });
 
 // ---------------------------------------------------------------- marking dirty (inside a command's write batch)
@@ -73,21 +102,63 @@ export function markCharacterDirty(c: Ctx, characterId: number): D1PreparedState
 
 // ---------------------------------------------------------------- one guild's refresh
 
-interface ThreadInfo {
+/** A thread as Discord's thread lists return it (docs.discord.com/developers/resources/channel). */
+export interface ThreadInfo {
+  id: string;
+  parent_id?: string;
+  owner_id?: string;
   archived: boolean;
   flags: number;
+  /** "number of messages (not including the initial message or deleted messages)". */
+  message_count?: number;
+  last_message_id?: string | null;
+  archive_timestamp?: string;
+  auto_archive_duration?: number;
 }
-type Active = Map<string, ThreadInfo> | null;
+type Threads = Map<string, ThreadInfo> | null;
+
+type ApiThread = {
+  id: string;
+  parent_id?: string;
+  owner_id?: string;
+  flags?: number;
+  message_count?: number;
+  last_message_id?: string | null;
+  thread_metadata?: { archived?: boolean; archive_timestamp?: string; auto_archive_duration?: number };
+};
+
+const threadMap = (threads: ApiThread[] | undefined): Map<string, ThreadInfo> =>
+  new Map(
+    (threads ?? []).map((t) => [
+      t.id,
+      {
+        id: t.id, parent_id: t.parent_id, owner_id: t.owner_id, archived: !!t.thread_metadata?.archived, flags: t.flags ?? 0, message_count: t.message_count,
+        last_message_id: t.last_message_id, archive_timestamp: t.thread_metadata?.archive_timestamp, auto_archive_duration: t.thread_metadata?.auto_archive_duration,
+      },
+    ]),
+  );
 
 /** The guild's active threads in one call: which of our posts are archived, and whether the index is pinned. */
-async function activeThreads(api: BotApi, guildId: string): Promise<Active> {
-  const r = await api.call<{ threads?: { id: string; flags?: number; thread_metadata?: { archived?: boolean } }[] }>('GET', `/guilds/${guildId}/threads/active`);
-  if (!r.ok) return null;
-  return new Map((r.body.threads ?? []).map((t) => [t.id, { archived: !!t.thread_metadata?.archived, flags: t.flags ?? 0 }]));
+async function activeThreads(api: BotApi, guildId: string): Promise<Threads> {
+  const r = await api.call<{ threads?: ApiThread[] }>('GET', `/guilds/${guildId}/threads/active`);
+  return r.ok ? threadMap(r.body.threads) : null;
+}
+
+/** The forum's archived posts in one call (rebuild only: their message counts and owners). null if unread or incomplete. */
+async function archivedThreads(api: BotApi, forumId: string): Promise<Threads> {
+  const r = await api.call<{ threads?: ApiThread[]; has_more?: boolean }>('GET', `/channels/${forumId}/threads/archived/public?limit=100`);
+  return r.ok && !r.body.has_more ? threadMap(r.body.threads) : null;
 }
 
 /** null when unknown (the read failed); otherwise whether the thread is archived (absent from the active list). */
-const isArchived = (active: Active, threadId: string): boolean | null => (active ? !active.get(threadId) || active.get(threadId)!.archived : null);
+const isArchived = (active: Threads, threadId: string): boolean | null => (active ? !active.get(threadId) || active.get(threadId)!.archived : null);
+
+/** When Discord will auto-archive an active thread: its last activity plus its auto-archive time. */
+export function archivesAt(t: ThreadInfo): number | null {
+  if (!t.auto_archive_duration) return null;
+  const last = Math.max(t.archive_timestamp ? Date.parse(t.archive_timestamp) : 0, snowflakeMs(t.last_message_id ?? t.id));
+  return last + t.auto_archive_duration * 60_000;
+}
 
 const body = (m: BoardMessage) => ({ embeds: m.embeds, allowed_mentions: m.allowed_mentions });
 
@@ -200,11 +271,17 @@ async function editPost(api: BotApi, post: BoardPostRow, skill: string, msgs: Bo
 const RESERVE = 3;
 
 /**
- * Refreshes one guild's board: missing posts are created, dirty ones (all of them when `all`) re-rendered
- * and edited when their hash changed, then the index. Stops before the call budget or the deadline runs out;
- * whatever it did not reach stays dirty (or missing) for the next sweep.
+ * Refreshes one guild's board: missing posts are created (Z→A), dirty ones (all of them when `all`)
+ * re-rendered and edited when their hash changed, then the index. The nightly run (`all`) first keeps every
+ * post active; a rebuild in progress replaces old posts, then deletes them. Stops before the call budget or
+ * the deadline runs out; whatever it did not reach stays dirty (or missing, or old) for the next run.
  */
-export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: string, opts: { all?: boolean; nowMs?: number } = {}): Promise<RefreshResult> {
+export async function refreshGuildBoard(
+  db: D1Database,
+  api: BotApi,
+  guildId: string,
+  opts: { all?: boolean; nowMs?: number; trigger?: Trigger } = {},
+): Promise<RefreshResult> {
   const r = emptyResult();
   const nowMs = opts.nowMs ?? Date.now();
   const at = new Date(nowMs).toISOString();
@@ -225,9 +302,37 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
   if (results[0].meta.changes !== 1) return { ...r, locked: true };
   const forum = data.guild.board_channel_id;
 
-  const work = data.tradeskills.filter((t) => opts.all || !data.posts.get(t.id) || data.posts.get(t.id)!.dirty !== 0);
-  const needActive = work.some((t) => data.posts.has(t.id)) || !!data.guild.board_index_thread_id;
+  // The rebuild (order 6): posts whose thread predates board_rebuild_since are old.
+  const since = data.guild.board_rebuild_since;
+  const sinceSf = since ? snowflakeAt(Date.parse(since)) : null;
+  const isOld = (thread: string) => sinceSf !== null && BigInt(thread) < sinceSf;
+  // A refresh after an ordinary command never creates while a rebuild is in progress.
+  const mayCreate = !(since && opts.trigger === 'command');
+  const rebuilding = !!since && mayCreate;
+  if (since) r.rebuild = mayCreate ? 'in_progress' : 'held';
+
+  const work = data.tradeskills.filter((t) => {
+    const p = data.posts.get(t.id);
+    return opts.all || !p || p.dirty !== 0 || (rebuilding && isOld(p.thread_id));
+  });
+  const needActive = work.some((t) => data.posts.has(t.id)) || !!data.guild.board_index_thread_id || rebuilding;
   const active = needActive ? await activeThreads(api, guildId) : null;
+  const archivedList = rebuilding ? await archivedThreads(api, forum) : null;
+  // Without both lists the rebuild cannot tell member messages apart, so this run replaces and deletes nothing.
+  const rebuildBlind = rebuilding && (active === null || archivedList === null);
+  if (rebuildBlind) r.errors.push('rebuild: thread lists unread; nothing replaced this run');
+  const infoOf = (thread: string) => active?.get(thread) ?? archivedList?.get(thread);
+
+  // Posts with member messages are never replaced (ORDER-RULES, order 6).
+  const guarded = new Set<number>();
+  if (rebuilding)
+    for (const t of data.tradeskills) {
+      const p = data.posts.get(t.id);
+      if (p && isOld(p.thread_id) && (infoOf(p.thread_id)?.message_count ?? 0) > 0) {
+        guarded.add(t.id);
+        r.guarded.push(t.name);
+      }
+    }
 
   const writes: D1PreparedStatement[] = [];
   const upsert = (row: Omit<BoardPostRow, 'dirty' | 'last_rendered_at'>, complete: boolean) =>
@@ -244,31 +349,89 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
     if (data.posts.has(tradeskillId)) writes.push(db.prepare('UPDATE board_post SET dirty = 1 WHERE guild_id = ? AND tradeskill_id = ?').bind(guildId, tradeskillId));
   };
   const threads = new Map<number, string>([...data.posts].map(([id, p]) => [id, p.thread_id]));
-  let stopped = false;
+  const unarchivedNow = new Set<string>();
+  /** Posts found deleted in Discord by the keep-active step: forgotten below, recreated by the next run. */
+  const goneNow = new Set<number>();
+  const canCall = (n: number) => budgetLeft(api.budget) >= n && Date.now() < api.budget.deadline;
 
-  for (const t of work) {
+  // Keep active (nightly): an archived post is unarchived; one close to auto-archiving gets its archive time changed.
+  if (opts.all && active && !since)
+    for (const t of data.tradeskills) {
+      const p = data.posts.get(t.id);
+      if (!p) continue;
+      const info = active.get(p.thread_id);
+      const due = info ? archivesAt(info) : null;
+      const archived = !info || info.archived;
+      if (!archived && (due === null || due - nowMs > KEEP_ACTIVE_MS)) continue;
+      if (!canCall(1 + RESERVE)) break;
+      if (archived) {
+        const u = await unarchive(api, p.thread_id, r);
+        if (u === 'ok') unarchivedNow.add(p.thread_id);
+        else if (u === 'gone') goneNow.add(t.id);
+        continue;
+      }
+      const next = info!.auto_archive_duration === AUTO_ARCHIVE_MINUTES ? BUMP_MINUTES : AUTO_ARCHIVE_MINUTES;
+      const b = await api.call('PATCH', `/channels/${p.thread_id}`, { auto_archive_duration: next });
+      if (b.ok) r.bumped++;
+      else r.errors.push(`keep active ${t.name}: ${b.status} ${b.code ?? ''}`.trim());
+    }
+
+  let stopped = false;
+  // Once a create fails or is skipped, nothing is created after it in this run: posts are only ever created Z→A.
+  let createStopped = false;
+  for (const t of [...work].reverse()) {
     const post = data.posts.get(t.id);
+    if (post && goneNow.has(t.id)) {
+      r.gone++;
+      threads.delete(t.id);
+      writes.push(db.prepare('DELETE FROM board_post WHERE guild_id = ? AND tradeskill_id = ? AND thread_id = ?').bind(guildId, t.id, post.thread_id));
+      continue;
+    }
     const lines = data.lines.get(t.id) ?? [];
     const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, nowMs);
     const hash = await contentHash(msgs);
-    if (post && post.content_hash === hash) {
+    const replace = !!post && rebuilding && isOld(post.thread_id) && !guarded.has(t.id);
+    if (!post || replace) {
+      if (!mayCreate || createStopped || (replace && rebuildBlind)) {
+        if (post && post.dirty !== 0) leaveDirty(t.id);
+        else if (!post) r.left_dirty++;
+        continue;
+      }
+      if (stopped || !canCall(msgs.length + RESERVE)) {
+        stopped = createStopped = true;
+        leaveDirty(t.id);
+        continue;
+      }
+      const out = await createPost(api, forum, t.name, t.id, msgs, hash, r);
+      if ('failed' in out || 'gone' in out) {
+        createStopped = true;
+        leaveDirty(t.id);
+        continue;
+      }
+      if (replace) r.replaced++;
+      threads.set(t.id, out.row.thread_id);
+      writes.push(upsert(out.row, out.complete));
+      if (!out.complete) r.left_dirty++;
+      continue;
+    }
+    if (post.content_hash === hash) {
       r.skipped_unchanged++;
       writes.push(upsert(post, true));
       continue;
     }
-    const archived = post ? isArchived(active, post.thread_id) : false;
-    const need = msgs.length + (archived ? 1 : 0) + Math.max(0, (post ? JSON.parse(post.message_ids_json).length : 1) - msgs.length);
-    if (stopped || budgetLeft(api.budget) < need + RESERVE || Date.now() >= api.budget.deadline) {
+    const archived = unarchivedNow.has(post.thread_id) ? false : isArchived(active, post.thread_id);
+    const need = msgs.length + (archived ? 1 : 0) + Math.max(0, JSON.parse(post.message_ids_json).length - msgs.length);
+    if (stopped || !canCall(need + RESERVE)) {
       stopped = true;
       leaveDirty(t.id);
       continue;
     }
-    const out = post ? await editPost(api, post, t.name, msgs, hash, archived, r) : await createPost(api, forum, t.name, t.id, msgs, hash, r);
+    const out = await editPost(api, post, t.name, msgs, hash, archived, r);
     if ('gone' in out) {
       // The post was deleted in Discord: forget it, and the next run creates it again.
       r.gone++;
       threads.delete(t.id);
-      writes.push(db.prepare('DELETE FROM board_post WHERE guild_id = ? AND tradeskill_id = ? AND thread_id = ?').bind(guildId, t.id, post!.thread_id));
+      writes.push(db.prepare('DELETE FROM board_post WHERE guild_id = ? AND tradeskill_id = ? AND thread_id = ?').bind(guildId, t.id, post.thread_id));
     } else if ('failed' in out) {
       leaveDirty(t.id);
     } else {
@@ -277,6 +440,43 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
       if (!out.complete) r.left_dirty++;
     }
   }
+
+  // The rebuild's second half: once every unguarded post is new, delete the old ones. An old post is a
+  // bot-owned thread in this forum, older than the rebuild, that no row references, with no member messages.
+  if (rebuilding && !rebuildBlind) {
+    const remaining = data.tradeskills.filter((t) => !guarded.has(t.id) && (!threads.get(t.id) || isOld(threads.get(t.id)!))).length;
+    if (remaining === 0) {
+      const referenced = new Set([...threads.values(), data.guild.board_index_thread_id].filter(Boolean) as string[]);
+      // The bot's own user id, read from a thread it is known to own (the index or any post).
+      const botId = [...referenced].map((id) => infoOf(id)?.owner_id).find(Boolean);
+      const listed = [...(active?.values() ?? []), ...(archivedList?.values() ?? [])];
+      const old = botId ? listed.filter((x) => x.parent_id === forum && x.owner_id === botId && !referenced.has(x.id) && isOld(x.id)) : [];
+      let left = 0;
+      for (const x of old) {
+        if ((x.message_count ?? 1) !== 0) {
+          left++;
+          r.errors.push(`old post kept: it has member messages (${x.message_count ?? 'unknown'})`);
+          continue;
+        }
+        if (!canCall(1 + RESERVE)) {
+          left++;
+          continue;
+        }
+        const d = await api.call('DELETE', `/channels/${x.id}`);
+        if (d.ok || d.code === UNKNOWN_CHANNEL) r.deleted_old++;
+        else {
+          left++;
+          r.errors.push(`delete old post: ${d.status} ${d.code ?? ''}`.trim());
+        }
+      }
+      if (!botId) r.errors.push('rebuild: could not tell which threads are the bot’s; old posts not deleted');
+      else if (left === 0) {
+        r.rebuild = 'done';
+        writes.push(db.prepare('UPDATE guild SET board_rebuild_since = NULL WHERE id = ? AND board_rebuild_since = ?').bind(guildId, since));
+      }
+    }
+  }
+  r.in_order = boardInOrder(data.tradeskills, (id) => threads.get(id));
 
   // The index: created (and pinned) once, edited when its links or counts changed or any post was written.
   const wrote = r.created + r.edited + r.gone > 0;
@@ -288,19 +488,19 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
   let indexThread = data.guild.board_index_thread_id;
   let indexMessage = data.guild.board_index_message_id;
   let indexHash = data.guild.board_index_hash;
-  const canCall = (n: number) => budgetLeft(api.budget) >= n + 1 && Date.now() < api.budget.deadline;
+  const canCallIndex = (n: number) => canCall(n + 1);
 
   if (indexThread && indexMessage) {
     const info = active?.get(indexThread);
     const unpinned = active !== null && (!info || info.archived || (info.flags & PINNED) === 0);
-    if (unpinned && canCall(1)) {
+    if (unpinned && canCallIndex(1)) {
       const p = await api.call('PATCH', `/channels/${indexThread}`, { archived: false, flags: PINNED });
       if (p.ok) r.repinned = true;
       else if (p.code === UNKNOWN_CHANNEL) indexThread = indexMessage = indexHash = null;
       else r.errors.push(`re-pin index: ${p.status} ${p.code ?? ''}`.trim());
     }
     if (indexThread && indexMessage && (wrote || idxHash !== indexHash)) {
-      if (!canCall(1)) r.index = 'not_reached';
+      if (!canCallIndex(1)) r.index = 'not_reached';
       else {
         const e = await api.call('PATCH', `/channels/${indexThread}/messages/${indexMessage}`, body(idx.message));
         if (e.ok) {
@@ -316,7 +516,7 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
     } else if (indexThread) r.index = 'unchanged';
   }
   if (!indexThread || !indexMessage) {
-    if (!canCall(2)) r.index = 'not_reached';
+    if (!canCallIndex(2)) r.index = 'not_reached';
     else {
       const made = await api.call<{ id: string; message?: { id: string } }>('POST', `/channels/${forum}/threads`, {
         name: INDEX_TITLE,
@@ -347,11 +547,11 @@ export async function refreshGuildBoard(db: D1Database, api: BotApi, guildId: st
   return r;
 }
 
-// ---------------------------------------------------------------- the two entry points
+// ---------------------------------------------------------------- the entry points
 
 export interface BoardRunLog {
   gc: 'board';
-  trigger: 'command' | 'sweep' | 'nightly';
+  trigger: Trigger;
   guilds: number;
   d1_calls: number;
   discord_calls: number;
@@ -360,15 +560,16 @@ export interface BoardRunLog {
   err: string | null;
 }
 
-/** After a command's reply (inside the same waitUntil): rewrite this guild's dirty posts. */
-export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1Call[]): Promise<BoardRunLog> {
+/** After a command's reply (inside the same waitUntil): rewrite this guild's dirty posts. `rebuild`: /guildcraft rebuild-board's own run. */
+export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1Call[], opts: { rebuild?: boolean } = {}): Promise<BoardRunLog> {
   const budget: BoardBudget = { d1: () => d1Calls.length, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + AFTER_COMMAND_MS };
-  const log: BoardRunLog = { gc: 'board', trigger: 'command', guilds: 1, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
+  const trigger: Trigger = opts.rebuild ? 'rebuild' : 'command';
+  const log: BoardRunLog = { gc: 'board', trigger, guilds: 1, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
   if (!env.DISCORD_BOT_TOKEN) return { ...log, err: 'DISCORD_BOT_TOKEN not set' };
   const api = botApi(env.DISCORD_BOT_TOKEN, budget);
   const d1Before = d1Calls.length;
   try {
-    log.results.push(await refreshGuildBoard(env.DB, api, guildId));
+    log.results.push(await refreshGuildBoard(env.DB, api, guildId, { trigger }));
   } catch (e) {
     log.err = e instanceof Error ? e.message : String(e);
   }
@@ -381,15 +582,15 @@ export const isNightly = (scheduledTime: number) => {
   return d.getUTCHours() === NIGHTLY_HOUR_UTC && d.getUTCMinutes() < 15;
 };
 
-/** Guilds with a board that has something to do: dirty or missing posts, or no index (every board, nightly). */
-const SWEEP_SQL = `SELECT g.id FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL
+/** Guilds with a board that has something to do: dirty or missing posts, no index, a rebuild in progress (every board, nightly). */
+const SWEEP_SQL = `SELECT g.id FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
   OR EXISTS (SELECT 1 FROM board_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
   OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill)) ORDER BY g.id`;
 
 /**
- * The scheduled handler (one 15-minute trigger): sweeps dirty and missing posts; at NIGHTLY_HOUR_UTC it
- * re-renders every post. Logs one line with its own first-query timing (order 5, ITEM 2: an idle-gap sample
- * every 15 minutes from the same binding path as the interactions).
+ * The scheduled handler (one 15-minute trigger): sweeps dirty and missing posts and continues a rebuild;
+ * at NIGHTLY_HOUR_UTC it re-renders every post and keeps them active. Logs one line with its own first-query
+ * timing (order 5, ITEM 2: an idle-gap sample every 15 minutes from the same binding path as the interactions).
  */
 export async function scheduled(controller: { scheduledTime: number; cron?: string }, env: Env, _ctx?: WaitUntil): Promise<BoardRunLog & Record<string, unknown>> {
   const isolate = isolateSnapshot();
@@ -408,7 +609,7 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       api = botApi(env.DISCORD_BOT_TOKEN!, budget);
       for (const g of results) {
         if (budgetLeft(budget) < RESERVE + 3) break;
-        log.results.push(await refreshGuildBoard(counted.db, api, g.id, { all: nightly }));
+        log.results.push(await refreshGuildBoard(counted.db, api, g.id, { all: nightly, trigger: log.trigger }));
       }
     }
   } catch (e) {
@@ -428,4 +629,17 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   };
   console.log(JSON.stringify(line));
   return line;
+}
+
+/**
+ * A minute before the request: a post created after it must never read as old, even if Discord's clock runs
+ * behind ours (an old-looking new post would be replaced again). Old posts are hours old, so the margin costs nothing.
+ */
+const CLOCK_MARGIN_MS = 60_000;
+
+/** /guildcraft rebuild-board: asks for the rebuild (the refresh after the reply starts it). A rebuild already in progress keeps its start. */
+export function requestRebuild(db: D1Database, guildId: string, nowMs = Date.parse(isoNow())): D1PreparedStatement {
+  return db
+    .prepare('UPDATE guild SET board_rebuild_since = coalesce(board_rebuild_since, ?) WHERE id = ? AND board_channel_id IS NOT NULL')
+    .bind(new Date(nowMs - CLOCK_MARGIN_MS).toISOString(), guildId);
 }

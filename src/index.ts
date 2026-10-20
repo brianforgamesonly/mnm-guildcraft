@@ -17,14 +17,14 @@ const fallback = (i: Interaction): InteractionReply =>
 
 const errText = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
-type Isolate = ReturnType<typeof isolateSnapshot>;
+type Isolate = ReturnType<typeof isolateSnapshot> & { receivedAt: number };
 
 /**
  * The deferred work, inside ctx.waitUntil (up to 30 seconds after the acknowledgement). Logs the one timing
  * line. A handler that marked board posts dirty gets them rewritten here, after its reply is delivered
  * (order 5); if that fails the posts stay dirty for the 15-minute sweep.
  */
-async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number, isolate: Isolate) {
+async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number, { receivedAt, ...isolate }: Isolate) {
   const log: Delivery[] = [];
   const effects: Effects = {};
   let err: string | null = null;
@@ -38,11 +38,12 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
     console.error('interaction failed', err, JSON.stringify(log.filter((d) => d.error)));
     await deliverError(i, plan, log);
   }
-  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate }));
-  if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls)));
+  console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate, receivedAt }));
+  if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls, { rebuild: effects.rebuild })));
 }
 
 app.post('/', async (c) => {
+  const receivedAt = Date.now();
   const signature = c.req.header('X-Signature-Ed25519');
   const timestamp = c.req.header('X-Signature-Timestamp');
   const body = await c.req.text();
@@ -66,13 +67,13 @@ app.post('/', async (c) => {
     plan = planFor(interaction);
   } catch (err) {
     console.error('interaction failed', errText(err));
-    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err: errText(err), isolate }));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err: errText(err), isolate, receivedAt }));
     return c.json(fallback(interaction));
   }
 
   // Deferred: acknowledge now (no I/O on this path), work and deliver after the response.
   if (plan.defer) {
-    c.executionCtx.waitUntil(runDeferred(interaction, plan, env, c.executionCtx as ExecutionContext, counted.calls, colo, started, isolate));
+    c.executionCtx.waitUntil(runDeferred(interaction, plan, env, c.executionCtx as ExecutionContext, counted.calls, colo, started, { ...isolate, receivedAt }));
     return c.json(ackFor(plan));
   }
 
@@ -85,7 +86,7 @@ app.post('/', async (c) => {
     return c.json(fallback(interaction));
   } finally {
     // One line per interaction (ITEM 3.1). io_ms covers D1 and network waits only (see src/telemetry.ts).
-    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err, isolate }));
+    console.log(timingLine(interaction, counted.calls, colo, Date.now() - started, { ack: null, err, isolate, receivedAt }));
   }
 });
 

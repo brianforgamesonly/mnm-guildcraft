@@ -4,6 +4,8 @@ import type { GuildMember, Resolved } from './discord.ts';
 /** Work a handler asks for after its reply is delivered (order 5: the board refresh). */
 export interface Effects {
   board?: boolean;
+  /** Order 6: the refresh is /guildcraft rebuild-board's own run (it may create while the rebuild is in progress). */
+  rebuild?: boolean;
 }
 
 /** What every command handler gets: the caller, their guild and their rights, checked for this request. */
