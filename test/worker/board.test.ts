@@ -100,7 +100,8 @@ describe('/guildcraft setup board: checks, then builds', () => {
     expect(forum.posts().map((t) => t.name).sort()).toEqual([...names, 'Index: how to get listed'].sort());
     const bs = forum.text(post('Blacksmithing'));
     expect(bs).toContain('1 character (1 member), ranked by skill level.');
-    expect(bs).toContain('**1.** **Testchar** · Ann · 25');
+    // Order 16: the member as a mention, with the saved name beside it.
+    expect(bs).toContain(`**1.** **Testchar** · <@${ANN}> (Ann) · 25`);
     const index = post('Index: how to get listed')!;
     expect(index.flags & PINNED).toBe(PINNED);
     expect(forum.text(index)).toContain(`<#${post('Blacksmithing')!.id}> · 1 character`);
@@ -123,7 +124,7 @@ describe('refresh paths', () => {
   it('/craft set: the reply is delivered first, then the post is edited in the same request', async () => {
     const { ack, calls } = await exchange(cmd(admin, 'craft', 'set', { skill: 'Blacksmithing', level: 30 }), TOKEN);
     expect(seen(ack, calls).data.content).toContain('Blacksmithing set to **30** (was 25)');
-    expect(forum.text(post('Blacksmithing'))).toContain('**Testchar** · Ann · 30');
+    expect(forum.text(post('Blacksmithing'))).toContain(`**Testchar** · <@${ANN}> (Ann) · 30`);
     const edits = forum.calls.filter((c) => c.method === 'PATCH' && c.path.includes('/messages/'));
     expect(edits.length).toBe(2); // the post and the index (its count did not change, but a post was written)
     // The reply's webhook call was already recorded when the first board edit went out.
@@ -147,7 +148,7 @@ describe('refresh paths', () => {
     const ch = await one<{ id: number }>("SELECT id FROM character WHERE name = 'Testchar'");
     const tailoring = await one<{ id: number }>("SELECT id FROM tradeskill WHERE name = 'Tailoring'");
     await exchange(submit(admin, `updm:${ch.id}`, { [`lvl:${tailoring.id}`]: '40' }), TOKEN);
-    expect(forum.text(post('Tailoring'))).toContain('**Testchar** · Ann · 40');
+    expect(forum.text(post('Tailoring'))).toContain(`**Testchar** · <@${ANN}> (Ann) · 40`);
     await exchange(cmd(bo, 'character', 'add', { name: 'Bochar' }), TOKEN);
     await exchange(cmd(bo, 'craft', 'set', { skill: 'Tailoring', level: 10 }), TOKEN);
     expect(forum.text(post('Tailoring'))).toContain('2 characters (2 members)');
@@ -195,7 +196,47 @@ describe('refresh paths', () => {
   it('the nightly marks a skill stale after stale_days, and the post shows it', async () => {
     await env.DB.prepare("UPDATE character_skill SET updated_at = '2026-01-01T00:00:00Z'").run();
     await runCron(Date.parse('2026-10-20T08:05:00Z'));
-    expect(forum.text(post('Blacksmithing'))).toMatch(/Testchar\*\* · Ann · 25 · \*stale\*[\s\S]*stale = not updated in 60 days/);
+    expect(forum.text(post('Blacksmithing'))).toMatch(/Testchar\*\* · <@\d+> \(Ann\) · 25 · \*stale\*[\s\S]*stale = not updated in 60 days/);
+  });
+});
+
+describe('order 16: names are mentions, and nothing ever pings', () => {
+  /** Every bot-API call that sends a message body (a create, an edit, an overflow, a thread's starter message). */
+  const sent = () => forum.calls.filter((c) => (c.method === 'POST' || c.method === 'PATCH') && (c.body?.embeds || c.body?.message || c.body?.content));
+  const bodyOf = (c: { body: any }) => c.body.message ?? c.body;
+
+  it('the first build, a rewrite, the nightly run and a rebuild all send allowed_mentions that ping nobody', async () => {
+    await liveShape();
+    await exchange(cmd(bo, 'character', 'add', { name: 'Bochar' }), TOKEN);
+    await exchange(cmd(bo, 'craft', 'set', { skill: 'Blacksmithing', level: 40 }), TOKEN);
+    forum.clockOffsetMs = -2 * 3_600_000; // posts two hours old, so the rebuild below replaces them
+    await setupBoard(); // the first post of every tradeskill
+    forum.clockOffsetMs = 0;
+    await exchange(cmd(admin, 'craft', 'set', { skill: 'Blacksmithing', level: 26 }), TOKEN); // a rewrite
+    await env.DB.prepare("UPDATE character_skill SET updated_at = '2026-01-01T00:00:00Z'").run();
+    await runCron(Date.parse('2026-10-20T08:00:00Z')); // the nightly run, which now edits (stale markers)
+    await exchange(cmd(admin, 'guildcraft', 'rebuild-board'), TOKEN); // a rebuild: every post created again
+    const kinds = new Set(sent().map((c) => `${c.method} ${c.path.replace(/\d{5,}/g, '{id}')}`));
+    expect([...kinds].sort()).toEqual(['PATCH /channels/{id}/messages/{id}', 'POST /channels/{id}/threads']);
+    const skills = await skillCount();
+    // Created twice (setup, then the rebuild) plus the index, and edited at least by the rewrite and the nightly run.
+    expect(sent().filter((c) => c.path.endsWith('/threads')).length).toBe(2 * skills + 1);
+    for (const c of sent()) expect(bodyOf(c).allowed_mentions, `${c.method} ${c.path}`).toEqual({ parse: [] });
+    // The mentions are there to show names, not to ping: both members appear as mentions.
+    expect(forum.text(post('Blacksmithing'))).toContain(`<@${BO}> (Bo)`);
+    expect(forum.text(post('Blacksmithing'))).toContain(`<@${ANN}> (Ann)`);
+  });
+
+  it('/craft find and the roster replies carry the mention and ping nobody', async () => {
+    await liveShape();
+    for (const r of [
+      await reply(exchange(cmd(admin, 'roster', 'skill', { skill: 'Blacksmithing' }), TOKEN)),
+      await reply(exchange(cmd(admin, 'roster', 'top'), TOKEN)),
+      await reply(exchange(cmd(admin, 'roster', 'member', { member: ANN }), TOKEN)),
+    ]) {
+      expect(JSON.stringify(r.data)).toContain(`<@${ANN}> (Ann)`);
+      expect((r.data as any).allowed_mentions).toEqual({ parse: [] });
+    }
   });
 });
 
@@ -293,7 +334,8 @@ describe('overflow into bot-owned follow-up messages', () => {
   it('a long list grows into follow-up messages, and they are deleted when it shrinks', async () => {
     await liveShape();
     await setupBoard();
-    // ~31 characters a line: 250 lines are about 7,800 embed characters, more than one message's 6,000.
+    // Order 16: ~52 characters a line with the mention and saved name: 250 lines are about 13,000 embed characters,
+    // three messages of at most 6,000 (two follow-ups).
     const many = Array.from({ length: 250 }, (_, i) => `Alt${String(i).padStart(3, '0')}`);
     await env.DB.batch(
       many.flatMap((name, i) => [
@@ -303,7 +345,7 @@ describe('overflow into bot-owned follow-up messages', () => {
     );
     await env.DB.prepare('UPDATE board_post SET dirty = 1').run();
     const grown = await runCron();
-    expect(grown.results[0], JSON.stringify(grown)).toMatchObject({ messages_added: 1 });
+    expect(grown.results[0], JSON.stringify(grown)).toMatchObject({ messages_added: 2 });
     const ids = JSON.parse((await one<{ m: string }>("SELECT message_ids_json AS m FROM board_post WHERE tradeskill_id = (SELECT id FROM tradeskill WHERE name = 'Brewing')")).m);
     expect(ids.length).toBeGreaterThan(1);
     expect(post('Brewing')!.messages.size).toBe(ids.length);

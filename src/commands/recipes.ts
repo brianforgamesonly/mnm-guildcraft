@@ -5,10 +5,10 @@
 // /recipe writes this guild's correction layer (src/recipes.ts, migration 0009), never the shared recipe row.
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, memberTag, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, CORRECTED, correctionJoin, FACTION_MAX, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, type Character } from './character.ts';
-import { KNOWN_MARK } from './find.ts';
+import { fitLines, KNOWN_MARK } from './find.ts';
 import { postButton, postedReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { SELECT_MAX_OPTIONS, type Tradeskill } from './skills.ts';
 
@@ -275,7 +275,7 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
   const { results } = await c.db
     .prepare(
       `SELECT r.id, i.name AS item, t.name AS tradeskill, ${CORRECTED.acquisition} AS acquisition, ${CORRECTED.faction} AS faction,
-         group_concat(ch.name, ', ') AS who
+         json_group_array(json_object('name', ch.name, 'user', ch.owner_user_id, 'member', m.display_name)) AS who
        FROM character_recipe k JOIN character ch ON ch.id = k.character_id AND ch.deleted_at IS NULL
        JOIN member m ON m.guild_id = ch.guild_id AND m.discord_user_id = ch.owner_user_id AND m.status = 'active'
        JOIN recipe r ON r.id = k.recipe_id JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id
@@ -292,14 +292,24 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
 export const RARE_EMPTY =
   'No one has marked a reputation or discovery recipe as known yet. Officers set how a recipe is obtained with `/recipe source`; members then mark the ones they know with `/craft know` or the **I know this recipe** button on `/craft find`.';
 
+/** Knowers named per recipe line; the rest are counted (order 16: a knower is now a mention and a name, ~50 characters). */
+const WHO_MAX = 5;
+/** Order 16: "Annsmith <@id> (Ann), Bohammer <@id> (Bo)" from the query's JSON list of who marked it known, by character name. */
+export function whoText(json: string): string {
+  const list = (JSON.parse(json) as { name: string; user: string; member: string }[]).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
+  const shown = list.slice(0, WHO_MAX).map((w) => `${md(w.name)} ${memberTag(w.user, w.member)}`);
+  return [...shown, ...(list.length > WHO_MAX ? [`+${list.length - WHO_MAX} more`] : [])].join(', ');
+}
+
 function rareEmbed(list: KnownRare[], page: number, skill: string | null): Embed {
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const lines = list
     .slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-    .map((r) => `**${md(r.item)}** · ${r.tradeskill} · ${ACQUISITION_LABEL[r.acquisition]}${r.faction ? ` (${md(r.faction)})` : ''}: ${md(r.who)}`);
+    .map((r) => `**${md(r.item)}** · ${r.tradeskill} · ${ACQUISITION_LABEL[r.acquisition]}${r.faction ? ` (${md(r.faction)})` : ''}: ${whoText(r.who)}`);
   return {
     title: truncate(`Reputation and discovery recipes${skill ? ` · ${skill}` : ''}: ${list.length}`, EMBED_LIMITS.title),
-    description: truncate(lines.length ? lines.join('\n') : RARE_EMPTY, EMBED_LIMITS.description),
+    // Whole lines only: a cut line could split a mention (order 16).
+    description: lines.length ? fitLines(lines, PAGE_SIZE, EMBED_LIMITS.description) : RARE_EMPTY,
     footer: { text: `Page ${page + 1} of ${pages}` },
   };
 }

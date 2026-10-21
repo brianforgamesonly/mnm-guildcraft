@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport, type WikiData } from '../../scripts/import/core.ts';
 import { KNOWN_MARK, loadFind } from '../../src/commands/find.ts';
-import { RARE_EMPTY, parseComponents, resolveRecipe } from '../../src/commands/recipes.ts';
+import { RARE_EMPTY, parseComponents, resolveRecipe, whoText } from '../../src/commands/recipes.ts';
 import { crafterTier } from '../../src/crafters.ts';
 import { ACQUISITIONS } from '../../src/recipes.ts';
 import migration0009 from '../../migrations/0009_corrections_reports_images.sql?raw';
@@ -178,7 +178,7 @@ describe('/recipe source (officers; the guild correction layer)', () => {
     expect(s.data.content).toMatch(/^Saved for this server: \*\*Copper Sword · Blacksmithing · trivial 20\*\* is now \*\*Reputation\*\* \(Test Faction\)/);
     const r = await find('Copper Sword');
     const fields = r.data.embeds![1] as any;
-    expect(fields.fields.map((f: any) => `${f.name} = ${f.value}`)).toEqual([`Reliable (Blacksmithing 20+) · 1 = **Annsmith** 25 ${KNOWN_MARK}`, 'Has skill, needs reputation (Test Faction) · 1 = **Bohammer** 40']);
+    expect(fields.fields.map((f: any) => `${f.name} = ${f.value}`)).toEqual([`Reliable (Blacksmithing 20+) · 1 = **Annsmith** 25 ${KNOWN_MARK} · <@${ANN}> (Global ${ANN})`, `Has skill, needs reputation (Test Faction) · 1 = **Bohammer** 40 · <@${BO}> (Global ${BO})`]);
     expect(fields.description).toContain('**Reputation recipe** (Test Faction): only characters who marked it known');
     // The shared recipe row is untouched: another guild still sees Unknown.
     expect(await one('SELECT acquisition, faction FROM recipe WHERE id = ?', swordRecipe)).toEqual({ acquisition: 'unknown', faction: null });
@@ -245,6 +245,13 @@ describe('one correction rule (order 10, ITEM 1.3)', () => {
 });
 
 describe('/roster recipes', () => {
+  it('order 16: who knows it, by character name, five named and the rest counted', () => {
+    const who = ['eve', 'Bob', 'carl', 'Al', 'dan', 'Fay', 'gus'].map((name, i) => ({ name, user: `10000000000000000${i}`, member: `M${i}` }));
+    expect(whoText(JSON.stringify(who))).toBe(
+      'Al <@100000000000000003> (M3), Bob <@100000000000000001> (M1), carl <@100000000000000002> (M2), dan <@100000000000000004> (M4), eve <@100000000000000000> (M0), +2 more',
+    );
+  });
+
   it('explains itself when empty, then lists known reputation and discovery recipes and who knows them', async () => {
     const empty = await send(cmd(ann, 'roster', 'recipes'));
     expect(empty.data.embeds![0].description).toBe(RARE_EMPTY);
@@ -253,7 +260,7 @@ describe('/roster recipes', () => {
     expect((await send(cmd(ann, 'roster', 'recipes'))).data.embeds![0].description).toBe(RARE_EMPTY); // still Unknown: not rare
     await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: 'Red Mantle' }));
     const r = await send(cmd(ann, 'roster', 'recipes', { skill: 'Blacksmithing' }));
-    expect(r.data.embeds![0]).toMatchObject({ title: 'Reputation and discovery recipes · Blacksmithing: 1', description: '**Copper Sword** · Blacksmithing · Reputation (Red Mantle): Annsmith, Bohammer', footer: { text: 'Page 1 of 1' } });
+    expect(r.data.embeds![0]).toMatchObject({ title: 'Reputation and discovery recipes · Blacksmithing: 1', description: `**Copper Sword** · Blacksmithing · Reputation (Red Mantle): Annsmith <@${ANN}> (Global ${ANN}), Bohammer <@${BO}> (Global ${BO})`, footer: { text: 'Page 1 of 1' } });
     expect(r.data.components![0].components.map((b: any) => b.label)).toEqual(['◀ Previous', 'Next ▶', 'Post to channel']);
   });
 });

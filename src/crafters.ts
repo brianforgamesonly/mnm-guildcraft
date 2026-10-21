@@ -32,6 +32,9 @@ export function crafterTier(level: number, recipe: TierRecipe, knowsRecipe: bool
 export interface CrafterRow {
   recipe_id: number;
   character: string;
+  /** Order 16: the member, shown as a mention, and the name saved at their last command beside it. */
+  owner_user_id: string;
+  member: string;
   class: string | null;
   char_level: number | null;
   level: number;
@@ -43,7 +46,7 @@ export interface CrafterRow {
  * highest skill first. Removed characters (deleted_at) and departed members (status 'left') never appear.
  * Binds: ?2 guild id; `item` is the item id expression (default ?1).
  */
-export const craftersSql = (item = '?1') => `SELECT r.id AS recipe_id, c.name AS character, c.class, c.level AS char_level, cs.level,
+export const craftersSql = (item = '?1') => `SELECT r.id AS recipe_id, c.name AS character, c.owner_user_id, m.display_name AS member, c.class, c.level AS char_level, cs.level,
     EXISTS (SELECT 1 FROM character_recipe k WHERE k.character_id = c.id AND k.recipe_id = r.id) AS knows_recipe
   FROM recipe r
   JOIN character_skill cs ON cs.tradeskill_id = r.tradeskill_id

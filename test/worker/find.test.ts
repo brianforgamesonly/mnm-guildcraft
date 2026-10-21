@@ -11,6 +11,8 @@ import { as, auto, cmd, GUILD, send } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const ann = as(ANN);
+/** Order 16: every crafter line ends with the member's mention and saved name. */
+const TAG = ` · <@${ANN}> (Global ${ANN})`;
 const at = '2026-10-19T00:00:00Z';
 const WIKI = 'https://monstersandmemories.miraheze.org/wiki/';
 
@@ -130,7 +132,7 @@ describe('/craft find reply', () => {
     expect(card.footer.text).toMatch(/^Item data: Monsters and Memories Wiki, CC BY-SA 4\.0 · data test\d{3} \(2026-10-19\)$/);
     expect(rec.title).toBe('Blacksmithing · trivial 20');
     expect(rec.description).toBe(`2 × Bronze Scraps\n1 × Corroded Bronze Plate Boots\n\n${CONFIRM_NOTE}`);
-    expect(rec.fields).toEqual([{ name: 'Reliable (Blacksmithing 20+) · 1', value: '**Testchar** 25' }]);
+    expect(rec.fields).toEqual([{ name: 'Reliable (Blacksmithing 20+) · 1', value: `**Testchar** 25${TAG}` }]);
     const buttons = r.data.components![0].components;
     expect(buttons.map((b: any) => b.label)).toEqual(['Post to channel', 'Wiki', 'MnMdb', 'MNM Realm']);
     expect(buttons[1].url).toBe(`${WIKI}Tarnished_Bronze_Plate_Boots`);
@@ -140,7 +142,7 @@ describe('/craft find reply', () => {
 
   it('Copper Axe (30): Testchar still learning; Bronze Plate Boots (125): further below 1', async () => {
     const axe = (await find('copper axe')).data.embeds![1] as any;
-    expect(axe.fields).toEqual([{ name: 'Still learning (Blacksmithing 5–29) · 1', value: '**Testchar** 25' }]);
+    expect(axe.fields).toEqual([{ name: 'Still learning (Blacksmithing 5–29) · 1', value: `**Testchar** 25${TAG}` }]);
     const card = (await find('Copper Axe')).data.embeds![0] as any;
     expect(card.fields.find((f: any) => f.name === 'Damage').value).toBe('9 / 40 delay · SLA');
     const boots = (await find('Bronze Plate Boots')).data.embeds![1] as any;
@@ -167,10 +169,10 @@ describe('/craft find reply', () => {
     const [, a, b] = r.data.embeds as any[];
     expect(r.data.embeds).toHaveLength(3);
     expect(a.title).toBe('Recipe 1 of 2: Tailoring · trivial 12');
-    expect(a.fields).toEqual([{ name: 'Still learning (Tailoring 0–11) · 1', value: '**Testchar** 3' }]);
+    expect(a.fields).toEqual([{ name: 'Still learning (Tailoring 0–11) · 1', value: `**Testchar** 3${TAG}` }]);
     expect(b.title).toBe('Recipe 2 of 2: Tailoring · trivial unknown');
     expect(b.description.split('\n').slice(0, 2)).toEqual(['3 × Bronze Scraps', 'plus 2 unknown ingredients']);
-    expect(b.fields).toEqual([{ name: 'Trivial unknown: everyone with Tailoring · 1', value: '**Testchar** 3' }]);
+    expect(b.fields).toEqual([{ name: 'Trivial unknown: everyone with Tailoring · 1', value: `**Testchar** 3${TAG}` }]);
   });
 
   it('a stub result shows its name only: no icon, no stats, no links', async () => {
@@ -194,7 +196,7 @@ describe('/craft find reply', () => {
     await env.DB.prepare("UPDATE character SET deleted_at = ? WHERE name = 'Other000'").bind(at).run();
     await env.DB.prepare("UPDATE member SET status = 'left' WHERE discord_user_id = (SELECT owner_user_id FROM character WHERE name = 'Other001')").run();
     const rec = (await find('Tarnished Bronze Plate Boots')).data.embeds![1] as any;
-    expect(rec.fields).toEqual([{ name: 'Reliable (Blacksmithing 20+) · 1', value: '**Testchar** 25' }]);
+    expect(rec.fields).toEqual([{ name: 'Reliable (Blacksmithing 20+) · 1', value: `**Testchar** 25${TAG}` }]);
   });
 
   it('overflow: 200 crafters stay inside every embed limit, with "+M more"', async () => {

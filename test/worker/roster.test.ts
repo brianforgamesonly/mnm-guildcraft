@@ -36,6 +36,9 @@ beforeEach(async () => {
 });
 
 const lines = (r: any) => (r.data.embeds[0].description as string).split('\n');
+/** Order 16: the member beside each character: seed()'s i-th member, and Ann (her saved name is her global name). */
+const seeded = (i: number) => `<@3000000000000${String(i).padStart(5, '0')}> (m${i})`;
+const ANN_TAG = `<@${ANN}> (Global ${ANN})`;
 
 describe('/roster skill', () => {
   it('ranked by skill level, 15 per page; Previous/Next page across 33 characters; each press a new interaction', async () => {
@@ -45,9 +48,9 @@ describe('/roster skill', () => {
     expect(r.data.flags).toBe(64);
     expect(r.data.embeds![0].title).toBe('Blacksmithing: 33 characters');
     expect(lines(r)).toHaveLength(PAGE_SIZE);
-    expect(lines(r)[0]).toBe('**1.** **Smith01** 32 · WAR level 10');
+    expect(lines(r)[0]).toBe(`**1.** **Smith01** 32 · WAR level 10 · ${seeded(0)}`);
     // A tie at 25 with Smith08 is ordered by name.
-    expect(lines(r).slice(7, 9)).toEqual(['**8.** **Smith08** 25 · WAR level 10', '**9.** **Testchar** 25 · CLR level 12']);
+    expect(lines(r).slice(7, 9)).toEqual([`**8.** **Smith08** 25 · WAR level 10 · ${seeded(7)}`, `**9.** **Testchar** 25 · CLR level 12 · ${ANN_TAG}`]);
     const nav = r.data.components![0].components;
     expect(nav.map((b: any) => [b.label, !!b.disabled])).toEqual([['◀ Previous', true], ['Next ▶', false], ['Post to channel', false]]);
 
@@ -57,7 +60,7 @@ describe('/roster skill', () => {
     expect((p2.data as any).embeds[0].footer.text).toBe('Page 2 of 3');
     const p3 = await send(button(ann, p2.data.components![0].components[1].custom_id));
     expect(lines(p3)).toHaveLength(3);
-    expect(lines(p3).at(-1)).toBe('**33.** **Smith32** 1 · WAR level 10');
+    expect(lines(p3).at(-1)).toBe(`**33.** **Smith32** 1 · WAR level 10 · ${seeded(31)}`);
     expect(p3.data.components![0].components[1].disabled).toBe(true);
     const back = await send(button(ann, p3.data.components![0].components[0].custom_id));
     expect((back.data as any).embeds[0].footer.text).toBe('Page 2 of 3');
@@ -74,7 +77,7 @@ describe('/roster skill', () => {
     const sw = await send(select(ann, sel.custom_id, [tailor]));
     expect(sw.type).toBe(7);
     expect((sw.data as any).embeds[0].title).toBe('Tailoring: 3 characters at 3+');
-    expect(lines(sw)[0]).toBe('**1.** **Smith03** 52 · WAR level 10');
+    expect(lines(sw)[0]).toBe(`**1.** **Smith03** 52 · WAR level 10 · ${seeded(2)}`);
   });
 
   it('removed characters and departed members are left out', async () => {
@@ -82,7 +85,7 @@ describe('/roster skill', () => {
     await env.DB.prepare("UPDATE character SET deleted_at = ? WHERE name = 'Smith01'").bind(at).run();
     await env.DB.prepare("UPDATE member SET status = 'left' WHERE discord_user_id = (SELECT owner_user_id FROM character WHERE name = 'Smith02')").run();
     const r = await send(cmd(ann, 'roster', 'skill', { skill: 'Blacksmithing' }));
-    expect(lines(r)).toEqual(['**1.** **Smith03** 1 · WAR level 10']);
+    expect(lines(r)).toEqual([`**1.** **Smith03** 1 · WAR level 10 · ${seeded(2)}`]);
   });
 
   it('Post to channel posts the current page publicly, without the paging controls', async () => {
@@ -110,7 +113,7 @@ describe('/roster member', () => {
     await send(cmd(as(BO), 'craft', 'me')); // BO's first command carries the one-time welcome
     const r = await send(cmd(as(BO), 'roster', 'member', { member: ANN }));
     expect(r.data.flags).toBe(64);
-    expect(r.data.content).toBe(`<@${ANN}>: 2 characters`);
+    expect(r.data.content).toBe(`${ANN_TAG}: 2 characters`);
     expect(r.data.embeds!.map((e) => [e.title, e.description])).toEqual([
       ['Testchar (main)', 'CLR level 12\n**Blacksmithing** 25'],
       ['Alt', '**Tailoring** 7'],
@@ -118,9 +121,10 @@ describe('/roster member', () => {
   });
 
   it('a member with no characters, or who left, shows none', async () => {
+    // Bo has never used GuildCraft: no saved name, so the mention alone.
     expect((await send(cmd(ann, 'roster', 'member', { member: BO }))).data.content).toBe(`<@${BO}> has no characters on the roster.`);
     await env.DB.prepare("UPDATE member SET status = 'left' WHERE discord_user_id = ?").bind(ANN).run();
-    expect((await send(cmd(as(BO), 'roster', 'member', { member: ANN }))).data.content).toBe(`<@${ANN}> has no characters on the roster.`);
+    expect((await send(cmd(as(BO), 'roster', 'member', { member: ANN }))).data.content).toBe(`${ANN_TAG} has no characters on the roster.`);
   });
 });
 
@@ -130,7 +134,9 @@ describe('/roster top', () => {
     await send(cmd(ann, 'craft', 'set', { skill: 'Blacksmithing', level: 25 }));
     const r = await send(cmd(ann, 'roster', 'top'));
     expect(r.data.flags).toBe(64);
-    expect(r.data.embeds![0].description).toBe('**Blacksmithing**: Testchar 25 · Smith01 5 · Smith02 4\n**Tailoring**: Smith03 52 · Smith02 51 · Smith01 50');
+    expect(r.data.embeds![0].description).toBe(
+      `**Blacksmithing**: Testchar 25 ${ANN_TAG} · Smith01 5 ${seeded(0)} · Smith02 4 ${seeded(1)}\n**Tailoring**: Smith03 52 ${seeded(2)} · Smith02 51 ${seeded(1)} · Smith01 50 ${seeded(0)}`,
+    );
     expect(r.data.components![0].components[0].label).toBe('Post to channel');
   });
 });

@@ -1,6 +1,6 @@
 // The roster board's posts (order 5, PRD FR-5 and FR-9), rendered from rows with no I/O, so the Worker,
 // the tests and the read-only dry run (scripts/board/run.ts) all render the same way.
-import { EMBED_LIMITS, md, plural, truncate, type Embed } from '../discord.ts';
+import { EMBED_LIMITS, md, memberTag, NO_PINGS, plural, truncate, type AllowedMentions, type Embed } from '../discord.ts';
 
 /** One ranked line: a live character's level in one tradeskill (removed characters and departed members are filtered in SQL). */
 export interface BoardLine {
@@ -15,12 +15,13 @@ export interface BoardLine {
 /** What one bot-owned message of a post carries. */
 export interface BoardMessage {
   embeds: Embed[];
-  allowed_mentions: { parse: string[] };
+  allowed_mentions: AllowedMentions;
 }
 
 const DAY_MS = 86_400_000;
 export const BOARD_COLOR = 0x8a6d3b;
-const NO_MENTIONS = { parse: [] as string[] };
+/** Every board create and edit (first post, rewrites, the nightly run, a rebuild) sends this: the board never pings. */
+const NO_MENTIONS = NO_PINGS;
 
 /** "2 characters (1 member)": the count lives in the body, never the title (thread renames are tightly rate-limited). */
 export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
@@ -29,9 +30,11 @@ export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
 }
 
 /**
- * A tradeskill post: rank, character, member display name, skill level, and a stale marker after
- * stale_days. Lines fill embeds of at most 4,096 description characters, and messages of at most 6,000
- * embed characters and 10 embeds (EMBED_LIMITS); what does not fit goes to further bot-owned messages.
+ * A tradeskill post: rank, character, the member (a mention that pings nobody, with the saved name beside it; order 16),
+ * skill level, and a stale marker after stale_days. Lines fill embeds of at most 4,096 description characters, and
+ * messages of at most 6,000 embed characters and 10 embeds (EMBED_LIMITS); what does not fit goes to further bot-owned
+ * messages. The split is measured on each line's own length, so longer lines (a mention is 21-22 characters) simply
+ * move to the next embed or message sooner.
  */
 export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: number, nowMs: number): BoardMessage[] {
   const staleBefore = nowMs - staleDays * DAY_MS;
@@ -39,7 +42,7 @@ export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: nu
   const rows = lines.map((l, i) => {
     const stale = Date.parse(l.updated_at) < staleBefore;
     anyStale ||= stale;
-    return `**${i + 1}.** **${md(l.character)}** · ${md(l.member)} · ${l.level}${stale ? ' · *stale*' : ''}`;
+    return `**${i + 1}.** **${md(l.character)}** · ${memberTag(l.owner_user_id, l.member)} · ${l.level}${stale ? ' · *stale*' : ''}`;
   });
   const title = truncate(skill, EMBED_LIMITS.title);
   const head = lines.length
