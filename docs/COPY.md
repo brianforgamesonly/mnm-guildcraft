@@ -723,5 +723,5 @@ Every line below is DRAFT until approved. \<label> is a filter as the member set
 | src/recipes.ts:29 | Item report issue: Wrong class | DRAFT |
 | src/commands/reports.ts:43 | Review card title: Item report: \<item> | DRAFT |
 | src/commands/reports.ts:47 | Review card footer: Report #\<n> · item data comes from the community wiki: correct it there, then mark it fixed | DRAFT |
-| src/commands/help.ts:31 | `/craft help`: `/gear find` find gear for your class by slot, weapon type, AC, ratio, stats and source | DRAFT |
+| src/commands/help.ts:31 | `/craft help`: `/gear find` — find gear for your class by slot, weapon type, AC, ratio, stats and source | APPROVED (owner, by exception; approved in substance 2026-10-20, order 14) |
 | src/board/render.ts:103 | Board index: `/gear find` gear for your class, by slot, stats and source | DRAFT |

@@ -1,0 +1,69 @@
+# Work order 14, ITEM 1: can GuildCraft read the community wiki without anyone's home computer? The same two wiki API
+# requests (scripts/probe/wiki.ts) from a GitHub-hosted runner and from Cloudflare's network. Dispatch only, never
+# scheduled; kept for re-tests. A refusal (403, 429, 503) is the result being measured: the probe steps exit 0 and
+# report it. No retry beyond scripts/probe/wiki.ts's one, on a network error only.
+# Expected: <1 billed minute per job (public repository: free). Cloudflare: one temporary Worker
+# (guildcraft-wiki-probe, scripts/probe/wrangler.jsonc: no bindings, routes or cron), one request, then deleted.
+name: wiki-probe
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  github:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: The two wiki requests, from a GitHub-hosted runner
+        run: node scripts/probe/run.ts --path github
+  cloudflare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    concurrency: wiki-probe-worker
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      PROBE_CONFIG: scripts/probe/wrangler.jsonc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Deploy the temporary Worker, with this run's one-time token compiled in
+        id: deploy
+        shell: bash
+        run: |
+          token=$(openssl rand -hex 24)
+          echo "::add-mask::$token"
+          printf '%s' "$token" > "$RUNNER_TEMP/probe-token"
+          npx wrangler deploy --config "$PROBE_CONFIG" --define "PROBE_TOKEN:\"$token\"" | tee "$RUNNER_TEMP/deploy.log"
+          url=$(grep -oE 'https://guildcraft-wiki-probe\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)
+          test -n "$url" || { echo "::error::no workers.dev URL in the deploy output"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: Call it once (the two wiki requests leave from Cloudflare's network)
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # A fixed pause for the new workers.dev script to go live, not a poll: the Worker is called exactly once.
+          sleep 15
+          # Up to 2 × 20 s per wiki request plus the 10 s retry pause (scripts/probe/wiki.ts), twice: within 150 s.
+          code=$(curl -sS --max-time 150 -o "$RUNNER_TEMP/cloudflare.json" -w '%{http_code}' "$URL/probe?token=$(cat "$RUNNER_TEMP/probe-token")" || echo "curl exit $?")
+          echo "The probe Worker answered HTTP $code"
+          test "$code" = 200 || { echo "::error::the probe Worker did not answer (HTTP $code)"; head -c 300 "$RUNNER_TEMP/cloudflare.json"; exit 1; }
+          node scripts/probe/run.ts --from "$RUNNER_TEMP/cloudflare.json"
+      - name: Delete the temporary Worker, even if a step failed, and confirm it is gone
+        if: always()
+        shell: bash
+        run: |
+          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
+          npx wrangler delete --config "$PROBE_CONFIG" --force || echo "::warning::wrangler delete exited $?"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-probe")
+          echo "Cloudflare API, the probe script after the delete: HTTP $code (404 = deleted)"
+          test "$code" = 404
