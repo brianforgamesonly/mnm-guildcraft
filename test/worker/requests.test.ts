@@ -308,6 +308,31 @@ describe('/craft request: the unsent request, then Send', () => {
     expect(await count('audit_log', "action = 'request.create'")).toBe(1);
   });
 
+  it('Send pressed twice opens one thread and pings once (the request is claimed before any Discord call)', async () => {
+    await setupRequests();
+    await notify(bo, 'Blacksmithing');
+    const unsent = await request(ann, 'Copper Plate Breastplate');
+    const id = button(unsent, 'Send request').custom_id;
+    // The second press arrives while the first is still opening the thread: the claim has already happened.
+    let second: any = null;
+    const real = botApi.handle!;
+    botApi.handle = async (method, path, body) => {
+      if (method === 'POST' && path === `/channels/${REQ}/threads` && second === null) {
+        second = 'pending';
+        const r = await env.DB.prepare("SELECT status, thread_id FROM craft_request WHERE status <> 'closed'").first<{ status: string; thread_id: string | null }>();
+        second = r; // what a second press would load: no longer unsent
+      }
+      return real(method, path, body);
+    };
+    const a = await send(press(ann, id), TOKEN);
+    expect(second).toEqual({ status: 'open', thread_id: null });
+    const b = await send(press(ann, id), TOKEN);
+    expect(a.data.content).toMatch(/^Sent:/);
+    expect(b.data.content).toBe('That request was already sent or discarded. Run `/craft request` to start another.');
+    expect(threads.size).toBe(1);
+    expect(await count('audit_log', "action = 'request.create'")).toBe(1);
+  });
+
   it('Request a craft on a /craft find card posted to a channel answers privately with a new message', async () => {
     await setupRequests();
     await notify(bo, 'Blacksmithing');
@@ -439,7 +464,7 @@ describe('the thread: claim, done, cancel', () => {
 describe('expiry, through the */15 sweep (no extra cron)', () => {
   it('nothing claimed in 14 days: closed with a note (request.expire), locked; a claimed request stays open until 30 days of no activity', async () => {
     await sendPlate();
-    await env.DB.prepare("UPDATE craft_request SET created_at = ?").bind(new Date(Date.now() - 15 * 86_400_000).toISOString()).run();
+    await env.DB.prepare('UPDATE craft_request SET created_at = ?1, opened_at = ?1').bind(new Date(Date.now() - 15 * 86_400_000).toISOString()).run();
     await env.DB.prepare("UPDATE audit_log SET created_at = ? WHERE action LIKE 'request.%'").bind(new Date(Date.now() - 15 * 86_400_000).toISOString()).run();
     const swept = await runCron();
     expect(swept).toMatchObject({ expired: 1 });
@@ -449,11 +474,29 @@ describe('expiry, through the */15 sweep (no extra cron)', () => {
     expect(await count('audit_log', "action = 'request.expire' AND actor = 'sweep'")).toBe(1);
   });
 
+  it('the 14 days count from when it was sent, not from when the member started it', async () => {
+    await setupRequests();
+    await notify(bo, 'Blacksmithing');
+    const unsent = await request(ann, 'Copper Plate Breastplate');
+    await env.DB.prepare('UPDATE craft_request SET created_at = ?').bind(new Date(Date.now() - 20 * 86_400_000).toISOString()).run();
+    await send(press(ann, button(unsent, 'Send request').custom_id), TOKEN);
+    expect(await runCron()).toMatchObject({ open: 1, expired: 0 });
+  });
+
+  it('a thread deleted in Discord closes its request; it is not retried every sweep', async () => {
+    await sendPlate();
+    threads.delete(thread().id);
+    expect(await runCron()).toMatchObject({ expired: 1 });
+    expect(await one('SELECT status, close_reason FROM craft_request')).toEqual({ status: 'closed', close_reason: 'cancelled' });
+    logs.length = 0;
+    expect(await runCron()).toBeNull(); // nothing left to look at, so no log line
+  });
+
   it('claimed: open at 15 days; closed after 30 days with no activity', async () => {
     await sendPlate();
     await send(press(bo, buttons({ data: firstMessage(thread()) })[0].custom_id), TOKEN);
     const ago = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
-    await env.DB.prepare('UPDATE craft_request SET created_at = ?').bind(ago(31)).run();
+    await env.DB.prepare('UPDATE craft_request SET created_at = ?1, opened_at = ?1').bind(ago(31)).run();
     await env.DB.prepare("UPDATE audit_log SET created_at = ? WHERE action LIKE 'request.%'").bind(ago(15)).run();
     expect(await runCron()).toMatchObject({ expired: 0 });
     await env.DB.prepare("UPDATE audit_log SET created_at = ? WHERE action LIKE 'request.%'").bind(ago(31)).run();
@@ -493,12 +536,12 @@ describe('writes per action (D1 rows_written, measured)', () => {
     await send(press(ann, buttons({ data: firstMessage(thread()) }).find((b: any) => b.label === 'Cancel').custom_id), TOKEN);
     const third = await request(ann, 'Copper Plate Breastplate');
     await send(press(ann, button(third, 'Send request').custom_id), TOKEN);
-    await env.DB.prepare("UPDATE craft_request SET created_at = ? WHERE status = 'open'").bind(new Date(Date.now() - 15 * 86_400_000).toISOString()).run();
+    await env.DB.prepare("UPDATE craft_request SET opened_at = ? WHERE status = 'open'").bind(new Date(Date.now() - 15 * 86_400_000).toISOString()).run();
     const swept = await runCron();
     const byAction: Record<string, number> = { ...Object.fromEntries(requestLogs().map((l) => [l.action, l.rows_written])), expire: swept.rows_written };
-    // Measured here (workerd's D1, index writes included), 2026-10-21: notify 5, compose 5, create 7, claim 5, done 7 (it
-    // closed the request), cancel 7 (closed), expire 7.
-    expect(byAction).toEqual({ notify: 5, compose: 5, create: 7, claim: 5, done: 7, cancel: 7, expire: 7 });
+    // Measured here (workerd's D1, index writes included), 2026-10-21: notify 5, compose 5, create 8 (with its claim
+    // before the thread), claim 5, done 7 (it closed the request), cancel 7 (closed), expire 7.
+    expect(byAction).toEqual({ notify: 5, compose: 5, create: 8, claim: 5, done: 7, cancel: 7, expire: 7 });
     for (const a of ['compose', 'create', 'claim', 'done', 'cancel', 'expire']) {
       expect(byAction[a], a).toBeGreaterThan(0);
       expect(byAction[a], a).toBeLessThanOrEqual(12);

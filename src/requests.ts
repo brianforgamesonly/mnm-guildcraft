@@ -56,6 +56,8 @@ export interface RequestRow {
   message_id: string | null;
   thread_name: string | null;
   created_at: string;
+  /** When it was sent (the thread's clock: expiry counts from here). */
+  opened_at: string | null;
   /** The requester's main character's name now (not stored: names change). */
   main: string | null;
   /** The latest request.* audit row's time. */
@@ -75,7 +77,7 @@ export interface ItemRow {
 
 const MAIN_SQL = `(SELECT name FROM character ch WHERE ch.guild_id = r.guild_id AND ch.owner_user_id = r.requester AND ch.deleted_at IS NULL ORDER BY ch.is_main DESC, ch.created_at, ch.id LIMIT 1)`;
 const ACTIVITY_SQL = `(SELECT max(a.created_at) FROM audit_log a WHERE a.guild_id = r.guild_id AND a.target = 'request:' || r.id)`;
-export const REQUEST_COLS = `r.id, r.guild_id, r.requester, r.note, r.status, r.close_reason, r.thread_id, r.message_id, r.thread_name, r.created_at, ${MAIN_SQL} AS main, ${ACTIVITY_SQL} AS last_activity`;
+export const REQUEST_COLS = `r.id, r.guild_id, r.requester, r.note, r.status, r.close_reason, r.thread_id, r.message_id, r.thread_name, r.created_at, r.opened_at, ${MAIN_SQL} AS main, ${ACTIVITY_SQL} AS last_activity`;
 export const ITEMS_SQL = `SELECT q.request_id, q.position, q.item_id, i.name, q.quantity, q.status, q.claimer, q.crafters_json
   FROM craft_request_item q JOIN item i ON i.id = q.item_id WHERE q.request_id IN (SELECT value FROM json_each(?)) ORDER BY q.request_id, q.position`;
 
@@ -321,8 +323,8 @@ export async function syncThread(api: BotApi, req: RequestRow, items: ItemRow[],
     const e = await inThread(api, thread, 'PATCH', `/channels/${thread}/messages/${req.message_id}`, body(NO_PINGS), r);
     if (!e.ok) r.errors.push(`edit: ${e.status} ${e.code ?? ''}`.trim());
   } else {
-    // The first message never went out (its send failed): post it now, pinging the crafters it lists.
-    const p = await inThread<{ id: string }>(api, thread, 'POST', `/channels/${thread}/messages`, body(pingOnly([...new Set(items.flatMap(crafters))])), r);
+    // The first message never went out (its send failed): post it now, pinging the crafters it lists (nobody once closed).
+    const p = await inThread<{ id: string }>(api, thread, 'POST', `/channels/${thread}/messages`, body(req.status === 'closed' ? NO_PINGS : pingOnly([...new Set(items.flatMap(crafters))])), r);
     if (p.ok) r.message_id = p.body.id;
     else r.errors.push(`first message: ${p.status} ${p.code ?? ''}`.trim());
   }
@@ -350,9 +352,16 @@ export async function syncThread(api: BotApi, req: RequestRow, items: ItemRow[],
   return r;
 }
 
-/** The row's view of Discord after a sync (thread_name and message_id). */
+/**
+ * The row's view of Discord after a sync (thread_name and message_id). A sync that failed anywhere but the rename (an
+ * edit, a notice, the close) clears thread_name, so the sweep's next run sees the thread as behind and syncs it again.
+ */
 export const syncWrite = (db: D1Database, req: RequestRow, s: SyncResult) =>
-  db.prepare('UPDATE craft_request SET thread_name = coalesce(?, thread_name), message_id = coalesce(?, message_id) WHERE id = ?').bind(s.thread_name, s.message_id, req.id);
+  s.errors.length > (s.rename_refused ? 1 : 0)
+    ? db.prepare('UPDATE craft_request SET thread_name = NULL, message_id = coalesce(?, message_id) WHERE id = ?').bind(s.message_id, req.id)
+    : db.prepare('UPDATE craft_request SET thread_name = coalesce(?, thread_name), message_id = coalesce(?, message_id) WHERE id = ?').bind(s.thread_name, s.message_id, req.id);
+/** Whether a sync must be written back (a new name or message id, or a failure to retry). */
+export const syncChanged = (req: RequestRow, s: SyncResult) => !!s.thread_name || s.message_id !== req.message_id || s.errors.length > (s.rename_refused ? 1 : 0);
 
 /** An audit row written only when the statement just before it in the batch changed a row (a lost race records nothing). */
 export function auditIfChanged(db: D1Database, guildId: string, actor: string, action: string, tgt: string, before: unknown, after: unknown): D1PreparedStatement {
@@ -387,10 +396,15 @@ export interface SweepResult {
   rows_written: number;
 }
 
-/** Open requests, and closed ones whose thread name still lags: the only rows the sweep looks at (one query when idle). */
+/**
+ * Open requests, and closed ones whose thread is still behind (its name, or a failed sync: thread_name NULL): the only
+ * rows the sweep looks at (one query when idle). In random order, so a run that stops on the call budget does not leave
+ * the same requests behind every time; an idle open request costs no Discord call, so there is no row cap.
+ */
 const SWEEP_SQL = `SELECT ${REQUEST_COLS} FROM craft_request r
-  WHERE r.thread_id IS NOT NULL AND (r.status = 'open' OR (r.status = 'closed' AND r.closed_at > ?1 AND r.thread_name NOT LIKE '[${PREFIX.done}]%' AND r.thread_name NOT LIKE '[${PREFIX.cancelled}]%'))
-  ORDER BY r.id LIMIT 50`;
+  WHERE r.thread_id IS NOT NULL AND (r.status = 'open' OR (r.status = 'closed' AND r.closed_at > ?1
+    AND (r.thread_name IS NULL OR (r.thread_name NOT LIKE '[${PREFIX.done}]%' AND r.thread_name NOT LIKE '[${PREFIX.cancelled}]%'))))
+  ORDER BY random()`;
 
 const RESERVE = 3;
 
@@ -421,14 +435,15 @@ export async function sweepRequests(db: D1Database, api: BotApi, nowMs: number):
     if (req.status === 'open') r.open++;
     const names = namesIn(req.guild_id);
     let notice: { content: string; ping: string[] } | undefined;
-    // Expiry: nothing claimed in 14 days, or no activity in 30.
+    // Expiry, from when it was sent: nothing claimed in 14 days, or no activity in 30.
     if (req.status === 'open') {
-      const created = Date.parse(req.created_at);
-      const last = Math.max(created, req.last_activity ? Date.parse(req.last_activity) : 0);
-      const untouched = items.every((i) => i.status === 'open');
-      const reason: CloseReason | null = untouched && nowMs - created >= EXPIRE_UNCLAIMED_MS ? 'expired' : nowMs - last >= EXPIRE_INACTIVE_MS ? 'inactive' : null;
+      const sent = Date.parse(req.opened_at ?? req.created_at);
+      const last = Math.max(sent, req.last_activity ? Date.parse(req.last_activity) : 0);
+      const unclaimed = !items.some((i) => i.status === 'claimed' || i.status === 'done');
+      const reason: CloseReason | null = unclaimed && nowMs - sent >= EXPIRE_UNCLAIMED_MS ? 'expired' : nowMs - last >= EXPIRE_INACTIVE_MS ? 'inactive' : null;
       if (reason) {
-        if (!canCall(4)) break;
+        // Room for the close and its note too (the sync below), or it waits for the next run.
+        if (!canCall(5)) break;
         const res = await db.batch(closeStatements(db, req, reason, 'sweep', 'request.expire'));
         r.rows_written += res.reduce((n, x) => n + (x.meta.rows_written ?? 0), 0);
         if (res[1].meta.changes !== 1) continue;
@@ -459,7 +474,16 @@ export async function sweepRequests(db: D1Database, api: BotApi, nowMs: number):
         if (!canCall(1)) break;
         const u = await api.call('PATCH', `/channels/${req.thread_id}`, { archived: false });
         if (u.ok) r.unarchived++;
-        else r.errors.push(`unarchive request ${req.id}: ${u.status} ${u.code ?? ''}`.trim());
+        else if (u.code === UNKNOWN_CHANNEL) {
+          // The thread was deleted in Discord: the request closes (nothing to post to), and is not looked at again.
+          const res = await db.batch([
+            ...closeStatements(db, req, 'cancelled', 'sweep', 'request.expire'),
+            db.prepare('UPDATE craft_request SET thread_name = ? WHERE id = ?').bind(threadName(PREFIX.cancelled, items, req.main), req.id),
+          ]);
+          r.rows_written += res.reduce((n, x) => n + (x.meta.rows_written ?? 0), 0);
+          r.expired++;
+          continue;
+        } else r.errors.push(`unarchive request ${req.id}: ${u.status} ${u.code ?? ''}`.trim());
       } else if (info) {
         const due = archivesAt(info);
         if (due !== null && due - nowMs <= KEEP_ACTIVE_MS) {
@@ -479,7 +503,7 @@ export async function sweepRequests(db: D1Database, api: BotApi, nowMs: number):
       if (s.renamed) r.renamed++;
       if (s.rename_refused) r.rename_refused++;
       r.errors.push(...s.errors.map((e) => `request ${req.id}: ${e}`));
-      if (s.thread_name || s.message_id !== req.message_id) writes.push(syncWrite(db, req, s));
+      if (syncChanged(req, s)) writes.push(syncWrite(db, req, s));
     }
   }
   if (writes.length) {

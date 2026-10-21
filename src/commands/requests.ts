@@ -9,7 +9,7 @@ import { AUTO_ARCHIVE_MINUTES } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, mention, optBool, optInt, optString, pingOnly, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import {
-  auditIfChanged, closeStatements, crafters, involved, isEligible, ITEM_PREFIX, ITEMS_SQL, loadRequest, MAX_ADDED, MAX_ITEMS, MAX_OPEN_PER_MEMBER, MAX_QUANTITY, namesOf, NO_REQUEST_CHANNEL, NOTE_MAX, prefixOf,
+  auditIfChanged, closeStatements, syncChanged, crafters, involved, isEligible, ITEM_PREFIX, ITEMS_SQL, loadRequest, MAX_ADDED, MAX_ITEMS, MAX_OPEN_PER_MEMBER, MAX_QUANTITY, namesOf, NO_REQUEST_CHANNEL, NOTE_MAX, prefixOf,
   REQUEST_COLS, requestComponents, requestContent, routeItems, syncThread, syncWrite, target, threadName, whoCanView, UNSENT_MS, type Crafter, type ItemAction, type ItemRoute, type ItemRow, type Names, type RequestRow,
 } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
@@ -89,7 +89,11 @@ interface ItemPick {
 const ITEM_WITH_RECIPE = (guild: string) => `SELECT i.id, i.name FROM item i WHERE i.name_key = ?1 AND EXISTS (SELECT 1 FROM recipe r WHERE r.result_item_id = i.id AND ${visibleTo(guild)})`;
 
 async function openCount(c: Ctx): Promise<number> {
-  const r = await c.db.prepare("SELECT count(*) AS n FROM craft_request WHERE guild_id = ? AND requester = ? AND status = 'open'").bind(c.guild.id, c.userId).first<{ n: number }>();
+  // A claim whose thread was never written (its run died) stops counting after an hour (sendUnsent).
+  const r = await c.db
+    .prepare("SELECT count(*) AS n FROM craft_request WHERE guild_id = ? AND requester = ? AND status = 'open' AND (thread_id IS NOT NULL OR opened_at > ?)")
+    .bind(c.guild.id, c.userId, new Date(Date.now() - 3_600_000).toISOString())
+    .first<{ n: number }>();
   return r?.n ?? 0;
 }
 
@@ -248,7 +252,10 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
   const { req, items } = loaded;
   if ((await openCount(c)) >= MAX_OPEN_PER_MEMBER) return ephemeral(TOO_MANY_OPEN);
   const routes = await routeItems(c.db, c.guild.id, c.userId, items.map((i) => i.item_id), c.guild.learning_window);
-  const candidates = [...new Map(routes.flatMap((r) => r.eligible).map((x) => [x.userId, x])).values()];
+  // Each item's crafters in turn (its first, then the next item's first, ...), so the MAX_ADDED places are shared.
+  const byUser = new Map<string, Crafter>();
+  for (let k = 0; routes.some((r) => k < r.eligible.length); k++) for (const r of routes) if (r.eligible[k] && !byUser.has(r.eligible[k].userId)) byUser.set(r.eligible[k].userId, r.eligible[k]);
+  const candidates = [...byUser.values()];
   const noOne = (left: LeftOut[] = []) =>
     ephemeral(
       [
@@ -280,11 +287,26 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
     return noOne(left);
   }
 
+  // Claim the request before any thread exists: a second press of Send (the button works until this message changes)
+  // finds it no longer unsent, and the 5-open limit is checked in the same statement. A claim whose thread never got
+  // written (the run died) stops counting after an hour.
+  const openedAt = now();
+  const claimed = await c.db
+    .prepare(
+      `UPDATE craft_request SET status = 'open', opened_at = ?1 WHERE id = ?2 AND status = 'unsent'
+         AND (SELECT count(*) FROM craft_request WHERE guild_id = ?3 AND requester = ?4 AND status = 'open' AND (thread_id IS NOT NULL OR opened_at > ?5)) < ?6`,
+    )
+    .bind(openedAt, id, c.guild.id, c.userId, new Date(Date.now() - 3_600_000).toISOString(), MAX_OPEN_PER_MEMBER)
+    .run();
+  if (claimed.meta.changes !== 1) return ephemeral((await openCount(c)) >= MAX_OPEN_PER_MEMBER ? TOO_MANY_OPEN : 'That request was already sent or discarded.');
+  const unclaim = () => c.db.prepare("UPDATE craft_request SET status = 'unsent', opened_at = NULL WHERE id = ? AND status = 'open' AND thread_id IS NULL").bind(id).run();
+
   // The thread: private, members cannot invite others, the longest auto-archive time.
-  const open: RequestRow = { ...req, status: 'open' };
+  const open: RequestRow = { ...req, status: 'open', opened_at: openedAt };
   const name = threadName(prefixOf(open, items), items, req.main);
   const made = await api.call<{ id: string }>('POST', `/channels/${channel}/threads`, { name, type: 12, invitable: false, auto_archive_duration: AUTO_ARCHIVE_MINUTES });
   if (!made.ok) {
+    await unclaim();
     logAction('create', 0, api, { refused: `create ${made.status} ${made.code ?? ''}` });
     return ephemeral(`Sorry, Discord refused to open the thread in <#${channel}> (${made.status}). Nothing was sent; your request is kept, unsent. An admin can check \`/guildcraft setup requests:\`.`);
   }
@@ -308,13 +330,11 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
     allowed_mentions: pingOnly(sentTo.map((x) => x.userId)),
   });
   const res = await c.db.batch([
-    c.db
-      .prepare("UPDATE craft_request SET status = 'open', thread_id = ?, message_id = ?, thread_name = ?, opened_at = ? WHERE id = ? AND status = 'unsent'")
-      .bind(thread, first.ok ? first.body.id : null, name, now(), id),
     ...withCrafters.map((it) => c.db.prepare('UPDATE craft_request_item SET crafters_json = ? WHERE request_id = ? AND position = ?').bind(it.crafters_json, id, it.position)),
-    audit(c.db, c.guild.id, c.userId, 'request.create', target(id), null, { items: items.map((i) => ({ item: i.item_id, quantity: i.quantity })), added: sentTo.length, left_out: left.length }),
+    c.db.prepare('UPDATE craft_request SET thread_id = ?, message_id = ?, thread_name = ? WHERE id = ? AND thread_id IS NULL').bind(thread, first.ok ? first.body.id : null, name, id),
+    auditIfChanged(c.db, c.guild.id, c.userId, 'request.create', target(id), null, { items: items.map((i) => ({ item: i.item_id, quantity: i.quantity })), added: sentTo.length, left_out: left.length }),
   ]);
-  logAction('create', written(res), api, { items: items.length, added: sentTo.length, left_out: left.length });
+  logAction('create', written([claimed, ...res]), api, { items: items.length, added: sentTo.length, left_out: left.length });
   const lines = [
     `Sent: <#${thread}>. ${plural(sentTo.length, 'crafter')} added and pinged there.`,
     ...withCrafters.map((it) => `**${md(it.name)}** ×${it.quantity}: ${crafters(it).length ? crafters(it).map((u) => tagOf(names, u)).join(', ') : 'no crafter added'}`),
@@ -399,9 +419,13 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
   if (api) {
     const names = await namesOf(c.db, c.guild.id, involved(after, items));
     const s = await syncThread(api, after, items, names, { content: notice, ping });
-    if (s.thread_name || s.message_id !== after.message_id) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
+    if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
     logAction(auditAction.replace('request.', ''), rows, api, { closed, errors: s.errors });
-  } else logAction(auditAction.replace('request.', ''), rows, null, { closed, errors: ['no bot token'] });
+  } else {
+    // No way to reach Discord now: the sweep brings the thread up to date (thread_name cleared marks it behind).
+    rows += written(await c.db.batch([c.db.prepare('UPDATE craft_request SET thread_name = NULL WHERE id = ?').bind(req.id)]));
+    logAction(auditAction.replace('request.', ''), rows, null, { closed, errors: ['no bot token'] });
+  }
   return ephemeral(reply);
 }
 
@@ -410,7 +434,7 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
 export async function craftRequests(c: Ctx): Promise<MessageReply> {
   if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
   const { results: reqs } = await c.db
-    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE r.guild_id = ?1 AND r.status = 'open' AND (?3 = 1 OR r.requester = ?2) ORDER BY r.id LIMIT 25`)
+    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE r.guild_id = ?1 AND r.status = 'open' AND r.thread_id IS NOT NULL AND (?3 = 1 OR r.requester = ?2) ORDER BY r.id LIMIT 25`)
     .bind(c.guild.id, c.userId, c.officer ? 1 : 0)
     .all<RequestRow>();
   if (!reqs.length) return ephemeral(c.officer ? 'No open craft requests in this server.' : 'You have no open craft requests. `/craft request` starts one.');
@@ -422,7 +446,7 @@ export async function craftRequests(c: Ctx): Promise<MessageReply> {
   };
   const lines = [
     c.officer ? `**Open craft requests** (as an officer you see all ${reqs.length}${reqs.length === 25 ? '+' : ''}):` : '**Your open craft requests:**',
-    ...reqs.map((r) => `**#${r.id}** ${r.thread_id ? `<#${r.thread_id}>` : ''} · ${md(summary(r))} · ${prefixOf(r, items.filter((i) => i.request_id === r.id))}${c.officer ? ` · from ${tagOf(names, r.requester)}` : ''} · <t:${Math.floor(Date.parse(r.created_at) / 1000)}:R>`),
+    ...reqs.map((r) => `**#${r.id}** ${r.thread_id ? `<#${r.thread_id}>` : ''} · ${md(summary(r))} · ${prefixOf(r, items.filter((i) => i.request_id === r.id))}${c.officer ? ` · from ${tagOf(names, r.requester)}` : ''} · <t:${Math.floor(Date.parse(r.opened_at ?? r.created_at) / 1000)}:R>`),
   ];
   const select = {
     type: 3,
@@ -452,7 +476,7 @@ export async function cancelFromList(c: Ctx, values: string[]): Promise<MessageR
   if (api) {
     const names = await namesOf(c.db, c.guild.id, involved(after, items));
     const s = await syncThread(api, after, items, names, { content: `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}This request was cancelled by ${mention(c.userId)}, so this thread is now closed.`, ping });
-    if (s.thread_name || s.message_id !== after.message_id) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
+    if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
     logAction('cancel', rows, api, { errors: s.errors });
   } else logAction('cancel', rows, null);
   return updateMessage({ content: `Cancelled request #${req.id}${req.thread_id ? ` (<#${req.thread_id}>)` : ''}.`, components: [] });
