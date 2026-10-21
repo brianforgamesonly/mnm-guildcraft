@@ -234,3 +234,19 @@ export function rollHistory(history, entry, now) {
   const judged = invocations >= DROP_BOUND_MIN_N;
   return { history: all, drops, invocations, bound, judged, breach: judged && bound > DROP_BOUND_THRESHOLD };
 }
+
+/**
+ * Order 15: a short read named per request, never only totalled. Since 2026-10-20 ~12:10 UTC the platform's count
+ * has held events its event list did not return (run 39425858977: 63 counted, 45 read). `counted` is the same count
+ * grouped by $metadata.requestId ({requestId, n}); `readIds` the request id of each event read (null when it has none).
+ * Returns each request read short, and the counted events the grouping holds under no request id (`unattributed`).
+ */
+export function shortRequests({ population, counted, readIds }) {
+  const got = new Map();
+  for (const id of readIds) got.set(id ?? null, (got.get(id ?? null) ?? 0) + 1);
+  const short = counted
+    .map((c) => ({ requestId: c.requestId ?? null, counted: c.n, read: got.get(c.requestId ?? null) ?? 0 }))
+    .filter((c) => c.read < c.counted);
+  const countedTotal = counted.reduce((s, c) => s + c.n, 0);
+  return { short, unattributed: Math.max(0, population - countedTotal) };
+}

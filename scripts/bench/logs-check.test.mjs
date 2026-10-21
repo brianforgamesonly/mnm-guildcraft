@@ -3,7 +3,7 @@
 // cron schedule created by the 22:21 deploy, a second deploy at 01:10, runs in every slot but 23:30.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DROP_BOUND_THRESHOLD, explainGaps, reconcile, rollHistory, slotKey, SLOT_MS, upperBound } from './logs-check.mjs';
+import { DROP_BOUND_THRESHOLD, explainGaps, reconcile, rollHistory, shortRequests, slotKey, SLOT_MS, upperBound } from './logs-check.mjs';
 
 const t = (s) => Date.parse(s);
 const from = t('2026-10-19T22:00:00Z');
@@ -147,6 +147,43 @@ test('the rolling history keeps 7 days, replaces an overlapping window, and flag
   // The next day's window starting a few minutes earlier overlaps yesterday's, and keeps it.
   const shifted = rollHistory(r.history, { from: '2026-10-27T08:55:00Z', to: '2026-10-28T08:55:00Z', drops: 0, invocations: 100 }, now + 86_400_000);
   assert.equal(shifted.history.length, 4);
+});
+
+// Order 15: the totals of the 2026-10-20 12:10 → 12:40 dev window (run 39425858977): 63 events counted, 45 read.
+// Per-request figures were not printed by that run, so the split below is shaped on its totals: 24 requests read
+// complete and three not read at all (one stands for the 12:24:52 report.create, which analytics counts).
+test('a short read is named per request, and a complete re-read clears it', () => {
+  const counted = [
+    ...Array.from({ length: 24 }, (_, i) => ({ requestId: `r${i}`, n: i < 21 ? 2 : 1 })), // 45 read in full
+    { requestId: 'partA', n: 4 },
+    { requestId: 'partB', n: 4 },
+    { requestId: 'gone', n: 10 },
+  ];
+  const population = 63;
+  const readIds = [...counted.slice(0, 24).flatMap((c) => Array(c.n).fill(c.requestId))];
+  assert.equal(readIds.length, 45);
+  const r = shortRequests({ population, counted, readIds });
+  assert.deepEqual(r.short, [
+    { requestId: 'partA', counted: 4, read: 0 },
+    { requestId: 'partB', counted: 4, read: 0 },
+    { requestId: 'gone', counted: 10, read: 0 },
+  ]);
+  assert.equal(r.unattributed, 0);
+  const reread = [...readIds, ...Array(4).fill('partA'), ...Array(4).fill('partB'), ...Array(10).fill('gone')];
+  assert.deepEqual(shortRequests({ population, counted, readIds: reread }).short, []);
+});
+
+test('red: totals that meet do not hide a request read short (a late arrival in another request offsets it)', () => {
+  const counted = [{ requestId: 'a', n: 2 }, { requestId: 'b', n: 2 }];
+  const r = shortRequests({ population: 4, counted, readIds: ['a', 'b', 'b', 'late'] });
+  assert.deepEqual(r.short, [{ requestId: 'a', counted: 2, read: 1 }]);
+});
+
+test('events the grouping holds under no request id are unattributed, and a partial re-read stays short', () => {
+  const counted = [{ requestId: 'a', n: 3 }, { requestId: null, n: 2 }];
+  const r = shortRequests({ population: 7, counted, readIds: ['a', null] });
+  assert.deepEqual(r.short, [{ requestId: 'a', counted: 3, read: 1 }, { requestId: null, counted: 2, read: 1 }]);
+  assert.equal(r.unattributed, 2);
 });
 
 test('the bound is not judged under the minimum sample (no false breach from a short window)', () => {
