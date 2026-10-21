@@ -8,6 +8,8 @@ import up10 from '../../migrations/0010_gear.sql?raw';
 import up11 from '../../migrations/0011_item_reports.sql?raw';
 import down12 from '../../scripts/rollback/0012_craft_requests.down.sql?raw';
 import up12 from '../../migrations/0012_craft_requests.sql?raw';
+import down13 from '../../scripts/rollback/0013_zones.down.sql?raw';
+import up13 from '../../migrations/0013_zones.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -21,6 +23,14 @@ const statements = (sql: string) =>
 const run = async (sql: string) => {
   for (const s of statements(sql)) await env.DB.prepare(s).run();
 };
+
+it('order 17: 0013 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down13);
+  expect((await schema()).some((r) => ['zone', 'zone_name', 'npc', 'import_source'].includes(r.name))).toBe(false);
+  await run(up13);
+  expect(await schema()).toEqual(before);
+});
 
 it('order 16: 0012 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();

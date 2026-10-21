@@ -6,6 +6,8 @@ import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
 import { IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
 import small from '../fixtures/wiki-small.json';
+import { buildZonePlan } from '../../scripts/import/zones.ts';
+import { zoneInput } from '../fixtures/zones-small.ts';
 
 const db = bindingDb(env.DB as never);
 let tick = 0;
@@ -227,10 +229,16 @@ describe('game_class (classes derived at import)', () => {
   };
 
   it('order 10: every statement writes exactly the table it names, and together they cover IMPORT_TABLES (the backup reads that list)', () => {
-    const empty = { tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(), indexes: {} };
+    const empty = {
+      tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(),
+      zones: new Map(), zoneNames: new Map(), npcs: new Map(), importSources: new Map(), indexes: {},
+    };
     const f = withClasses();
     f.mobs['a test mob'] = { title: 'A test mob', zone: '[[Night Harbor]]' };
-    const stmts = buildStatements(buildPlan(f, empty), '2026-10-20T00:00:00Z');
+    const plan = buildPlan(f, empty);
+    // Order 17: the zone tables are written by a run that read the zone sources.
+    plan.zones = buildZonePlan(zoneInput(), [], [], '2026-10-20T00:00:00Z');
+    const stmts = buildStatements(plan, '2026-10-20T00:00:00Z');
     for (const s of stmts) expect(/^(?:INSERT INTO|UPDATE|DELETE FROM) (\w+)/.exec(s.sql)?.[1], s.sql.slice(0, 60)).toBe(s.table);
     expect([...new Set(stmts.map((s) => s.table))].sort()).toEqual([...IMPORT_TABLES].sort());
   });

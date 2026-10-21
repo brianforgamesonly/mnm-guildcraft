@@ -9,9 +9,17 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { runImport } from '../import/core.ts';
 import { localDb } from '../import/db.ts';
+import { readZoneDir } from '../import/zone-files.ts';
 
 const { values: args } = parseArgs({
-  options: { file: { type: 'string' }, sha: { type: 'string', default: 'local-file' }, ceiling: { type: 'string' }, runs: { type: 'string', default: '2' } },
+  options: {
+    file: { type: 'string' },
+    sha: { type: 'string', default: 'local-file' },
+    ceiling: { type: 'string' },
+    runs: { type: 'string', default: '2' },
+    // Order 17: the zone sources, as scripts/import/zone-files.ts wrote them.
+    'zones-dir': { type: 'string' },
+  },
 });
 if (!args.file) throw new Error('--file is required');
 
@@ -38,6 +46,7 @@ try {
       sourceSha: args.sha!,
       now: () => new Date().toISOString(),
       writeCeiling: args.ceiling ? Number(args.ceiling) : undefined,
+      zones: args['zones-dir'] ? readZoneDir(args['zones-dir']) : undefined,
     });
     console.log(
       `import run ${i}: ${res.status} · rows written ${res.rowsWritten} of ceiling ${res.ceiling}` +
@@ -47,6 +56,7 @@ try {
     if (i === 1) {
       console.log(`predicted: ${JSON.stringify(res.predicted)}`);
       console.log(`gear: ${JSON.stringify(res.gear)}`);
+      if (res.zones) console.log(`zones: ${JSON.stringify(res.zones, null, 1)}`);
       for (const w of res.warnings ?? []) if (w.kind !== 'scroll' && w.kind !== 'unmatched_component_names') console.log(`warning: ${JSON.stringify(w)}`);
     }
   }
