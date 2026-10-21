@@ -194,11 +194,18 @@ export const choices = (list: Choice[]): InteractionReply => ({
   data: { choices: list },
 });
 
-/** The subcommand and its options, for a command registered as name → subcommand. */
+/**
+ * The subcommand and its options, for a command registered as name → subcommand. Order 17: a command with no
+ * subcommand (/zone) has plain options at the top: no name, and those options.
+ */
 export function subcommand(i: Interaction): { name: string | undefined; options: Option[] } {
   const sub = i.data?.options?.[0];
+  if (sub && sub.type !== SUBCOMMAND_OPTION && sub.type !== SUBCOMMAND_GROUP_OPTION) return { name: undefined, options: i.data?.options ?? [] };
   return { name: sub?.name, options: sub?.options ?? [] };
 }
+/** Application command option types SUB_COMMAND and SUB_COMMAND_GROUP. */
+const SUBCOMMAND_OPTION = 1;
+const SUBCOMMAND_GROUP_OPTION = 2;
 
 export const optString = (opts: Option[], name: string): string | undefined => {
   const v = opts.find((o) => o.name === name)?.value;
