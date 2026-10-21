@@ -2,7 +2,7 @@
 // Rosters show guild roster data only: character names, classes, levels and skill levels. Removed
 // characters (deleted_at) and departed members (status 'left') never appear.
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, memberTag, mention, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { postButton, postedReply, searchReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { skillGroups, type Tradeskill } from './skills.ts';
 
@@ -22,6 +22,8 @@ const charBits = (cls: string | null, level: number | null) => [cls ? md(cls) : 
 
 interface RosterLine {
   name: string;
+  owner_user_id: string;
+  member: string;
   class: string | null;
   char_level: number | null;
   level: number;
@@ -53,7 +55,7 @@ async function loadSkillPage(c: Ctx, skillId: number, min: number, page: number)
   const p = Math.min(Math.max(0, page), pages - 1);
   const { results } = await c.db
     .prepare(
-      `SELECT c.name, c.class, c.level AS char_level, cs.level, cs.updated_at FROM character_skill cs ${JOIN_LIVE}
+      `SELECT c.name, c.owner_user_id, m.display_name AS member, c.class, c.level AS char_level, cs.level, cs.updated_at FROM character_skill cs ${JOIN_LIVE}
        WHERE cs.tradeskill_id = ? AND c.guild_id = ? AND cs.level >= ? AND ${LIVE}
        ORDER BY cs.level DESC, c.name COLLATE NOCASE LIMIT ? OFFSET ?`,
     )
@@ -67,7 +69,7 @@ function skillEmbed(c: Ctx, d: SkillPage): Embed {
   const lines = d.lines.map((l, i) => {
     const bits = charBits(l.class, l.char_level);
     const stale = Date.parse(l.updated_at) < staleBefore ? ' · *stale*' : '';
-    return `**${d.page * PAGE_SIZE + i + 1}.** **${md(l.name)}** ${l.level}${bits ? ` · ${bits}` : ''}${stale}`;
+    return `**${d.page * PAGE_SIZE + i + 1}.** **${md(l.name)}** ${l.level}${bits ? ` · ${bits}` : ''} · ${memberTag(l.owner_user_id, l.member)}${stale}`;
   });
   const minText = d.min > 0 ? ` at ${d.min}+` : '';
   return {
@@ -133,16 +135,21 @@ export async function rosterSwitch(c: Ctx, customId: string, values: string[]): 
 // ---------------------------------------------------------------- /roster member
 
 async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; content: string }> {
-  const { results } = await c.db
-    .prepare(
-      `SELECT c.id, c.name, c.class, c.level AS char_level, c.is_main, t.name AS skill, cs.level
-       FROM character c JOIN member m ON m.guild_id = c.guild_id AND m.discord_user_id = c.owner_user_id
-       LEFT JOIN character_skill cs ON cs.character_id = c.id LEFT JOIN tradeskill t ON t.id = cs.tradeskill_id
-       WHERE c.guild_id = ? AND c.owner_user_id = ? AND ${LIVE}
-       ORDER BY c.is_main DESC, c.created_at, c.id, cs.level DESC, t.name COLLATE NOCASE`,
-    )
-    .bind(c.guild.id, userId)
-    .all<{ id: number; name: string; class: string | null; char_level: number | null; is_main: number; skill: string | null; level: number | null }>();
+  const [rows, saved] = await c.db.batch([
+    c.db
+      .prepare(
+        `SELECT c.id, c.name, c.class, c.level AS char_level, c.is_main, t.name AS skill, cs.level
+         FROM character c JOIN member m ON m.guild_id = c.guild_id AND m.discord_user_id = c.owner_user_id
+         LEFT JOIN character_skill cs ON cs.character_id = c.id LEFT JOIN tradeskill t ON t.id = cs.tradeskill_id
+         WHERE c.guild_id = ? AND c.owner_user_id = ? AND ${LIVE}
+         ORDER BY c.is_main DESC, c.created_at, c.id, cs.level DESC, t.name COLLATE NOCASE`,
+      )
+      .bind(c.guild.id, userId),
+    // Order 16: the saved name beside the header's mention (none for someone who never used GuildCraft).
+    c.db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(c.guild.id, userId),
+  ]);
+  const results = rows.results as { id: number; name: string; class: string | null; char_level: number | null; is_main: number; skill: string | null; level: number | null }[];
+  const savedName = (saved.results as { display_name: string }[])[0]?.display_name;
   const chars = new Map<number, Embed & { lines: string[] }>();
   for (const r of results) {
     let e = chars.get(r.id);
@@ -155,7 +162,7 @@ async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; 
   }
   const all = [...chars.values()];
   const embeds = all.slice(0, EMBED_LIMITS.embeds).map(({ lines, ...e }) => ({ ...e, description: lines.length ? lines.join('\n') : 'No skills recorded.' }));
-  const who = `<@${userId}>`;
+  const who = savedName ? memberTag(userId, savedName) : mention(userId);
   const content = !all.length
     ? `${who} has no characters on the roster.`
     : `${who}: ${plural(all.length, 'character')}${all.length > embeds.length ? ` (showing ${embeds.length})` : ''}`;
@@ -176,17 +183,17 @@ export const TOP_N = 3;
 async function topEmbed(c: Ctx): Promise<Embed> {
   const { results } = await c.db
     .prepare(
-      `SELECT skill, name, level FROM (
-         SELECT t.name AS skill, c.name, cs.level,
+      `SELECT skill, name, owner_user_id, member, level FROM (
+         SELECT t.name AS skill, c.name, c.owner_user_id, m.display_name AS member, cs.level,
            ROW_NUMBER() OVER (PARTITION BY cs.tradeskill_id ORDER BY cs.level DESC, c.name COLLATE NOCASE) AS rn
          FROM character_skill cs ${JOIN_LIVE} JOIN tradeskill t ON t.id = cs.tradeskill_id
          WHERE c.guild_id = ? AND ${LIVE})
        WHERE rn <= ? ORDER BY skill COLLATE NOCASE, rn`,
     )
     .bind(c.guild.id, TOP_N)
-    .all<{ skill: string; name: string; level: number }>();
+    .all<{ skill: string; name: string; owner_user_id: string; member: string; level: number }>();
   const bySkill = new Map<string, string[]>();
-  for (const r of results) bySkill.set(r.skill, [...(bySkill.get(r.skill) ?? []), `${md(r.name)} ${r.level}`]);
+  for (const r of results) bySkill.set(r.skill, [...(bySkill.get(r.skill) ?? []), `${md(r.name)} ${r.level} ${memberTag(r.owner_user_id, r.member)}`]);
   const lines = [...bySkill].map(([skill, top]) => `**${skill}**: ${top.join(' · ')}`);
   return {
     title: `Top ${TOP_N} in each tradeskill`,

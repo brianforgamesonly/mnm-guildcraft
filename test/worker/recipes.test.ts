@@ -178,7 +178,7 @@ describe('/recipe source (officers; the guild correction layer)', () => {
     expect(s.data.content).toMatch(/^Saved for this server: \*\*Copper Sword · Blacksmithing · trivial 20\*\* is now \*\*Reputation\*\* \(Test Faction\)/);
     const r = await find('Copper Sword');
     const fields = r.data.embeds![1] as any;
-    expect(fields.fields.map((f: any) => `${f.name} = ${f.value}`)).toEqual([`Reliable (Blacksmithing 20+) · 1 = **Annsmith** 25 ${KNOWN_MARK}`, 'Has skill, needs reputation (Test Faction) · 1 = **Bohammer** 40']);
+    expect(fields.fields.map((f: any) => `${f.name} = ${f.value}`)).toEqual([`Reliable (Blacksmithing 20+) · 1 = **Annsmith** 25 ${KNOWN_MARK} · <@${ANN}> (Global ${ANN})`, `Has skill, needs reputation (Test Faction) · 1 = **Bohammer** 40 · <@${BO}> (Global ${BO})`]);
     expect(fields.description).toContain('**Reputation recipe** (Test Faction): only characters who marked it known');
     // The shared recipe row is untouched: another guild still sees Unknown.
     expect(await one('SELECT acquisition, faction FROM recipe WHERE id = ?', swordRecipe)).toEqual({ acquisition: 'unknown', faction: null });
@@ -253,7 +253,7 @@ describe('/roster recipes', () => {
     expect((await send(cmd(ann, 'roster', 'recipes'))).data.embeds![0].description).toBe(RARE_EMPTY); // still Unknown: not rare
     await send(cmd(officer, 'recipe', 'source', { item: `#${swordRecipe}`, how: 'reputation', faction: 'Red Mantle' }));
     const r = await send(cmd(ann, 'roster', 'recipes', { skill: 'Blacksmithing' }));
-    expect(r.data.embeds![0]).toMatchObject({ title: 'Reputation and discovery recipes · Blacksmithing: 1', description: '**Copper Sword** · Blacksmithing · Reputation (Red Mantle): Annsmith, Bohammer', footer: { text: 'Page 1 of 1' } });
+    expect(r.data.embeds![0]).toMatchObject({ title: 'Reputation and discovery recipes · Blacksmithing: 1', description: `**Copper Sword** · Blacksmithing · Reputation (Red Mantle): Annsmith <@${ANN}> (Global ${ANN}), Bohammer <@${BO}> (Global ${BO})`, footer: { text: 'Page 1 of 1' } });
     expect(r.data.components![0].components.map((b: any) => b.label)).toEqual(['◀ Previous', 'Next ▶', 'Post to channel']);
   });
 });

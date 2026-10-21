@@ -115,12 +115,34 @@ export const button = (custom_id: string, label: string, style = STYLE_SECONDARY
 export const linkButton = (label: string, url: string) => ({ type: BUTTON, style: STYLE_LINK, label, url });
 export const row = (components: unknown[]) => ({ type: 1, components });
 
+/**
+ * Who a message may ping (docs.discord.com/developers/resources/message#allowed-mentions-object). Order 16: every
+ * create and every edit sends it explicitly; `users` lists the only members a message may ping (ITEM 2's pings).
+ */
+export interface AllowedMentions {
+  parse: string[];
+  users?: string[];
+}
+/** Pings nobody: mentions still show as names. */
+export const NO_PINGS: AllowedMentions = { parse: [] };
+/** Pings exactly these members (Discord takes at most 100), and nobody else. */
+export const pingOnly = (users: string[]): AllowedMentions => ({ parse: [], users: [...new Set(users)].slice(0, 100) });
+/** A member mention: shows the member's current server name, and is clickable. It pings only where allowed_mentions lets it. */
+export const mention = (userId: string) => `<@${userId}>`;
+/**
+ * Order 16, ITEM 1: a member as a mention with the name saved at their last command beside it. A mention that pings
+ * nobody is not sent in the message's `mentions` array, in content or in an embed, so a reader's app that has not
+ * loaded that member shows `<@id>` or "@invalid-user" (discord-api-docs issues #1479 and #2126, Discord staff); the
+ * saved name keeps the line readable there.
+ */
+export const memberTag = (userId: string, savedName: string) => `${mention(userId)} (${md(savedName)})`;
+
 export interface MessageData {
   content?: string;
   embeds?: Embed[];
   components?: unknown[];
   flags?: number;
-  allowed_mentions?: { parse: string[] };
+  allowed_mentions?: AllowedMentions;
 }
 
 export type InteractionReply =

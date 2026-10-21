@@ -40,7 +40,11 @@ const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 const bot = process.env.DISCORD_BOT_TOKEN;
 if (!token || !account) throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
 const cfg = JSON.parse(readFileSync('wrangler.jsonc', 'utf8').replace(/^\s*\/\/.*$/gm, ''));
-const databaseId = cfg.env.dev.d1_databases[0].database_id;
+// Order 16: COPY=production is allowed for the read-only render only (a production post previewed before a deploy rewrites it).
+const copy = process.env.COPY || 'dev';
+if (!cfg.env[copy]) throw new Error(`unknown COPY ${copy}`);
+if (copy !== 'dev' && action !== 'render') throw new Error(`COPY=${copy} is allowed for ACTION=render only`);
+const databaseId = cfg.env[copy].d1_databases[0].database_id;
 const readOnly = action === 'render' || action === 'inspect' || dryRun;
 if (['archive', 'refresh'].includes(action) && dryRun) throw new Error(`ACTION=${action} changes live data: it runs only with DRY_RUN=0`);
 if (['inspect', 'archive', 'refresh', 'departures'].includes(action) && !bot) throw new Error(`DISCORD_BOT_TOKEN must be set for ACTION=${action}`);
@@ -87,7 +91,7 @@ async function discord(method, path, body) {
 }
 
 const guilds = (await db.prepare('SELECT id, board_channel_id FROM guild ORDER BY id').all()).results;
-console.log(JSON.stringify({ action, dry_run: readOnly, guilds: guilds.length, with_board: guilds.filter((g) => g.board_channel_id).length }));
+console.log(JSON.stringify({ action, copy, dry_run: readOnly, guilds: guilds.length, with_board: guilds.filter((g) => g.board_channel_id).length }));
 
 if (action === 'render') {
   const now = Date.now();

@@ -5,7 +5,7 @@
 // /recipe writes this guild's correction layer (src/recipes.ts, migration 0009), never the shared recipe row.
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, memberTag, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, CORRECTED, correctionJoin, FACTION_MAX, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, type Character } from './character.ts';
 import { KNOWN_MARK } from './find.ts';
@@ -275,7 +275,7 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
   const { results } = await c.db
     .prepare(
       `SELECT r.id, i.name AS item, t.name AS tradeskill, ${CORRECTED.acquisition} AS acquisition, ${CORRECTED.faction} AS faction,
-         group_concat(ch.name, ', ') AS who
+         json_group_array(json_object('name', ch.name, 'user', ch.owner_user_id, 'member', m.display_name)) AS who
        FROM character_recipe k JOIN character ch ON ch.id = k.character_id AND ch.deleted_at IS NULL
        JOIN member m ON m.guild_id = ch.guild_id AND m.discord_user_id = ch.owner_user_id AND m.status = 'active'
        JOIN recipe r ON r.id = k.recipe_id JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id
@@ -292,11 +292,17 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
 export const RARE_EMPTY =
   'No one has marked a reputation or discovery recipe as known yet. Officers set how a recipe is obtained with `/recipe source`; members then mark the ones they know with `/craft know` or the **I know this recipe** button on `/craft find`.';
 
+/** Order 16: "Testchar <@id> (Ann), Alt <@id> (Bo)" from the query's JSON list of who marked it known. */
+function whoText(json: string): string {
+  const list = JSON.parse(json) as { name: string; user: string; member: string }[];
+  return list.map((w) => `${md(w.name)} ${memberTag(w.user, w.member)}`).join(', ');
+}
+
 function rareEmbed(list: KnownRare[], page: number, skill: string | null): Embed {
   const pages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
   const lines = list
     .slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)
-    .map((r) => `**${md(r.item)}** · ${r.tradeskill} · ${ACQUISITION_LABEL[r.acquisition]}${r.faction ? ` (${md(r.faction)})` : ''}: ${md(r.who)}`);
+    .map((r) => `**${md(r.item)}** · ${r.tradeskill} · ${ACQUISITION_LABEL[r.acquisition]}${r.faction ? ` (${md(r.faction)})` : ''}: ${whoText(r.who)}`);
   return {
     title: truncate(`Reputation and discovery recipes${skill ? ` · ${skill}` : ''}: ${list.length}`, EMBED_LIMITS.title),
     description: truncate(lines.length ? lines.join('\n') : RARE_EMPTY, EMBED_LIMITS.description),

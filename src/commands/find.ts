@@ -2,7 +2,7 @@
 // recipes, their components, the crafters and the data version; crafters are tiered by src/crafters.ts.
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, memberTag, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { postedReply, searchReply } from './share.ts';
@@ -138,7 +138,8 @@ export function fitLines(lines: string[], maxLines: number, maxChars = EMBED_LIM
 
 /** Carried by every character who marked the recipe known, in every tier (FR-3.1). */
 export const KNOWN_MARK = '📜';
-const crafterLine = (r: CrafterRow) => `**${md(r.character)}** ${r.level}${r.knows_recipe ? ` ${KNOWN_MARK}` : ''}`;
+/** Order 16: every tier's line carries the member (src/discord.ts memberTag; the reply pings nobody). */
+export const crafterLine = (r: CrafterRow) => `**${md(r.character)}** ${r.level}${r.knows_recipe ? ` ${KNOWN_MARK}` : ''} · ${memberTag(r.owner_user_id, r.member)}`;
 
 const TIER_TITLES: [Exclude<Tier, 'below'>, (r: RecipeRow, ts: string, w: number) => string][] = [
   ['reliable', (r, ts) => `Reliable (${ts} ${r.trivial}+)`],
