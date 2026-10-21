@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport, type WikiData } from '../../scripts/import/core.ts';
 import { KNOWN_MARK, loadFind } from '../../src/commands/find.ts';
-import { RARE_EMPTY, parseComponents, resolveRecipe } from '../../src/commands/recipes.ts';
+import { RARE_EMPTY, parseComponents, resolveRecipe, whoText } from '../../src/commands/recipes.ts';
 import { crafterTier } from '../../src/crafters.ts';
 import { ACQUISITIONS } from '../../src/recipes.ts';
 import migration0009 from '../../migrations/0009_corrections_reports_images.sql?raw';
@@ -245,6 +245,13 @@ describe('one correction rule (order 10, ITEM 1.3)', () => {
 });
 
 describe('/roster recipes', () => {
+  it('order 16: who knows it, by character name, five named and the rest counted', () => {
+    const who = ['eve', 'Bob', 'carl', 'Al', 'dan', 'Fay', 'gus'].map((name, i) => ({ name, user: `10000000000000000${i}`, member: `M${i}` }));
+    expect(whoText(JSON.stringify(who))).toBe(
+      'Al <@100000000000000003> (M3), Bob <@100000000000000001> (M1), carl <@100000000000000002> (M2), dan <@100000000000000004> (M4), eve <@100000000000000000> (M0), +2 more',
+    );
+  });
+
   it('explains itself when empty, then lists known reputation and discovery recipes and who knows them', async () => {
     const empty = await send(cmd(ann, 'roster', 'recipes'));
     expect(empty.data.embeds![0].description).toBe(RARE_EMPTY);

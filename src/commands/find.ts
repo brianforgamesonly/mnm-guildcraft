@@ -123,7 +123,7 @@ export function ingredientsText(components: { name: string; qty: number }[], unk
 }
 
 /** Lines that fit `maxChars`, at most `maxLines`, then "+M more". */
-export function fitLines(lines: string[], maxLines: number, maxChars = EMBED_LIMITS.fieldValue): string {
+export function fitLines(lines: string[], maxLines: number, maxChars: number = EMBED_LIMITS.fieldValue): string {
   const out: string[] = [];
   let used = 0;
   for (const [i, l] of lines.entries()) {
