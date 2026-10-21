@@ -38,10 +38,12 @@ test('every route the code calls is in ROUTES, and every ROUTES path is still ca
 });
 
 test('the install permissions are the union of the routes; Create Public Threads is not among them', () => {
-  assert.equal(INSTALL_PERMISSIONS, 292057893888n);
+  // Order 16: 292057893888 + Create Private Threads (1 << 36 = 68719476736).
+  assert.equal(INSTALL_PERMISSIONS, 360777370624n);
+  assert.equal(INSTALL_PERMISSIONS - 292057893888n, 1n << 36n);
   assert.equal(INSTALL_PERMISSIONS & (1n << 35n), 0n);
   // Each channel's check is a subset of the install permissions, so a fresh install passes setup.
-  for (const k of ['board', 'review', 'vault'] as const) for (const [b] of channelPermissions(k)) assert.equal(INSTALL_PERMISSIONS & b, b, k);
+  for (const k of ['board', 'review', 'vault', 'requests'] as const) for (const [b] of channelPermissions(k)) assert.equal(INSTALL_PERMISSIONS & b, b, k);
 });
 
 test('docs/LAUNCH-GUIDE.md carries the same permissions number as the code', () => {

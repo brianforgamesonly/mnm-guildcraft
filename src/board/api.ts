@@ -25,7 +25,20 @@ export interface ApiLogEntry {
   status: number;
   code?: number;
   waited_ms?: number;
+  /**
+   * Order 16: Discord's rate-limit headers on Modify Channel (thread renames), and retry_after on any 429, so the rename
+   * limit is measured from Discord's answers rather than assumed. Discord does not document it, and its sub-limit may not
+   * show in the headers (discord-api-docs #1900): a 429's retry_after is then the measurement.
+   */
+  limit?: string;
+  remaining?: string;
+  reset_after?: string;
+  bucket?: string;
+  retry_after?: number;
+  scope?: string;
 }
+
+const isModifyChannel = (route: string) => /^PATCH \/channels\/\d+$/.test(route);
 
 export interface BoardBudget {
   /** D1 calls made so far in this invocation (the counted binding's call list, src/telemetry.ts). */
@@ -113,7 +126,12 @@ export function botApi(token: string, budget: BoardBudget, fetcher: typeof fetch
           return null;
         }
       })() as { code?: number; message?: string; retry_after?: number } | null;
-      log.push({ route: logRoute(route), status: res.status, ...(json?.code ? { code: json.code } : {}), ...(waited ? { waited_ms: waited } : {}) });
+      const h = (name: string) => res.headers.get(name) ?? undefined;
+      log.push({
+        route: logRoute(route), status: res.status, ...(json?.code ? { code: json.code } : {}), ...(waited ? { waited_ms: waited } : {}),
+        ...(isModifyChannel(route) ? { limit: h('X-RateLimit-Limit'), remaining: h('X-RateLimit-Remaining'), reset_after: h('X-RateLimit-Reset-After'), bucket: h('X-RateLimit-Bucket') } : {}),
+        ...(res.status === 429 ? { retry_after: Number(json?.retry_after ?? h('Retry-After')), scope: h('X-RateLimit-Scope') } : {}),
+      });
       if (res.status === 429 && attempt === 0) {
         const retry = Number(json?.retry_after ?? res.headers.get('Retry-After'));
         blockedUntil.set(route, Date.now() + (Number.isFinite(retry) ? retry * 1000 : MAX_WAIT_MS + 1));

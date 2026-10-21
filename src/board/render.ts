@@ -104,6 +104,8 @@ export const HOW_TO_GET_LISTED = [
   '`/craft report` report wrong data · `/item image` send an item screenshot · `/craft help` every command',
   // Order 13.
   '`/gear find` gear for your class, by slot, stats and source',
+  // Order 16.
+  '`/craft request` ask the crafters who can make an item · `/craft notify` be added to requests you can craft',
 ].join('\n');
 
 /**

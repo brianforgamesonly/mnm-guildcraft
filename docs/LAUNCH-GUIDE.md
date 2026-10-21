@@ -7,7 +7,7 @@ Steps a server admin follows when GuildCraft is added to a guild's server. Start
 A server admin (someone with **Manage Server**) opens this link, chooses the server and presses **Authorize**:
 
 ```
-https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=292057893888
+https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=360777370624
 ```
 
 Discord shows the permissions GuildCraft asks for before you authorize. Each is there because GuildCraft calls something that needs it, and nothing else is asked for:
@@ -20,11 +20,23 @@ Discord shows the permissions GuildCraft asks for before you authorize. Each is 
 | Embed Links | GuildCraft's board posts, report cards and departure notices are embeds |
 | Attach Files | to re-post item screenshots in the vault channel for officers to approve |
 | Read Message History | to find archived board posts, and to read approved screenshots back |
-| Manage Threads | to keep board posts open, pin the board's index post, and remove old board posts when the board is rebuilt |
+| Manage Threads | to keep board posts open, pin the board's index post, and remove old board posts when the board is rebuilt; to rename, close and reopen craft request threads |
+| Create Private Threads | to open one private thread per craft request in the request channel |
 
 GuildCraft does not ask for Administrator, Manage Messages, Create Public Threads or any moderation permission. It never reads members' messages. Discord's own guide to the link: https://docs.discord.com/developers/topics/oauth2 (bot authorization flow; `permissions` is "an integer corresponding to the permission calculations for the bot").
 
 After authorizing, run `/guildcraft setup` to choose the roles and channels; it checks GuildCraft can do its job in each channel you pick and names anything missing.
+
+## Servers that added GuildCraft before craft requests
+
+Craft requests (`/craft request`) arrived after the first install link, and need one more permission: **Create Private Threads**. Discord does not add a permission to a bot that is already in a server, so `/guildcraft setup requests:` names it as missing. Either fix works:
+
+1. **Grant it on the request channel:** Edit Channel → Permissions → add **MNM-Guildcraft** (its role) → turn on **Create Private Threads** (and **Send Messages in Threads**, **Manage Threads** and **Read Message History** if setup names them too) → Save. Then run `/guildcraft setup requests:` again.
+2. **Or re-authorize with the link above:** open it, choose the same server and press **Authorize**. Discord updates GuildCraft's role with the new permissions; nothing else changes.
+
+## Who can read craft requests
+
+Each request is a private thread in the request channel. Discord shows a private thread only to the members in it, to anyone with **Manage Threads** in that channel, and to Administrators and the server owner. `/guildcraft setup requests:` names the roles that hold Manage Threads or Administrator there, so you know who else can read requests. Members also need **View Channel** on the request channel to see their thread.
 
 ## Letting officers use `/guildcraft remove-member`
 

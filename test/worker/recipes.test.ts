@@ -121,7 +121,7 @@ describe('the I know this recipe button', () => {
   const findButtons = async (m = ann) => (await find('Copper Sword', m)).data.components!.flatMap((r: any) => r.components);
 
   it('is on /craft find with Report a problem and Stat image', async () => {
-    expect((await findButtons()).map((b: any) => b.label)).toEqual(['Post to channel', 'MnMdb', 'MNM Realm', 'I know this recipe', 'Report a problem', 'Stat image']);
+    expect((await findButtons()).map((b: any) => b.label)).toEqual(['Post to channel', 'MnMdb', 'MNM Realm', 'I know this recipe', 'Report a problem', 'Stat image', 'Request a craft']);
   });
 
   it('one character, one recipe: one press marks it, with a new private reply naming the character', async () => {

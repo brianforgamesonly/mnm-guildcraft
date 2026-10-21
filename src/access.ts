@@ -17,9 +17,11 @@ export interface Guild {
   review_channel_id: string | null;
   /** Where screenshots wait for approval (order 9, PRD FR-6), set by /guildcraft setup vault:. */
   vault_channel_id: string | null;
+  /** Where craft requests open their private threads (order 16), set by /guildcraft setup requests:. */
+  request_channel_id: string | null;
 }
 
-const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window, board_channel_id, review_channel_id, vault_channel_id';
+const GUILD_COLUMNS = 'id, name, member_role_id, officer_role_id, skill_cap, stale_days, learning_window, board_channel_id, review_channel_id, vault_channel_id, request_channel_id';
 
 /** Budget for the guild-name lookup, well inside Discord's 3-second first-reply window. */
 export const GUILD_NAME_TIMEOUT_MS = 1500;

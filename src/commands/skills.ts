@@ -6,6 +6,7 @@ import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
 import { knownLine, knownRecipesOf } from './recipes.ts';
+import { notifyLine } from './requests.ts';
 
 export interface Tradeskill {
   id: number;
@@ -281,6 +282,8 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
   });
   const notes = [
     chars.length > EMBED_MAX ? `Showing ${EMBED_MAX} of ${chars.length} characters.` : null,
+    // Order 16: the member's craft request opt-ins (per member, not per character).
+    await notifyLine(c.db, c.guild.id, c.userId),
     anyStale ? `-# *stale* = not updated in ${c.guild.stale_days} days.` : null,
   ].filter(Boolean);
   return ephemeral(notes.join('\n'), { embeds, components: updateButtons(shown) });

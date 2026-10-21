@@ -72,6 +72,8 @@ export interface DepartureResult {
 
 /** `why` is the operator's detail (logs); `note` is what /guildcraft status shows officers (order 11). */
 type ListOutcome = { ok: true; ids: Set<string>; pages: number } | { ok: false; pages: number; why: string; note: string };
+/** Order 16: the same list with each member's role ids (who can see the request channel). */
+type MembersOutcome = { ok: true; roles: Map<string, string[]>; pages: number } | { ok: false; pages: number; why: string; note: string };
 
 const LIST_UNREAD = "Couldn't read the full member list, so nobody was hidden. If this repeats, tell Joegandomi.";
 const LIST_REFUSED = 'Discord refused the member list. Tell Joegandomi.';
@@ -80,10 +82,16 @@ const MORE_TOMORROW = `More notices come tomorrow night (up to ${MAX_NOTICES} a 
 
 /** Every member id, or why the list is not complete. Never partial: a failed or skipped page fails the list. */
 export async function listMemberIds(api: BotApi, guildId: string): Promise<ListOutcome> {
-  const ids = new Set<string>();
+  const r = await listMembers(api, guildId);
+  return r.ok ? { ok: true, ids: new Set(r.roles.keys()), pages: r.pages } : r;
+}
+
+/** Every member and their role ids, or why the list is not complete. Never partial: a failed or skipped page fails the list. */
+export async function listMembers(api: BotApi, guildId: string): Promise<MembersOutcome> {
+  const ids = new Map<string, string[]>();
   let after = '0';
   for (let pages = 1; ; pages++) {
-    const r = await api.call<{ user?: { id?: string } }[]>('GET', `/guilds/${guildId}/members?limit=${MEMBER_PAGE}&after=${after}`);
+    const r = await api.call<{ user?: { id?: string }; roles?: string[] }[]>('GET', `/guilds/${guildId}/members?limit=${MEMBER_PAGE}&after=${after}`);
     if (!r.ok) {
       const why = r.skipped
         ? `member list page ${pages} not read (${r.skipped})`
@@ -91,8 +99,8 @@ export async function listMemberIds(api: BotApi, guildId: string): Promise<ListO
       return { ok: false, pages, why, note: r.skipped ? LIST_UNREAD : LIST_REFUSED };
     }
     if (!Array.isArray(r.body)) return { ok: false, pages, why: `member list page ${pages}: not a list`, note: LIST_UNREAD };
-    for (const m of r.body) if (m.user?.id) ids.add(m.user.id);
-    if (r.body.length < MEMBER_PAGE) return { ok: true, ids, pages };
+    for (const m of r.body) if (m.user?.id) ids.set(m.user.id, m.roles ?? []);
+    if (r.body.length < MEMBER_PAGE) return { ok: true, roles: ids, pages };
     const last = r.body.at(-1)?.user?.id;
     if (!last || last === after) return { ok: false, pages, why: `member list page ${pages}: cursor did not advance`, note: LIST_UNREAD };
     after = last;

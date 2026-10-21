@@ -5,6 +5,7 @@ import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafte
 import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, memberTag, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
+import { FROM_FIND_PREFIX } from '../requests.ts';
 import { postedReply, searchReply } from './share.ts';
 
 export interface ItemRecord {
@@ -297,7 +298,13 @@ export const IMAGE_PREFIX = 'img:';
  * posted copy alike, and always answer with a new private message: one member's press never changes a public post.
  */
 export const findActions = (itemId: number) =>
-  row([button(`${KNOW_PREFIX}${itemId}`, 'I know this recipe', STYLE_PRIMARY), button(`${REPORT_PREFIX}${itemId}`, 'Report a problem'), button(`${IMAGE_PREFIX}${itemId}`, 'Stat image')]);
+  row([
+    button(`${KNOW_PREFIX}${itemId}`, 'I know this recipe', STYLE_PRIMARY),
+    button(`${REPORT_PREFIX}${itemId}`, 'Report a problem'),
+    button(`${IMAGE_PREFIX}${itemId}`, 'Stat image'),
+    // Order 16: starts (or adds to) the presser's unsent craft request, privately.
+    button(`${FROM_FIND_PREFIX}${itemId}`, 'Request a craft'),
+  ]);
 
 /** Post to channel: the same reply, rebuilt now, posted publicly. */
 export async function postFind(c: Ctx, itemId: number): Promise<MessageReply> {

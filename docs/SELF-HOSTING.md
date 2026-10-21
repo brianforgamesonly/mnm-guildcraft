@@ -108,10 +108,10 @@ No export? A brand-new copy skips this step: Step 10 fills in the game data, and
 Discord only lets the bot's commands into a server the bot has been added to, so this comes before Step 9. Open this link, with your Application ID in place of `<APP ID>`, choose your server and press **Authorize** (Discord: https://docs.discord.com/developers/topics/oauth2, bot authorization flow):
 
 ```
-https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=292057893888
+https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=360777370624
 ```
 
-`292057893888` is these permissions together, each one because GuildCraft calls something that needs it:
+`360777370624` is these permissions together, each one because GuildCraft calls something that needs it:
 
 | Permission | Why |
 |---|---|
@@ -121,7 +121,8 @@ https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.c
 | Embed Links | GuildCraft's posts are embeds |
 | Attach Files | to re-post item screenshots in the vault channel |
 | Read Message History | to read archived board posts and the vault's screenshots back |
-| Manage Threads | to keep board posts open, pin the index post, and remove old board posts on a rebuild |
+| Manage Threads | to keep board posts open, pin the index post, and remove old board posts on a rebuild; to rename, close and reopen craft request threads |
+| Create Private Threads | to open one private thread per craft request |
 
 ## Step 9 — Register the commands
 
