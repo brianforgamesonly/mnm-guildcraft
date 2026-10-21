@@ -5,5 +5,7 @@
   "name": "guildcraft-wiki-probe",
   "main": "worker.ts",
   "compatibility_date": "2026-10-01",
-  "workers_dev": true
+  "workers_dev": true,
+  // One hostname only: no version-specific preview URL.
+  "preview_urls": false
 }

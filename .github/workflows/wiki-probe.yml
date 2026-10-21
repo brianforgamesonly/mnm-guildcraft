@@ -12,7 +12,7 @@ permissions:
 jobs:
   github:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -22,7 +22,7 @@ jobs:
         run: node scripts/probe/run.ts --path github
   cloudflare:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     concurrency: wiki-probe-worker
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -43,7 +43,7 @@ jobs:
           echo "::add-mask::$token"
           printf '%s' "$token" > "$RUNNER_TEMP/probe-token"
           npx wrangler deploy --config "$PROBE_CONFIG" --define "PROBE_TOKEN:\"$token\"" | tee "$RUNNER_TEMP/deploy.log"
-          url=$(grep -oE 'https://guildcraft-wiki-probe\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1)
+          url=$(grep -oE 'https://guildcraft-wiki-probe\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)
           test -n "$url" || { echo "::error::no workers.dev URL in the deploy output"; exit 1; }
           echo "url=$url" >> "$GITHUB_OUTPUT"
       - name: Call it once (the two wiki requests leave from Cloudflare's network)
@@ -53,7 +53,8 @@ jobs:
         run: |
           # A fixed pause for the new workers.dev script to go live, not a poll: the Worker is called exactly once.
           sleep 15
-          code=$(curl -sS --max-time 60 -o "$RUNNER_TEMP/cloudflare.json" -w '%{http_code}' "$URL/probe?token=$(cat "$RUNNER_TEMP/probe-token")")
+          # Up to 2 × 20 s per wiki request plus the 10 s retry pause (scripts/probe/wiki.ts), twice: within 150 s.
+          code=$(curl -sS --max-time 150 -o "$RUNNER_TEMP/cloudflare.json" -w '%{http_code}' "$URL/probe?token=$(cat "$RUNNER_TEMP/probe-token")" || echo "curl exit $?")
           echo "The probe Worker answered HTTP $code"
           test "$code" = 200 || { echo "::error::the probe Worker did not answer (HTTP $code)"; head -c 300 "$RUNNER_TEMP/cloudflare.json"; exit 1; }
           node scripts/probe/run.ts --from "$RUNNER_TEMP/cloudflare.json"
@@ -61,7 +62,8 @@ jobs:
         if: always()
         shell: bash
         run: |
-          npx wrangler delete --config "$PROBE_CONFIG" --force
+          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
+          npx wrangler delete --config "$PROBE_CONFIG" --force || echo "::warning::wrangler delete exited $?"
           code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-probe")
           echo "Cloudflare API, the probe script after the delete: HTTP $code (404 = deleted)"
           test "$code" = 404

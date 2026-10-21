@@ -11,6 +11,8 @@ export const REQUESTS = [
 // The order's five, plus cf-mitigated: Cloudflare sets it on a challenge, which tells a CDN block from Miraheze's own.
 const HEADERS = ['server', 'cf-ray', 'x-cache', 'retry-after', 'content-type', 'cf-mitigated'] as const;
 const RETRY_AFTER_MS = 10_000;
+// A stall is an outcome too: a request with no full answer in 20 s is a network error (and gets the one retry).
+const TIMEOUT_MS = 20_000;
 
 export type ProbeResult = {
   name: string;
@@ -36,25 +38,29 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function one(req: (typeof REQUESTS)[number]): Promise<ProbeResult> {
   const url = WIKI + req.path;
   const base = { name: req.name, url, headers: {}, bodyBytes: 0 };
-  let res: Response | undefined;
+  let got: { res: Response; bytes: Uint8Array } | undefined;
   let attempts = 0;
   let error = '';
-  while (!res && attempts < 2) {
+  while (!got && attempts < 2) {
     if (attempts) await wait(RETRY_AFTER_MS);
     attempts++;
     try {
-      res = await fetch(url, { headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' }, redirect: 'manual' });
+      const res = await fetch(url, {
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      got = { res, bytes: new Uint8Array(await res.arrayBuffer()) };
     } catch (e) {
       error = e instanceof Error ? `${e.name}: ${e.message}${e.cause ? ` (${String(e.cause)})` : ''}` : String(e);
     }
   }
-  if (!res) return { ...base, attempts, status: null, error };
-  const got = res;
-  const bytes = new Uint8Array(await got.arrayBuffer());
+  if (!got) return { ...base, attempts, status: null, error };
+  const { res, bytes } = got;
   const body = new TextDecoder().decode(bytes);
-  const headers = Object.fromEntries(HEADERS.flatMap((h) => (got.headers.has(h) ? [[h, got.headers.get(h) ?? '']] : [])));
-  const out: ProbeResult = { ...base, attempts, status: got.status, headers, bodyBytes: bytes.byteLength };
-  if (got.status < 200 || got.status > 299) return { ...out, refusal: body.slice(0, 300) };
+  const headers = Object.fromEntries(HEADERS.flatMap((h) => (res.headers.has(h) ? [[h, res.headers.get(h) ?? '']] : [])));
+  const out: ProbeResult = { ...base, attempts, status: res.status, headers, bodyBytes: bytes.byteLength };
+  if (res.status < 200 || res.status > 299) return { ...out, refusal: body.slice(0, 300) };
   let json: { error?: { code?: string }; query?: { general?: { sitename?: string; generator?: string } }; parse?: { wikitext?: unknown } };
   try {
     json = JSON.parse(body);
