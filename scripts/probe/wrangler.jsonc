@@ -1,0 +1,9 @@
+{
+  // Work order 14: the temporary wiki probe, its own minimal config. No bindings, routes, cron or vars: the one-time
+  // token is compiled in (wrangler deploy --define). .github/workflows/wiki-probe.yml deploys it, calls it once and
+  // deletes it in the same run.
+  "name": "guildcraft-wiki-probe",
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true
+}
