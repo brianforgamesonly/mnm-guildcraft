@@ -16,7 +16,7 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { alarm, summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
-import { DROP_BOUND_CONFIDENCE, DROP_BOUND_MIN_N, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, SLOT_MS } from './logs-check.mjs';
+import { DROP_BOUND_CONFIDENCE, DROP_BOUND_MIN_N, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, shortRequests, SLOT_MS } from './logs-check.mjs';
 
 // Order 10: the copy GUILDCRAFT_COPY names (default dev): its Worker's logs, checked against its own database.
 const COPY = currentCopy();
@@ -36,9 +36,15 @@ const SCRIPT_FILTER = { key: '$workers.scriptName', operation: 'eq', type: 'stri
 
 const redact = (s) => String(s).replace(/\d{15,}/g, '<id>');
 
-async function query(body) {
+// `soft`: a diagnostic query whose failure is printed and returns null, so the check, the alarm and the drop history
+// still run (order 15).
+async function query(body, { soft = false } = {}) {
   const res = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const json = await res.json().catch(() => ({}));
+  if (soft && (!res.ok || json.success === false)) {
+    console.log(`diagnostic query ${body.queryId?.split('-').slice(0, 3).join('-')} failed: ${JSON.stringify({ http: res.status, errors: (json.errors ?? []).map((e) => ({ code: e.code, message: redact(e.message) })) })}`);
+    return null;
+  }
   if (!res.ok || json.success === false) {
     console.log(JSON.stringify({ http: res.status, errors: (json.errors ?? []).map((e) => ({ code: e.code, message: redact(e.message) })) }));
     console.log('Read-back failed. If this is an authorization error, the API token needs the account permission "Workers Observability Write" (the repository owner adds it).');
@@ -113,6 +119,86 @@ for (let page = 0; page < PAGE_CAP; page++) {
     break;
   }
   offset = next;
+}
+
+// Order 15: a short read is counted per request (scripts/bench/logs-check.mjs shortRequests), each short request is read
+// again by its own id, and what is still missing is named: its time, and the event types counted but not read.
+// Only events the API returns are added (one copy each, by $metadata.id), and any request still short fails the check
+// on its own, so neither a late arrival nor a re-read can make the read look complete.
+// Keyed like the grouping below ($metadata.requestId); an empty id counts as none.
+const groupIdOf = (e) => e.$metadata?.requestId || null;
+const eventKey = (e) => e.$metadata?.id ?? JSON.stringify(e);
+const RECOVER_CAP = 20;
+let shortRead = null;
+if (population && events.length < population) {
+  const byId = await query(
+    {
+      queryId: `timings-count-by-request-${to}`,
+      timeframe: { from, to },
+      view: 'calculations',
+      dry: true,
+      parameters: { filters: [SCRIPT_FILTER], calculations: [{ operator: 'count', alias: 'n' }], groupBys: [{ type: 'string', value: '$metadata.requestId' }], limit: 2000 },
+    },
+    { soft: true },
+  );
+  const counted = (byId?.calculations?.[0]?.aggregates ?? []).map((a) => ({ requestId: a.groups?.[0]?.value || null, n: Number(a.count ?? a.value) || 0 }));
+  const before = shortRequests({ population, counted, readIds: events.map(groupIdOf) });
+  const held = new Set(events.map(eventKey));
+  let recovered = 0;
+  for (const s of before.short.filter((x) => x.requestId !== null).slice(0, RECOVER_CAP)) {
+    const r = await query(
+      {
+        queryId: `timings-events-request-${to}`,
+        timeframe: { from, to },
+        view: 'events',
+        limit: 2000,
+        dry: true,
+        parameters: { filters: [SCRIPT_FILTER, { key: '$metadata.requestId', operation: 'eq', type: 'string', value: s.requestId }] },
+      },
+      { soft: true },
+    );
+    for (const e of r?.events?.events ?? (Array.isArray(r?.events) ? r.events : [])) {
+      const k = eventKey(e);
+      if (held.has(k)) continue;
+      held.add(k);
+      events.push(e);
+      recovered++;
+    }
+  }
+  const after = shortRequests({ population, counted, readIds: events.map(groupIdOf) });
+  const stillShort = [];
+  for (const s of after.short.slice(0, RECOVER_CAP)) {
+    const mine = events.filter((e) => groupIdOf(e) === s.requestId);
+    const times = mine.map((e) => Number(e.timestamp)).filter(Number.isFinite);
+    const at = times.length ? new Date(Math.min(...times)).toISOString() : null;
+    let countedTypes = null;
+    if (s.requestId !== null) {
+      const t = await query(
+        {
+        queryId: `timings-types-request-${to}`,
+        timeframe: { from, to },
+        view: 'calculations',
+        dry: true,
+        parameters: {
+          filters: [SCRIPT_FILTER, { key: '$metadata.requestId', operation: 'eq', type: 'string', value: s.requestId }],
+          calculations: [{ operator: 'count', alias: 'n' }],
+          groupBys: [{ type: 'string', value: '$metadata.type' }],
+          limit: 50,
+        },
+        },
+        { soft: true },
+      );
+      countedTypes = t && Object.fromEntries((t.calculations?.[0]?.aggregates ?? []).map((a) => [a.groups?.[0]?.value ?? null, Number(a.count ?? a.value) || 0]));
+    }
+    const readTypes = {};
+    for (const e of mine) {
+      const k = e.$metadata?.type ?? null;
+      readTypes[k] = (readTypes[k] ?? 0) + 1;
+    }
+    // Request ids are Cloudflare's, not guild data; the tail is enough to tell them apart.
+    stillShort.push({ request: s.requestId === null ? null : `…${String(s.requestId).slice(-6)}`, at, counted: s.counted, read: s.read, counted_types: countedTypes, read_types: readTypes, paths: [...new Set(mine.map((e) => timingOf(e)?.cmd ?? timingOf(e, 'board')?.trigger ?? e.$workers?.eventType).filter(Boolean))] });
+  }
+  shortRead = { request_groups: byId ? counted.length : 'unread', group_cap_hit: counted.length >= 2000, short_requests: before.short.length, recovered_events: recovered, still_short_requests: after.short.length, unattributed_events: after.unattributed, still_short: stillShort };
 }
 
 /** Finds the first value under `key` anywhere in an event (field placement differs between event kinds). */
@@ -212,6 +298,11 @@ let readShort = false;
 if (population && events.length < population) {
   readShort = true;
   console.log(`WARNING: read ${events.length} of ${population} events in the window; figures below cover only those read.`);
+}
+if (shortRead) {
+  console.log(`short read, per request (order 15): ${redact(JSON.stringify(shortRead))}`);
+  // A request still short fails even when the totals meet (a late arrival must not stand in for a missing event).
+  if (shortRead.still_short_requests || shortRead.request_groups === 'unread') readShort = true;
 }
 if (pageCapHit) {
   readShort = true;

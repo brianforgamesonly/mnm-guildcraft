@@ -145,3 +145,10 @@ Treat the clock as authoritative over any date an order states.
 - Order 14's explicit override 1 of the earlier orders' "GuildCraft never contacts the wiki": the reachability probe's two API requests (scripts/probe/wiki.ts) from this machine, a GitHub-hosted runner and Cloudflare's network, through the dispatch-only `.github/workflows/wiki-probe.yml`; and one temporary Worker, `guildcraft-wiki-probe` (scripts/probe/wrangler.jsonc: no bindings, routes or cron), deployed, called once and deleted in the same run. Nothing else contacts the wiki.
 - Order 14's explicit override 2 of the rule against production changes beyond the named ones: deploying both copies for the `/craft help` copy fix only.
 - A polite guest: at most 2 requests per path, a named User-Agent that does not name Brian, one retry after 10 s on a network error only, never on a 403 or 429. Never disguise the origin: no browser User-Agents, proxies, IP rotation or retry-until-it-works. A block is an answer.
+
+## Order 15
+
+- If the auto-mode check refuses a local `git fetch`, the base SHA is read from GitHub instead.
+- A dispatch is made only to confirm a fix and only when it is expected to pass; a run expected to fail is never dispatched. Every failed run is listed in the report with its reason.
+- The usage workflow is never dispatched to confirm its level alarm, not even as a dry run: a dry run writes nothing, so the next scheduled run judges the same days again.
+- When a check fails on a real gap, the deliverable is the diagnosis and the fix of the gap, never a change to the check. A short read from Workers Logs is named per request (`scripts/bench/logs-check.mjs` `shortRequests`), never only totalled.
