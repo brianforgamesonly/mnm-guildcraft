@@ -11,6 +11,7 @@ import { SQL_IS_OFFICER, SQL_PASSES_MEMBER_GATE, sqlAccessParams } from '../acce
 import { focused, matchChoices, optString, subcommand, truncate, type Choice, type Interaction } from '../discord.ts';
 import { gameList, type GameList } from '../gamedata.ts';
 import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
+import { ALL_SKILLS } from './requests.ts';
 
 const CHOICE_MAX = 100;
 
@@ -83,6 +84,8 @@ export async function autocomplete(db: D1Database, i: Interaction): Promise<Choi
     const { results } = await db.prepare(FACTIONS_SQL).bind(i.guild_id).all<{ faction: string }>();
     return factionChoices(results.map((r) => r.faction), typed);
   }
+  // Order 16: /craft notify's tradeskill, with All first.
+  if (command === 'craft' && sub === 'notify' && f.name === 'tradeskill') return asChoices(matchChoices([ALL_SKILLS, ...(await gameList(db, 'skills'))], typed));
   const list = GAME_OPTIONS[f.name];
   if (list) return asChoices(matchChoices(await gameList(db, list), typed));
   if (f.name === 'name' || f.name === 'character') {

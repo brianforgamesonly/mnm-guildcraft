@@ -8,13 +8,13 @@
 // needed to see a channel or any thread in it (topics/permissions). EMBED_LINKS: Discord's table describes it only as
 // auto-embedding links; it is listed where the bot's own posts are embeds, as /guildcraft setup has required since
 // order 5 (whether a bot's embeds need it is unverified either way).
-import { ATTACH_FILES, EMBED_LINKS, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
+import { ATTACH_FILES, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
 
 /** The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). */
-export type ChannelKind = 'board' | 'review' | 'vault';
+export type ChannelKind = 'board' | 'review' | 'vault' | 'requests';
 
 export interface Route {
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT';
   /** The path with every variable part written {} (no query string). */
   path: string;
   channel: ChannelKind | null;
@@ -42,6 +42,12 @@ export const ROUTES: Route[] = [
   { method: 'GET', path: '/guilds/{}/members/{}', channel: null, needs: [], why: 'setup: the bot\'s own roles (Get Guild Member: no permission stated)' },
   { method: 'GET', path: '/guilds/{}/members', channel: null, needs: [], why: 'departures: who is still in the server ("requires the GUILD_MEMBERS Privileged Intent"; the Server Members intent, not a permission)' },
   { method: 'GET', path: '/guilds/{}', channel: null, needs: [], why: 'the server\'s name (Get Guild: no permission stated)' },
+  // Order 16: craft requests, one private thread each in the request channel (read 2026-10-21).
+  { method: 'POST', path: '/channels/{}/threads', channel: 'requests', needs: [VIEW_CHANNEL, CREATE_PRIVATE_THREADS], why: 'requests: create a private thread (type 12; CREATE_PRIVATE_THREADS "Allows for creating private threads")' },
+  { method: 'PUT', path: '/channels/{}/thread-members/{}', channel: 'requests', needs: [VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS], why: 'requests: add the requester and crafters (Add Thread Member: "Requires the ability to send messages in the thread")' },
+  { method: 'POST', path: '/channels/{}/messages', channel: 'requests', needs: [VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS], why: 'requests: the first message and the claim, done and cancel notices (threads need SEND_MESSAGES_IN_THREADS)' },
+  { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'requests', needs: [VIEW_CHANNEL, READ_MESSAGE_HISTORY], why: 'requests: edit its own first message (status); Read Message History so the thread\'s earlier messages stay readable to the bot (required by order 16; whether an edit needs it is unverified)' },
+  { method: 'PATCH', path: '/channels/{}', channel: 'requests', needs: [VIEW_CHANNEL, MANAGE_THREADS], why: 'requests: rename, lock, archive and unarchive its threads ("requires MANAGE_THREADS or that the current user is the thread creator"; lock needs MANAGE_THREADS)' },
 ];
 
 /** Discord's settings names for the bits the routes use. */
@@ -53,6 +59,7 @@ export const PERMISSION_NAMES = new Map<bigint, string>([
   [ATTACH_FILES, 'Attach Files'],
   [READ_MESSAGE_HISTORY, 'Read Message History'],
   [MANAGE_THREADS, 'Manage Threads (Manage Posts, to pin the index)'],
+  [CREATE_PRIVATE_THREADS, 'Create Private Threads'],
 ]);
 
 const union = (rs: Route[]) => rs.reduce((b, r) => r.needs.reduce((x, n) => x | n, b), 0n);

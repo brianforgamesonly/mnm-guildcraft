@@ -33,11 +33,12 @@ import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { usageAlerts } from '../usage.ts';
+import { sweepRequests } from '../requests.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
-const AUTO_ARCHIVE_MINUTES = 10080;
+export const AUTO_ARCHIVE_MINUTES = 10080;
 /** The keep-active bump alternates between these two (Discord's allowed values include 4320 and 10080). */
-const BUMP_MINUTES = 4320;
+export const BUMP_MINUTES = 4320;
 /** The nightly run bumps any post that would auto-archive within this long (2 days: one missed night is covered). */
 export const KEEP_ACTIVE_MS = 2 * 86_400_000;
 /** Channel flag PINNED (1 << 1): only one post per forum can carry it. */
@@ -647,6 +648,20 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     ...isolate,
   };
   console.log(JSON.stringify(line));
+  // Order 16: craft requests, on what the board left of the budget: expiry, keep-active, and renames that were refused.
+  // One D1 query when there is nothing open; its own log line only when it found something.
+  if (env.DISCORD_BOT_TOKEN && budgetLeft(budget) >= RESERVE + 3) {
+    api ??= botApi(env.DISCORD_BOT_TOKEN, budget);
+    const mark = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
+    let req: Record<string, unknown> = { gc: 'requests' };
+    try {
+      const r = await sweepRequests(counted.db, api, controller.scheduledTime);
+      req = r.open || r.errors.length || r.renamed || r.rename_refused ? { gc: 'requests', ...r } : {};
+    } catch (e) {
+      req.err = e instanceof Error ? e.message : String(e);
+    }
+    if (req.gc) console.log(JSON.stringify({ ...req, d1_calls: counted.calls.length - mark.d1, discord_calls: budget.discord - mark.discord, calls: api.log.slice(mark.log) }));
+  }
   // Order 8 (ITEM 2.4): the usage warning, after the sweep (so the sweep's first query stays the run's first after an
   // idle gap, order 5): one read per run; it posts only when a metric's state changes (src/usage.ts). It needs a read,
   // a post and a write; whatever the sweep left dirty waits for the next run either way.

@@ -66,11 +66,12 @@ describe('/craft help copy', () => {
     // Every registered subcommand is listed, and the help lists nothing that is not in the PRD.
     for (const c of DEFINED) expect(entries.some((e) => e.cmds.includes(c)), c).toBe(true);
     // Order 13: /gear find is a named departure from the PRD (CHECKLIST A15), the one command beyond it.
-    const BEYOND_PRD = ['/gear find'];
+    // Order 16: the craft request commands (CHECKLIST A18), named departures from the PRD too.
+    const BEYOND_PRD = ['/gear find', '/craft request', '/craft requests', '/craft notify'];
     for (const c of entries.flatMap((e) => e.cmds)) expect([...prdCommands, ...BEYOND_PRD], c).toContain(c);
     expect([...DEFINED].sort()).toEqual([
-      '/character add', '/character edit', '/character remove', '/craft find', '/craft forget', '/craft help', '/craft know', '/craft me', '/craft report', '/craft set',
-      '/craft update', '/gear find', '/guildcraft rebuild-board', '/guildcraft remove-member', '/guildcraft setup', '/guildcraft status', '/item image', '/recipe override',
+      '/character add', '/character edit', '/character remove', '/craft find', '/craft forget', '/craft help', '/craft know', '/craft me', '/craft notify', '/craft report',
+      '/craft request', '/craft requests', '/craft set', '/craft update', '/gear find', '/guildcraft rebuild-board', '/guildcraft remove-member', '/guildcraft setup', '/guildcraft status', '/item image', '/recipe override',
       '/recipe source', '/roster member', '/roster recipes', '/roster skill', '/roster top',
     ]);
     // Order 9: /recipe add is out of scope (override 3), so it alone stays "(coming soon)", derived.

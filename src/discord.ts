@@ -224,6 +224,8 @@ export const EMBED_LINKS = 1n << 14n;
 export const ATTACH_FILES = 1n << 15n;
 export const READ_MESSAGE_HISTORY = 1n << 16n;
 export const MANAGE_THREADS = 1n << 34n;
+/** Order 16: the request channel's private threads ("Allows for creating private threads"). */
+export const CREATE_PRIVATE_THREADS = 1n << 36n;
 export const SEND_MESSAGES_IN_THREADS = 1n << 38n;
 /** Channel type GUILD_FORUM. */
 export const GUILD_FORUM = 15;

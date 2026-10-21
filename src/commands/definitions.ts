@@ -108,6 +108,27 @@ export const COMMANDS = [
           { type: STRING, name: 'details', description: 'Optional: what it should be (up to 300 characters)', max_length: 300 },
         ],
       },
+      // Order 16: craft requests.
+      {
+        type: SUBCOMMAND,
+        name: 'request',
+        description: 'Ask the opted-in crafters who can make an item, in a private thread',
+        options: [
+          { type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 },
+          { type: INTEGER, name: 'quantity', description: 'How many (default 1)', min_value: 1, max_value: 1000 },
+          { type: STRING, name: 'note', description: 'Optional: anything the crafter should know (up to 300 characters)', max_length: 300 },
+        ],
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'notify',
+        description: 'Turn craft request notices on or off for a tradeskill (off by default)',
+        options: [
+          { type: STRING, name: 'tradeskill', description: 'A tradeskill, or All', required: true, autocomplete: true, max_length: 100 },
+          { type: BOOLEAN, name: 'on', description: 'True: be added to requests you can craft. False: stop.', required: true },
+        ],
+      },
+      { type: SUBCOMMAND, name: 'requests', description: 'Your open craft requests (officers: all of them), with Cancel (private)' },
       { type: SUBCOMMAND, name: 'help', description: 'A one-screen guide to every command' },
     ],
   },
@@ -215,13 +236,14 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'setup',
-        description: 'Set the roles, roster board, and review and vault channels (leave all out to see them)',
+        description: 'Set the roles, roster board, and review, vault and request channels (leave all out to see them)',
         options: [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
           { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
           { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
           { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
+          { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
         ],
       },
       { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },

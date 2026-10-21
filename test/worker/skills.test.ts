@@ -165,7 +165,8 @@ describe('/craft me', () => {
     expect(lines[1]).toMatch(/^\*\*Blacksmithing\*\* 25 · <t:\d{10}:d>$/);
     expect(lines[2]).toBe(`**Tailoring** 7 · <t:${Date.parse('2026-01-01T00:00:00.000Z') / 1000}:d> · *stale*`);
     expect(r.data.embeds![1].description).toBe('No skills yet: `/craft set` or `/craft update`.');
-    expect(r.data.content).toBe('-# *stale* = not updated in 60 days.');
+    // Order 16: the member's craft request opt-ins (none yet).
+    expect(r.data.content).toBe('**Craft request notices:** off (`/craft notify` turns them on for a tradeskill)\n-# *stale* = not updated in 60 days.');
   });
 });
 

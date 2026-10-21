@@ -15,6 +15,10 @@ import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterS
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
 import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
 import { WELCOME } from './commands/welcome.ts';
+import {
+  ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftNotify, craftRequest, craftRequests, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, requestFromFind, SEND_PREFIX, sendUnsent,
+} from './commands/requests.ts';
+import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -58,6 +62,10 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'item image': { access: 'member', run: itemImage },
   'recipe source': { access: 'officer', run: recipeSource },
   'recipe override': { access: 'officer', run: recipeOverride },
+  // Order 16: craft requests. Each answers clearly where no request channel is set (src/requests.ts NO_REQUEST_CHANNEL).
+  'craft request': { access: 'member', run: craftRequest },
+  'craft notify': { access: 'member', run: craftNotify },
+  'craft requests': { access: 'member', run: craftRequests },
   'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
   'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
@@ -108,7 +116,8 @@ export function planFor(i: Interaction): Plan {
     }
     case InteractionType.MESSAGE_COMPONENT:
       // The skill select and Report a problem open a modal, which cannot follow a deferral.
-      if (!inGuild || [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX].some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: false };
+      // Order 16: Add item (on an unsent craft request) opens a modal too.
+      if (!inGuild || [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX].some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: false };
       return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
     case InteractionType.MODAL_SUBMIT:
       if (!inGuild) return { defer: false };
@@ -160,8 +169,16 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (i.type === InteractionType.MODAL_SUBMIT) {
     if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
     if (id.startsWith(REPORT_MODAL_PREFIX) || id.startsWith(ITEM_REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
+    if (id.startsWith(ADD_MODAL_PREFIX)) return addItemSubmitted(c, id, i.data?.components);
     return ephemeral(STALE_FORM);
   }
+  // Order 16: craft requests. Request a craft answers privately (also on a posted card); the thread's buttons re-check
+  // who may press them; an unsent request's and /craft requests' controls are private messages, edited in place.
+  if (id.startsWith(FROM_FIND_PREFIX)) return requestFromFind(c, Number(id.slice(FROM_FIND_PREFIX.length)));
+  if (id.startsWith(REQUEST_ITEM_PREFIX)) return itemButton(c, id);
+  if (id.startsWith(SEND_PREFIX)) return sendUnsent(c, id);
+  if (id.startsWith(DISCARD_PREFIX)) return discardUnsent(c, id);
+  if (id.startsWith(LIST_PREFIX)) return cancelFromList(c, i.data?.values ?? []);
   // Order 9: /craft find's buttons, private or on a posted copy. Each answers the presser with a new private message.
   if (id.startsWith(KNOW_PREFIX)) return knowButton(c, Number(id.slice(KNOW_PREFIX.length)));
   if (id.startsWith(KNOW_SELECT_PREFIX)) return knowSelected(c, i.data?.values ?? []);
@@ -201,6 +218,7 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   const id = i.data?.custom_id ?? '';
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
   if (id.startsWith(ITEM_REPORT_PREFIX)) return reportModal(Number(id.slice(ITEM_REPORT_PREFIX.length)), 'item');
+  if (id.startsWith(ADD_PREFIX)) return addItemModal(id);
   return updateSelected(ctxFor(env, guild, i.member!, {}), id, i.data?.values ?? []);
 }
 

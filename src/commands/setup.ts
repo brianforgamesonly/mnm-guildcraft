@@ -2,8 +2,8 @@
 // The review channel arrived in order 7; the vault channel arrives in order 9.
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { ADMINISTRATOR, ephemeral, GUILD_FORUM, GUILD_TEXT, optString, plural, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
-import { channelPermissions } from '../permissions.ts';
+import { ADMINISTRATOR, CREATE_PRIVATE_THREADS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, plural, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
+import { channelPermissions, PERMISSION_NAMES } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
@@ -22,6 +22,8 @@ const describeReview = (g: Pick<Guild, 'review_channel_id'>) =>
   `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices and reports)'}`;
 const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
   `Vault channel: ${g.vault_channel_id ? `<#${g.vault_channel_id}>` : 'not set (`vault:` picks a private text channel for item screenshots)'}`;
+const describeRequests = (g: Pick<Guild, 'request_channel_id'>) =>
+  `Request channel: ${g.request_channel_id ? `<#${g.request_channel_id}>` : 'not set (`requests:` picks a text channel for craft requests)'}`;
 
 // ---------------------------------------------------------------- the board channel's permissions
 
@@ -30,15 +32,45 @@ const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
 export const BOARD_PERMISSIONS = channelPermissions('board');
 export const REVIEW_PERMISSIONS = channelPermissions('review');
 export const VAULT_PERMISSIONS = channelPermissions('vault');
+export const REQUEST_PERMISSIONS = channelPermissions('requests');
 
 export const missingPermissions =(bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
   (bits & ADMINISTRATOR) === ADMINISTRATOR ? [] : needed.filter(([b]) => (bits & b) !== b).map(([, name]) => name);
 
-interface Overwrite {
+export interface Overwrite {
   id: string;
   type: number;
   allow: string;
   deny: string;
+}
+
+export interface RoleBits {
+  id: string;
+  permissions: string;
+}
+
+/**
+ * A member's permissions in a channel from the server's roles and the channel's overwrites
+ * (docs.discord.com/developers/topics/permissions, "Permission Overwrites"): @everyone and the member's roles, then the
+ * @everyone overwrite, the member's role overwrites together, then the member's own. Administrator and the server owner
+ * hold every permission. The one computation for the bot (computeAppPermissions) and for members (order 16: who can see
+ * the request channel).
+ */
+export function memberChannelBits(guildId: string, roles: RoleBits[], overwrites: Overwrite[], userId: string, userRoles: string[], ownerId?: string | null): bigint {
+  if (ownerId && userId === ownerId) return ~0n;
+  const perm = (id: string) => BigInt(roles.find((r) => r.id === id)?.permissions ?? '0');
+  let bits = perm(guildId) | userRoles.reduce((b, id) => b | perm(id), 0n);
+  if ((bits & ADMINISTRATOR) === ADMINISTRATOR) return ~0n;
+  const apply = (o: { allow: bigint; deny: bigint }) => {
+    bits = (bits & ~o.deny) | o.allow;
+  };
+  const everyone = overwrites.find((o) => o.id === guildId);
+  if (everyone) apply({ allow: BigInt(everyone.allow), deny: BigInt(everyone.deny) });
+  const roleOw = overwrites.filter((o) => o.type === 0 && userRoles.includes(o.id));
+  apply({ allow: roleOw.reduce((b, o) => b | BigInt(o.allow), 0n), deny: roleOw.reduce((b, o) => b | BigInt(o.deny), 0n) });
+  const mine = overwrites.find((o) => o.type === 1 && o.id === userId);
+  if (mine) apply({ allow: BigInt(mine.allow), deny: BigInt(mine.deny) });
+  return bits;
 }
 
 /**
@@ -61,20 +93,7 @@ export async function computeAppPermissions(token: string, guildId: string, chan
     get<{ roles: string[] }>(`/guilds/${guildId}/members/${appId}`),
   ]);
   if (!channel || !roles || !me) return null;
-  const perm = (id: string) => BigInt(roles.find((r) => r.id === id)?.permissions ?? '0');
-  let bits = perm(guildId) | me.roles.reduce((b, id) => b | perm(id), 0n);
-  if ((bits & ADMINISTRATOR) === ADMINISTRATOR) return bits;
-  const ow = channel.permission_overwrites ?? [];
-  const apply = (o: { allow: bigint; deny: bigint }) => {
-    bits = (bits & ~o.deny) | o.allow;
-  };
-  const everyone = ow.find((o) => o.id === guildId);
-  if (everyone) apply({ allow: BigInt(everyone.allow), deny: BigInt(everyone.deny) });
-  const roleOw = ow.filter((o) => o.type === 0 && me.roles.includes(o.id));
-  apply({ allow: roleOw.reduce((b, o) => b | BigInt(o.allow), 0n), deny: roleOw.reduce((b, o) => b | BigInt(o.deny), 0n) });
-  const mine = ow.find((o) => o.type === 1 && o.id === appId);
-  if (mine) apply({ allow: BigInt(mine.allow), deny: BigInt(mine.deny) });
-  return bits;
+  return memberChannelBits(guildId, roles, channel.permission_overwrites ?? [], appId, me.roles);
 }
 
 /**
@@ -123,7 +142,50 @@ const CHANNEL_KINDS = {
     permissions: VAULT_PERMISSIONS,
     wrongType: (id: string) => `<#${id}> is not a text channel. Create a private text channel for officers, then pick it here.`,
   },
+  // Order 16: private threads can only be created in text channels.
+  requests: {
+    type: GUILD_TEXT,
+    permissions: REQUEST_PERMISSIONS,
+    wrongType: (id: string) => `<#${id}> is not a text channel. Craft requests open private threads, which only text channels have: pick a text channel.`,
+  },
 } as const;
+
+/**
+ * Order 16: who can read every private thread in a channel besides its members: "only viewable by those invited and those
+ * with the MANAGE_THREADS permission", and Administrator holds every permission (as does the server owner). The roles
+ * holding either there (from the roles and the channel's overwrites, memberChannelBits), and how many members hold
+ * Manage Threads by their own overwrite. Two GETs; null when either fails.
+ */
+export async function threadReaders(token: string, guildId: string, channelId: string): Promise<{ everyone: boolean; admins: string[]; managers: string[]; members: number } | null> {
+  const get = async <T>(path: string): Promise<T | null> => {
+    try {
+      const res = await fetch(`${DISCORD_API}${path}`, { headers: { Authorization: `Bot ${token}`, 'User-Agent': 'DiscordBot (mnm-guildcraft, 1)' }, signal: AbortSignal.timeout(5000) });
+      return res.ok ? ((await res.json()) as T) : null;
+    } catch {
+      return null;
+    }
+  };
+  const [channel, roles] = await Promise.all([get<{ permission_overwrites?: Overwrite[] }>(`/channels/${channelId}`), get<(RoleBits & { managed?: boolean })[]>(`/guilds/${guildId}/roles`)]);
+  if (!channel || !roles) return null;
+  const ow = channel.permission_overwrites ?? [];
+  const holds = (bits: bigint) => (bits & MANAGE_THREADS) === MANAGE_THREADS;
+  const everyone = holds(memberChannelBits(guildId, roles, ow, '0', []));
+  const others = roles.filter((r) => r.id !== guildId);
+  const admins = others.filter((r) => (BigInt(r.permissions) & ADMINISTRATOR) === ADMINISTRATOR).map((r) => r.id);
+  const managers = others.filter((r) => !admins.includes(r.id) && holds(memberChannelBits(guildId, roles, ow, '0', [r.id]))).map((r) => r.id);
+  const members = ow.filter((o) => o.type === 1 && (BigInt(o.allow) & MANAGE_THREADS) === MANAGE_THREADS).length;
+  return { everyone, admins, managers, members };
+}
+
+export function threadReadersNote(id: string, r: Awaited<ReturnType<typeof threadReaders>>): string {
+  if (!r) return `**Note:** I couldn't check who can read private threads in <#${id}>. Anyone with Manage Threads there, or Administrator, can read every request.`;
+  if (r.everyone) return `**Note:** everyone in the server has Manage Threads in <#${id}>, so everyone can read every request. To keep requests private: Edit Channel → Permissions → @everyone → turn off Manage Threads.`;
+  const roles = [...r.admins.map((x) => `<@&${x}>`), ...r.managers.map((x) => `<@&${x}>`)];
+  return [
+    `**Who else can read every request:** besides the requester and the crafters added, private threads in <#${id}> are visible to anyone with Manage Threads there or Administrator, and to the server owner.`,
+    roles.length ? `Here that is: ${roles.join(', ')}${r.members ? `, and ${plural(r.members, 'member')} with their own Manage Threads permission in the channel` : ''}.` : r.members ? `Here that is ${plural(r.members, 'member')} with their own Manage Threads permission in the channel.` : 'No role holds either here.',
+  ].join('\n');
+}
 
 /** Checks a picked channel: the right type, and the bot holds every permission it needs there. Returns the refusal text, or ok. */
 async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNEL_KINDS): Promise<{ refusal: string } | { ok: true; source: 'app_permissions' | 'computed' }> {
@@ -142,7 +204,10 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
   const missing = missingPermissions(bits, want.permissions);
   if (missing.length)
     return {
-      refusal: `Nothing was changed. In <#${channelId}> GuildCraft is missing: **${missing.join('**, **')}**.\nGive MNM-Guildcraft these permissions in the channel's settings (Permissions), then run this again.`,
+      refusal: `Nothing was changed. In <#${channelId}> GuildCraft is missing: **${missing.join('**, **')}**.\nGive MNM-Guildcraft these permissions in the channel's settings (Permissions), then run this again.${
+        // Order 16: servers that installed GuildCraft before craft requests lack this one.
+        missing.includes(PERMISSION_NAMES.get(CREATE_PRIVATE_THREADS)!) ? '\nGuildCraft installed before craft requests existed did not ask for Create Private Threads: grant it on this channel, or re-invite GuildCraft with the current install link (ask Joegandomi).' : ''
+      }`,
     };
   return { ok: true, source };
 }
@@ -155,19 +220,21 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const board = optString(opts, 'board');
   const review = optString(opts, 'review');
   const vault = optString(opts, 'vault');
-  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined)
-    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}`);
+  const requests = optString(opts, 'requests');
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined && requests === undefined)
+    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}\n${describeRequests(c.guild)}`);
 
-  for (const [id, kind] of [[board, 'board'], [review, 'review'], [vault, 'vault']] as const) {
+  for (const [id, kind] of [[board, 'board'], [review, 'review'], [vault, 'vault'], [requests, 'requests']] as const) {
     if (id === undefined) continue;
     const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
   const before = {
     member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id,
-    vault_channel_id: c.guild.vault_channel_id,
+    vault_channel_id: c.guild.vault_channel_id, request_channel_id: c.guild.request_channel_id,
   };
   const after = {
+    request_channel_id: requests ?? before.request_channel_id,
     member_role_id: memberRole ?? before.member_role_id,
     officer_role_id: officerRole ?? before.officer_role_id,
     board_channel_id: board ?? before.board_channel_id,
@@ -177,8 +244,8 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
   const stmts = [
     c.db
-      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ? WHERE id = ?')
-      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, c.guild.id),
+      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ?, request_channel_id = ? WHERE id = ?')
+      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, after.request_channel_id, c.guild.id),
     audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
   ];
   // A new forum starts a new board: the old posts are forgotten here (they stay in the old channel).
@@ -189,7 +256,13 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     );
   const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
   const results = await c.db.batch([...stmts, counted]);
-  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}`];
+  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}\n${describeRequests(after)}`];
+  if (requests !== undefined) {
+    lines.push(
+      `Craft requests will open private threads in <#${requests}>: one per request, holding the requester and the crafters who opted in with \`/craft notify\` and can make the item. Members need to see the channel to see their thread.`,
+      threadReadersNote(requests, c.botToken ? await threadReaders(c.botToken, c.guild.id, requests) : null),
+    );
+  }
   if (vault !== undefined) {
     lines.push(`Screenshots from \`/item image\` will wait in <#${vault}> for an officer's **Approve** or **Reject**. Screenshots already in an earlier vault stay where they are.`);
     const open = c.botToken ? await everyoneCanView(c.botToken, c.guild.id, vault) : null;

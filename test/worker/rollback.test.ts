@@ -6,6 +6,8 @@ import down10 from '../../scripts/rollback/0010_gear.down.sql?raw';
 import down11 from '../../scripts/rollback/0011_item_reports.down.sql?raw';
 import up10 from '../../migrations/0010_gear.sql?raw';
 import up11 from '../../migrations/0011_item_reports.sql?raw';
+import down12 from '../../scripts/rollback/0012_craft_requests.down.sql?raw';
+import up12 from '../../migrations/0012_craft_requests.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -20,7 +22,20 @@ const run = async (sql: string) => {
   for (const s of statements(sql)) await env.DB.prepare(s).run();
 };
 
+it('order 16: 0012 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down12);
+  const without = await schema();
+  expect(without.some((r) => /^craft_/.test(r.name) || /request_channel_id/.test(r.sql ?? ''))).toBe(false);
+  await run(up12);
+  expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
+  const cols = (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('guild') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
+  expect(cols.at(-1)).toBe('request_channel_id');
+});
+
 it('0011 then 0010 down, then up again, restores the schema; down leaves no trace of either', async () => {
+  // Order 16: 0012 comes off first (it is the newest), and goes back last.
+  await run(down12);
   const before = await schema();
   await run(down11);
   await run(down10);
@@ -32,4 +47,5 @@ it('0011 then 0010 down, then up again, restores the schema; down leaves no trac
   expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
   const cols = (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('item') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
   expect(cols.slice(-11)).toEqual(['ac', 'dmg', 'delay', 'ratio', 'skill', 'handed', 'class_mask', 'slot_mask', 'source_mask', 'origin_json', 'total_stats']);
+  await run(up12);
 });
