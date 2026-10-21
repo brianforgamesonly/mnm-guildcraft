@@ -64,8 +64,11 @@ function list(raw: unknown, file: string, key: string): Record<string, unknown>[
 /** The only two normalisations allowed (order 17, section D): case, and curly to straight apostrophes. */
 export const zoneKey = (name: string): string => name.replace(/[‘’]/g, "'").toLowerCase();
 
-/** Mo Betta's NPC zone text: split only on ", " and " or ", then de-duplicated. Nothing is trimmed or guessed. */
-export const npcZoneParts = (text: string): string[] => [...new Set(text.split(/, | or /))];
+/**
+ * Mo Betta's NPC zone text: split only on ", " and " or ", then de-duplicated. Nothing is trimmed or guessed. Empty text
+ * names no zone (counted as noZone), not an unmatched name.
+ */
+export const npcZoneParts = (text: string): string[] => (text === '' ? [] : [...new Set(text.split(/, | or /))]);
 
 /** The first whole number in a level text ("~36-37" → 36, "< 20" → 20); null when it holds none. The sort key only. */
 export function levelSort(level: string | null | undefined): number | null {
@@ -94,7 +97,8 @@ export interface ZoneNameRow {
 export interface NpcRow {
   zone_key: string;
   name: string;
-  kind: string;
+  /** Mo Betta's kind ("npc", "merchant"), NULL when it records none. */
+  kind: string | null;
   level: string | null;
   race: string | null;
   class: string | null;
@@ -145,7 +149,7 @@ export interface ZoneSummary {
     rows: number;
     /** Mo Betta records whose zone text maps to no zone at all (each unmatched part is in names['mo-betta:npcs']). */
     noZone: number;
-    /** Records folded into another with the same name and zone, differing only in case. */
+    /** Records folded into an earlier one with the same name (case-insensitive) and zone. */
     caseDuplicates: number;
     caseDuplicateConflicts: { zone: string; name: string; field: string; kept: string; dropped: string }[];
     /** Rows matching a mnm-tools mob (same name, case-insensitive, in a zone of that mob). */
@@ -269,7 +273,7 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
       const row: NpcRow = {
         zone_key: zk,
         name: n.name as string,
-        kind: str(n.kind) ?? 'npc',
+        kind: str(n.kind),
         level: fieldText(n.level),
         race: fieldText(n.race),
         class: fieldText(n.class),
@@ -283,8 +287,7 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
         continue;
       }
       caseDuplicates++;
-      if (row.kind !== prior.kind) caseDuplicateConflicts.push({ zone: zones.get(zk)!.name, name: prior.name, field: 'kind', kept: prior.kind, dropped: row.kind });
-      for (const f of ['level', 'race', 'class', 'location', 'loot_json'] as const) {
+      for (const f of ['kind', 'level', 'race', 'class', 'location', 'loot_json'] as const) {
         if (prior[f] === null) prior[f] = row[f];
         else if (row[f] !== null && row[f] !== prior[f])
           caseDuplicateConflicts.push({ zone: zones.get(zk)!.name, name: prior.name, field: f, kept: prior[f]!, dropped: row[f]! });

@@ -853,7 +853,7 @@ export interface Predicted {
   game_class: { insert: number; update: number; deactivate: number };
   mob: { insert: number; update: number; deactivate: number };
   /** Order 17: rows each zone table would write (inserts and updates together), absent without the zone sources. */
-  zones?: { zone: number; zone_name: number; npc: number; import_source: number };
+  zones?: { zone: number; zone_name: number; npc: number; import_source: number; deactivate: { zone: number; zone_name: number; npc: number } };
 }
 
 export function predict(plan: Plan, ex: ExistingState): Predicted {
@@ -889,7 +889,9 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
   for (const s of plan.stubs) if (!ex.items.has(s.name_key)) p.stub.insert++;
   if (plan.zones) {
     const z = plan.zones;
+    const gone = zoneDeactivations(z, ex);
     p.zones = {
+      deactivate: { zone: gone.zones.length, zone_name: gone.names.length, npc: gone.npcs.length },
       zone: z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).length,
       zone_name: z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)).length,
       npc: z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).length,
@@ -954,7 +956,8 @@ export const WRITE_CEILING = 40_000;
  * The import's statements in groups, in write order. A run that reaches the write ceiling stops between groups, never
  * inside one, and never skips ahead (a later group can depend on an earlier one: recipes name items). Each item and mob
  * row is written whole by one statement; the recipes and their components are one group.
- * With `ex`, item and mob rows that would not change are left out (itemDiffers / mobDiffers, as the dry run predicts);
+ * With `ex`, item, mob and zone-table rows that would not change are left out (itemDiffers, mobDiffers, zoneDiffers,
+ * zoneNameDiffers, npcDiffers, as the dry run predicts);
  * the statements' own "differs" guards still apply, so a re-run on unchanged data writes 0 rows.
  */
 export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState): Statement[][] {
@@ -1108,8 +1111,21 @@ function mobGroups(plan: Plan, ex: ExistingState | undefined, stmt: (table: Tabl
  */
 function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Table, rows: number, sql: string) => Statement): Statement[][] {
   const groups: Statement[][] = [];
+  // The source versions first: a small group, so even a run stopped at the ceiling leaves every zone table holding rows
+  // after its first import (the backup's must-hold-rows check reads IMPORT_TABLES).
+  const versions = ex ? z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt) : z.versions;
+  if (versions.length)
+    groups.push([
+      stmt(
+        'import_source',
+        versions.length,
+        `INSERT INTO import_source (name, sha, changed_at) VALUES ${versions.map((v) => `(${lit(v.name)}, ${lit(v.sha)}, ${lit(v.changedAt)})`).join(', ')} ` +
+          `ON CONFLICT(name) DO UPDATE SET sha = excluded.sha, changed_at = excluded.changed_at ` +
+          `WHERE import_source.sha IS NOT excluded.sha OR import_source.changed_at IS NOT excluded.changed_at`,
+      ),
+    ]);
   const zones = ex ? z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)) : z.zones;
-  for (const rows of chunk(zones, ROWS_PER_STATEMENT))
+  for (const rows of chunkSized(zones, utf8))
     groups.push([
       stmt(
         'zone',
@@ -1136,7 +1152,7 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
       ),
     ]);
   const npcs = ex ? z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)) : z.npcs;
-  for (const rows of chunk(npcs, ROWS_PER_STATEMENT))
+  for (const rows of chunkSized(npcs, utf8))
     groups.push([
       stmt(
         'npc',
@@ -1153,37 +1169,54 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
           `OR npc.loot_json IS NOT excluded.loot_json OR npc.active IS NOT 1`,
       ),
     ]);
-  const versions = ex ? z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt) : z.versions;
-  if (versions.length)
-    groups.push([
-      stmt(
-        'import_source',
-        versions.length,
-        `INSERT INTO import_source (name, sha, changed_at) VALUES ${versions.map((v) => `(${lit(v.name)}, ${lit(v.sha)}, ${lit(v.changedAt)})`).join(', ')} ` +
-          `ON CONFLICT(name) DO UPDATE SET sha = excluded.sha, changed_at = excluded.changed_at ` +
-          `WHERE import_source.sha IS NOT excluded.sha OR import_source.changed_at IS NOT excluded.changed_at`,
-      ),
-    ]);
   if (ex) {
-    const keep = new Set(z.zones.map((r) => r.key));
-    const goneZones = [...ex.zones.values()].filter((r) => r.active === 1 && !keep.has(r.key)).map((r) => r.key);
-    for (const keys of chunk(goneZones, ROWS_PER_STATEMENT))
+    const gone = zoneDeactivations(z, ex);
+    for (const keys of chunk(gone.zones, ROWS_PER_STATEMENT))
       groups.push([stmt('zone', keys.length, `UPDATE zone SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)]);
-    const keepNames = new Set(z.names.map((n) => zoneNameId(n.source, n.name)));
-    const goneNames = [...ex.zoneNames.values()].filter((n) => n.active === 1 && !keepNames.has(zoneNameId(n.source, n.name)));
-    for (const rows of chunk(goneNames, ROWS_PER_STATEMENT))
+    for (const rows of chunk(gone.names, ROWS_PER_STATEMENT))
       groups.push([
         stmt('zone_name', rows.length, `UPDATE zone_name SET active = 0 WHERE active = 1 AND (source, name) IN (VALUES ${rows.map((n) => `(${lit(n.source)}, ${lit(n.name)})`).join(', ')})`),
       ]);
-    const keepNpcs = new Set(z.npcs.map((n) => npcId(n.zone_key, n.name)));
-    const goneNpcs = [...ex.npcs.values()].filter((n) => n.active === 1 && !keepNpcs.has(npcId(n.zone_key, n.name)));
-    for (const rows of chunk(goneNpcs, ROWS_PER_STATEMENT))
+    for (const rows of chunk(gone.npcs, ROWS_PER_STATEMENT))
       groups.push([
         stmt('npc', rows.length, `UPDATE npc SET active = 0 WHERE active = 1 AND (zone_key, name) IN (VALUES ${rows.map((n) => `(${lit(n.zone_key)}, ${lit(n.name)})`).join(', ')})`),
       ]);
   }
   return groups;
 }
+
+/** Stored active zone rows the plan no longer holds: deactivated, never deleted (the dry run counts the same lists). */
+function zoneDeactivations(z: ZonePlan, ex: ExistingState) {
+  const keep = new Set(z.zones.map((r) => r.key));
+  const keepNames = new Set(z.names.map((n) => zoneNameId(n.source, n.name)));
+  const keepNpcs = new Set(z.npcs.map((n) => npcId(n.zone_key, n.name)));
+  return {
+    zones: [...ex.zones.values()].filter((r) => r.active === 1 && !keep.has(r.key)).map((r) => r.key),
+    names: [...ex.zoneNames.values()].filter((n) => n.active === 1 && !keepNames.has(zoneNameId(n.source, n.name))),
+    npcs: [...ex.npcs.values()].filter((n) => n.active === 1 && !keepNpcs.has(npcId(n.zone_key, n.name))),
+  };
+}
+
+/** D1 refuses a statement over 100,000 bytes: rows go in chunks of at most ROWS_PER_STATEMENT and about 90,000 bytes. */
+const MAX_STATEMENT_BYTES = 90_000;
+function chunkSized<T>(xs: T[], size: (x: T) => number): T[][] {
+  const out: T[][] = [];
+  let cur: T[] = [];
+  let bytes = 0;
+  for (const x of xs) {
+    const b = size(x);
+    if (cur.length && (cur.length >= ROWS_PER_STATEMENT || bytes + b > MAX_STATEMENT_BYTES)) {
+      out.push(cur);
+      cur = [];
+      bytes = 0;
+    }
+    cur.push(x);
+    bytes += b;
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+const utf8 = (v: unknown) => new TextEncoder().encode(JSON.stringify(v)).length + 64;
 
 export const buildStatements = (plan: Plan, importedAt: string, ex?: ExistingState): Statement[] => buildGroups(plan, importedAt, ex).flat();
 
@@ -1382,6 +1415,9 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
       throw e;
     }
     warnings.push(...plan.zones.warnings);
+    const activeZones = [...existing.zones.values()].filter((z) => z.active === 1).length;
+    if (activeZones > 0 && plan.zones.zones.length < activeZones * MIN_RECIPE_RATIO)
+      return fail(`implausible drop: ${plan.zones.zones.length} zones against ${activeZones} active stored`);
     const activeNpcs = [...existing.npcs.values()].filter((n) => n.active === 1).length;
     if (activeNpcs > 0 && plan.zones.npcs.length < activeNpcs * MIN_RECIPE_RATIO)
       return fail(`implausible drop: ${plan.zones.npcs.length} NPC rows against ${activeNpcs} active stored`);

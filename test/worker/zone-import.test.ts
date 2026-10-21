@@ -3,7 +3,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
-import { runImport } from '../../scripts/import/core.ts';
+import { buildPlan, buildStatements, loadExisting, runImport } from '../../scripts/import/core.ts';
 import { buildZonePlan, levelSort, npcZoneParts, zoneKey } from '../../scripts/import/zones.ts';
 import { mergeCreature } from '../../src/zone/creatures.ts';
 import small from '../fixtures/wiki-small.json';
@@ -35,6 +35,7 @@ describe('order 17: names', () => {
     expect(npcZoneParts("Keeper's Bight or Night Harbor")).toEqual(["Keeper's Bight", 'Night Harbor']);
     expect(npcZoneParts('Night Harbor Faelindral')).toEqual(['Night Harbor Faelindral']);
     expect(npcZoneParts('Rothold,Tel Ekir')).toEqual(['Rothold,Tel Ekir']);
+    expect(npcZoneParts('')).toEqual([]);
   });
 
   it('sorts levels by their first whole number; no number sorts last (null)', () => {
@@ -59,10 +60,10 @@ describe('order 17: zone import', () => {
     const n = res.zones!.names;
     expect(n['atlas:maps']).toEqual({ names: 4, matched: 3, unmatched: ['World map'] });
     expect(n['mo-betta:adjacent'].unmatched).toEqual(['Fields of the Lost']);
-    expect(n['mo-betta:npcs'].unmatched).toEqual(['Evershade Weald Rothold', '']);
+    expect(n['mo-betta:npcs'].unmatched).toEqual(['Evershade Weald Rothold']);
     expect(n['mo-betta:npcs'].matched).toBe(4); // Evershade Weald, Keeper's Bight, Ail'vorith (case), Rothold
     const unmatched = await all<{ source: string; name: string }>('SELECT source, name FROM zone_name WHERE zone_key IS NULL ORDER BY source, name');
-    expect(unmatched.map((r) => `${r.source}:${r.name}`)).toEqual(['atlas:maps:World map', 'mo-betta:adjacent:Fields of the Lost', 'mo-betta:npcs:', 'mo-betta:npcs:Evershade Weald Rothold']);
+    expect(unmatched.map((r) => `${r.source}:${r.name}`)).toEqual(['atlas:maps:World map', 'mo-betta:adjacent:Fields of the Lost', 'mo-betta:npcs:Evershade Weald Rothold']);
     expect(res.warnings!.filter((w) => w.kind === 'zone_names_unmatched').map((w) => (w as { source: string }).source)).toEqual(['atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs']);
   });
 
@@ -131,17 +132,31 @@ describe('order 17: zone import', () => {
     await load();
     const again = await load();
     for (const t of ['zone', 'zone_name', 'npc', 'import_source'] as const) expect(again.written![t].rows_written, t).toBe(0);
-    expect(again.predicted!.zones).toEqual({ zone: 0, zone_name: 0, npc: 0, import_source: 0 });
+    expect(again.predicted!.zones).toEqual({ zone: 0, zone_name: 0, npc: 0, import_source: 0, deactivate: { zone: 0, zone_name: 0, npc: 0 } });
     const z = zoneInput();
     (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs.filter((n) => n.name !== 'Supplier Jul');
     await load(z);
     expect(await all('SELECT name, active FROM npc WHERE name = \'Supplier Jul\'')).toEqual([{ name: 'Supplier Jul', active: 0 }]);
   });
 
+  it('keeps every statement under D1\'s 100,000-byte limit, however long the markers and descriptions', async () => {
+    const z = zoneInput();
+    const tools = z.files['mnm-tools/maps.json'] as { zones: { name: string; markers: unknown[] }[] };
+    tools.zones = Array.from({ length: 60 }, (_, i) => ({ name: `Long Zone ${i}`, markers: Array.from({ length: 40 }, () => ({ label: 'x', category: 'ore', notes: 'é'.repeat(400) })) }));
+    const plan = buildPlan(withZoneWiki(small), await loadExisting(db));
+    plan.zones = buildZonePlan(z, [], [], '2026-10-21T00:00:00Z');
+    const stmts = buildStatements(plan, '2026-10-21T00:00:00Z');
+    const longest = Math.max(...stmts.map((s) => new TextEncoder().encode(s.sql).length));
+    expect(longest).toBeGreaterThan(30_000);
+    expect(longest).toBeLessThan(100_000);
+    const res = await load(z);
+    expect(res.status).toBe('ok');
+  });
+
   it('a dry run writes no zone rows and predicts the first import', async () => {
     const res = await load(zoneInput(), true);
     expect(res.status).toBe('dry-run');
-    expect(res.predicted!.zones).toEqual({ zone: 5, zone_name: 24, npc: 6, import_source: 5 });
+    expect(res.predicted!.zones).toEqual({ zone: 5, zone_name: 23, npc: 6, import_source: 5, deactivate: { zone: 0, zone_name: 0, npc: 0 } });
     expect(await all('SELECT key FROM zone')).toEqual([]);
   });
 

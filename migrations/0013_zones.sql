@@ -36,7 +36,7 @@ PRIMARY KEY (source, name)
 CREATE TABLE npc (
 zone_key TEXT NOT NULL,
 name TEXT NOT NULL COLLATE NOCASE,
-kind TEXT NOT NULL,
+kind TEXT,
 level TEXT,
 race TEXT,
 class TEXT,
