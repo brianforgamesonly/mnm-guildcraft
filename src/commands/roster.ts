@@ -3,6 +3,7 @@
 // characters (deleted_at) and departed members (status 'left') never appear.
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, ephemeral, md, memberTag, mention, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { fitLines } from './find.ts';
 import { postButton, postedReply, searchReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { skillGroups, type Tradeskill } from './skills.ts';
 
@@ -197,7 +198,8 @@ async function topEmbed(c: Ctx): Promise<Embed> {
   const lines = [...bySkill].map(([skill, top]) => `**${skill}**: ${top.join(' · ')}`);
   return {
     title: `Top ${TOP_N} in each tradeskill`,
-    description: truncate(lines.length ? lines.join('\n') : 'No one in the guild has recorded a tradeskill yet.', EMBED_LIMITS.description),
+    // Whole lines only: a cut line could split a mention (order 16).
+    description: lines.length ? fitLines(lines, lines.length, EMBED_LIMITS.description) : 'No one in the guild has recorded a tradeskill yet.',
   };
 }
 
