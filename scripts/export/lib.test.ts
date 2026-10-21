@@ -56,6 +56,10 @@ function fixture(): string {
       `INSERT INTO audit_log (guild_id, actor, action, target, created_at) VALUES ('${g}', '${u}', 'member.left', 'member:${u}9', '${at}')`,
       `INSERT INTO recipe_correction (guild_id, recipe_id, acquisition, faction, updated_by, updated_at) VALUES ('${g}', 1, 'reputation', 'Faction${n}', '${u}', '${at}')`,
       `INSERT INTO recipe_correction_component (guild_id, recipe_id, item_id, qty) VALUES ('${g}', 1, 1, ${n})`,
+      // Order 16: craft requests (craft_request_item is a child of craft_request: no guild_id of its own).
+      `INSERT INTO craft_notify (guild_id, discord_user_id, tradeskill_id, created_at) VALUES ('${g}', '${u}', 1, '${at}')`,
+      `INSERT INTO craft_request (id, guild_id, requester, note, status, thread_id, created_at) VALUES (${n}, '${g}', '${u}', 'Note${n}', 'open', 'reqthread${n}', '${at}')`,
+      `INSERT INTO craft_request_item (request_id, position, item_id, quantity, crafters_json) VALUES (${n}, 1, 2, ${n}, '["${u}"]')`,
     );
   }
   return `${schema()}\n${rows.map((r) => `${r};`).join('\n')}\n`;
@@ -98,7 +102,9 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
     for (const g of [A, B]) assert.ok(Number((full.prepare(`SELECT count(*) AS n FROM "${t.name}" WHERE guild_id = ?`).get(g) as { n: number }).n) > 0, `${t.name} has no row for ${g}`);
   }
   const out = guildDump(sql, A, IMPORT_WRITES);
-  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  // Order 16: the request's items come with it, by their parent.
+  assert.equal(out.counts.craft_request_item, 1);
   for (const mine of [A, 'Char1', 'Departed1', 'Faction1', 'thread1', 'private1', 'member.left']) assert.ok(out.sql.includes(mine), `A's ${mine} missing`);
   const c = out.counts;
   assert.deepEqual(
