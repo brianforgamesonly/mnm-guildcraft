@@ -10,6 +10,7 @@
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
 import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
+import { buildZonePlan, ZoneStructureError, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
 export const SOURCE = 'mnm-tools/wiki.json';
 
@@ -52,7 +53,9 @@ export type Warning =
   // Order 13: a value the data holds that a /gear find choice list lacks (or a class list change): re-register commands.
   | { kind: 'vocab_drift'; list: 'class' | 'slot' | 'weapon_type' | 'stat' | 'resist'; values: { value: string; items: number }[]; note: string }
   // Order 13: the run stopped at the write ceiling; the rest is written by the next run (the differs guards resume it).
-  | { kind: 'write_ceiling'; ceiling: number; written: number; deferredStatements: number; deferredBound: number };
+  | { kind: 'write_ceiling'; ceiling: number; written: number; deferredStatements: number; deferredBound: number }
+  // Order 17: a zone source unchanged for 30 days, and zone names that map to no zone (scripts/import/zones.ts).
+  | ZoneWarning;
 
 // The source's fields as of mnm-tools e19cc75 (2026-10-19). A field outside these lists is a
 // warning, not a failure, so the next source change names itself in data_import.warnings.
@@ -436,6 +439,18 @@ type StoredMob = MobRow & { active: number };
 const MOB_FIELDS = ['key', 'title', 'level', 'race', 'class', 'image_url', 'zones_json', 'loot_json'] as const;
 export const mobDiffers = (o: StoredMob | undefined, m: MobRow) => !o || o.active !== 1 || MOB_FIELDS.some((f) => o[f] !== m[f]);
 
+// Order 17: the zone tables (migrations/0013_zones.sql), compared the same way.
+type StoredZone = ZoneRow & { active: number };
+const ZONE_FIELDS = ['name', 'level', 'description', 'adjacent_json', 'atlas_id', 'wiki_url', 'map_json', 'markers_json'] as const;
+export const zoneDiffers = (o: StoredZone | undefined, z: ZoneRow) => !o || o.active !== 1 || ZONE_FIELDS.some((f) => o[f] !== z[f]);
+type StoredZoneName = ZoneNameRow & { active: number };
+export const zoneNameDiffers = (o: StoredZoneName | undefined, n: ZoneNameRow) => !o || o.active !== 1 || o.zone_key !== n.zone_key;
+type StoredNpc = NpcRow & { active: number };
+const NPC_FIELDS = ['name', 'kind', 'level', 'race', 'class', 'location', 'loot_json'] as const;
+export const npcDiffers = (o: StoredNpc | undefined, n: NpcRow) => !o || o.active !== 1 || NPC_FIELDS.some((f) => o[f] !== n[f]);
+export const npcId = (zoneKey: string, name: string) => `${zoneKey}|${name.toLowerCase()}`;
+export const zoneNameId = (source: string, name: string) => `${source}|${name}`;
+
 /** The wiki link as mnm-tools builds it (mnmdb/app.js:179-180). Checked live in order 3: 21 of 21 sampled pages 200, no redirect. */
 export const WIKI_BASE = 'https://monstersandmemories.miraheze.org/wiki/';
 export const wikiUrl = (name: string) => WIKI_BASE + encodeURIComponent(name.replace(/ /g, '_'));
@@ -470,6 +485,11 @@ export interface ExistingState {
   activeWikiRecipes: number;
   classes: Map<string, { item_count: number; bit: number | null }>; // game_class code (item_count 0 = no longer kept)
   mobs: Map<string, StoredMob>; // by lower(key)
+  // Order 17 (0013): zones by key, zone names by zoneNameId, npcs by npcId, source versions by name.
+  zones: Map<string, StoredZone>;
+  zoneNames: Map<string, StoredZoneName>;
+  npcs: Map<string, StoredNpc>;
+  importSources: Map<string, { sha: string; changed_at: string }>;
   /** Indexes per table, from the live schema: each written row can also write one entry in each (the write bound). */
   indexes: Record<string, number>;
 }
@@ -514,6 +534,8 @@ export interface Plan {
   /** Stored active mobs missing upstream: set active = 0, never deleted (by key). */
   mobDeactivate: string[];
   gear: GearSummary;
+  /** Order 17: the zone data, when the run read the zone sources (runImport's `zones` option). */
+  zones?: ZonePlan;
 }
 
 /** A recipe's identity within its (tradeskill, result) group, excluding the variant number. */
@@ -830,6 +852,8 @@ export interface Predicted {
   recipe_component: { insert: number; update: number; delete: number };
   game_class: { insert: number; update: number; deactivate: number };
   mob: { insert: number; update: number; deactivate: number };
+  /** Order 17: rows each zone table would write (inserts and updates together), absent without the zone sources. */
+  zones?: { zone: number; zone_name: number; npc: number; import_source: number };
 }
 
 export function predict(plan: Plan, ex: ExistingState): Predicted {
@@ -863,6 +887,15 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
     else if (itemDiffers(o, it)) p.item.update++;
   }
   for (const s of plan.stubs) if (!ex.items.has(s.name_key)) p.stub.insert++;
+  if (plan.zones) {
+    const z = plan.zones;
+    p.zones = {
+      zone: z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).length,
+      zone_name: z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)).length,
+      npc: z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).length,
+      import_source: z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt).length,
+    };
+  }
   for (const r of plan.recipes) {
     const o = ex.recipes.get(r.source_key);
     if (!o) p.recipe.insert++;
@@ -901,7 +934,7 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
  * The game-data tables the import writes: every Statement names one, and import.test.ts checks each statement's SQL
  * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
  */
-export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob'] as const;
+export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source'] as const;
 export type Table = (typeof IMPORT_TABLES)[number];
 /** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
 export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
@@ -957,6 +990,7 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
     ),
   ]);
   groups.push(...mobGroups(plan, ex, stmt));
+  if (plan.zones) groups.push(...zoneGroups(plan.zones, ex, stmt));
   const items = ex ? plan.items.filter((i) => itemDiffers(ex.items.get(i.name_key), i)) : plan.items;
   for (const rows of chunk(items, ROWS_PER_STATEMENT))
     groups.push([
@@ -1068,6 +1102,89 @@ function mobGroups(plan: Plan, ex: ExistingState | undefined, stmt: (table: Tabl
   return groups;
 }
 
+/**
+ * Order 17: the zone tables depend on nothing else either. Each row is written whole by one statement with a "differs"
+ * guard (a re-run on unchanged sources writes 0 rows); rows missing upstream are deactivated, never deleted.
+ */
+function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Table, rows: number, sql: string) => Statement): Statement[][] {
+  const groups: Statement[][] = [];
+  const zones = ex ? z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)) : z.zones;
+  for (const rows of chunk(zones, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'zone',
+        rows.length,
+        `INSERT INTO zone (key, name, level, description, adjacent_json, atlas_id, wiki_url, map_json, markers_json, active) VALUES ` +
+          rows
+            .map((r) => `(${lit(r.key)}, ${lit(r.name)}, ${lit(r.level)}, ${lit(r.description)}, ${lit(r.adjacent_json)}, ${lit(r.atlas_id)}, ${lit(r.wiki_url)}, ${lit(r.map_json)}, ${lit(r.markers_json)}, 1)`)
+            .join(', ') +
+          ` ON CONFLICT(key) DO UPDATE SET name = excluded.name, level = excluded.level, description = excluded.description, adjacent_json = excluded.adjacent_json, ` +
+          `atlas_id = excluded.atlas_id, wiki_url = excluded.wiki_url, map_json = excluded.map_json, markers_json = excluded.markers_json, active = 1 ` +
+          `WHERE zone.name IS NOT excluded.name OR zone.level IS NOT excluded.level OR zone.description IS NOT excluded.description ` +
+          `OR zone.adjacent_json IS NOT excluded.adjacent_json OR zone.atlas_id IS NOT excluded.atlas_id OR zone.wiki_url IS NOT excluded.wiki_url ` +
+          `OR zone.map_json IS NOT excluded.map_json OR zone.markers_json IS NOT excluded.markers_json OR zone.active IS NOT 1`,
+      ),
+    ]);
+  const names = ex ? z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)) : z.names;
+  for (const rows of chunk(names, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'zone_name',
+        rows.length,
+        `INSERT INTO zone_name (source, name, zone_key, active) VALUES ${rows.map((n) => `(${lit(n.source)}, ${lit(n.name)}, ${lit(n.zone_key)}, 1)`).join(', ')} ` +
+          `ON CONFLICT(source, name) DO UPDATE SET zone_key = excluded.zone_key, active = 1 WHERE zone_name.zone_key IS NOT excluded.zone_key OR zone_name.active IS NOT 1`,
+      ),
+    ]);
+  const npcs = ex ? z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)) : z.npcs;
+  for (const rows of chunk(npcs, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'npc',
+        rows.length,
+        `INSERT INTO npc (zone_key, name, kind, level, race, class, location, loot_json, active) VALUES ` +
+          rows
+            .map((n) => `(${lit(n.zone_key)}, ${lit(n.name)}, ${lit(n.kind)}, ${lit(n.level)}, ${lit(n.race)}, ${lit(n.class)}, ${lit(n.location)}, ${lit(n.loot_json)}, 1)`)
+            .join(', ') +
+          ` ON CONFLICT(zone_key, name) DO UPDATE SET name = excluded.name, kind = excluded.kind, level = excluded.level, race = excluded.race, ` +
+          `class = excluded.class, location = excluded.location, loot_json = excluded.loot_json, active = 1 ` +
+          // name is a NOCASE column: compared as written, so a case change is written (as npcDiffers sees it).
+          `WHERE npc.name IS NOT excluded.name COLLATE BINARY OR npc.kind IS NOT excluded.kind OR npc.level IS NOT excluded.level ` +
+          `OR npc.race IS NOT excluded.race OR npc.class IS NOT excluded.class OR npc.location IS NOT excluded.location ` +
+          `OR npc.loot_json IS NOT excluded.loot_json OR npc.active IS NOT 1`,
+      ),
+    ]);
+  const versions = ex ? z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt) : z.versions;
+  if (versions.length)
+    groups.push([
+      stmt(
+        'import_source',
+        versions.length,
+        `INSERT INTO import_source (name, sha, changed_at) VALUES ${versions.map((v) => `(${lit(v.name)}, ${lit(v.sha)}, ${lit(v.changedAt)})`).join(', ')} ` +
+          `ON CONFLICT(name) DO UPDATE SET sha = excluded.sha, changed_at = excluded.changed_at ` +
+          `WHERE import_source.sha IS NOT excluded.sha OR import_source.changed_at IS NOT excluded.changed_at`,
+      ),
+    ]);
+  if (ex) {
+    const keep = new Set(z.zones.map((r) => r.key));
+    const goneZones = [...ex.zones.values()].filter((r) => r.active === 1 && !keep.has(r.key)).map((r) => r.key);
+    for (const keys of chunk(goneZones, ROWS_PER_STATEMENT))
+      groups.push([stmt('zone', keys.length, `UPDATE zone SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)]);
+    const keepNames = new Set(z.names.map((n) => zoneNameId(n.source, n.name)));
+    const goneNames = [...ex.zoneNames.values()].filter((n) => n.active === 1 && !keepNames.has(zoneNameId(n.source, n.name)));
+    for (const rows of chunk(goneNames, ROWS_PER_STATEMENT))
+      groups.push([
+        stmt('zone_name', rows.length, `UPDATE zone_name SET active = 0 WHERE active = 1 AND (source, name) IN (VALUES ${rows.map((n) => `(${lit(n.source)}, ${lit(n.name)})`).join(', ')})`),
+      ]);
+    const keepNpcs = new Set(z.npcs.map((n) => npcId(n.zone_key, n.name)));
+    const goneNpcs = [...ex.npcs.values()].filter((n) => n.active === 1 && !keepNpcs.has(npcId(n.zone_key, n.name)));
+    for (const rows of chunk(goneNpcs, ROWS_PER_STATEMENT))
+      groups.push([
+        stmt('npc', rows.length, `UPDATE npc SET active = 0 WHERE active = 1 AND (zone_key, name) IN (VALUES ${rows.map((n) => `(${lit(n.zone_key)}, ${lit(n.name)})`).join(', ')})`),
+      ]);
+  }
+  return groups;
+}
+
 export const buildStatements = (plan: Plan, importedAt: string, ex?: ExistingState): Statement[] => buildGroups(plan, importedAt, ex).flat();
 
 // ---------------------------------------------------------------- existing state
@@ -1091,6 +1208,10 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
      WHERE r.source = 'wiki'`,
   );
   const cls = await db.all<{ code: string; item_count: number; bit: number | null }>('SELECT code, item_count, bit FROM game_class');
+  const zs = await db.all<StoredZone>('SELECT key, name, level, description, adjacent_json, atlas_id, wiki_url, map_json, markers_json, active FROM zone');
+  const zns = await db.all<StoredZoneName>('SELECT source, name, zone_key, active FROM zone_name');
+  const ns = await db.all<StoredNpc>('SELECT zone_key, name, kind, level, race, class, location, loot_json, active FROM npc');
+  const srcs = await db.all<{ name: string; sha: string; changed_at: string }>('SELECT name, sha, changed_at FROM import_source');
   const recipes = new Map<string, ExistingRecipe>();
   for (const row of rs) {
     let r = recipes.get(row.source_key);
@@ -1122,6 +1243,10 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
     classes: new Map(cls.map((c) => [c.code, { item_count: Number(c.item_count), bit: c.bit === null ? null : Number(c.bit) }])),
     mobs: new Map(ms.map((m) => [nameKey(m.key), { ...m, active: Number(m.active) }])),
+    zones: new Map(zs.map((z) => [z.key, { ...z, active: Number(z.active) }])),
+    zoneNames: new Map(zns.map((n) => [zoneNameId(n.source, n.name), { ...n, active: Number(n.active) }])),
+    npcs: new Map(ns.map((n) => [npcId(n.zone_key, n.name), { ...n, active: Number(n.active) }])),
+    importSources: new Map(srcs.map((s) => [s.name, { sha: s.sha, changed_at: s.changed_at }])),
     indexes: Object.fromEntries(idx.map((r) => [r.t, Number(r.n)])),
   };
 }
@@ -1138,6 +1263,8 @@ export interface ImportOptions {
   requireDryRun?: boolean;
   /** Rows this run may write (default WRITE_CEILING). */
   writeCeiling?: number;
+  /** Order 17: the zone sources (scripts/import/source.ts fetchZoneSources). Without them the zone tables are untouched. */
+  zones?: ZoneInput;
 }
 
 export interface ImportResult {
@@ -1172,6 +1299,8 @@ export interface ImportResult {
   written?: Record<Table, { statements: number; rows_written: number; changes: number }>;
   /** Order 13: gear sources, overlaps, classes and mob matches. */
   gear?: GearSummary;
+  /** Order 17: the zone mapping (matched and unmatched names per source), the NPC merge and the map images. */
+  zones?: ZoneSummary;
   /** Every row the run wrote (D1 rows_written, index writes included), its own data_import rows too. */
   rowsWritten?: number;
   /** Dry run: the most rows the planned statements could write (rows × (1 + indexes on their table)). */
@@ -1235,6 +1364,28 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   const activeMobs = [...existing.mobs.values()].filter((m) => m.active === 1).length;
   if (activeMobs > 0 && plan.mobs.length < activeMobs * MIN_RECIPE_RATIO)
     return fail(`implausible drop: ${plan.mobs.length} mobs against ${activeMobs} active stored`);
+  if (opts.zones) {
+    try {
+      const wikiZones = [...new Set(Object.values(data.items).flatMap((it) => (Array.isArray(it.wikiZones) ? (it.wikiZones as string[]) : [])))];
+      const mobs = plan.mobs.map((m) => ({
+        key: m.key,
+        title: m.title,
+        level: m.level,
+        race: m.race,
+        class: m.class,
+        zones: m.zones_json ? (JSON.parse(m.zones_json) as string[]) : [],
+        loot: m.loot_json ? (JSON.parse(m.loot_json) as string[]) : [],
+      }));
+      plan.zones = buildZonePlan(opts.zones, mobs, wikiZones, startedAt);
+    } catch (e) {
+      if (e instanceof ZoneStructureError) return fail(`zone sources: ${e.message}`);
+      throw e;
+    }
+    warnings.push(...plan.zones.warnings);
+    const activeNpcs = [...existing.npcs.values()].filter((n) => n.active === 1).length;
+    if (activeNpcs > 0 && plan.zones.npcs.length < activeNpcs * MIN_RECIPE_RATIO)
+      return fail(`implausible drop: ${plan.zones.npcs.length} NPC rows against ${activeNpcs} active stored`);
+  }
 
   const counts: NonNullable<ImportResult['counts']> = {
     sourceItems: Object.keys(data.items).length,
@@ -1267,6 +1418,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
       warnings,
       classes: plan.classes,
       gear: plan.gear,
+      zones: plan.zones?.summary,
       gatheringCandidates: plan.gatheringCandidates,
       predicted,
       writeBound: bound,
@@ -1339,6 +1491,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     warnings,
     classes: plan.classes,
     gear: plan.gear,
+    zones: plan.zones?.summary,
     gatheringCandidates: plan.gatheringCandidates,
     predicted,
     written,

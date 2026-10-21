@@ -30,8 +30,11 @@ describe('schema (migrations/0001_init.sql)', () => {
       "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%' ORDER BY name",
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
-    // Order 16 (0012): craft_notify, craft_request, craft_request_item.
-    expect(departureTables).toEqual(['game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob', 'craft_notify', 'craft_request', 'craft_request_item']);
+    // Order 16 (0012): craft_notify, craft_request, craft_request_item. Order 17 (0013): zone, zone_name, npc, import_source.
+    expect(departureTables).toEqual([
+      'game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob', 'craft_notify', 'craft_request', 'craft_request_item',
+      'zone', 'zone_name', 'npc', 'import_source',
+    ]);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
       'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live', 'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
