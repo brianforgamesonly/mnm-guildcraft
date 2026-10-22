@@ -5,7 +5,7 @@ import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport, type WikiData } from '../../scripts/import/core.ts';
 import { COMMANDS, commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
 import { DETAILS_PREFIX, GEAR_COPY, PAGE_PREFIX } from '../../src/commands/gear.ts';
-import { HELP_TEXT } from '../../src/commands/help.ts';
+import { pageText } from '../../src/commands/help.ts';
 import { ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MAX_OPEN_REPORTS } from '../../src/commands/reports.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
@@ -70,7 +70,8 @@ beforeEach(async () => {
 
 describe('the command definition (Discord limits)', () => {
   it('class is the first option and required; options in the order set; every list derived', () => {
-    const find = COMMANDS.find((c) => c.name === 'gear')!.options[0];
+    // Order 18: /gear has no subcommand; its options are the command's own.
+    const find = COMMANDS.find((c) => c.name === 'gear') as unknown as { options: { name: string; required?: boolean; choices?: { value: string }[] }[] };
     expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort', 'zone']);
     expect(find.options[0]).toMatchObject({ required: true });
     const opt = (n: string) => find.options.find((o) => o.name === n) as { choices?: { value: string }[] };
@@ -79,14 +80,14 @@ describe('the command definition (Discord limits)', () => {
     expect(opt('stat1').choices!.length).toBe(STATS.length + RESISTS.length + 5);
     expect(opt('source').choices!.map((c) => c.value)).toEqual([ANY, ...SOURCES]);
     expect(opt('sort').choices!.map((c) => c.value)).toEqual(SORTS.map((s) => s.key));
-    const withClasses = commandsWith(['ARC', 'BRD']).find((c) => c.name === 'gear')!.options[0].options[0] as { choices: { value: string }[] };
+    const withClasses = commandsWith(['ARC', 'BRD']).find((c) => c.name === 'gear')!.options![0] as unknown as { choices: { value: string }[] };
     expect(withClasses.choices.map((c) => c.value)).toEqual([ANY, 'ARC', 'BRD']);
   });
 
   it('CI guard: no choice list over 25, no command over 25 options or 8,000 characters (with 24 classes); 25 classes fail', () => {
     const classes = (n: number) => Array.from({ length: n }, (_, i) => `C${String(i).padStart(2, '0')}`);
     expect(commandLimitProblems(commandsWith(classes(24)))).toEqual([]);
-    expect(commandLimitProblems(commandsWith(classes(25)))).toEqual(['/gear find class: 26 choices, over 25']);
+    expect(commandLimitProblems(commandsWith(classes(25)))).toEqual(['/gear class: 26 choices, over 25']);
     // Today's lists: slots 24 of 25, sorts 22, stats 20.
     expect(SLOTS.length).toBe(24);
     expect([SORTS.length, STAT_FILTERS.length]).toEqual([22, 20]);
@@ -275,8 +276,8 @@ describe('the item card, and item reports', () => {
 });
 
 describe('copy', () => {
-  it('/craft help and the board index list /gear find in one line each', () => {
-    expect(HELP_TEXT.split('\n').filter((l) => l.includes('/gear find'))).toHaveLength(1);
-    expect(HOW_TO_GET_LISTED.split('\n').filter((l) => l.includes('/gear find'))).toHaveLength(1);
+  it('/help (Finding things) and the board index list /gear in one line each', () => {
+    expect(pageText('find').split('\n').filter((l) => l.startsWith('`/gear`'))).toHaveLength(1);
+    expect(HOW_TO_GET_LISTED.split('\n').filter((l) => l.includes('`/gear`'))).toHaveLength(1);
   });
 });

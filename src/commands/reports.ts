@@ -6,8 +6,8 @@ import { InteractionResponseType, MessageComponentTypes } from 'discord-interact
 import { audit, now } from '../access.ts';
 import { botApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optString, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
-import { issueLabel, issuesFor, REPORT_ISSUES, type ReportKind } from '../recipes.ts';
+import { button, ephemeral, md, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type InteractionReply, type MessageReply, type ModalComponent } from '../discord.ts';
+import { issueLabel, issuesFor, type ReportKind } from '../recipes.ts';
 import { OFFICER_ONLY } from './members.ts';
 
 /** A member may have this many reports open at once, recipe and item reports together (orders 9 and 13). */
@@ -46,7 +46,7 @@ export function reportCard(r: ReportRow): Embed {
     footer: {
       text: item
         ? `Report #${r.id} · item data comes from the community wiki: correct it there, then mark it fixed`
-        : `Report #${r.id} · fix the data with /recipe override or /recipe source, then mark it fixed`,
+        : `Report #${r.id} · fix the data with /officer recipe-fix or /officer recipe-source, then mark it fixed`,
     },
   };
 }
@@ -84,13 +84,6 @@ async function fileReport(c: Ctx, item: { id: number | null; name: string }, iss
 
 const findItem = (db: D1Database, by: { key: string } | { id: number }) =>
   db.prepare(`SELECT id, name FROM item WHERE ${'key' in by ? 'name_key' : 'id'} = ?`).bind('key' in by ? by.key : by.id).first<{ id: number; name: string }>();
-
-export async function craftReport(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const typed = (optString(opts, 'item') ?? '').trim();
-  const item = await findItem(c.db, { key: typed.toLowerCase() });
-  if (!item) return ephemeral(`I don't know an item called **${md(typed || '(nothing)')}**. Pick one from the list as you type.`);
-  return fileReport(c, item, optString(opts, 'issue') ?? '', optString(opts, 'details'));
-}
 
 /**
  * rpt:<item id>, the Report a problem button: a modal at once (type 9; a modal cannot follow a deferral). An issue

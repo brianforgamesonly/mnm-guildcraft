@@ -1,7 +1,9 @@
-// ITEM 1.3: /character add | edit | remove, name resolution and privacy, audit rows.
+// ITEM 1.3: /character add | edit | remove, name resolution and privacy, audit rows. Order 18: these are /me's Add
+// character, Edit character and Remove character now (test/discord.ts sends the old calls through them).
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ME_COPY } from '../../src/commands/me.ts';
 import { all, count, one, reset } from '../db.ts';
-import { ADMIN, as, auto, cmd, send } from '../discord.ts';
+import { ADMIN, as, auto, cmd, select, send, submit } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const BO = '100000000000000002';
@@ -98,7 +100,8 @@ describe('/character edit', () => {
     await add(ann, { name: 'Two' });
     expect((await edit(ann, { name: 'Two', main: true })).data.content).toBe('Updated **Two**. It is now your main.');
     expect((await chars()).map((c) => c.is_main)).toEqual([0, 1]);
-    expect((await edit(ann, { name: 'Two', main: false })).data.content).toBe('**Two** is your main. To change that, set `main` on another character.');
+    // Order 18: on /me's form, "No" on the main changes nothing (a main stops being the main only when another becomes it).
+    expect((await edit(ann, { name: 'Two', main: false })).data.content).toBe('Nothing changed.');
     expect(await count('character', 'is_main = 1')).toBe(1);
   });
 
@@ -106,23 +109,33 @@ describe('/character edit', () => {
     await add(bo, { name: 'Bochar' });
     const other = await edit(ann, { name: 'Bochar', level: 50 });
     const missing = await edit(ann, { name: 'Nobody', level: 50 });
-    expect(other.data.content).toBe('You have no character named **Bochar**.');
-    expect(missing.data.content).toBe('You have no character named **Nobody**.');
-    expect((await remove(ann, { name: 'Bochar' })).data.content).toBe('You have no character named **Bochar**.');
+    // Order 18: /me's forms only ever offer the member's own characters; another's id answers as a missing one.
+    expect(other.data.content).toBe(ME_COPY.gone);
+    expect(missing.data.content).toBe(ME_COPY.gone);
+    expect((await remove(ann, { name: 'Bochar' })).data.content).toBe(ME_COPY.gone);
     expect((await send(cmd(ann, 'craft', 'me', { character: 'Bochar' }))).data.content).toBe('You have no character named **Bochar**.');
+    expect(await chars()).toEqual([{ name: 'Bochar', owner_user_id: BO, is_main: 1, deleted: 0, class: null, level: null }]);
+  });
+
+  it("a member who sends another member's real character id, in the form or the remove select, is refused and nothing changes", async () => {
+    await add(bo, { name: 'Bochar' });
+    const id = String((await one<{ id: number }>('SELECT id FROM character')).id);
+    expect((await send(submit(ann, `meem:${id}`, { name: 'Stolen', level: '9' }))).data.content).toBe('Only officers can do that.');
+    expect((await send(select(ann, `mers:${BO}`, [id]))).data.content).toBe('Only officers can do that.');
+    expect((await send(select(ann, `mers:${ANN}`, [id]))).data.content).toBe(ME_COPY.gone);
     expect(await chars()).toEqual([{ name: 'Bochar', owner_user_id: BO, is_main: 1, deleted: 0, class: null, level: null }]);
   });
 
   it('member:@user is refused for a non-officer and works for an officer', async () => {
     await add(bo, { name: 'Bochar' });
-    expect((await edit(ann, { name: 'Bochar', level: 5, member: BO })).data.content).toBe("Only officers can change another member's characters.");
+    expect((await edit(ann, { name: 'Bochar', level: 5, member: BO })).data.content).toBe('Only officers can do that.');
     expect((await edit(officer, { name: 'Bochar', level: 5, member: BO })).data.content).toBe('Updated **Bochar** (level 5).');
-    expect((await remove(ann, { name: 'Bochar', member: BO })).data.content).toBe("Only officers can change another member's characters.");
+    expect((await remove(ann, { name: 'Bochar', member: BO })).data.content).toBe('Only officers can do that.');
   });
 
   it('nothing to change is answered, not written', async () => {
     await add(ann, { name: 'One' });
-    expect((await edit(ann, { name: 'One' })).data.content).toMatch(/^Nothing to change/);
+    expect((await edit(ann, { name: 'One' })).data.content).toBe('Nothing changed.');
     expect(await count('audit_log', "action = 'character.edit'")).toBe(0);
   });
 });
@@ -134,7 +147,7 @@ describe('/character remove', () => {
     await add(ann, { name: 'Newest', main: true });
     await send(cmd(ann, 'craft', 'set', { skill: 'Brewing', level: 7 }));
     const r = await remove(ann, { name: 'Newest' });
-    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: `/character add name:Newest` restores it.\n**Oldest** is now your main.');
+    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: **Add character** on `/me` with the name **Newest** restores it.\n**Oldest** is now your main.');
     expect((await chars()).map((c) => [c.name, c.is_main, c.deleted])).toEqual([['Oldest', 1, 0], ['Middle', 0, 0], ['Newest', 0, 1]]);
     expect(await count('character_skill')).toBe(1);
   });
@@ -171,24 +184,22 @@ describe('audit', () => {
 });
 
 describe('autocomplete', () => {
-  it('class: codes from game_class with item_count > 0, prefix matches first', async () => {
-    const r = await send(auto(ann, 'character', 'add', { name: 'X', class: 'c' }, 'class'));
-    expect(r.type).toBe(8);
-    expect(r.data.choices!.map((c) => c.value)).toEqual(['CLR']);
-    const all = await send(auto(ann, 'character', 'add', { class: '' }, 'class'));
-    expect(all.data.choices!.map((c) => c.value)).toEqual(['CLR', 'SHD', 'WIZ']);
+  // Order 18: class is a typed text box on /me's form (a modal has no autocomplete), so any class name is accepted as
+  // before; the code is matched to the class list when saved (cleanClass).
+  it('class: a code from the list is stored as the code; anything else as typed, with a note', async () => {
+    expect((await add(ann, { name: 'Coded', class: 'clr' })).data.content).toMatch(/^Added \*\*Coded\*\* \(CLR\)/);
+    expect((await add(ann, { name: 'Typed', class: 'Spellsword' })).data.content).toContain("isn't in the class list");
   });
 
-  it("name: only the caller's own live characters", async () => {
+  it("character: only the caller's own live characters; a member: option the command does not have is ignored", async () => {
     await add(ann, { name: 'Annchar' });
     await add(bo, { name: 'Bochar' });
     await add(ann, { name: 'Gone' });
     await remove(ann, { name: 'Gone' });
-    const r = await send(auto(ann, 'character', 'edit', { name: '' }, 'name'));
+    const r = await send(auto(ann, 'skills', undefined, { character: '' }, 'character'));
     expect(r.data.choices!.map((c) => c.value)).toEqual(['Annchar']);
-    const sneaky = await send(auto(ann, 'character', 'edit', { name: '', member: BO }, 'name'));
+    const sneaky = await send(auto(ann, 'skills', undefined, { character: '', member: BO }, 'character'));
     expect(sneaky.data.choices!.map((c) => c.value)).toEqual(['Annchar']);
-    const off = await send(auto(officer, 'character', 'edit', { name: '', member: BO }, 'name'));
-    expect(off.data.choices!.map((c) => c.value)).toEqual(['Bochar']);
+    expect((await send(auto(ann, 'me', undefined, { character: 'ann' }, 'character'))).data.choices!.map((c) => c.value)).toEqual(['Annchar']);
   });
 });

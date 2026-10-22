@@ -1,19 +1,19 @@
-// Craft requests (order 16, ITEM 2): /craft notify, /craft request, the Request a craft button on /craft find,
-// /craft requests, and the buttons in a request's thread. The routing, the thread's text and the sweep are in
+// Craft requests (order 16, ITEM 2; order 18's names): /request, the Request a craft button on /item (and on /craft find
+// cards from before order 18), /officer requests, and the buttons in a request's thread. The routing, the thread's text and the sweep are in
 // src/requests.ts. Every reply here is private; the only messages others see are the thread's (its first message, and
 // the claim, done and cancel notices), and those ping only as order 16's override 2 allows.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
-import { audit, now } from '../access.ts';
+import { now } from '../access.ts';
 import { botApi, type BotApi } from '../board/api.ts';
 import { AUTO_ARCHIVE_MINUTES } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, memberTag, mention, optBool, optInt, optString, pingOnly, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, ephemeral, md, memberTag, mention, optInt, optString, pingOnly, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import {
   auditIfChanged, closeStatements, syncChanged, crafters, involved, isEligible, ITEM_PREFIX, ITEMS_SQL, loadRequest, MAX_ADDED, MAX_ITEMS, MAX_OPEN_PER_MEMBER, MAX_QUANTITY, namesOf, NO_REQUEST_CHANNEL, NOTE_MAX, prefixOf,
   REQUEST_COLS, requestComponents, requestContent, routeItems, syncThread, syncWrite, target, threadName, whoCanView, UNSENT_MS, type Crafter, type ItemAction, type ItemRoute, type ItemRow, type Names, type RequestRow,
 } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
-import { noRecipe } from './find.ts';
+import { GONE_RECIPE, noRecipe } from './find.ts';
 import { OFFICER_ONLY } from './members.ts';
 import { modalValues } from './reports.ts';
 
@@ -30,17 +30,15 @@ const apiFor = (c: Ctx): BotApi | null =>
   c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: MAX_ADDED + 12, deadline: Date.now() + 20_000 }) : null;
 
 /** One log line per request action: its D1 rows written (measured from D1's own meta) and its Discord calls. */
-function logAction(action: string, rowsWritten: number, api: BotApi | null, extra: Record<string, unknown> = {}) {
+export function logAction(action: string, rowsWritten: number, api: BotApi | null, extra: Record<string, unknown> = {}) {
   console.log(JSON.stringify({ gc: 'request', action, rows_written: rowsWritten, discord_calls: api?.budget.discord ?? 0, calls: api?.log ?? [], ...extra }));
 }
-const written = (rs: D1Result[]) => rs.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0);
+export const written = (rs: D1Result[]) => rs.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0);
 
 const tagOf = (names: Names, id: string) => (names.has(id) ? memberTag(id, names.get(id)!) : mention(id));
 const crafterList = (cs: Crafter[]) => cs.map((x) => memberTag(x.userId, x.member)).join(', ');
 
-// ---------------------------------------------------------------- /craft notify tradeskill: on:
-
-export const ALL_SKILLS = 'All';
+// ---------------------------------------------------------------- craft request notices (set with /me's Notices, order 18)
 
 export async function notifyLine(db: D1Database, guildId: string, userId: string): Promise<string> {
   const { results } = await db
@@ -48,36 +46,8 @@ export async function notifyLine(db: D1Database, guildId: string, userId: string
     .bind(guildId, userId)
     .all<{ name: string }>();
   return results.length
-    ? `**Craft request notices:** ${results.map((r) => r.name).join(', ')} (\`/craft notify\` changes them)`
-    : '**Craft request notices:** off (`/craft notify` turns them on for a tradeskill)';
-}
-
-export async function craftNotify(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
-  const typed = (optString(opts, 'tradeskill') ?? '').trim();
-  const on = optBool(opts, 'on');
-  if (on === undefined) return ephemeral('Pick `on:` True or False.');
-  const all = typed.toLowerCase() === ALL_SKILLS.toLowerCase();
-  const { results: skills } = all
-    ? await c.db.prepare('SELECT id, name FROM tradeskill ORDER BY name COLLATE NOCASE').all<{ id: number; name: string }>()
-    : await c.db.prepare('SELECT id, name FROM tradeskill WHERE name = ? COLLATE NOCASE').bind(typed).all<{ id: number; name: string }>();
-  if (!skills.length) return ephemeral(`I don't know a tradeskill called **${md(typed)}**. Pick one from the list as you type, or **All**.`);
-  const ids = JSON.stringify(skills.map((s) => s.id));
-  const res = await c.db.batch([
-    on
-      ? c.db.prepare('INSERT OR IGNORE INTO craft_notify (guild_id, discord_user_id, tradeskill_id, created_at) SELECT ?, ?, value, ? FROM json_each(?)').bind(c.guild.id, c.userId, now(), ids)
-      : c.db.prepare('DELETE FROM craft_notify WHERE guild_id = ? AND discord_user_id = ? AND tradeskill_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, c.userId, ids),
-    audit(c.db, c.guild.id, c.userId, 'craft.notify', `member:${c.userId}`, null, { on, tradeskills: all ? ALL_SKILLS : skills[0].name }),
-  ]);
-  logAction('notify', written(res), null);
-  const what = all ? 'every tradeskill' : skills[0].name;
-  const lines = [
-    on
-      ? `Craft request notices **on** for ${what}. When someone asks for an item one of your characters can make, you're added to a private thread in <#${c.guild.request_channel_id}> and pinged there.`
-      : `Craft request notices **off** for ${what}.`,
-    await notifyLine(c.db, c.guild.id, c.userId),
-  ];
-  return ephemeral(lines.join('\n'));
+    ? `**Craft request notices:** ${results.map((r) => r.name).join(', ')} (**Notices** on \`/me\` changes them)`
+    : '**Craft request notices:** off (**Notices** on `/me` turns them on for a tradeskill)';
 }
 
 // ---------------------------------------------------------------- the unsent: /craft request, Request a craft, Add item
@@ -98,7 +68,8 @@ async function openCount(c: Ctx): Promise<number> {
   return r?.n ?? 0;
 }
 
-export const TOO_MANY_OPEN = `You already have ${MAX_OPEN_PER_MEMBER} open requests. Mark one done or cancel one (\`/craft requests\`) before asking for more.`;
+const GONE_UNSENT = 'That request was already sent or discarded. Run `/request` to start another.';
+export const TOO_MANY_OPEN = `You already have ${MAX_OPEN_PER_MEMBER} open requests. Mark one done or cancel one (**Cancel a request** on \`/me\`) before asking for more.`;
 
 /** Adds an item to the member's unsent (a new unsent when none is recent), then shows the unsent. */
 async function addToUnsent(c: Ctx, item: ItemPick, quantity: number, note: string | undefined): Promise<MessageReply> {
@@ -150,13 +121,13 @@ function unsentRows(unsentId: number, items: number, canSend: boolean): unknown[
 
 /** What the requester can do about an item no opted-in crafter can make: the crafters /craft find lists, to ask directly. */
 function noCrafterLine(route: ItemRoute): string {
-  if (!route.notOptedIn.length) return "No opted-in crafter can make it yet, and no one else in the guild can either (by `/craft find`'s Reliable list).";
+  if (!route.notOptedIn.length) return "No opted-in crafter can make it yet, and no one else in the guild can either (by `/item`'s Reliable list).";
   return `No opted-in crafter can make it yet. These crafters can, but haven't turned on request notices, so ask them directly: ${crafterList(route.notOptedIn)}`;
 }
 
 async function unsentView(c: Ctx, unsentId: number, update = false): Promise<MessageReply> {
   const loaded = await loadRequest(c.db, c.guild.id, unsentId);
-  if (!loaded || loaded.req.requester !== c.userId || loaded.req.status !== 'unsent') return ephemeral('That request was already sent or discarded. Run `/craft request` to start another.');
+  if (!loaded || loaded.req.requester !== c.userId || loaded.req.status !== 'unsent') return ephemeral(GONE_UNSENT);
   const { req, items } = loaded;
   const routes = await routeItems(c.db, c.guild.id, c.userId, items.map((i) => i.item_id), c.guild.learning_window);
   const many = items.length > 1;
@@ -168,7 +139,7 @@ async function unsentView(c: Ctx, unsentId: number, update = false): Promise<Mes
       return r.eligible.length ? `${head} · ${plural(r.eligible.length, 'opted-in crafter')} can make it: ${crafterList(r.eligible)}` : `${head} · ${noCrafterLine(r)}`;
     }),
     req.note ? `**Note:** ${md(req.note)}` : null,
-    `-# **Send request** opens a private thread in <#${c.guild.request_channel_id}> with you and the crafters, who are pinged there. Up to ${MAX_ITEMS} items: **Add item**, or run \`/craft request\` again.`,
+    `-# **Send request** opens a private thread in <#${c.guild.request_channel_id}> with you and the crafters, who are pinged there. Up to ${MAX_ITEMS} items: **Add item**, or run \`/request\` again.`,
   ].filter(Boolean) as string[];
   const canSend = routes.some((r) => r.eligible.length > 0);
   const data = { content: truncate(lines.join('\n'), 2000), components: unsentRows(unsentId, items.length, canSend) };
@@ -187,7 +158,7 @@ export async function craftRequest(c: Ctx, opts: Option[]): Promise<MessageReply
 export async function requestFromFind(c: Ctx, itemId: number): Promise<MessageReply> {
   if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
   const item = await c.db.prepare(`SELECT i.id, i.name FROM item i WHERE i.id = ?1 AND EXISTS (SELECT 1 FROM recipe r WHERE r.result_item_id = i.id AND ${visibleTo('?2')})`).bind(itemId, c.guild.id).first<ItemPick>();
-  if (!item) return ephemeral('That item no longer has a recipe. Run `/craft find` again.');
+  if (!item) return ephemeral(GONE_RECIPE);
   return addToUnsent(c, item, 1, undefined);
 }
 
@@ -202,7 +173,7 @@ export function addItemModal(customId: string): InteractionReply {
         {
           type: MessageComponentTypes.LABEL,
           label: 'Item',
-          description: 'The exact item name. Or run /craft request again: it picks from a list and adds to this request.',
+          description: 'The exact item name. Or run /request again: it picks from a list and adds to this request.',
           component: { type: MessageComponentTypes.INPUT_TEXT, custom_id: ITEM_INPUT, style: 1, required: true, max_length: 100 },
         },
         {
@@ -222,9 +193,9 @@ export async function addItemSubmitted(c: Ctx, customId: string, components: Mod
   const typed = (v.get(ITEM_INPUT) ?? '').trim();
   const qtyText = (v.get(QTY_INPUT) ?? '').trim() || '1';
   const unsent = await c.db.prepare("SELECT id FROM craft_request WHERE id = ? AND guild_id = ? AND requester = ? AND status = 'unsent'").bind(unsentId, c.guild.id, c.userId).first();
-  if (!unsent) return ephemeral('That request was already sent or discarded. Run `/craft request` to start another.');
+  if (!unsent) return ephemeral(GONE_UNSENT);
   const item = await c.db.prepare(ITEM_WITH_RECIPE('?2')).bind(typed.toLowerCase(), c.guild.id).first<ItemPick>();
-  if (!item) return ephemeral(`${noRecipe(typed || '(nothing)')} In the form the name must match exactly; \`/craft request item:\` picks from the list and adds to this request.`);
+  if (!item) return ephemeral(`${noRecipe(typed || '(nothing)')} In the form the name must match exactly; \`/request item:\` picks from the list and adds to this request.`);
   if (!/^\d+$/.test(qtyText)) return ephemeral(`\`quantity\` must be a whole number from 1 to ${MAX_QUANTITY}.`);
   return addToUnsent(c, item, Number(qtyText), undefined);
 }
@@ -249,7 +220,7 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
   const channel = c.guild.request_channel_id;
   if (!channel) return ephemeral(NO_REQUEST_CHANNEL);
   const loaded = await loadRequest(c.db, c.guild.id, id);
-  if (!loaded || loaded.req.requester !== c.userId || loaded.req.status !== 'unsent') return updateMessage({ content: 'That request was already sent or discarded. Run `/craft request` to start another.', components: [] });
+  if (!loaded || loaded.req.requester !== c.userId || loaded.req.status !== 'unsent') return updateMessage({ content: GONE_UNSENT, components: [] });
   const { req, items } = loaded;
   if ((await openCount(c)) >= MAX_OPEN_PER_MEMBER) return ephemeral(TOO_MANY_OPEN);
   const routes = await routeItems(c.db, c.guild.id, c.userId, items.map((i) => i.item_id), c.guild.learning_window);
@@ -386,7 +357,7 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
     reply = `Marked ${IT(it)} done.`;
   } else if (action === 'x') {
     if (it.status !== 'open' && it.status !== 'claimed') return ephemeral('That item is already closed.');
-    if (me !== req.requester && !c.officer) return ephemeral('Only the requester can cancel an item. Officers can cancel a whole request with `/craft requests`.');
+    if (me !== req.requester && !c.officer) return ephemeral('Only the requester can cancel an item. Officers can cancel a whole request with `/officer requests`.');
     next = { status: 'cancelled' };
     from = it.status;
     auditAction = 'request.cancel';
@@ -453,18 +424,6 @@ export async function requestList(c: Ctx, reqs: RequestRow[], withRequester: boo
     options: reqs.map((r) => ({ label: truncate(`#${r.id} ${summary(r)}`, 100), value: String(r.id) })),
   };
   return { lines, select };
-}
-
-export async function craftRequests(c: Ctx): Promise<MessageReply> {
-  if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
-  const { results: reqs } = await c.db
-    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE r.guild_id = ?1 AND r.status = 'open' AND r.thread_id IS NOT NULL AND (?3 = 1 OR r.requester = ?2) ORDER BY r.id LIMIT 25`)
-    .bind(c.guild.id, c.userId, c.officer ? 1 : 0)
-    .all<RequestRow>();
-  if (!reqs.length) return ephemeral(c.officer ? 'No open craft requests in this server.' : 'You have no open craft requests. `/craft request` starts one.');
-  const { lines, select } = await requestList(c, reqs, c.officer);
-  const head = c.officer ? `**Open craft requests** (as an officer you see all ${reqs.length}${reqs.length === 25 ? '+' : ''}):` : '**Your open craft requests:**';
-  return ephemeral([head, ...lines].join('\n').slice(0, 2000), { components: [row([select])] });
 }
 
 // ---------------------------------------------------------------- /officer requests (order 18): every open request, paged

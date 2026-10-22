@@ -15,8 +15,7 @@ export const OFFICER_ONLY = 'Only officers can do that.';
 const listOf = (characters: CharacterBrief[]) => characters.map(describeCharacter).join(', ');
 
 /** The preview: what Confirm would do, with Confirm and Cancel. Nothing changes until Confirm. */
-export const guildcraftRemoveMember = (c: Ctx, opts: Option[]) => removeMemberPreview(c, optString(opts, 'user'));
-/** Order 18: /officer remove-member member: (the same preview). */
+/** /officer remove-member member: (order 18; formerly /guildcraft remove-member user:). */
 export const officerRemoveMember = (c: Ctx, opts: Option[]) => removeMemberPreview(c, optString(opts, 'member'));
 
 async function removeMemberPreview(c: Ctx, userId: string | undefined): Promise<MessageReply> {
@@ -30,8 +29,8 @@ async function removeMemberPreview(c: Ctx, userId: string | undefined): Promise<
   return ephemeral(
     [
       what,
-      `${who} is then marked as having left: hidden from \`/craft find\`, \`/roster\` and the roster board until they use GuildCraft again.`,
-      'Their skills are kept, and `/character add` with the same name restores a character. Nothing is deleted.',
+      `${who} is then marked as having left: hidden from \`/item\`, \`/roster\` and the roster board until they use GuildCraft again.`,
+      'Their skills are kept, and **Add character** on `/me` with the same name restores a character. Nothing is deleted.',
     ].join('\n'),
     { components: [row([button(`${REMOVE_PREFIX}yes:${userId}`, 'Confirm', STYLE_DANGER), button(`${REMOVE_PREFIX}no:${userId}`, 'Cancel', STYLE_SECONDARY)])] },
   );
@@ -39,7 +38,7 @@ async function removeMemberPreview(c: Ctx, userId: string | undefined): Promise<
 
 const removedText = (name: string, characters: CharacterBrief[], by: string) =>
   `${by} removed **${md(name)}**${characters.length ? ` and ${plural(characters.length, 'character')}: ${listOf(characters)}` : ' (no characters)'}. ` +
-  'Their skills are kept: `/character add` with the same name restores a character.';
+  'Their skills are kept: **Add character** on `/me` with the same name restores a character.';
 
 /** rm:yes:<user> / rm:no:<user>: the preview's buttons (the preview is private to the officer who ran it). */
 export async function removeMemberButton(c: Ctx, customId: string): Promise<MessageReply> {

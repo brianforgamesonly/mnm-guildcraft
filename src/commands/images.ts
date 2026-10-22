@@ -13,7 +13,7 @@
 import { audit, now } from '../access.ts';
 import { botApi, UNKNOWN_MESSAGE } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optString, row, STYLE_DANGER, truncate, updateMessage, type MessageReply, type Option } from '../discord.ts';
+import { button, ephemeral, md, row, STYLE_DANGER, truncate, updateMessage, type MessageReply } from '../discord.ts';
 import { DISCORD_API } from '../respond.ts';
 import { OFFICER_ONLY } from './members.ts';
 
@@ -80,9 +80,7 @@ async function vaultMessageGone(c: Ctx, channelId: string, messageId: string): P
   return !r.ok && r.code === UNKNOWN_MESSAGE;
 }
 
-export const itemImage = (c: Ctx, opts: Option[]) => submitImage(c, optString(opts, 'item'), optString(opts, 'image'), 'image');
-
-/** Order 18: /item name: screenshot: and the old /item image item: image: send the same screenshot the same way. */
+/** /item name: screenshot: (order 18; formerly /item image item: image:). */
 export async function submitImage(c: Ctx, itemName: string | undefined, attachment: string | undefined, box: string): Promise<MessageReply> {
   const started = Date.now();
   const vault = c.guild.vault_channel_id;
@@ -146,7 +144,7 @@ export async function submitImage(c: Ctx, itemName: string | undefined, attachme
       .bind(sent.body.id, a.id, a.url, linkExpiry(a.url), id),
     audit(c.db, c.guild.id, c.userId, 'image.submit', `item:${item.id}`, null, { image: id }),
   ]);
-  return ephemeral(`Thanks: your screenshot of **${md(item.name)}** is waiting for an officer to approve it. Once approved, it shows under **Stat image** on \`/craft find\`.`);
+  return ephemeral(`Thanks: your screenshot of **${md(item.name)}** is waiting for an officer to approve it. Once approved, it shows under **Stat image** on \`/item\`.`);
 }
 
 interface ImageRow {
@@ -200,7 +198,7 @@ export async function statImage(c: Ctx, itemId: number): Promise<MessageReply> {
     .all<ImageRow>();
   const none = async () => {
     const item = await c.db.prepare('SELECT name FROM item WHERE id = ?').bind(itemId).first<{ name: string }>();
-    return ephemeral(`No screenshot of **${md(item?.name ?? 'this item')}** yet. Have one? Send it with \`/item image\`: an officer approves it, then it shows here.`);
+    return ephemeral(`No screenshot of **${md(item?.name ?? 'this item')}** yet. Have one? Send it with \`/item\` and \`screenshot:\`: an officer approves it, then it shows here.`);
   };
   const show = (img: ImageRow, url: string) => ephemeral('', { embeds: [{ title: truncate(img.item, 256), image: { url }, footer: { text: 'Screenshot from a guild member, approved by an officer' } }] });
   const api = c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 }) : null;

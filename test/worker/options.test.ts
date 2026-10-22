@@ -13,9 +13,13 @@ import { ADMIN, as, auto } from '../discord.ts';
 
 const STRING = 3;
 type Opt = { type: number; name: string; choices?: readonly { value: string }[]; autocomplete?: boolean; min_length?: number; max_length?: number; options?: readonly Opt[] };
-const strings = COMMANDS.flatMap((c) =>
-  (c.options as readonly Opt[]).flatMap((s) => (s.options ?? []).filter((o) => o.type === STRING).map((o) => ({ command: c.name, sub: s.name, o }))),
-);
+// Order 18: a command without subcommands (/item, /skills ...) has its options at the top.
+const strings = COMMANDS.flatMap((c) => {
+  const opts = ((c as { options?: readonly Opt[] }).options ?? []) as readonly Opt[];
+  const subs = opts.filter((s) => s.type === 1);
+  const at = subs.length ? subs.map((s) => ({ sub: s.name as string | undefined, list: s.options ?? [] })) : [{ sub: undefined as string | undefined, list: opts }];
+  return at.flatMap(({ sub, list }) => list.filter((o) => o.type === STRING).map((o) => ({ command: c.name, sub, o })));
+});
 /** The closed lists a choice set may come from. Order 13: /gear find's, each derived (src/gear/options.ts). */
 const CLOSED = [
   ACQUISITIONS.map(String),

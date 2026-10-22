@@ -12,15 +12,15 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, md, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
 import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
-import { characterAdd, characterEdit, characterRemove, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
+import { characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
 import { OFFICER_ONLY } from './members.ts';
 import { craftForget } from './recipes.ts';
 import { modalValues } from './reports.ts';
-import { notifyLine, requestList } from './requests.ts';
+import { logAction, notifyLine, requestList, written } from './requests.ts';
 import { allTradeskills, characterEmbeds, EMBED_MAX, skillGroups, updatePicker } from './skills.ts';
 import { WELCOME } from './welcome.ts';
 
@@ -71,6 +71,7 @@ export const ME_COPY = {
   pickRemove: 'Which character do you want to remove? Its skills are kept, and adding it again restores it.',
   pickUpdate: 'Which character are you updating?',
   pickCharacter: 'Pick a character',
+  removedMark: ' (removed)',
   nothingChanged: 'Nothing changed.',
   addTitle: 'Add a character',
   editTitle: (name: string) => truncate(`Edit ${name}`, LABEL_MAX),
@@ -107,9 +108,9 @@ function target(c: Ctx, customId: string, prefix: string, ownOnly = false): { ow
 }
 
 /** A picked character (a select's value), re-checked: live, the target's, and the presser may act on it. */
-async function pickedCharacter(c: Ctx, ownerId: string, value: string | undefined): Promise<Character | null> {
+async function pickedCharacter(c: Ctx, ownerId: string, value: string | undefined, includeRemoved = false): Promise<Character | null> {
   const id = Number(value);
-  const ch = Number.isInteger(id) ? await findById(c.db, c.guild.id, id) : null;
+  const ch = Number.isInteger(id) ? await findById(c.db, c.guild.id, id, includeRemoved) : null;
   return ch && ch.owner_user_id === ownerId ? ch : null;
 }
 
@@ -119,7 +120,7 @@ const characterSelect = (customId: string, chars: Character[]) =>
       type: MessageComponentTypes.STRING_SELECT,
       custom_id: customId,
       placeholder: ME_COPY.pickCharacter,
-      options: chars.slice(0, SELECT_MAX).map((ch) => ({ label: truncate(`${ch.name}${ch.is_main ? ' (main)' : ''}`, 100), value: String(ch.id) })),
+      options: chars.slice(0, SELECT_MAX).map((ch) => ({ label: truncate(`${ch.name}${ch.deleted_at ? ME_COPY.removedMark : ch.is_main ? ' (main)' : ''}`, 100), value: String(ch.id) })),
     },
   ]);
 
@@ -273,7 +274,9 @@ const editModal = (ch: Character): InteractionReply => ({
 export async function editButton(c: Ctx, customId: string): Promise<InteractionReply> {
   const t = target(c, customId, EDIT_PREFIX);
   if ('reply' in t) return t.reply;
-  const chars = await liveCharacters(c.db, c.guild.id, t.ownerId);
+  // An officer on another member's panel also reaches their removed characters, to free a name (as /character edit
+  // member: did); the member's own panel lists live ones only.
+  const chars = t.ownerId === c.userId ? await liveCharacters(c.db, c.guild.id, t.ownerId) : await charactersWithRemoved(c.db, c.guild.id, t.ownerId);
   if (!chars.length) return ephemeral(ME_COPY.gone);
   if (chars.length === 1) return editModal(chars[0]);
   return ephemeral(ME_COPY.pickEdit, { components: [characterSelect(`${EDIT_PICK_PREFIX}${t.ownerId}`, chars)] });
@@ -283,15 +286,17 @@ export async function editButton(c: Ctx, customId: string): Promise<InteractionR
 export async function editPicked(c: Ctx, customId: string, values: string[]): Promise<InteractionReply> {
   const t = target(c, customId, EDIT_PICK_PREFIX);
   if ('reply' in t) return t.reply;
-  const ch = await pickedCharacter(c, t.ownerId, values[0]);
+  const ch = await pickedCharacter(c, t.ownerId, values[0], t.ownerId !== c.userId);
   return ch ? editModal(ch) : ephemeral(ME_COPY.gone);
 }
 
 /** meem:<character id>: /character edit with what changed (member: is the owner, so an officer's edit is checked as before). */
 export async function editSubmitted(c: Ctx, customId: string, components: ModalComponent[] | undefined): Promise<MessageReply> {
-  const ch = await findById(c.db, c.guild.id, Number(customId.slice(EDIT_MODAL_PREFIX.length)));
+  const ch = await findById(c.db, c.guild.id, Number(customId.slice(EDIT_MODAL_PREFIX.length)), true);
   if (!ch) return ephemeral(ME_COPY.gone);
   if (ch.owner_user_id !== c.userId && !c.officer) return ephemeral(OFFICER_ONLY);
+  // Removed characters are an officer's, on another member's panel (characterEdit applies the same rule).
+  if (ch.deleted_at && ch.owner_user_id === c.userId) return ephemeral(ME_COPY.gone);
   const v = modalValues(components);
   const name = (v.get('name') ?? '').trim();
   const cls = (v.get('class') ?? '').trim();
@@ -406,7 +411,8 @@ export async function noticesPicked(c: Ctx, customId: string, values: string[]):
       c.db.prepare('DELETE FROM craft_notify WHERE guild_id = ? AND discord_user_id = ? AND tradeskill_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, c.userId, JSON.stringify(turnOff)),
       audit(c.db, c.guild.id, c.userId, 'craft.notify', `member:${c.userId}`, null, { on: false, tradeskills: names(turnOff) }),
     );
-  if (stmts.length) await c.db.batch(stmts);
+  // The request log line (order 16's "writes per action"), as /craft notify wrote it.
+  logAction('notify', stmts.length ? written(await c.db.batch(stmts)) : 0, null);
   const v = await noticesView(c);
   return updateMessage(v ?? { content: ME_COPY.nothingChanged, components: [] });
 }

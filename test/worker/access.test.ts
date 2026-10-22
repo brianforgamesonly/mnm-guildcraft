@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { ADMIN_ONLY } from '../../src/interactions.ts';
 import { all, count, one, reset } from '../db.ts';
-import { ADMIN, as, auto, cmd, GUILD, guildLookup, MANAGE_GUILD, select, send, submit } from '../discord.ts';
+import { ADMIN, as, auto, cmd, GUILD, guildLookup, MANAGE_GUILD, select, send, submit, top } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const BO = '100000000000000002';
@@ -39,7 +39,7 @@ describe('guild row', () => {
   it('a failed lookup stores the id as the name; a later command refreshes it', async () => {
     guildLookup.respond = () => new Response('nope', { status: 500 });
     const first = await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
-    expect(first.data.embeds![0].description).toMatch(/^## GuildCraft/); // the reply is not held up (order 17: the guide is an embed)
+    expect(first.data.embeds![0].title).toMatch(/^GuildCraft help/); // the reply is not held up (order 18: /help's first page)
     expect(await one('SELECT name FROM guild')).toEqual({ name: GUILD });
     guildLookup.respond = () => Response.json({ id: GUILD, name: 'Renamed Later' });
     await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
@@ -101,7 +101,7 @@ describe('access', () => {
   it('/craft help answers a caller the gate refuses, without creating a member row', async () => {
     await gate();
     const r = await send(cmd(as(BO), 'craft', 'help'));
-    expect(r.data.embeds![0].description).toMatch(/^## GuildCraft/);
+    expect(r.data.embeds![0].title).toMatch(/^GuildCraft help/);
     expect(await count('member', 'discord_user_id = ?', BO)).toBe(0);
   });
 
@@ -110,7 +110,7 @@ describe('access', () => {
     await send(cmd(as(BO, { roles: [MEMBER_ROLE] }), 'character', 'add', { name: 'Bochar' }));
     const edit = (m: ReturnType<typeof as>, level: number) => send(cmd(m, 'character', 'edit', { name: 'Bochar', level, member: BO }));
     const plain = '100000000000000003';
-    expect((await edit(as(plain, { roles: [MEMBER_ROLE] }), 5)).data.content).toBe("Only officers can change another member's characters.");
+    expect((await edit(as(plain, { roles: [MEMBER_ROLE] }), 5)).data.content).toBe('Only officers can do that.');
     expect((await edit(as('100000000000000004', { roles: [MEMBER_ROLE, OFFICER_ROLE] }), 6)).data.content).toMatch(/^Updated/);
     expect((await edit(as('100000000000000005', { roles: [MEMBER_ROLE], permissions: ADMIN }), 7)).data.content).toMatch(/^Updated/);
     expect((await edit(as('100000000000000006', { roles: [MEMBER_ROLE], permissions: MANAGE_GUILD }), 8)).data.content).toMatch(/^Updated/);
@@ -144,17 +144,21 @@ describe('member row', () => {
 
 describe('first-use welcome (FR-9)', () => {
   it('shows once, privately, with the first command reply and never again', async () => {
-    const first = await send(cmd(as(ANN), 'character', 'add', { name: 'Testchar' }));
+    // Order 18: a new member's first command is /me (Add character is its button), so the welcome comes with /me.
+    const first = await send(top(as(ANN), 'me'));
     expect(first.data.flags).toBe(64);
-    expect(first.data.content).toMatch(/^Added \*\*Testchar\*\*\. It is your main/);
-    expect(hasWelcome(first)).toBe(true);
-    const second = await send(cmd(as(ANN), 'craft', 'me'));
+    expect(first.data.embeds!.filter((e) => e.title === WELCOME.title)).toHaveLength(1);
+    const added = await send(cmd(as(ANN), 'character', 'add', { name: 'Testchar' }));
+    expect(added.data.content).toMatch(/^Added \*\*Testchar\*\*\. It is your main/);
+    expect(hasWelcome(added)).toBe(false);
+    const second = await send(top(as(ANN), 'me'));
     expect(hasWelcome(second)).toBe(false);
   });
 
-  it('step 3 (/craft find) is no longer "coming soon" now it is registered; step 2 names the Update skills button', () => {
-    expect(WELCOME.description).toMatch(/`\/craft find`: look up who in the guild can make an item\.\n/);
+  it('the three steps name the new commands (order 18): /me and Add character, /skills, /item', () => {
+    expect(WELCOME.description).toMatch(/\*\*1\.\*\* `\/me`: press \*\*Add character\*\*/);
+    expect(WELCOME.description).toMatch(/\*\*2\.\*\* `\/skills`: press Enter.*\nOr press \*\*Update skills\*\* on your `\/me`/);
+    expect(WELCOME.description).toMatch(/\*\*3\.\*\* `\/item`: look up any item/);
     expect(WELCOME.description).not.toMatch(/coming soon/);
-    expect(WELCOME.description).toMatch(/\*\*2\.\*\* `\/craft update`: press Enter.*\nOr press the \*\*Update skills\*\* button/);
   });
 });

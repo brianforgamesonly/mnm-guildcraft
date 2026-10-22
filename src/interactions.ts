@@ -1,26 +1,25 @@
 import { InteractionResponseFlags, InteractionResponseType, InteractionType } from 'discord-interactions';
 import { ensureGuild, isAdmin, isOfficer, loadGuild, passesMemberGate, touchMember, type Guild, type WaitUntil } from './access.ts';
 import { autocomplete } from './commands/autocomplete.ts';
-import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
-import { helpReply } from './commands/help.ts';
+import { HELP_PREFIX, helpButton, helpReply } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
-import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
+import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
-import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
-import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
-import { craftForget, craftKnow, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
+import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
+import { APPROVE_PREFIX, imageButton, REJECT_PREFIX, statImage } from './commands/images.ts';
+import { KNOW_PAGE_PREFIX, knowPage, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
 import {
-  craftReport, DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MISSING_MODAL_PREFIX, MISSING_PREFIX, missingModal, missingSubmitted, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted,
+  DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MISSING_MODAL_PREFIX, MISSING_PREFIX, missingModal, missingSubmitted, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted,
 } from './commands/reports.ts';
 import { DETAILS_PREFIX, gearDetails, gearFind, gearPage, gearSort, PAGE_PREFIX as GEAR_PAGE_PREFIX, postGear, POST_WHAT as GEAR_POST, SORT_PREFIX as GEAR_SORT_PREFIX } from './commands/gear.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
-import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, skillsCommand, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
+import { BUTTON_PREFIX, MODAL_PREFIX, SELECT_PREFIX, skillsCommand, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
 import { WELCOME } from './commands/welcome.ts';
 import {
-  ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftNotify, craftRequest, craftRequests, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, OFFICER_PAGE_PREFIX, officerRequests, officerRequestsPage,
+  ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftRequest, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, OFFICER_PAGE_PREFIX, officerRequests, officerRequestsPage,
   requestFromFind, SEND_PREFIX, sendUnsent,
 } from './commands/requests.ts';
 import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
@@ -33,7 +32,7 @@ import type { Env } from './env.ts';
 
 export type { Interaction, InteractionReply } from './discord.ts';
 
-export const NOT_YET = "Sorry, that command isn't available yet. Type `/craft help` to see what's coming.";
+export const NOT_YET = "Sorry, that command isn't available. Type `/help` to see every command.";
 export const NOT_IN_GUILD = 'Sorry, GuildCraft works inside a server, not in direct messages.';
 export const ADMIN_ONLY = 'Only server admins (Administrator or Manage Server) can change GuildCraft settings.';
 export const STALE_FORM = 'Sorry, that menu has expired. Run the command again.';
@@ -47,54 +46,37 @@ type Access = 'open' | 'member' | 'officer' | 'admin';
  * lookups in its audit log"; craft.find is the PRD's action, roster.view and guildcraft.status are named additions).
  * Writes keep their own audit rows inside their write batch.
  */
-const ROUTES: Record<string, { access: Access; search?: true; audit?: string | ((opts: Option[]) => string | undefined); run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
-  'character add': { access: 'member', run: characterAdd },
-  'character edit': { access: 'member', run: characterEdit },
-  'character remove': { access: 'member', run: characterRemove },
-  'craft set': { access: 'member', run: craftSet },
-  'craft update': { access: 'member', run: craftUpdate },
-  'craft me': { access: 'member', run: craftMe },
-  'craft find': { access: 'member', search: true, audit: 'craft.find', run: craftFind },
-  'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
-  'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
-  'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
-  // Order 9.
-  'craft know': { access: 'member', run: craftKnow },
-  'craft forget': { access: 'member', run: craftForget },
-  'craft report': { access: 'member', run: craftReport },
-  'roster recipes': { access: 'member', search: true, audit: 'roster.view', run: rosterRecipes },
-  // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
-  // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),
-  // whatever SEARCH_REPLIES_PRIVATE says, and Previous/Next edit them in place; the item card has Post to channel.
-  'gear find': { access: 'member', audit: 'gear.find', run: gearFind },
-  'item image': { access: 'member', run: itemImage },
-  'recipe source': { access: 'officer', run: recipeSource },
-  'recipe override': { access: 'officer', run: recipeOverride },
-  // Order 16: craft requests. Each answers clearly where no request channel is set (src/requests.ts NO_REQUEST_CHANNEL).
-  'craft request': { access: 'member', run: craftRequest },
-  'craft notify': { access: 'member', run: craftNotify },
-  'craft requests': { access: 'member', run: craftRequests },
-  // Order 17: a zone's card, private with Post to channel (as /craft find); 'zone.view' is its only write.
-  zone: { access: 'member', search: true, audit: 'zone.view', run: zoneCommand },
-  'craft help': { access: 'open', run: async () => helpReply() },
-  'guildcraft setup': { access: 'admin', run: guildcraftSetup },
-  'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
-  'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
-  'guildcraft remove-member': { access: 'officer', run: guildcraftRemoveMember },
-  // Order 18 (CHECKLIST A20): the simpler list (src/commands/definitions.ts NEXT_COMMANDS), on the old handlers. The audit
-  // action names stay as they were (craft.find, gear.find), so history stays comparable; the target is the new route key.
+// Order 18 (CHECKLIST A20): one route per registered command (src/commands/definitions.ts; test/worker/next-commands.test.ts
+// checks the two match). The old names (/character, /craft, /item image, /gear find, /recipe, /guildcraft remove-member)
+// are no longer registered and answer NOT_YET; their buttons and forms on earlier messages are still handled below. The
+// audit action names stay as they were (craft.find, gear.find, roster.view), so history stays comparable; the audit row's
+// target is the route key, so a lookup's target reads "item" where it read "craft find" before.
+export const ROUTES: Record<string, { access: Access; search?: true; audit?: string | ((opts: Option[]) => string | undefined); run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
   me: { access: 'member', run: meCommand },
-  'officer edit-member': { access: 'officer', run: officerEditMember },
   skills: { access: 'member', run: skillsCommand },
   // A screenshot attached is a submission (its own audit row), not a lookup.
   item: { access: 'member', search: true, audit: (opts) => (opts.some((o) => o.name === 'screenshot') ? undefined : 'craft.find'), run: itemCommand },
+  // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
+  // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),
+  // whatever SEARCH_REPLIES_PRIVATE says, and Previous/Next edit them in place; the item card has Post to channel.
   gear: { access: 'member', audit: 'gear.find', run: gearFind },
+  'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
+  'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
+  'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
+  'roster recipes': { access: 'member', search: true, audit: 'roster.view', run: rosterRecipes },
+  // Order 17: a zone's card, private with Post to channel; 'zone.view' is its only write.
+  zone: { access: 'member', search: true, audit: 'zone.view', run: zoneCommand },
+  // Order 16: craft requests. Each answers clearly where no request channel is set (src/requests.ts NO_REQUEST_CHANNEL).
   request: { access: 'member', run: craftRequest },
   help: { access: 'open', run: async () => helpReply() },
   'officer recipe-source': { access: 'officer', run: recipeSource },
   'officer recipe-fix': { access: 'officer', run: recipeOverride },
   'officer remove-member': { access: 'officer', run: officerRemoveMember },
+  'officer edit-member': { access: 'officer', run: officerEditMember },
   'officer requests': { access: 'officer', run: officerRequests },
+  'guildcraft setup': { access: 'admin', run: guildcraftSetup },
+  'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
+  'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
 };
 
 /** "name sub", or "name" for a command without subcommands (order 17: /zone). */
@@ -199,6 +181,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (!guild) return ephemeral(STALE_FORM);
   const c = ctxFor(env, guild, i.member!, effects, i);
   const id = i.data?.custom_id ?? '';
+  // Order 18: /help's page buttons, open to anyone (as /help is).
+  if (id.startsWith(HELP_PREFIX)) return helpButton(id);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
@@ -210,6 +194,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (passes || c.officer) {
     const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (panel) return panel;
+    // The panel's Update skills leads to the skill form, which re-checks owner or officer itself (componentCharacter).
+    if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
   }
   if (!passes) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) {
@@ -231,6 +217,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 9: /craft find's buttons, private or on a posted copy. Each answers the presser with a new private message.
   if (id.startsWith(KNOW_PREFIX)) return knowButton(c, Number(id.slice(KNOW_PREFIX.length)));
   if (id.startsWith(KNOW_SELECT_PREFIX)) return knowSelected(c, i.data?.values ?? []);
+  if (id.startsWith(KNOW_PAGE_PREFIX)) return knowPage(c, id);
   if (id.startsWith(IMAGE_PREFIX)) return statImage(c, Number(id.slice(IMAGE_PREFIX.length)));
   if (id.startsWith(RECIPES_PAGE_PREFIX)) return rosterRecipesPage(c, id);
   // Order 13: /gear find's paging (edits the private results) and details menu (a new private card).
@@ -280,6 +267,8 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   if (passes || c.officer) {
     const panel = meImmediate(c, id, i.data?.values ?? []);
     if (panel) return panel;
+    // The skill select (from the panel's Update skills), re-checked for owner or officer in updateSelected.
+    if (id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
   }
   if (!passes) return ephemeral(roleRequired(guild));
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));

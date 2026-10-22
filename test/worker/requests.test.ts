@@ -8,7 +8,8 @@ import worker from '../../src/index.ts';
 import { REQUEST_PERMISSIONS } from '../../src/commands/setup.ts';
 import { NO_REQUEST_CHANNEL, routeItems, threadName } from '../../src/requests.ts';
 import { all, count, markImported, one, reset } from '../db.ts';
-import { ADMIN, APP_ID, as, botApi, cmd, GUILD, press, select, send, spyOnFetch, submit, webhook } from '../discord.ts';
+import { ADMIN, APP_ID, as, botApi, cmd, GUILD, press, rawCmd, select, send, spyOnFetch, submit, top, webhook } from '../discord.ts';
+import { ME_COPY } from '../../src/commands/me.ts';
 
 const TOKEN = { env: { DISCORD_BOT_TOKEN: 'test-bot-token', GUILDCRAFT_COPY: 'production' } };
 const REQ = '600000000000000040';
@@ -198,8 +199,8 @@ async function sendPlate() {
 }
 
 describe('no request channel set (production commands are global)', () => {
-  it('/craft request, /craft notify and /craft requests reply clearly, with no error', async () => {
-    for (const r of [await request(ann, 'Copper Plate Breastplate'), await notify(bo, 'Blacksmithing'), await send(cmd(ann, 'craft', 'requests'), TOKEN)]) {
+  it('/request, Notices and Cancel a request (on /me) reply clearly, with no error', async () => {
+    for (const r of [await request(ann, 'Copper Plate Breastplate'), await send(press(bo, `men:${BO}`), TOKEN), await send(cmd(ann, 'craft', 'requests'), TOKEN)]) {
       expect(r.data.content).toBe(NO_REQUEST_CHANNEL);
       expect(r.data.flags).toBe(64);
     }
@@ -226,17 +227,19 @@ describe('/guildcraft setup requests:', () => {
   });
 });
 
-describe('/craft notify and /craft me', () => {
-  it('off by default; on and off per tradeskill, or All; /craft me lists the opt-ins', async () => {
+describe('Notices (on /me; formerly /craft notify)', () => {
+  it('off by default; on and off per tradeskill, or every one; /me lists the opt-ins', async () => {
     await setupRequests();
     expect((await send(cmd(bo, 'craft', 'me'), TOKEN)).data.content).toContain('**Craft request notices:** off');
-    expect((await notify(bo, 'blacksmithing')).data.content).toContain('Craft request notices **on** for Blacksmithing.');
-    expect((await send(cmd(bo, 'craft', 'me'), TOKEN)).data.content).toContain('**Craft request notices:** Blacksmithing (`/craft notify` changes them)');
+    expect((await notify(bo, 'blacksmithing')).data.content).toContain('**Craft request notices:** Blacksmithing');
+    expect((await send(cmd(bo, 'craft', 'me'), TOKEN)).data.content).toContain('**Craft request notices:** Blacksmithing (**Notices** on `/me` changes them)');
     await notify(bo, 'All');
     expect((await send(cmd(bo, 'craft', 'me'), TOKEN)).data.content).toContain('Blacksmithing, Tailoring, Tinkering');
     await notify(bo, 'Tailoring', false);
     expect(await all<{ t: number }>('SELECT tradeskill_id AS t FROM craft_notify WHERE discord_user_id = ?', BO)).toHaveLength(2);
-    expect((await notify(bo, 'Basketry')).data.content).toMatch(/I don't know a tradeskill called \*\*Basketry\*\*/);
+    // The select lists the import's tradeskills, each picked as it is on.
+    const view = await send(press(bo, `men:${BO}`), TOKEN);
+    expect(view.data.components![0].components[0].options.filter((o: any) => o.default).map((o: any) => o.label)).toEqual(['Blacksmithing', 'Tinkering']);
   });
 });
 
@@ -328,7 +331,7 @@ describe('/craft request: the unsent request, then Send', () => {
     expect(second).toEqual({ status: 'open', thread_id: null });
     const b = await send(press(ann, id), TOKEN);
     expect(a.data.content).toMatch(/^Sent:/);
-    expect(b.data.content).toBe('That request was already sent or discarded. Run `/craft request` to start another.');
+    expect(b.data.content).toBe('That request was already sent or discarded. Run `/request` to start another.');
     expect(threads.size).toBe(1);
     expect(await count('audit_log', "action = 'request.create'")).toBe(1);
   });
@@ -506,14 +509,16 @@ describe('expiry, through the */15 sweep (no extra cron)', () => {
   });
 });
 
-describe('/craft requests (private)', () => {
+describe('open requests: Cancel a request on /me (own), /officer requests (all)', () => {
   it('a member sees their own; an officer sees every open request and can cancel one from outside the thread', async () => {
     await sendPlate();
-    expect((await send(cmd(bo, 'craft', 'requests'), TOKEN)).data.content).toBe('You have no open craft requests. `/craft request` starts one.');
+    expect((await send(cmd(bo, 'craft', 'requests'), TOKEN)).data.content).toBe(ME_COPY.noOpen);
     const mine = await send(cmd(ann, 'craft', 'requests'), TOKEN);
-    expect(mine.data.content).toMatch(/Your open craft requests[\s\S]*Copper Plate Breastplate ×2 · Open/);
+    expect(mine.data.content).toMatch(/Pick a request to cancel[\s\S]*Copper Plate Breastplate ×2 · Open/);
+    // /me lists them too.
+    expect((await send(top(ann, 'me'), TOKEN)).data.content).toMatch(/Your open craft requests:\*\*\n\*\*#\d+\*\*.*Copper Plate Breastplate ×2/);
     await send(press(bo, buttons({ data: firstMessage(thread()) })[0].custom_id), TOKEN);
-    const list = await send(cmd(off, 'craft', 'requests'), TOKEN);
+    const list = await send(rawCmd(off, 'officer', 'requests'), TOKEN);
     expect(list.data.flags).toBe(64);
     expect(list.data.content).toContain(`from <@${ANN}> (Ann)`);
     const id = String((await one<{ id: number }>('SELECT id FROM craft_request')).id);

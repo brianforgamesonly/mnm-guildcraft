@@ -2,11 +2,11 @@
 // recipes, their components, the crafters and the data version; crafters are tiered by src/crafters.ts.
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow, type Tier } from '../crafters.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, memberTag, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, memberTag, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply } from '../discord.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
-import { postedReply, searchReply } from './share.ts';
+import { postedReply } from './share.ts';
 
 export interface ItemRecord {
   id: number;
@@ -278,18 +278,10 @@ export function findEmbeds(d: FindData, window: number, beside: Embed[] = []): {
   return { embeds, note: d.recipes.length > shown.length ? `Showing ${shown.length} of ${d.recipes.length} recipes.` : null };
 }
 
-export const noRecipe = (typed: string) => `No recipe found for **${md(typed)}**. Pick an item from the list as you type.`;
+/** A button on an item card whose item no longer has a recipe (order 18: /item). */
+export const GONE_RECIPE = 'That item no longer has a recipe. Run `/item` again.';
 
-export async function craftFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const typed = (optString(opts, 'item') ?? '').trim();
-  const d = await loadFind(c.db, c.guild.id, { key: typed.toLowerCase() });
-  if (!d.item || !d.isResult) {
-    const wiki = d.item?.wiki_url;
-    return ephemeral(noRecipe(typed || '(nothing)'), wiki ? { components: [{ type: 1, components: [linkButton('Wiki', wiki)] }] } : {});
-  }
-  const { embeds, note } = findEmbeds(d, c.guild.learning_window);
-  return searchReply({ content: note ?? undefined, embeds }, `find:${d.item.id}`, itemLinks(d.item), [findActions(d.item.id)]);
-}
+export const noRecipe = (typed: string) => `No recipe found for **${md(typed)}**. Pick an item from the list as you type.`;
 
 // ---------------------------------------------------------------- the reply's action buttons (order 9)
 
@@ -309,10 +301,10 @@ export const findActions = (itemId: number) =>
     button(`${FROM_FIND_PREFIX}${itemId}`, 'Request a craft'),
   ]);
 
-/** Post to channel: the same reply, rebuilt now, posted publicly. */
+/** Post to channel on a /craft find reply sent before order 18 ("pub:find:<id>"): the same reply, rebuilt now, posted publicly. */
 export async function postFind(c: Ctx, itemId: number): Promise<MessageReply> {
   const d = await loadFind(c.db, c.guild.id, { id: itemId });
-  if (!d.item || !d.isResult) return ephemeral('That item no longer has a recipe. Run `/craft find` again.');
+  if (!d.item || !d.isResult) return ephemeral(GONE_RECIPE);
   const { embeds, note } = findEmbeds(d, c.guild.learning_window);
   return postedReply({ content: note ?? undefined, embeds }, c.userId, itemLinks(d.item), [findActions(d.item.id)]);
 }

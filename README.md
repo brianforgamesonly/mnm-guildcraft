@@ -4,7 +4,7 @@ A Discord bot for a Monsters & Memories guild: who can craft what, tradeskill ro
 It runs on Cloudflare's free tier (one Worker plus a D1 database). GitHub Actions loads the recipe data each night.
 
 - **Specification:** [docs/PRD.md](docs/PRD.md). **Binding rules:** [docs/STANDING-report-contract.md](docs/STANDING-report-contract.md) and [docs/ORDER-RULES.md](docs/ORDER-RULES.md).
-- **Status:** dev environment only. Built so far: `/character add|edit|remove`, `/craft set|update|me|help` and `/guildcraft setup`.
+- **Status:** dev and production copies; no guild has installed yet. Commands (work order 18): `/me`, `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`, `/officer` and `/guildcraft`.
 
 ## Stack
 

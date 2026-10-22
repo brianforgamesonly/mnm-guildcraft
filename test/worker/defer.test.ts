@@ -9,7 +9,7 @@ import { planFor } from '../../src/interactions.ts';
 import { deliver, ERROR_REPLY, type Delivery } from '../../src/respond.ts';
 import { ephemeral } from '../../src/discord.ts';
 import { reset } from '../db.ts';
-import { APP_ID, as, auto, cmd, exchange, press, seen, select, submit, webhook } from '../discord.ts';
+import { APP_ID, as, auto, cmd, exchange, press, rawCmd, seen, select, submit, webhook } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const ann = as(ANN);
@@ -30,12 +30,13 @@ describe('which interactions defer: every D1 handler, except the answers Discord
   beforeEach(liveShape);
 
   // Derived from the registered command definitions, not a hand list.
-  const commands = [...DEFINED].map((c) => c.slice(1).split(' ') as [string, string]);
+  const commands = [...DEFINED].map((c) => c.slice(1).split(' ') as [string, string | undefined]);
 
   it('every registered command defers with type 5 and carries the private flag in the defer itself', async () => {
-    expect(commands.length).toBe(COMMANDS.reduce((n, c) => n + c.options.length, 0));
+    // Each command's subcommands, or the command itself when it has none (order 17: /zone; order 18: /me, /item ...).
+    expect(commands.length).toBe(COMMANDS.reduce((n, c) => n + Math.max(1, ((c as { options?: readonly { type: number }[] }).options ?? []).filter((o) => o.type === 1).length), 0));
     for (const [name, sub] of commands) {
-      const { ack, calls } = await exchange(cmd(ann, name, sub));
+      const { ack, calls } = await exchange(rawCmd(ann, name, sub));
       expect(ack, `/${name} ${sub}`).toEqual({ type: 5, data: { flags: 64 } });
       expect(calls.length, `/${name} ${sub} delivered`).toBeGreaterThan(0);
       for (const c of calls) expect(c.body?.flags, `/${name} ${sub}: an edit never carries flags`).toBeUndefined();

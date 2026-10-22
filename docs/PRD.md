@@ -78,15 +78,28 @@ Three roles cover everyone. Roles map to Discord server roles, so the guild mana
 
 ## Functional requirements
 
-The bot exposes four command groups and maintains one auto-updating forum board. Every command is a slash command with autocomplete, so nobody has to remember exact item or skill names.
+The bot exposes eight member commands (`/me`, `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`), `/officer` for officers and `/guildcraft` for admins, and maintains one auto-updating forum board. Every command is a slash command with autocomplete, so nobody has to remember exact item or skill names.
+
+**Work order 18 (2026-10-21, CHECKLIST A20) renamed and merged the commands.** The tables below use the new names. Old → new:
+
+| Old command | New |
+|---|---|
+| /character add, edit, remove → | `/me`: Add character, Edit character, Remove character |
+| /craft set, /craft update → | `/skills` (with skill and level, or neither) |
+| /craft me, /craft notify, /craft forget, a member's /craft requests → | `/me`: the panel, Notices, Forget a recipe, Cancel a request |
+| /craft find, /craft know, /craft report, /item image → | `/item` (I know this recipe, Report a problem and Stat image are its buttons; `screenshot:` sends an image) |
+| /gear find → | `/gear` |
+| /craft request → | `/request` |
+| /craft help → | `/help` |
+| /recipe source, /recipe override → | `/officer recipe-source`, `/officer recipe-fix` |
+| /guildcraft remove-member, an officer's /craft requests, member: on edits → | `/officer remove-member`, `/officer requests`, `/officer edit-member` |
 
 ### FR-1 Characters
 
-| Command                                           | Behavior                                                                                     |
-|---------------------------------------------------|----------------------------------------------------------------------------------------------|
-| /character add name: \[class\] \[level\] \[main\] | Registers a character to the caller's Discord account. A member may hold several characters. |
-| /character edit name:                             | Renames or changes class, level or main flag.                                                |
-| /character remove name:                           | Soft-deletes the character and its skills; the board drops it on the next refresh.           |
+| Command | Behavior |
+|---|---|
+| `/me` \[character\] | A private panel: the caller's characters (main marked), skills with stale markers, known recipes, request notices and open requests. Its buttons: **Add character** (name, class, level, main: a form), **Edit character** (rename, or change class, level or main), **Remove character** (soft-deletes the character and keeps its skills; the board drops it on the next refresh), **Update skills**, **Notices**, **Forget a recipe**, **Cancel a request**. A member may hold several characters. |
+| `/officer edit-member` member: | Opens that member's `/me` panel for an officer; changes are recorded as the officer's. |
 
 - The first character a member adds becomes their main. Commands that take an optional character: default to the main.
 
@@ -94,12 +107,11 @@ The bot exposes four command groups and maintains one auto-updating forum board.
 
 ### FR-2 Skills and known recipes
 
-| Command                                | Behavior                                                                                                                                                                                                      |
-|----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| /craft set skill: level: \[character\] | Sets one tradeskill level. skill uses autocomplete, because Discord caps fixed choices at 25 and the game has about 35 tradeskills.                                                                           |
-| /craft update \[character\]            | Shows a tradeskill multi-select; after the member picks up to 5, opens a form with one level box per chosen skill. (A Discord form holds 5 inputs, so a dropdown plus a box per row would fit only 2 skills.) |
-| /craft me \[character\]                | Private reply listing the caller's skills, levels and last-updated dates.                                                                                                                                     |
-| /craft know recipe: \[character\]      | Marks a recipe as known. Required for reputation and discovery recipes to count toward "can make" (FR-3.1); optional for vendor recipes. /craft forget reverses it.                                           |
+| Command | Behavior |
+|---|---|
+| `/skills` skill: level: \[character\] | Sets one tradeskill level. skill uses autocomplete, because Discord caps fixed choices at 25 and the game has about 35 tradeskills. |
+| `/skills` \[character\] | With no skill and level: a tradeskill multi-select; after the member picks up to 5, a form with one level box per chosen skill. (A Discord form holds 5 inputs, so a dropdown plus a box per row would fit only 2 skills.) |
+| **I know this recipe** (on `/item`) | Marks a recipe as known. Required for reputation and discovery recipes to count toward "can make" (FR-3.1); optional for vendor recipes. **Forget a recipe** on `/me` reverses it. |
 
 - Levels are whole numbers from 0 to a configurable cap (default 300, adjustable once the game's cap is confirmed).
 
@@ -109,7 +121,7 @@ The bot exposes four command groups and maintains one auto-updating forum board.
 
 ### FR-3 Find a crafter
 
-/craft find item: returns one reply for the chosen item:
+`/item` name: returns one reply for any item (work order 18: items with no recipe too, with the recipes that use it as an ingredient):
 
 1.  **Header:** item name, icon thumbnail, slot, and key stats (see FR-6).
 
@@ -121,11 +133,11 @@ The bot exposes four command groups and maintains one auto-updating forum board.
 
     - *Still learning:* within 25 points below trivial (adjustable), sorted by level. Anyone further below appears only as a count, so a level-5 skill doesn't clutter a level-200 recipe.
 
-    - *Knows recipe:* flagged via /craft know, shown with a marker.
+    - *Knows recipe:* flagged via **I know this recipe**, shown with a marker.
 
     - If the trivial level is unknown, all members with the tradeskill are listed by level, labeled "trivial unknown."
 
-4.  **Buttons:** Stat image, Post to channel, Report a problem, plus link buttons to the wiki, MnMdb and MNM Realm pages.
+4.  **Buttons:** I know this recipe, Report a problem, Request a craft, Stat image, Post to channel, plus link buttons to the wiki, MnMdb and MNM Realm pages. A name the data lacks gets "No item called X" with Report a missing recipe.
 
 **About trivial levels.** A recipe's trivial is the skill level at which it stops giving skill-ups; the community data records it for 328 of 615 recipes. The data does not record the level at which a recipe is first learned, so tiers are a guide, not a guarantee.
 
@@ -133,7 +145,7 @@ The reply is private by default. "Post to channel" re-posts it publicly so a mem
 
 ### FR-3.1 Recipes gated by vendor, reputation or discovery
 
-Skill level alone doesn't grant every recipe, so each recipe records how it is obtained, and /craft find only counts a character as able to make a gated recipe if they have marked it known. In Monsters & Memories most recipes are bought from vendors at a price tied to the skill they need, some are sold only to characters with enough faction standing, and experimental recipes are never sold and must be discovered ([tradeskills overview](https://thegameswiki.com/monsters-and-memories/wiki/tradeskills)).
+Skill level alone doesn't grant every recipe, so each recipe records how it is obtained, and `/item` only counts a character as able to make a gated recipe if they have marked it known. In Monsters & Memories most recipes are bought from vendors at a price tied to the skill they need, some are sold only to characters with enough faction standing, and experimental recipes are never sold and must be discovered ([tradeskills overview](https://thegameswiki.com/monsters-and-memories/wiki/tradeskills)).
 
 | How obtained | What it means in game                                                                           | How the bot decides who can make it                                                                                                       |
 |--------------|-------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
@@ -142,29 +154,33 @@ Skill level alone doesn't grant every recipe, so each recipe records how it is o
 | Discovery    | Experimental recipes found by testing combinations; not sold anywhere                           | Only characters who marked it known count as able. The recipe may not exist in community data at all.                                     |
 | Unknown      | Not recorded yet                                                                                | Skill tiers from FR-3 apply, with a note to confirm the crafter has the recipe.                                                           |
 
-- **Starting point.** The community data doesn't record how recipes are obtained, so every imported recipe starts as Unknown. Officers set the real value with /recipe source item: how: \[faction\] \[note\], and member reports feed the same queue. These corrections survive the nightly import, like overrides.
+- **Starting point.** The community data doesn't record how recipes are obtained, so every imported recipe starts as Unknown. Officers set the real value with `/officer recipe-source` item: how: \[faction\] \[note\], and member reports feed the same queue. These corrections survive the nightly import, like overrides.
 
-- **One-click marking.** Every /craft find reply has an "I know this recipe" button, so marking a gated recipe takes one click from the place a member sees it.
+- **One-click marking.** Every `/item` reply for a craftable item has an "I know this recipe" button, so marking a gated recipe takes one click from the place a member sees it.
 
-- **Discovered recipes.** /recipe add lets a member record a recipe the community data lacks: tradeskill, result item, components and trivial if known. An officer approves it before it appears. It is **guild-private by default**, visible only to this guild and never shared upstream, so the guild keeps its discoveries. An officer can make it public later.
+- **Discovered recipes.** `/recipe add` (not built yet: after launch) lets a member record a recipe the community data lacks: tradeskill, result item, components and trivial if known. An officer approves it before it appears. It is **guild-private by default**, visible only to this guild and never shared upstream, so the guild keeps its discoveries. An officer can make it public later.
 
-- **Who knows the rare ones.** /roster recipes \[skill\] lists every reputation and discovery recipe that at least one guild character has marked known, and who knows it.
+- **Who knows the rare ones.** `/roster recipes` \[skill\] lists every reputation and discovery recipe that at least one guild character has marked known, and who knows it.
 
 - **Out of scope.** The bot doesn't track each character's faction standing. For reputation recipes it names the faction so members know what to work toward.
 
 ### FR-4 Roster commands
 
-| Command                      | Behavior                                                                                                                          |
-|------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| /roster skill: \[min_level\] | Ranked list of every character with that tradeskill, 15 per page, with Previous/Next buttons and a dropdown to switch tradeskill. |
-| /roster member: @user        | All of one member's characters and skills, grouped by character.                                                                  |
-| /roster top                  | The top 3 characters in each tradeskill, one compact list. (The rare-recipe roster, /roster recipes, is in FR-3.1.)               |
+| Command | Behavior |
+|---|---|
+| `/roster skill` skill: \[min_level\] | Ranked list of every character with that tradeskill, 15 per page, with Previous/Next buttons and a dropdown to switch tradeskill. |
+| `/roster member` member: @user | All of one member's characters and skills, grouped by character. |
+| `/roster top` | The top 3 characters in each tradeskill, one compact list. (The rare-recipe roster, `/roster recipes`, is in FR-3.1.) |
+| `/gear` class: … | Gear for a class, by slot, weapon type, AC, ratio, stats, source and zone (work order 13). |
+| `/zone` name: | A zone's card: level range, creatures, and links to the wikis and MnM Atlas (work order 17). |
+| `/request` item: \[quantity\] \[note\] | Asks the opted-in crafters who can make an item, in a private thread (work order 16). |
+| `/help` | A guide in pages, one button per page. |
 
 Discord dropdowns hold at most 25 options, so the tradeskill switcher lists only skills with at least one member, split alphabetically across two dropdowns (A–M, N–Z) when more than 25 are in use.
 
 ### FR-5 Roster board (forum channel)
 
-- An admin runs /guildcraft setup board:#forum-channel once. The bot creates one forum post per tradeskill, titled with the skill name only. The member count lives in the post body, because Discord tightly rate-limits renaming channels and threads.
+- An admin runs `/guildcraft setup` board:#forum-channel once. The bot creates one forum post per tradeskill, titled with the skill name only. The member count lives in the post body, because Discord tightly rate-limits renaming channels and threads.
 
 - Each post's first message is a ranked list (rank, character, member, level, stale marker), owned and edited only by the bot. Members can reply in the post, for example to request crafts.
 
@@ -178,24 +194,29 @@ Discord dropdowns hold at most 25 options, so the tradeskill switcher lists only
 
 - Item stats come from the community dataset (slot, AC, damage/delay, stats, resists, weight, classes, races) and render as embed fields with the item icon as thumbnail.
 
-- Members can submit a screenshot of the in-game item window with /item image item: image:. Officers approve it with one button before it shows publicly.
+- Members can submit a screenshot of the in-game item window with `/item` name: screenshot:. Officers approve it with one button before it shows publicly.
 
 - Every item reply links to its wiki, MnMdb and MNM Realm pages. The Item stats and images section covers sources and storage.
 
 ### FR-7 Data quality
 
-- /craft report item: issue: \[details\] files a report (wrong trivial, wrong components, wrong source, missing recipe, other) into an officer review queue channel with Mark fixed/Dismiss buttons. The officer fixes the data with /recipe; the buttons only record the outcome. (Amended by work order 9, override 4: "wrong source" and "other" added; the buttons were "Approve/Dismiss".)
+- **Report a problem** on an `/item` card files a report (wrong trivial, wrong components, wrong source, missing recipe, other; or, for item data, wrong stats, source or class) into an officer review queue channel with Mark fixed/Dismiss buttons. A name the data lacks can be reported as a missing recipe. The officer fixes the data with `/officer recipe-fix` or `/officer recipe-source`; the buttons only record the outcome. (Amended by work order 9, override 4: "wrong source" and "other" added; the buttons were "Approve/Dismiss".)
 
-- Officers can override an existing recipe's trivial or components with /recipe override, for their own server only. Overrides survive the nightly re-import. (Work order 9: adding a recipe, /recipe add, moves to after launch.)
+- Officers can override an existing recipe's trivial or components with `/officer recipe-fix`, for their own server only. Overrides survive the nightly re-import. (Work order 9: adding a recipe, `/recipe add`, moves to after launch.)
 
 ### FR-8 Administration
 
-| Command                         | Who     | Behavior                                                                 |
-|---------------------------------|---------|--------------------------------------------------------------------------|
-| /guildcraft setup               | Admin   | Sets board channel, review channel, member role and officer role.        |
-| /guildcraft remove-member user: | Officer | Removes a departed member's characters and skills.                       |
-| /guildcraft rebuild-board       | Admin   | Forces a full board rebuild.                                             |
-| /guildcraft status              | Admin   | Shows data version, last import, last board refresh and free-tier usage. |
+| Command | Who | Behavior |
+|---|---|---|
+| `/guildcraft setup` | Admin | Sets board channel, review, vault and request channels, member role and officer role. |
+| `/guildcraft rebuild-board` | Admin | Forces a full board rebuild. |
+| `/guildcraft status` | Admin | Shows data version, last import, last board refresh and free-tier usage. |
+| `/officer remove-member` member: | Officer | Removes a departed member's characters and skills. |
+| `/officer edit-member` member: | Officer | Opens that member's `/me` panel (FR-1). |
+| `/officer recipe-source`, `/officer recipe-fix` | Officer | How a recipe is obtained; its trivial or ingredients (FR-3.1, FR-7). |
+| `/officer requests` | Officer | Every open craft request, paged, with Cancel. |
+
+`/officer` and `/guildcraft` are shown to Manage Server by default; a server admin grants `/officer` to the officer role once (Server Settings → Integrations → the app → `/officer`).
 
 A member's record is created or refreshed the first time they use the bot. The nightly job compares that list with the server's current members (this needs the Server Members intent) and flags anyone who left for officer review. Data is never deleted automatically.
 
@@ -205,7 +226,7 @@ Officer and admin commands are hidden from regular members using Discord's defau
 
 - The first time a member uses any command, the bot replies privately with a three-step welcome: add a character, set skills, try a lookup.
 
-- /craft help shows a one-screen guide to every command.
+- `/help` shows a guide to every command, in pages with a button for each (work order 18; it was one screen).
 
 - The board's index post explains how to get listed, so new recruits can join the roster on their own.
 
@@ -437,7 +458,7 @@ detail_json TEXT,
 created_at TEXT NOT NULL  
 );
 
-**The core query.** /craft find answers "who can make this?" in one indexed query:
+**The core query.** `/item` (formerly /craft find) answers "who can make this?" in one indexed query:
 
 SELECT r.id AS recipe_id, r.acquisition, r.faction, c.name AS character, m.display_name AS member, cs.level, r.trivial,  
 CASE WHEN r.acquisition IN ('reputation','discovery')  
@@ -497,13 +518,13 @@ Many items without stats are components (bars, thread, leather), which have no c
 
 ### Layer 2: member screenshots of the in-game item window
 
-- /item image item: image: accepts an image attachment. The bot re-posts it to a private vault channel and files it as pending; officers approve or reject with a button.
+- `/item` name: screenshot: accepts an image attachment. The bot re-posts it to a private vault channel and files it as pending; officers approve or reject with a button.
 
 - Discord attachment links now expire. Each link carries an expiry timestamp and stops working after it passes. The bot gets a fresh one by reading the vault message again (Get Channel Message): Discord's reference says "when your app receives a payload with a signed URL (like when you fetch a message), it will be valid" ([Signed Attachment CDN URLs](https://docs.discord.com/developers/reference)). (Amended by work order 9, override 5: the refresh-urls endpoint named here before is not in Discord's reference and is not used.)
 
 - The bot therefore stores the vault message and attachment IDs, caches the current link with its expiry, and refreshes it on demand. Storage stays free and needs no credit card.
 
-- The "Stat image" button on /craft find shows the approved screenshot, or says none exists yet and invites a submission.
+- The "Stat image" button on `/item` shows the approved screenshot, or says none exists yet and invites a submission.
 
 - Upgrade path: copy approved images to Cloudflare R2 for permanent links, if the guild accepts adding a payment method.
 

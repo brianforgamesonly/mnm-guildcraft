@@ -1,9 +1,10 @@
-// Work order 18, PR A: the simpler command list (src/commands/definitions.ts NEXT_COMMANDS) on the old handlers:
+// Work order 18: the simpler command list (src/commands/definitions.ts COMMANDS) on the old handlers:
 // /skills, /item, /gear, /request, /help, /officer, /guildcraft; autocomplete keyed by command and option.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CRAFTABLE_MARK, LISTS, listKey } from '../../src/commands/autocomplete.ts';
-import { COMMANDS, NEXT_COMMANDS, SUBCOMMAND } from '../../src/commands/definitions.ts';
+import { COMMANDS as NEXT_COMMANDS, DEFINED, SUBCOMMAND } from '../../src/commands/definitions.ts';
+import { ROUTES } from '../../src/interactions.ts';
 import { ITEM_COPY } from '../../src/commands/item.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
 import { MISSING_MODAL_PREFIX, MISSING_PREFIX } from '../../src/commands/reports.ts';
@@ -72,6 +73,11 @@ describe('the new definitions (order 18)', () => {
     expect(subs('guildcraft')).toEqual(['setup', 'status', 'rebuild-board']);
   });
 
+  it('one route per registered command and subcommand, and no route for anything unregistered', () => {
+    const routed = Object.keys(ROUTES).map((k) => `/${k}`).sort();
+    expect(routed).toEqual([...DEFINED].sort());
+  });
+
   it('every one of them is answered (deferred privately); nothing new answers "not yet"', async () => {
     const calls: [unknown, string][] = [];
     for (const c of NEXT_COMMANDS) {
@@ -94,7 +100,7 @@ describe('autocomplete, keyed by command and option', () => {
       (c.options ?? []).flatMap((o) => (o.type === SUBCOMMAND ? (o.options ?? []).filter((p) => p.autocomplete).map((p) => listKey(c.name, o.name, p.name)) : o.autocomplete ? [listKey(c.name, undefined, o.name)] : [])),
     );
   it('every autocomplete option in both lists has a list, and every list names one (derived both ways)', () => {
-    const defined = new Set([...autocompleteOptions(COMMANDS), ...autocompleteOptions(NEXT_COMMANDS)]);
+    const defined = new Set(autocompleteOptions(NEXT_COMMANDS));
     expect([...defined].filter((k) => !LISTS[k])).toEqual([]);
     expect(Object.keys(LISTS).filter((k) => !defined.has(k))).toEqual([]);
   });
@@ -227,6 +233,30 @@ describe('/officer', () => {
     const p2 = await send(press(officer, next));
     expect(p2.data.content!.split('\n')[0]).toBe('**Open craft requests** 11–12 of 12, oldest first:');
     expect((await send(press(ann, next))).data.content).toBe(OFFICER_ONLY);
+  });
+});
+
+describe('buttons on messages sent before order 18 keep working', () => {
+  // Every custom_id prefix the code sent at e597826 (the base of order 18), with a plausible id. Each must reach its
+  // handler: an answer that is neither "that menu has expired" nor the error reply. (Handlers may still say the item or
+  // request is gone: these ids point at nothing.) A frozen list on purpose: it is the history the guild's messages carry.
+  const SENT_BEFORE: [string, 'press' | 'select' | 'submit', string[]?][] = [
+    ['dep:keep:1', 'press'], ['rm:no:1', 'press'], ['rpf:0', 'press'], ['rpd:0', 'press'], ['ima:0', 'press'], ['imr:0', 'press'],
+    ['know:0', 'press'], ['knows:0', 'select', ['0:0']], ['img:0', 'press'], ['rpt:0', 'press'], ['rptm:0', 'submit'], ['rpi:0', 'press'], ['rpim:0', 'submit'],
+    ['rqf:0', 'press'], ['rqa:0', 'press'], ['rqam:0', 'submit'], ['rqs:0', 'press'], ['rqz:0', 'press'], ['rqi:c:0:1', 'press'], ['rql:', 'select', ['0']],
+    ['pub:find:0', 'press'], ['pub:gear:0', 'press'], ['pub:zone:x', 'press'], ['pub:rr:0:0', 'press'], ['pub:rs:0:0:0', 'press'], ['pub:rm:1', 'press'], ['pub:rt', 'press'],
+    ['rr:0:0', 'press'], ['rs:0:0:0', 'press'], ['rss:0:0', 'select', ['0']], ['upb:0', 'press'], ['upd:0:0', 'select', ['0']], ['updm:0', 'submit'],
+    ['gp:0:x', 'press'], ['gd:', 'select', ['0']], ['gs:x', 'select', ['0']], ['zc:x', 'press'], ['zcn:0:x', 'press'], ['zd:x', 'press'], ['zdn:0:x', 'press'], ['zg:x', 'press'], ['zgc:x', 'select', ['Any']],
+  ];
+  it('every one reaches its handler', async () => {
+    const { STALE_FORM } = await import('../../src/interactions.ts');
+    const { ERROR_REPLY } = await import('../../src/respond.ts');
+    await send(top(officer, 'help'));
+    for (const [id, kind, values] of SENT_BEFORE) {
+      const body = kind === 'press' ? press(officer, id) : kind === 'select' ? { ...press(officer, id), data: { custom_id: id, component_type: 3, values } } : submit(officer, id, {});
+      const r = await send(body);
+      expect([STALE_FORM, ERROR_REPLY], id).not.toContain(r.data.content);
+    }
   });
 });
 

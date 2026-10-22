@@ -105,7 +105,7 @@ describe('/guildcraft setup board: checks, then builds', () => {
     const index = post('Index: how to get listed')!;
     expect(index.flags & PINNED).toBe(PINNED);
     expect(forum.text(index)).toContain(`<#${post('Blacksmithing')!.id}> · 1 character`);
-    expect(forum.text(index)).toMatch(/How to get listed[\s\S]*`\/character add`[\s\S]*Last refresh: <t:\d+:f>/);
+    expect(forum.text(index)).toMatch(/How to get listed[\s\S]*`\/me`, then \*\*Add character\*\*[\s\S]*Last refresh: <t:\d+:f>/);
     expect(await count('board_post', 'dirty <> 0')).toBe(0);
     // Calls made by the whole invocation (setup's D1 work, its delivery, the build) stay under the cap.
     const run = boardLines()[0];
