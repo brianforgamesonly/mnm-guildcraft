@@ -9,7 +9,7 @@ import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember 
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, REJECT_PREFIX, statImage } from './commands/images.ts';
-import { KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
+import { KNOW_PAGE_PREFIX, knowPage, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
 import {
   DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MISSING_MODAL_PREFIX, MISSING_PREFIX, missingModal, missingSubmitted, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted,
 } from './commands/reports.ts';
@@ -194,6 +194,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (passes || c.officer) {
     const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (panel) return panel;
+    // The panel's Update skills leads to the skill form, which re-checks owner or officer itself (componentCharacter).
+    if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
   }
   if (!passes) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) {
@@ -215,6 +217,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 9: /craft find's buttons, private or on a posted copy. Each answers the presser with a new private message.
   if (id.startsWith(KNOW_PREFIX)) return knowButton(c, Number(id.slice(KNOW_PREFIX.length)));
   if (id.startsWith(KNOW_SELECT_PREFIX)) return knowSelected(c, i.data?.values ?? []);
+  if (id.startsWith(KNOW_PAGE_PREFIX)) return knowPage(c, id);
   if (id.startsWith(IMAGE_PREFIX)) return statImage(c, Number(id.slice(IMAGE_PREFIX.length)));
   if (id.startsWith(RECIPES_PAGE_PREFIX)) return rosterRecipesPage(c, id);
   // Order 13: /gear find's paging (edits the private results) and details menu (a new private card).
@@ -264,6 +267,8 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   if (passes || c.officer) {
     const panel = meImmediate(c, id, i.data?.values ?? []);
     if (panel) return panel;
+    // The skill select (from the panel's Update skills), re-checked for owner or officer in updateSelected.
+    if (id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
   }
   if (!passes) return ephemeral(roleRequired(guild));
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));

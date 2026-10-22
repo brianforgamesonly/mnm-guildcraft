@@ -28,7 +28,7 @@ if (!classes.length) throw new Error('game_class holds no classes: run the impor
 const COMMANDS = commandsWith(classes);
 const problems = commandLimitProblems(COMMANDS);
 if (problems.length) throw new Error(`the definitions break Discord's limits, not registering: ${problems.join('; ')}`);
-console.log(`/gear find class choices: Any + ${classes.length} from game_class (${classes.join(' ')})`);
+console.log(`/gear class choices: Any + ${classes.length} from game_class (${classes.join(' ')})`);
 
 const botToken = need('DISCORD_BOT_TOKEN');
 const appId = need('DISCORD_APPLICATION_ID');

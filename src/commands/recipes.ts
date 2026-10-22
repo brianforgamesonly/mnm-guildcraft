@@ -72,13 +72,23 @@ export async function craftForget(c: Ctx, opts: Option[]): Promise<MessageReply>
 // ---------------------------------------------------------------- the "I know this recipe" button (FR-3.1)
 
 export const KNOW_SELECT_PREFIX = 'knows:';
+/** Order 18: Previous / Next on the dropdown when there are more than 25 character × recipe pairs ("knp:<item id>:<page>"). */
+export const KNOW_PAGE_PREFIX = 'knp:';
+
+/** knp:<item id>:<page>: another page of the dropdown, in place (the presser's own private message). */
+export async function knowPage(c: Ctx, customId: string): Promise<MessageReply> {
+  const [itemId, page] = customId.slice(KNOW_PAGE_PREFIX.length).split(':').map(Number);
+  const r = await knowButton(c, itemId, page || 0);
+  return updateMessage({ content: r.data.content, components: r.data.components ?? [] });
+}
 
 /**
- * know:<item id>, on a /craft find reply, private or posted. The presser's own characters, never the original asker's.
- * One character and one recipe: marked at once. Otherwise a dropdown of character × recipe, then the mark. Always a new
- * private message (type 4 with the private flag after a type 6 defer): a press never edits a public post.
+ * know:<item id>, on an /item (or older /craft find) card, private or posted. The presser's own characters, never the
+ * original asker's. One character and one recipe: marked at once. Otherwise a dropdown of character × recipe, 25 a page,
+ * then the mark. Always a new private message (type 4 with the private flag after a type 6 defer): a press never edits a
+ * public post.
  */
-export async function knowButton(c: Ctx, itemId: number): Promise<MessageReply> {
+export async function knowButton(c: Ctx, itemId: number, page = 0): Promise<MessageReply> {
   const [chars, recipes] = await Promise.all([
     liveCharacters(c.db, c.guild.id, c.userId),
     c.db
@@ -91,11 +101,18 @@ export async function knowButton(c: Ctx, itemId: number): Promise<MessageReply> 
   if (!recipes.length) return ephemeral(GONE_RECIPE);
   if (chars.length === 1 && recipes.length === 1) return ephemeral(await markKnown(c, chars[0], recipes[0]));
   const pairs = chars.flatMap((ch) => recipes.map((r) => ({ ch, r })));
-  const shown = pairs.slice(0, SELECT_MAX_OPTIONS);
+  const pages = Math.ceil(pairs.length / SELECT_MAX_OPTIONS);
+  const p = Math.min(Math.max(0, page), pages - 1);
+  const shown = pairs.slice(p * SELECT_MAX_OPTIONS, (p + 1) * SELECT_MAX_OPTIONS);
+  const nav = row([
+    button(`${KNOW_PAGE_PREFIX}${itemId}:${p - 1}`, '◀ Previous', STYLE_SECONDARY, p === 0),
+    button(`${KNOW_PAGE_PREFIX}${itemId}:${p + 1}`, 'Next ▶', STYLE_SECONDARY, p >= pages - 1),
+  ]);
   return ephemeral(
-    [`Which character knows which recipe?${pairs.length > shown.length ? ` (showing the first ${shown.length} of ${pairs.length})` : ''}`].join('\n'),
+    `Which character knows which recipe?${pages > 1 ? ` (${p * SELECT_MAX_OPTIONS + 1}–${p * SELECT_MAX_OPTIONS + shown.length} of ${pairs.length})` : ''}`,
     {
       components: [
+        ...(pages > 1 ? [nav] : []),
         row([
           {
             type: 3,

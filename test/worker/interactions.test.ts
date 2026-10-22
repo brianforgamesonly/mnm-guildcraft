@@ -1,3 +1,4 @@
+import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
 import { COMMANDS, DEFINED, DEFINED_LIST } from '../../src/commands/definitions.ts';
@@ -108,7 +109,11 @@ describe('/help pages (order 18: derived from the definitions)', () => {
     expect(PAGES.map((p) => p.label)).toEqual(['Getting started', 'Finding things', 'Your profile', 'Requests', 'Officers', 'Admins']);
   });
 
-  it('a page button edits the help in place, for anyone', async () => {
+  it('a page button edits the help in place, for anyone, the member gate included', async () => {
+    // A member role is set and this presser lacks it: /help and its pages are open, as before.
+    await send(rawCmd(as('100000000000000009', { permissions: String(1 << 3) }), 'guildcraft', 'setup', { member_role: '500000000000000001' }));
+    expect((await env.DB.prepare('SELECT member_role_id AS r FROM guild').first<{ r: string }>())!.r).toBe('500000000000000001');
+    expect((await send(top(as('100000000000000005'), 'me'))).data.content).toMatch(/is for members with the/); // the gate refuses them
     const r = await send(press(as('100000000000000005'), `${HELP_PREFIX}officers`));
     expect(r.type).toBe(7);
     expect(r.data.embeds![0].title).toBe('GuildCraft help · Officers (5 of 6)');

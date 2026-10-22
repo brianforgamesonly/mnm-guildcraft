@@ -115,6 +115,20 @@ describe('/craft know and /craft forget', () => {
     expect(await count('character_recipe')).toBe(0);
   });
 
+  it('more than 25 character × recipe pairs: the dropdown is paged, so every pair can be marked', async () => {
+    for (let n = 0; n < 4; n++) await send(cmd(ann, 'character', 'add', { name: `Alt${n}` }));
+    const item = await env.DB.prepare("INSERT INTO item (name, name_key, source, imported_at) VALUES ('Many Ways', 'many ways', 'wiki', '2026-10-19T00:00:00Z')").run();
+    for (let n = 0; n < 6; n++)
+      await env.DB.prepare("INSERT INTO recipe (source_key, tradeskill_id, result_item_id, trivial, source, imported_at) VALUES (?, (SELECT id FROM tradeskill WHERE name = 'Blacksmithing'), ?, ?, 'wiki', '2026-10-19T00:00:00Z')").bind(`mw${n}`, item.meta.last_row_id, n).run();
+    const first = await send(press(ann, `know:${item.meta.last_row_id}`));
+    expect(first.data.content).toBe('Which character knows which recipe? (1–25 of 30)');
+    const next = first.data.components![0].components[1].custom_id;
+    const second = await send(press(ann, next));
+    expect(second.type).toBe(7);
+    expect(second.data.content).toBe('Which character knows which recipe? (26–30 of 30)');
+    expect(second.data.components![1].components[0].options).toHaveLength(5);
+  });
+
   it('/craft me lists the known recipes, truncated with a count', async () => {
     await send(cmd(ann, 'craft', 'know', { recipe: 'Copper Sword' }));
     expect(JSON.stringify((await send(cmd(ann, 'craft', 'me'))).data.embeds)).toContain('Known recipes: Copper Sword (Blacksmithing)');

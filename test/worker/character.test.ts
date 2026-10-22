@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ME_COPY } from '../../src/commands/me.ts';
 import { all, count, one, reset } from '../db.ts';
-import { ADMIN, as, auto, cmd, send } from '../discord.ts';
+import { ADMIN, as, auto, cmd, select, send, submit } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const BO = '100000000000000002';
@@ -114,6 +114,15 @@ describe('/character edit', () => {
     expect(missing.data.content).toBe(ME_COPY.gone);
     expect((await remove(ann, { name: 'Bochar' })).data.content).toBe(ME_COPY.gone);
     expect((await send(cmd(ann, 'craft', 'me', { character: 'Bochar' }))).data.content).toBe('You have no character named **Bochar**.');
+    expect(await chars()).toEqual([{ name: 'Bochar', owner_user_id: BO, is_main: 1, deleted: 0, class: null, level: null }]);
+  });
+
+  it("a member who sends another member's real character id, in the form or the remove select, is refused and nothing changes", async () => {
+    await add(bo, { name: 'Bochar' });
+    const id = String((await one<{ id: number }>('SELECT id FROM character')).id);
+    expect((await send(submit(ann, `meem:${id}`, { name: 'Stolen', level: '9' }))).data.content).toBe('Only officers can do that.');
+    expect((await send(select(ann, `mers:${BO}`, [id]))).data.content).toBe('Only officers can do that.');
+    expect((await send(select(ann, `mers:${ANN}`, [id]))).data.content).toBe(ME_COPY.gone);
     expect(await chars()).toEqual([{ name: 'Bochar', owner_user_id: BO, is_main: 1, deleted: 0, class: null, level: null }]);
   });
 
