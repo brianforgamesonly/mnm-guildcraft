@@ -198,10 +198,11 @@ describe('order 13: the write ceiling', () => {
 
   it('review: a later group that could never fit fails the run loudly instead of closing partial every night', async () => {
     await load(gearFixture());
-    // Unchanged items and mobs are not sent, so the groups are tradeskills, classes, then the recipe group (bound 34).
+    // Unchanged items and mobs are not sent, so the groups are tradeskills, classes, then the recipe group (bound 42:
+    // order 19's recipe_component_by_item adds one write to each of its 8 component rows).
     const res = await load(gearFixture(), { writeCeiling: 30 });
     expect(res.status).toBe('failed');
-    expect(res.error).toMatch(/below the bound of statement group 3 of 3 \(34 rows\)/);
+    expect(res.error).toMatch(/below the bound of statement group 3 of 3 \(42 rows\)/);
     expect(await one("SELECT status FROM data_import ORDER BY id DESC LIMIT 1")).toEqual({ status: 'failed' });
   });
 
