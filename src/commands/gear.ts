@@ -3,7 +3,7 @@
 // groups, Stat image and Post to channel. No writes per search beyond the read audit row 'gear.find' (src/interactions.ts).
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow } from '../crafters.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { decodeState, defaultSort, encodeState, roundRatio, sortByKey, SORTS, STAT_FILTERS, type GearQuery } from '../gear/options.ts';
 import { zoneKey } from '../zone/names.ts';
 import { unknownZone } from '../zone/suggest.ts';
@@ -65,7 +65,13 @@ export const GEAR_COPY = {
   ].join('\n'),
   reportButton: 'Report a problem',
   imageButton: 'Stat image',
+  /** Order 19 (ITEM 5): a link button on results pages and the details card. */
+  plannerButton: 'Character planner (Stories of MnM)',
 } as const;
+
+/** Stories of MnM's planner. Its page documents no class parameter, so the plain address (order 19, ITEM 5). */
+export const PLANNER_URL = 'https://storiesofmnm.com/character-planner/';
+const plannerLink = () => linkButton(GEAR_COPY.plannerButton, PLANNER_URL);
 
 // ---------------------------------------------------------------- reading the options
 
@@ -284,6 +290,7 @@ function pageComponents(rows: GearRow[], q: GearQuery, page: number, hasNext: bo
   const nav = row([
     button(`${PAGE_PREFIX}${page - 1}:${state}`, GEAR_COPY.previous, undefined, page === 0),
     button(`${PAGE_PREFIX}${page + 1}:${state}`, GEAR_COPY.next, undefined, !hasNext),
+    plannerLink(),
   ]);
   const select = row([
     {
@@ -412,7 +419,7 @@ function fitLinesBy(lines: string[], maxChars = 600): string {
   return out.length < lines.length ? `${out.join('\n')}\n${GEAR_COPY.more(lines.length - out.length)}` : out.join('\n');
 }
 
-const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${itemId}`, GEAR_COPY.reportButton), button(`${IMAGE_PREFIX}${itemId}`, GEAR_COPY.imageButton)]);
+const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${itemId}`, GEAR_COPY.reportButton), button(`${IMAGE_PREFIX}${itemId}`, GEAR_COPY.imageButton), plannerLink()]);
 
 async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: unknown[] } | null> {
   const r = await c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId).first<GearRow>();

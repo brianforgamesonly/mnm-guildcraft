@@ -2,7 +2,7 @@
 // The review channel arrived in order 7; the vault channel arrives in order 9.
 import { audit, type Guild } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { ADMINISTRATOR, CREATE_PRIVATE_THREADS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, plural, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
+import { ADMINISTRATOR, button, CREATE_PRIVATE_THREADS, ephemeral, GUILD_FORUM, GUILD_TEXT, MANAGE_THREADS, optString, plural, row, STYLE_PRIMARY, VIEW_CHANNEL, type MessageReply, type Option } from '../discord.ts';
 import { channelPermissions, PERMISSION_NAMES } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
@@ -214,6 +214,16 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
 
 // ---------------------------------------------------------------- /guildcraft setup
 
+/** Order 19: the Create GuildCraft channels button (src/commands/channels.ts), "gcc:". */
+export const CREATE_CHANNELS_PREFIX = 'gcc:';
+export const CREATE_CHANNELS_LABEL = 'Create GuildCraft channels';
+const CHANNEL_SETTINGS = ['board_channel_id', 'review_channel_id', 'vault_channel_id', 'request_channel_id'] as const;
+/** The button: always on the settings reply (`always`), and on a save that leaves any of the four channels unset. */
+export function setupButtons(s: Pick<Guild, (typeof CHANNEL_SETTINGS)[number]>, always = false): { components?: unknown[] } {
+  if (!always && CHANNEL_SETTINGS.every((k) => s[k])) return {};
+  return { components: [row([button(CREATE_CHANNELS_PREFIX, CREATE_CHANNELS_LABEL, STYLE_PRIMARY)])] };
+}
+
 export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const memberRole = optString(opts, 'member_role');
   const officerRole = optString(opts, 'officer_role');
@@ -222,40 +232,16 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const vault = optString(opts, 'vault');
   const requests = optString(opts, 'requests');
   if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined && requests === undefined)
-    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}\n${describeRequests(c.guild)}`);
+    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}\n${describeRequests(c.guild)}`, setupButtons(c.guild, true));
 
   for (const [id, kind] of [[board, 'board'], [review, 'review'], [vault, 'vault'], [requests, 'requests']] as const) {
     if (id === undefined) continue;
     const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
-  const before = {
-    member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id,
-    vault_channel_id: c.guild.vault_channel_id, request_channel_id: c.guild.request_channel_id,
-  };
-  const after = {
-    request_channel_id: requests ?? before.request_channel_id,
-    member_role_id: memberRole ?? before.member_role_id,
-    officer_role_id: officerRole ?? before.officer_role_id,
-    board_channel_id: board ?? before.board_channel_id,
-    review_channel_id: review ?? before.review_channel_id,
-    vault_channel_id: vault ?? before.vault_channel_id,
-  };
-  const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
-  const stmts = [
-    c.db
-      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ?, request_channel_id = ? WHERE id = ?')
-      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, after.request_channel_id, c.guild.id),
-    audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
-  ];
-  // A new forum starts a new board: the old posts are forgotten here (they stay in the old channel).
-  if (moved)
-    stmts.push(
-      c.db.prepare('DELETE FROM board_post WHERE guild_id = ?').bind(c.guild.id),
-      c.db.prepare('UPDATE guild SET board_index_thread_id = NULL, board_index_message_id = NULL, board_index_hash = NULL WHERE id = ?').bind(c.guild.id),
-    );
-  const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
-  const results = await c.db.batch([...stmts, counted]);
+  const { before, after, moved, skills, posts } = await saveSetup(c, {
+    member_role_id: memberRole, officer_role_id: officerRole, board_channel_id: board, review_channel_id: review, vault_channel_id: vault, request_channel_id: requests,
+  });
   const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}\n${describeRequests(after)}`];
   if (requests !== undefined) {
     lines.push(
@@ -277,17 +263,59 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     else if (open === null) lines.push(reviewUnreadWarning(review));
   }
   if (board !== undefined) {
-    const { skills, posts } = (results.at(-1)!.results as { skills: number; posts: number }[])[0];
-    const toCreate = Math.max(0, skills - posts);
     c.effects.board = true;
-    lines.push(
-      toCreate
-        ? `Building the board now: ${plural(toCreate, 'tradeskill post')} plus a pinned index post. Most appear within a minute, all within 15 minutes. If nothing shows, reload Discord.`
-        : 'The board already has every tradeskill post; refreshing it now.',
-    );
+    lines.push(boardBuildLine(skills, posts));
     if (moved) lines.push(`The old board's posts in <#${before.board_channel_id}> are left as they are.`);
   }
-  return ephemeral(lines.join('\n'));
+  return ephemeral(lines.join('\n'), setupButtons(after));
+}
+
+/** What the setup reply says about building the board, from the tradeskill and post counts. */
+export const boardBuildLine = (skills: number, posts: number) => {
+  const toCreate = Math.max(0, skills - posts);
+  return toCreate
+    ? `Building the board now: ${plural(toCreate, 'tradeskill post')} plus a pinned index post. Most appear within a minute, all within 15 minutes. If nothing shows, reload Discord.`
+    : 'The board already has every tradeskill post; refreshing it now.';
+};
+
+/** The settings /guildcraft setup saves. */
+export type Settings = Pick<Guild, 'member_role_id' | 'officer_role_id' | 'board_channel_id' | 'review_channel_id' | 'vault_channel_id' | 'request_channel_id'>;
+
+/**
+ * The one save of /guildcraft setup's settings, from its options and from Create GuildCraft channels (order 19): one
+ * UPDATE with its guild.setup audit row; an undefined value keeps the saved one. A new forum starts a new board: the old
+ * posts are forgotten here (they stay in the old channel). Returns the tradeskill and board post counts after it.
+ */
+export async function saveSetup(c: Ctx, changes: { [K in keyof Settings]?: Settings[K] | undefined }) {
+  const before: Settings = {
+    member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id,
+    vault_channel_id: c.guild.vault_channel_id, request_channel_id: c.guild.request_channel_id,
+  };
+  const after: Settings = {
+    request_channel_id: changes.request_channel_id ?? before.request_channel_id,
+    member_role_id: changes.member_role_id ?? before.member_role_id,
+    officer_role_id: changes.officer_role_id ?? before.officer_role_id,
+    board_channel_id: changes.board_channel_id ?? before.board_channel_id,
+    review_channel_id: changes.review_channel_id ?? before.review_channel_id,
+    vault_channel_id: changes.vault_channel_id ?? before.vault_channel_id,
+  };
+  const board = changes.board_channel_id;
+  const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
+  const stmts = [
+    c.db
+      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ?, request_channel_id = ? WHERE id = ?')
+      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, after.request_channel_id, c.guild.id),
+    audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
+  ];
+  if (moved)
+    stmts.push(
+      c.db.prepare('DELETE FROM board_post WHERE guild_id = ?').bind(c.guild.id),
+      c.db.prepare('UPDATE guild SET board_index_thread_id = NULL, board_index_message_id = NULL, board_index_hash = NULL WHERE id = ?').bind(c.guild.id),
+    );
+  const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
+  const results = await c.db.batch([...stmts, counted]);
+  const { skills, posts } = (results.at(-1)!.results as { skills: number; posts: number }[])[0];
+  return { before, after, moved, skills, posts };
 }
 
 // ---------------------------------------------------------------- /guildcraft status (PRD FR-8; usage and backup from order 8)

@@ -38,10 +38,14 @@ test('every route the code calls is in ROUTES, and every ROUTES path is still ca
 });
 
 test('the install permissions are the union of the routes; Create Public Threads is not among them', () => {
-  // Order 16: 292057893888 + Create Private Threads (1 << 36 = 68719476736).
-  assert.equal(INSTALL_PERMISSIONS, 360777370624n);
-  assert.equal(INSTALL_PERMISSIONS - 292057893888n, 1n << 36n);
+  // Order 16: 292057893888 + Create Private Threads (1 << 36 = 68719476736) = 360777370624.
+  // Order 19 (override 3): + Manage Channels (1 << 4 = 16) + Manage Roles (1 << 28 = 268435456) = 361045806096.
+  assert.equal(INSTALL_PERMISSIONS, 361045806096n);
+  assert.equal(INSTALL_PERMISSIONS - 360777370624n, (1n << 4n) | (1n << 28n));
   assert.equal(INSTALL_PERMISSIONS & (1n << 35n), 0n);
+  // The bot can only allow or deny what it holds: the request channel's two thread permissions are among them.
+  assert.equal(INSTALL_PERMISSIONS & (1n << 38n), 1n << 38n); // Send Messages in Threads
+  assert.equal(INSTALL_PERMISSIONS & (1n << 36n), 1n << 36n); // Create Private Threads
   // Each channel's check is a subset of the install permissions, so a fresh install passes setup.
   for (const k of ['board', 'review', 'vault', 'requests'] as const) for (const [b] of channelPermissions(k)) assert.equal(INSTALL_PERMISSIONS & b, b, k);
 });
