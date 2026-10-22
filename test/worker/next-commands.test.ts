@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { CRAFTABLE_MARK, LISTS, listKey } from '../../src/commands/autocomplete.ts';
 import { COMMANDS as NEXT_COMMANDS, DEFINED, SUBCOMMAND } from '../../src/commands/definitions.ts';
 import { ROUTES } from '../../src/interactions.ts';
-import { ITEM_COPY } from '../../src/commands/item.ts';
+import { ITEM_COPY, USED_IN_SQL } from '../../src/commands/item.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
 import { MISSING_MODAL_PREFIX, MISSING_PREFIX } from '../../src/commands/reports.ts';
 import { SKILLS_COPY } from '../../src/commands/skills.ts';
@@ -129,6 +129,12 @@ describe('autocomplete, keyed by command and option', () => {
 describe('/item', () => {
   const card = (name: string, m = ann) => send(top(m, 'item', { name }));
   const labels = (r: Awaited<ReturnType<typeof send>>) => r.data.components!.map((row: any) => row.components.map((b: any) => b.label ?? b.placeholder));
+
+  it('"used in" seeks recipe_component by item, never scanning it (order 19, ITEM 2: EXPLAIN QUERY PLAN)', async () => {
+    const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${USED_IN_SQL}`).bind(ids.sword, GUILD).all<{ detail: string }>();
+    const reads = plan.results.map((r) => r.detail).filter((d) => /^(SCAN|SEARCH) recipe_component\b/.test(d));
+    expect(reads, JSON.stringify(plan.results)).toEqual([expect.stringMatching(/^SEARCH recipe_component USING COVERING INDEX recipe_component_by_item \(item_id=\?\)/)]);
+  });
 
   it('a craftable item: its recipe, the I know / Report / Request / Stat image buttons, and Post to channel', async () => {
     const r = await card('Copper Sword');
