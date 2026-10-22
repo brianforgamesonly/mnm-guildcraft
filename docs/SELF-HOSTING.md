@@ -151,6 +151,6 @@ Without an export, run `/guildcraft setup` to choose the roles and channels.
 
 ## Afterwards
 
-- The jobs that keep it running are all in the **Actions** tab: `import` (game data, daily), `backup` (nightly, to your private backup repository), `usage` and `timings` (free-tier checks). GitHub emails the account owner when one fails.
+- The jobs that keep it running are all in the **Actions** tab: `import` (game data, daily), `backup` (nightly, to your private backup repository), `usage` (free-tier check), `health` (daily: did the bot do its work yesterday, from its own records) and `timings` (speed figures, report only). GitHub emails the account owner when one fails.
 - `/guildcraft status` in Discord shows the data version, the last backup and the free-tier usage.
 - To give the guild's data to someone else later, the `export` workflow does what Joegandomi did for you: **Actions → export → Run workflow**, with your server's ID and **copy: dev** (your copy's name in `wrangler.jsonc`). It writes to `guild-exports/` in your private backup repository.

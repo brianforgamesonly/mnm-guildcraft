@@ -31,9 +31,10 @@ describe('schema (migrations/0001_init.sql)', () => {
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
     // Order 16 (0012): craft_notify, craft_request, craft_request_item. Order 17 (0013): zone, zone_name, npc, import_source.
+    // Order 20 (0016): sweep_run, the heartbeat.
     expect(departureTables).toEqual([
       'game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob', 'craft_notify', 'craft_request', 'craft_request_item',
-      'zone', 'zone_name', 'npc', 'import_source',
+      'zone', 'zone_name', 'npc', 'import_source', 'sweep_run',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

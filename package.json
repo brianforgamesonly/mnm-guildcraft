@@ -16,6 +16,7 @@
     "test:routes": "node --test scripts/ci/routes.test.ts",
     "test:operator-text": "node --test scripts/ci/operator-text.test.ts",
     "test:zone-sites": "node --test scripts/ci/zone-sites.test.ts",
+    "test:health": "node --test scripts/health/judge.test.ts",
     "dev": "wrangler dev --env dev",
     "db:migrate:local": "wrangler d1 migrations apply mnm-guildcraft-dev --local --env dev",
     "import:local": "node scripts/import/run.ts --local",

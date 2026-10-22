@@ -34,6 +34,7 @@ import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessa
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
+import { sweepFinished, sweepStarted } from '../heartbeat.ts';
 
 /** The forum post auto-archive setting at creation: 7 days, the longest Discord allows. */
 export const AUTO_ARCHIVE_MINUTES = 10080;
@@ -606,6 +607,15 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
   const log: BoardRunLog = { gc: 'board', trigger: nightly ? 'nightly' : 'sweep', guilds: 0, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
   let first: D1Call | undefined;
   let api: BotApi | null = null;
+  // Order 20 (ITEM 1): the heartbeat, before any other work. It is now the run's first query after an idle gap, so its
+  // timing is logged as heartbeat_ms (order 5's idle-gap sample); first_query_ms stays the sweep's own query.
+  let heartbeat: D1Call | undefined;
+  try {
+    await sweepStarted(counted.db, controller.scheduledTime, isoNow()).run();
+    heartbeat = counted.calls.at(-1);
+  } catch (e) {
+    console.error('heartbeat start failed', e instanceof Error ? e.message : String(e));
+  }
   // Order 7: in its own slot (08:15–08:29 UTC) the departure run goes first, on the same 40-call budget; the
   // sweep below gets what is left (it needs RESERVE + 3) and anything it cannot reach stays dirty.
   /** The departure run's calls, so the board line below counts the sweep's own. */
@@ -648,6 +658,7 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     first_query_ms: first?.ms ?? null,
     first_sql_ms: first?.sql_ms ?? null,
     first_rows_read: first?.rows_read ?? null,
+    heartbeat_ms: heartbeat?.ms ?? null,
     ...isolate,
   };
   console.log(JSON.stringify(line));
@@ -680,6 +691,12 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       usage.err = e instanceof Error ? e.message : String(e);
     }
     console.log(JSON.stringify({ ...usage, d1_calls: counted.calls.length - mark.d1, discord_calls: budget.discord - mark.discord, calls: api.log.slice(mark.log) }));
+  }
+  // Order 20: the finish, last. One call past the budget checks above: at most BOARD_CALL_CAP + 1, under the 50 subrequests.
+  try {
+    await sweepFinished(counted.db, controller.scheduledTime, isoNow()).run();
+  } catch (e) {
+    console.error('heartbeat finish failed', e instanceof Error ? e.message : String(e));
   }
   return line;
 }

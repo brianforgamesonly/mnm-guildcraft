@@ -14,7 +14,7 @@
 // population (all events in the window, by type) is counted first so a short read shows as one.
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { alarm, summary } from '../ci/alarm.ts';
+import { summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { DROP_BOUND_CONFIDENCE, DROP_BOUND_MIN_N, DROP_BOUND_THRESHOLD, DROP_HISTORY_DAYS, explainGaps, INGEST_GRACE_MS, reconcile, rollHistory, shortRequests, SLOT_MS } from './logs-check.mjs';
 
@@ -310,11 +310,21 @@ if (pageCapHit) {
 }
 // p95 only from 20 samples up (order 4, ITEM 2.1).
 const p95 = (xs, n) => (n >= 20 ? pct(xs, 95) : '-');
-console.log('path\tn\twall_p50\twall_p95\tcpu_p50\tcpu_p95\tio_p50\tio_p95\tqueries_max');
-for (const [k, p] of [...paths].sort()) {
+const SPEED_COLUMNS = ['path', 'n', 'wall_p50', 'wall_p95', 'cpu_p50', 'cpu_p95', 'io_p50', 'io_p95', 'queries_max'];
+const speedRows = [...paths].sort().map(([k, p]) => {
   const qs = p.q.filter((x) => typeof x === 'number');
-  console.log([k, p.n, pct(p.wall, 50), p95(p.wall, p.n), pct(p.cpu, 50), p95(p.cpu, p.n), pct(p.io, 50), p95(p.io, p.n), qs.length ? Math.max(...qs) : null].join('\t'));
-}
+  return [redact(k), p.n, pct(p.wall, 50), p95(p.wall, p.n), pct(p.cpu, 50), p95(p.cpu, p.n), pct(p.io, 50), p95(p.io, p.n), qs.length ? Math.max(...qs) : null];
+});
+console.log(SPEED_COLUMNS.join('\t'));
+for (const r of speedRows) console.log(r.join('\t'));
+// Order 20: the speed figures in the job summary too (for information; ms, from Workers Logs).
+const file = process.env.GITHUB_STEP_SUMMARY;
+if (file)
+  writeFileSync(
+    file,
+    [`\n### Speed per path (${COPY.name}) ${new Date(from).toISOString()} → ${new Date(to).toISOString()}`, `| ${SPEED_COLUMNS.join(' | ')} |`, `|${SPEED_COLUMNS.map(() => '---').join('|')}|`, ...speedRows.map((r) => `| ${r.map((x) => x ?? '').join(' | ')} |`), ''].join('\n'),
+    { flag: 'a' },
+  );
 /**
  * Order 4's definition of a failed request: an exception, an outcome other than ok, a status other than 200,
  * or 3 s or more before Discord got its answer. A deferred request (ack 5/6) answers before any I/O, so its
@@ -480,8 +490,14 @@ summary(
 );
 for (const u of unexplained) summary(`  - UNEXPLAINED: ${u}`);
 
-const reasons = [readShort && 'the reader came up short', !d1.ok && 'audit rows unread', unexplained.length && `${unexplained.length} unexplained gap(s)`].filter(Boolean);
-// Unexplained gaps belong to their own window (scheduled windows do not overlap), so each is a new state: it notifies.
-// The drop-rate bound is one rolling state: it notifies only on crossing the threshold (scripts/ci/alarm.ts).
-if (reasons.length) alarm({ job: 'logs completeness', failed: true, reason: reasons.join('; '), previousFailing: null });
-else alarm({ job: 'logs completeness (drop-rate bound)', failed: rolled.breach, reason: `drop-rate upper bound ${rate(rolled.bound)} over ${rate(DROP_BOUND_THRESHOLD)}`, previousFailing: previousBreach });
+// Order 20 (override 1): this job never fails on Cloudflare log or analytics completeness. Both sources are estimates
+// (analytics is sampled; the logs' event counts overstate), so a gap between them cannot tell real loss from noise. The
+// figures stay here for information; the alarm on missed work is the health job's, on the bot's own records
+// (.github/workflows/health.yml). It still fails when it cannot run: the logs query's API error exits above, and an
+// unread audit record (an API error) fails here.
+const notes = [readShort && 'the reader came up short', unexplained.length && `${unexplained.length} gap(s) analytics does not explain`, rolled.breach && `drop-rate upper bound ${rate(rolled.bound)} over ${rate(DROP_BOUND_THRESHOLD)}${previousBreach ? ' (already over before this run)' : ''}`].filter(Boolean);
+summary(`- logs completeness (report only, order 20): ${notes.length ? notes.join('; ') : 'nothing unexplained'}`);
+if (!d1.ok) {
+  summary(`**timings FAILED** — could not run the check: audit rows unread (HTTP ${d1.status})`);
+  process.exitCode = 1;
+}

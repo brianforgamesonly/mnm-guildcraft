@@ -24,6 +24,7 @@ jobs:
       - run: npm run test:export
       - run: npm run test:routes
       - run: npm run test:operator-text
+      - run: npm run test:health
       # Order 17b: a zone's site link held on main may not disappear (src/zone/sites.json); the base copy is fetched.
       - run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
       - run: npm run test:zone-sites
@@ -36,6 +37,10 @@ jobs:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
     timeout-minutes: 5
+    # Order 20: the health check's dry run reads GitHub's workflow runs (deploy windows, failed nightly runs).
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -60,3 +65,19 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           GUILDCRAFT_COPY: dev
         run: node scripts/bench/zone-cards.ts --remote ${{ vars.ATLAS_ZONE_IMAGES == 'on' && '--atlas-images' || '' }} --show 'evershade weald'
+      # Order 20: this pull request's health check on both copies' real records for yesterday, report-only (SELECTs and
+      # GitHub run reads only; counts and times, no guild data). A few seconds. It fails only if the check cannot run.
+      - name: Health check dry run, dev (read-only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GUILDCRAFT_COPY: dev
+        run: node scripts/health/run.ts --report-only
+      - name: Health check dry run, production (read-only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GUILDCRAFT_COPY: production
+        run: node scripts/health/run.ts --report-only
