@@ -156,6 +156,17 @@ describe('/officer edit-member: the member\'s panel for an officer, re-checked o
     expect(await one('SELECT level FROM character')).toEqual({ level: 30 });
   });
 
+  it('an officer without the member role can still use a member\'s panel; "No" on the main keeps the other changes', async () => {
+    await add('Testchar');
+    await env.DB.prepare('UPDATE guild SET member_role_id = ? WHERE id = ?').bind('600000000000000001', GUILD).run();
+    const panel = await send(cmd(officer, 'officer', 'edit-member', { member: ANN }));
+    const modal = await send(press(officer, byLabel(panel, ME_COPY.edit).custom_id));
+    expect(modal.type).toBe(9);
+    const done = await send(submit(officer, modal.data.custom_id!, { name: 'Testchar', class: 'Ranger', level: '', main: 'no' }));
+    expect(done.data.content).toMatch(/^Updated \*\*Testchar\*\* \(Ranger\)/);
+    expect(await one('SELECT class, is_main FROM character')).toEqual({ class: 'Ranger', is_main: 1 });
+  });
+
   it('a member who is not an officer gets nowhere with copied buttons or forms of another member\'s panel', async () => {
     await add('Testchar');
     const panel = await me();

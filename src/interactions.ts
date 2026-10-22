@@ -204,10 +204,14 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
   if (id.startsWith(FIXED_PREFIX) || id.startsWith(DISMISS_PREFIX)) return reportButton(c, id);
   if (id.startsWith(APPROVE_PREFIX) || id.startsWith(REJECT_PREFIX)) return imageButton(c, id);
-  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
-  // Order 18: /me's panel. Each press re-checks that the presser may act on the panel's member (src/commands/me.ts).
-  const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
-  if (panel) return panel;
+  // Order 18: /me's panel. Each press re-checks that the presser may act on the panel's member (src/commands/me.ts); an
+  // officer acting on a member's panel (/officer edit-member) needs no member role, as with the other officer tools.
+  const passes = passesMemberGate(guild, i.member!);
+  if (passes || c.officer) {
+    const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
+    if (panel) return panel;
+  }
+  if (!passes) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) {
     if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
     if (id.startsWith(REPORT_MODAL_PREFIX) || id.startsWith(ITEM_REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
@@ -269,14 +273,20 @@ export function deferredReply(i: Interaction, env: Env, ctx: WaitUntil, effects:
 async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> {
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
-  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   const id = i.data?.custom_id ?? '';
+  const c = ctxFor(env, guild, i.member!, {});
+  const passes = passesMemberGate(guild, i.member!);
+  // Order 18: /me's forms (the officer path as in component()).
+  if (passes || c.officer) {
+    const panel = meImmediate(c, id, i.data?.values ?? []);
+    if (panel) return panel;
+  }
+  if (!passes) return ephemeral(roleRequired(guild));
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
   if (id.startsWith(ITEM_REPORT_PREFIX)) return reportModal(Number(id.slice(ITEM_REPORT_PREFIX.length)), 'item');
   if (id.startsWith(ADD_PREFIX)) return addItemModal(id);
   if (id.startsWith(MISSING_PREFIX)) return missingModal(id);
-  const c = ctxFor(env, guild, i.member!, {});
-  return meImmediate(c, id, i.data?.values ?? []) ?? updateSelected(c, id, i.data?.values ?? []);
+  return updateSelected(c, id, i.data?.values ?? []);
 }
 
 /** The reply to an interaction planFor answers at once. */

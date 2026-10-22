@@ -12,7 +12,7 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, md, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
 import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
@@ -79,6 +79,8 @@ export const ME_COPY = {
   classHint: 'Optional. A class code from the game (e.g. CLR), or type your own',
   level: 'Level',
   levelHint: `Optional: 1 to ${LEVEL_MAX}`,
+  levelEditHint: `1 to ${LEVEL_MAX}. Blank keeps the current level`,
+  mainEditHint: 'To change your main, pick Yes on the character that should be it',
   main: 'Make this your main?',
   mainYes: 'Yes, my main character',
   mainNo: 'No',
@@ -165,12 +167,13 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
     const rows = panelRows(ownerId, own, false, reqs.length > 0);
     return own ? ephemeral(ME_COPY.noCharacters, { embeds: [WELCOME], components: rows }) : ephemeral(ME_COPY.othersNone(who), { components: rows });
   }
-  const shown = chars.slice(0, EMBED_MAX);
-  const { embeds, anyStale } = await characterEmbeds(c, shown);
+  const { embeds, anyStale } = await characterEmbeds(c, chars.slice(0, EMBED_MAX));
+  // Inside the message's 6,000 characters, less the one-time welcome's reserve: whole characters off the end, noted.
+  while (embeds.length > 1 && embedChars(embeds) > EMBED_LIMITS.total - 1000) embeds.pop();
   const listed = reqs.length ? await requestList(c, reqs, false) : null;
   const notes = [
     own ? null : ME_COPY.actingFor(who),
-    chars.length > EMBED_MAX ? ME_COPY.showing(EMBED_MAX, chars.length) : null,
+    chars.length > embeds.length ? ME_COPY.showing(embeds.length, chars.length) : null,
     await notifyLine(c.db, c.guild.id, ownerId),
     listed ? [own ? ME_COPY.requestsHead : ME_COPY.othersRequestsHead, ...listed.lines].join('\n') : ME_COPY.noRequests,
     anyStale ? ME_COPY.stale(c.guild.stale_days) : null,
@@ -207,9 +210,10 @@ const textInput = (custom_id: string, label: string, o: { description?: string; 
     ...(o.value ? { value: o.value } : {}),
   },
 });
-const mainSelect = (isMain: boolean) => ({
+const mainSelect = (isMain: boolean, edit: boolean) => ({
   type: MessageComponentTypes.LABEL,
   label: ME_COPY.main,
+  ...(edit ? { description: ME_COPY.mainEditHint } : {}),
   component: {
     type: MessageComponentTypes.STRING_SELECT,
     custom_id: 'main',
@@ -225,8 +229,8 @@ const mainSelect = (isMain: boolean) => ({
 const characterFields = (ch?: Character) => [
   textInput('name', ME_COPY.name, { required: true, max: NAME_MAX, value: ch?.name }),
   textInput('class', ME_COPY.className, { description: ME_COPY.classHint, max: 32, value: ch?.class }),
-  textInput('level', ME_COPY.level, { description: ME_COPY.levelHint, max: 3, value: ch?.level === null || ch?.level === undefined ? null : String(ch.level) }),
-  mainSelect(!!ch?.is_main),
+  textInput('level', ME_COPY.level, { description: ch ? ME_COPY.levelEditHint : ME_COPY.levelHint, max: 3, value: ch?.level === null || ch?.level === undefined ? null : String(ch.level) }),
+  mainSelect(!!ch?.is_main, !!ch),
 ];
 
 /** mea:<target>: the Add character form (own panel only: /character add had no member: option). */
@@ -297,7 +301,8 @@ export async function editSubmitted(c: Ctx, customId: string, components: ModalC
     ...(name !== ch.name ? [opt('new_name', name)] : []),
     ...(cls !== (ch.class ?? '') ? [opt('class', cls)] : []),
     ...(level !== undefined && level !== ch.level ? [opt('level', level)] : []),
-    ...(main === YES && !ch.is_main ? [opt('main', true)] : main === NO && ch.is_main ? [opt('main', false)] : []),
+    // A main stops being the main only when another becomes it, so "No" on the main changes nothing (the other fields still save).
+    ...(main === YES && !ch.is_main ? [opt('main', true)] : []),
   ];
   if (!changes.length) return ephemeral(ME_COPY.nothingChanged);
   return characterEdit(c, [opt('name', ch.name), opt('member', ch.owner_user_id), ...changes]);
@@ -385,12 +390,23 @@ export async function noticesPicked(c: Ctx, customId: string, values: string[]):
   if (!group) return updateMessage({ content: "That list has changed. Press **Notices** on `/me` again.", components: [] });
   const ids = group.skills.map((s) => s.id);
   const picked = values.map(Number).filter((n) => ids.includes(n));
-  const off = ids.filter((n) => !picked.includes(n));
-  await c.db.batch([
-    c.db.prepare('INSERT OR IGNORE INTO craft_notify (guild_id, discord_user_id, tradeskill_id, created_at) SELECT ?, ?, value, ? FROM json_each(?)').bind(c.guild.id, c.userId, now(), JSON.stringify(picked)),
-    c.db.prepare('DELETE FROM craft_notify WHERE guild_id = ? AND discord_user_id = ? AND tradeskill_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, c.userId, JSON.stringify(off)),
-    audit(c.db, c.guild.id, c.userId, 'craft.notify', `member:${c.userId}`, null, { on: group.skills.filter((s) => picked.includes(s.id)).map((s) => s.name), off: group.skills.filter((s) => off.includes(s.id)).map((s) => s.name) }),
-  ]);
+  const was = new Set((await c.db.prepare('SELECT tradeskill_id FROM craft_notify WHERE guild_id = ? AND discord_user_id = ?').bind(c.guild.id, c.userId).all<{ tradeskill_id: number }>()).results.map((r) => r.tradeskill_id));
+  const turnOn = picked.filter((n) => !was.has(n));
+  const turnOff = ids.filter((n) => !picked.includes(n) && was.has(n));
+  const names = (list: number[]) => group.skills.filter((s) => list.includes(s.id)).map((s) => s.name).join(', ');
+  // The audit rows keep /craft notify's shape ({ on, tradeskills }), one per direction, and only for a change.
+  const stmts: D1PreparedStatement[] = [];
+  if (turnOn.length)
+    stmts.push(
+      c.db.prepare('INSERT OR IGNORE INTO craft_notify (guild_id, discord_user_id, tradeskill_id, created_at) SELECT ?, ?, value, ? FROM json_each(?)').bind(c.guild.id, c.userId, now(), JSON.stringify(turnOn)),
+      audit(c.db, c.guild.id, c.userId, 'craft.notify', `member:${c.userId}`, null, { on: true, tradeskills: names(turnOn) }),
+    );
+  if (turnOff.length)
+    stmts.push(
+      c.db.prepare('DELETE FROM craft_notify WHERE guild_id = ? AND discord_user_id = ? AND tradeskill_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, c.userId, JSON.stringify(turnOff)),
+      audit(c.db, c.guild.id, c.userId, 'craft.notify', `member:${c.userId}`, null, { on: false, tradeskills: names(turnOff) }),
+    );
+  if (stmts.length) await c.db.batch(stmts);
   const v = await noticesView(c);
   return updateMessage(v ?? { content: ME_COPY.nothingChanged, components: [] });
 }
