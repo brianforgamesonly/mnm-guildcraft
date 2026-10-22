@@ -2,16 +2,13 @@
 # p50/p95 per path. Dispatch only; reads, writes nothing. Expected: <1 billed minute per run.
 # Needs the API token permission "Workers Observability Write" (the telemetry query API's only listed
 # permission); if missing, the run says so and fails.
-# Order 7 (ITEM 1.1): every run ends with the logs completeness check (scripts/bench/logs-check.mjs) and fails
-# when an event type does not reconcile with its own record. The daily schedule runs it over the last 24 hours,
-# so a mismatch arrives as a failed run (GitHub mails the repository owner). Expected: <1 billed minute a day.
-# Order 8 (ITEM 3.1), the alarm (ORDER-RULES order 8):
-#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
-#   how often: at most once a day (one scheduled run a day);
-#   state: (a) gaps Cloudflare's analytics does not explain, the reader coming up short, or audit rows unread: each
-#          scheduled window is new, so each fails; (b) the 7-day drop-rate bound over its threshold
-#          (scripts/bench/logs-check.mjs): fails only on crossing it. A platform drop (an invocation analytics counts
-#          as a success, missing from the logs) never fails: it is counted in the job summary and the drop history.
+# Order 7 (ITEM 1.1): every run ends with the logs completeness check (scripts/bench/logs-check.mjs). The daily
+# schedule runs it over the last 24 hours. Expected: <1 billed minute a day.
+# Order 20 (override 1, replacing orders 7, 8, 15 and 19's alarm here): REPORT ONLY. It never fails on Cloudflare log or
+# analytics completeness: both sources are estimates (analytics is sampled, the logs' event counts overstate), so a gap
+# between them cannot tell real loss from noise. The completeness figures, the drop-rate bound and the speed per path
+# stay in the job summary, for information. It fails only when it cannot run (an API error). The alarm on missed work
+# is the health job's, on the bot's own records (.github/workflows/health.yml).
 # The drop history (dates and counts only; this repository is public) passes from one scheduled run to the next as
 # the artifact drop-history (14 days' retention).
 name: timings

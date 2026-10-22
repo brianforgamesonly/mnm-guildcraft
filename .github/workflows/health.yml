@@ -1,0 +1,82 @@
+# Order 20 (ITEM 2): the daily health check, judged on the bot's own D1 records for the previous UTC day, per copy
+# (scripts/health/run.ts, rules in scripts/health/judge.ts): missed sweeps against the cron expression in wrangler.jsonc
+# (from each copy's first heartbeat row, sweep_run; a slot within 15 minutes after a deploy of that copy is reported, not
+# failed), sweeps that started but did not finish, command errors (not measurable: no exact record), and the nightly
+# import, backup and usage rows. Reads only. Expected: <1 billed minute a run per copy (public repository: free).
+# Schedule: 01:17 UTC, off the hour (GitHub delays and may drop runs at the start of every hour); the judged day is over.
+#
+# The alarm (order 20's override 2 of ORDER-RULES order 8's fail-once rule, for this alarm only):
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
+#   how often: once a day per copy, on EVERY day a rule is breached: a breach is genuine missed work, so a lasting
+#          problem never goes quiet. No state is kept between runs, and the first run needs no baseline;
+#   state: the day's own records only. The run also fails when it cannot run (an API error, or no heartbeat table).
+# GitHub's runs are read with this job's GITHUB_TOKEN (actions: read): no new credential.
+# Dispatch: day (default yesterday), copy, and evidence_from/evidence_to (per 15-minute slot, the bot's own timestamps).
+name: health
+on:
+  schedule:
+    - cron: '17 1 * * *'
+  workflow_dispatch:
+    inputs:
+      day:
+        description: 'UTC day to judge, YYYY-MM-DD (default: yesterday)'
+        default: ''
+      copy:
+        description: 'Which copy'
+        type: choice
+        options: [both, dev, production]
+        default: both
+      evidence_from:
+        description: 'Also list the bot''s own timestamps per 15-minute slot from this ISO time (with evidence_to)'
+        default: ''
+      evidence_to:
+        description: 'Evidence window end, ISO UTC'
+        default: ''
+permissions:
+  contents: read
+  actions: read
+jobs:
+  # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
+  copies:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 2
+    outputs:
+      list: ${{ steps.c.outputs.list }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - id: c
+        shell: bash
+        env:
+          WANT: ${{ inputs.copy || 'both' }}
+        run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"
+  health:
+    needs: copies
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.copies.outputs.list) }}
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GUILDCRAFT_COPY: ${{ matrix.copy }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Health (${{ matrix.copy }})
+        env:
+          DAY: ${{ inputs.day }}
+          EV_FROM: ${{ inputs.evidence_from }}
+          EV_TO: ${{ inputs.evidence_to }}
+        shell: bash
+        run: |
+          set -- ${DAY:+--day "$DAY"}
+          if [ -n "$EV_FROM" ]; then set -- "$@" --evidence "$EV_FROM" "$EV_TO"; fi
+          node scripts/health/run.ts "$@"

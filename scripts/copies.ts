@@ -7,6 +7,7 @@ import { readFileSync } from 'node:fs';
 interface EnvConfig {
   name: string;
   vars?: { GUILDCRAFT_COPY?: string };
+  triggers?: { crons?: string[] };
   d1_databases: { binding: string; database_name: string; database_id: string }[];
 }
 
@@ -15,6 +16,8 @@ export interface Copy {
   name: string;
   worker: string;
   database: string;
+  /** Order 20: the copy's cron triggers, as wrangler.jsonc states them (the health job's expected slots). */
+  crons: string[];
   /** The D1 database_id (not a secret); throws when the database is not provisioned yet. */
   databaseId: () => string;
 }
@@ -35,6 +38,7 @@ export function copies(configPath = 'wrangler.jsonc'): Copy[] {
       name,
       worker: e.name,
       database: db.database_name,
+      crons: e.triggers?.crons ?? [],
       databaseId: () => {
         if (!/^[0-9a-f-]{36}$/.test(db.database_id) || /^0{8}-/.test(db.database_id)) throw new Error(`wrangler.jsonc has no provisioned database_id for ${name}`);
         return db.database_id;

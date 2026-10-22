@@ -3,8 +3,9 @@
 //
 // A nightly job's alarm is its failed run: GitHub mails "the user who last modified the cron syntax in the workflow
 // file" (docs.github.com, events that trigger workflows). Each job runs once a day, so it can notify at most once a
-// day. Its state is failing or passing, read from the job's own record (backup_status, usage_daily's age, the
-// timings drop history). A failure while the state was already failing does not fail the run again: it prints an
+// day. Its state is failing or passing, read from the job's own record (backup_status, usage_daily's age). Order 20: the
+// timings job no longer alarms (report only), and the health job's alarm fails on every breached day instead of once
+// (scripts/health/run.ts, an explicit override of this rule for that alarm only). A failure while the state was already failing does not fail the run again: it prints an
 // ::error annotation and a FAILED summary, and /guildcraft status keeps showing it (stale after 36 hours).
 import { appendFileSync } from 'node:fs';
 import { alarmOutcome } from './alarm-outcome.ts';
