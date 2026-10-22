@@ -8,7 +8,7 @@
 // needed to see a channel or any thread in it (topics/permissions). EMBED_LINKS: Discord's table describes it only as
 // auto-embedding links; it is listed where the bot's own posts are embeds, as /guildcraft setup has required since
 // order 5 (whether a bot's embeds need it is unverified either way).
-import { ATTACH_FILES, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
+import { ATTACH_FILES, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_CHANNELS, MANAGE_ROLES, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
 
 /** The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). */
 export type ChannelKind = 'board' | 'review' | 'vault' | 'requests';
@@ -48,6 +48,12 @@ export const ROUTES: Route[] = [
   { method: 'POST', path: '/channels/{}/messages', channel: 'requests', needs: [VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS], why: 'requests: the first message and the claim, done and cancel notices (threads need SEND_MESSAGES_IN_THREADS)' },
   { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'requests', needs: [VIEW_CHANNEL, READ_MESSAGE_HISTORY], why: 'requests: edit its own first message (status); Read Message History so the thread\'s earlier messages stay readable to the bot (required by order 16; whether an edit needs it is unverified)' },
   { method: 'PATCH', path: '/channels/{}', channel: 'requests', needs: [VIEW_CHANNEL, MANAGE_THREADS], why: 'requests: rename, lock, archive and unarchive its threads ("requires MANAGE_THREADS or that the current user is the thread creator"; lock needs MANAGE_THREADS)' },
+  // Order 19 (ITEM 4): Create GuildCraft channels (read 2026-10-22). Overwrites: "only permissions your bot has in the
+  // guild can be allowed/denied" (Create Guild Channel), so every bit it sets is one the install link asks for.
+  { method: 'GET', path: '/guilds/{}/channels', channel: null, needs: [], why: 'channel setup: the channels that already exist, to reuse them (Get Guild Channels: no permission stated)' },
+  { method: 'POST', path: '/guilds/{}/channels', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: create the category and its channels, with their overwrites (Create Guild Channel: "Requires the MANAGE_CHANNELS permission"; it does not say whether overwrites also need MANAGE_ROLES, so the button requires both before any create)' },
+  { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
+  { method: 'PUT', path: '/channels/{}/permissions/{}', channel: null, needs: [MANAGE_ROLES], why: 'channel setup: add the officer role to its private channels later (Edit Channel Permissions: "Requires the MANAGE_ROLES permission")' },
 ];
 
 /** Discord's settings names for the bits the routes use. */
@@ -60,13 +66,17 @@ export const PERMISSION_NAMES = new Map<bigint, string>([
   [READ_MESSAGE_HISTORY, 'Read Message History'],
   [MANAGE_THREADS, 'Manage Threads (Manage Posts, to pin the index)'],
   [CREATE_PRIVATE_THREADS, 'Create Private Threads'],
+  [MANAGE_CHANNELS, 'Manage Channels'],
+  [MANAGE_ROLES, 'Manage Permissions (Manage Roles)'],
 ]);
 
 const union = (rs: Route[]) => rs.reduce((b, r) => r.needs.reduce((x, n) => x | n, b), 0n);
 /** The install link's permissions: every route's needs together. */
 export const INSTALL_PERMISSIONS = union(ROUTES);
+/** The bits the routes acting in one channel need: what setup checks there, and (order 19) what the bot allows itself there. */
+export const channelBits = (kind: ChannelKind): bigint => union(ROUTES.filter((r) => r.channel === kind));
 /** What /guildcraft setup checks in one channel: the needs of the routes that act in it, by name, in bit order. */
 export const channelPermissions = (kind: ChannelKind): [bigint, string][] => {
-  const bits = union(ROUTES.filter((r) => r.channel === kind));
+  const bits = channelBits(kind);
   return [...PERMISSION_NAMES].filter(([b]) => (bits & b) === b);
 };

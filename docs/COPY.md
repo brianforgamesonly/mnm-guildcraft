@@ -926,3 +926,29 @@ Every line below is DRAFT until approved: the new commands' and options' descrip
 | docs/LAUNCH-GUIDE.md:30-32 | "The commands (order 18)": Members: `/me` (your characters, skills, notices and requests, with buttons to change them), `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`. Officers: `/officer` (recipe-source, recipe-fix, remove-member, edit-member, requests). Admins: `/guildcraft` (setup, status, rebuild-board). `/help` shows them all, in pages. | DRAFT |
 | docs/LAUNCH-GUIDE.md:45-60 | "Grant `/officer` to your officer role once (order 18)": why it is needed, the four steps (Server Settings → Integrations → Manage → `/officer` → add the officer role), the source, the re-check on every call and press, and "Keep the grant" (replaces "Letting officers use `/guildcraft remove-member`" and "Letting officers use `/recipe source` and `/recipe override`") | DRAFT |
 | docs/LAUNCH-GUIDE.md:36, 64, 71 | `/craft request` → `/request`; `/item image` → `/item screenshot:`; `/gear find` → `/gear` (in "Servers that added GuildCraft before craft requests", the vault section and "Zones") | DRAFT |
+
+## Work order 19: zone map, channel setup, planner link (DRAFT)
+
+The zone map's title, "Map: MnM Atlas (mnmatlas.com) and its original map authors" (src/zone/card.ts:33), is unchanged; only its place moved (first).
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/setup.ts:219 | (button) Create GuildCraft channels | DRAFT |
+| src/commands/channels.ts:23, 36-39 | (names) GuildCraft (category) · GC-Crafting Roster · GC-Officer Review · GC-Item Vault · GC-Craft Requests | DRAFT |
+| src/commands/channels.ts:93 | GuildCraft is already creating channels for this server. Wait a minute, then press the button again. | DRAFT |
+| src/commands/channels.ts:94 | Sorry, GuildCraft can't reach Discord right now. Nothing was changed; please try again. | DRAFT |
+| src/commands/channels.ts:95 | Sorry, I couldn't read this server's channels and roles from Discord. Nothing was changed; please try again. | DRAFT |
+| src/commands/channels.ts:96-97 | Nothing was created. GuildCraft is missing **\<permissions>** in this server.<br>Grant them to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi): servers that added GuildCraft before this button did not grant **Manage Channels** or **Manage Permissions**. Picking your own channels with `/guildcraft setup`'s options still works. | DRAFT |
+| src/commands/channels.ts:98 | Created #\<channel> (forum / private text channel / text channel). | DRAFT |
+| src/commands/channels.ts:99 | Kept #\<channel> (…): it already exists. | DRAFT |
+| src/commands/channels.ts:100 | Could not create **\<name>** (Discord answered \<status>). Press the button again to retry; nothing is duplicated. | DRAFT |
+| src/commands/channels.ts:101-102 | **GC-Crafting Roster** (the roster board) was not created: forum channels need **Community**. Turn it on (Server Settings → Enable Community), then press the button again. | DRAFT |
+| src/commands/channels.ts:103 | No officer role is set, so the new review and vault channels are visible only to members with Administrator (and GuildCraft). Run `/guildcraft setup officer_role:`, then press **Create GuildCraft channels** on its reply to add the role to them. | DRAFT |
+| src/commands/channels.ts:104 | Added the officer role to #\<channel>. | DRAFT |
+| src/commands/channels.ts:105 | Could not add the officer role to #\<channel>: add it in the channel's settings (Permissions). | DRAFT |
+| src/commands/channels.ts:106 | Set #\<channel>'s default sort order to Creation Time, so the board reads A→Z. | DRAFT |
+| src/commands/channels.ts:107 | Every GuildCraft channel already exists and is saved. Nothing was changed. | DRAFT |
+| src/commands/channels.ts:108 | Could not create the **GuildCraft** category (Discord answered \<status>). Nothing else was created; press the button again to retry. | DRAFT |
+| src/commands/gear.ts:69 | (link button) Character planner (Stories of MnM) | DRAFT |
+| docs/LAUNCH-GUIDE.md:10, 25-26, 32, 34-36 | The install link (permissions=361045806096), the Manage Channels and Manage Permissions rows, "Or let GuildCraft create its channels", "Servers that added GuildCraft before Create GuildCraft channels" | DRAFT |
+| docs/SELF-HOSTING.md:111, 114, 126-127 | The install link and number (361045806096), the Manage Channels and Manage Permissions rows | DRAFT |

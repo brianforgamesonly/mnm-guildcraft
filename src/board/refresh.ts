@@ -563,9 +563,12 @@ export interface BoardRunLog {
   err: string | null;
 }
 
-/** After a command's reply (inside the same waitUntil): rewrite this guild's dirty posts. `rebuild`: /guildcraft rebuild-board's own run. */
-export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1Call[], opts: { rebuild?: boolean } = {}): Promise<BoardRunLog> {
-  const budget: BoardBudget = { d1: () => d1Calls.length, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + AFTER_COMMAND_MS };
+/**
+ * After a command's reply (inside the same waitUntil): rewrite this guild's dirty posts. `rebuild`: /guildcraft
+ * rebuild-board's own run. `discordCalls` (order 19): Discord calls the handler already made in this invocation.
+ */
+export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1Call[], opts: { rebuild?: boolean; discordCalls?: number } = {}): Promise<BoardRunLog> {
+  const budget: BoardBudget = { d1: () => d1Calls.length, discord: opts.discordCalls ?? 0, cap: BOARD_CALL_CAP, deadline: Date.now() + AFTER_COMMAND_MS };
   const trigger: Trigger = opts.rebuild ? 'rebuild' : 'command';
   const log: BoardRunLog = { gc: 'board', trigger, guilds: 1, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
   if (!env.DISCORD_BOT_TOKEN) return { ...log, err: 'DISCORD_BOT_TOKEN not set' };
@@ -576,7 +579,7 @@ export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1
   } catch (e) {
     log.err = e instanceof Error ? e.message : String(e);
   }
-  return { ...log, d1_calls: d1Calls.length - d1Before, discord_calls: budget.discord, calls: api.log };
+  return { ...log, d1_calls: d1Calls.length - d1Before, discord_calls: budget.discord - (opts.discordCalls ?? 0), calls: api.log };
 }
 
 /** Whether the 15-minute trigger at this time is the nightly rebuild. */

@@ -223,7 +223,11 @@ export const focused = (opts: Option[]): Option | undefined => opts.find((o) => 
 
 // Permission bits (https://docs.discord.com/developers/topics/permissions).
 export const ADMINISTRATOR = 1n << 3n;
+/** Order 19: Create GuildCraft channels (Create Guild Channel "Requires the MANAGE_CHANNELS permission"). */
+export const MANAGE_CHANNELS = 1n << 4n;
 export const MANAGE_GUILD = 1n << 5n;
+/** Order 19: editing a channel's permission overwrites (Edit Channel Permissions "Requires the MANAGE_ROLES permission"). */
+export const MANAGE_ROLES = 1n << 28n;
 export const VIEW_CHANNEL = 1n << 10n;
 /** In a forum channel this is "Create Posts" (CREATE_PUBLIC_THREADS is ignored there). */
 export const SEND_MESSAGES = 1n << 11n;
@@ -238,6 +242,8 @@ export const SEND_MESSAGES_IN_THREADS = 1n << 38n;
 export const GUILD_FORUM = 15;
 /** Channel type GUILD_TEXT (order 7: the review channel). */
 export const GUILD_TEXT = 0;
+/** Channel type GUILD_CATEGORY (order 19: the GuildCraft category). */
+export const GUILD_CATEGORY = 4;
 
 export function hasPermission(bitfield: string | undefined, bit: bigint): boolean {
   if (!bitfield || !/^\d+$/.test(bitfield)) return false;

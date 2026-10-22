@@ -2,7 +2,8 @@ import { InteractionResponseFlags, InteractionResponseType, InteractionType } fr
 import { ensureGuild, isAdmin, isOfficer, loadGuild, passesMemberGate, touchMember, type Guild, type WaitUntil } from './access.ts';
 import { autocomplete } from './commands/autocomplete.ts';
 import { HELP_PREFIX, helpButton, helpReply } from './commands/help.ts';
-import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
+import { CREATE_CHANNELS_PREFIX, guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
+import { createChannelsButton } from './commands/channels.ts';
 import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
@@ -183,6 +184,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   const id = i.data?.custom_id ?? '';
   // Order 18: /help's page buttons, open to anyone (as /help is).
   if (id.startsWith(HELP_PREFIX)) return helpButton(id);
+  // Order 19: Create GuildCraft channels, admins only, as /guildcraft setup is (rights from this press).
+  if (id.startsWith(CREATE_CHANNELS_PREFIX)) return isAdmin(i.member!) ? createChannelsButton(c) : ephemeral(ADMIN_ONLY);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

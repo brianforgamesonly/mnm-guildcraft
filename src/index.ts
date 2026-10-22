@@ -52,7 +52,7 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
     }
   }
   console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate, receivedAt, audit: audited }));
-  if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls, { rebuild: effects.rebuild })));
+  if (effects.board && i.guild_id) console.log(JSON.stringify(await refreshAfterCommand(env, i.guild_id, calls, { rebuild: effects.rebuild, discordCalls: effects.discordCalls })));
 }
 
 app.post('/', async (c) => {

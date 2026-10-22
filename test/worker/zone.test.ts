@@ -9,9 +9,9 @@ import { ZONE_REPLY_COPY } from '../../src/commands/zone.ts';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { decodeState, encodeState, sortByKey, ANY } from '../../src/gear/options.ts';
-import { EMBED_LIMITS } from '../../src/discord.ts';
+import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
 import { GEAR_COPY } from '../../src/commands/gear.ts';
-import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneSites } from '../../src/zone/card.ts';
+import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneEmbeds, zoneSites } from '../../src/zone/card.ts';
 import { ZONE_SUGGEST_COPY } from '../../src/zone/suggest.ts';
 import { count, reset } from '../db.ts';
 import { as, botApi, GUILD, press, select, send, type Member } from '../discord.ts';
@@ -43,7 +43,8 @@ const auto = (command: string, sub: string | null, name: string, value: string) 
     member: ann,
     data: { name: command, options: sub ? [{ type: 1, name: sub, options: [{ type: 3, name, value, focused: true }] }] : [{ type: 3, name, value, focused: true }] },
   });
-const field = (r: Awaited<ReturnType<typeof send>>, name: string | RegExp) => r.data.embeds![0].fields!.find((f) => (typeof name === 'string' ? f.name === name : name.test(f.name)));
+// The zone card is the embed with fields (order 19: a map, when shown, comes first and has none).
+const field = (r: Awaited<ReturnType<typeof send>>, name: string | RegExp) => r.data.embeds!.find((e) => e.fields)!.fields!.find((f) => (typeof name === 'string' ? f.name === name : name.test(f.name)));
 
 beforeEach(async () => {
   await reset(['Blacksmithing'], []);
@@ -176,8 +177,27 @@ describe('/zone: the card', () => {
     expect(off.data.embeds).toHaveLength(1);
     const on = await zone('Rothold', ann, { env: { ATLAS_ZONE_IMAGES: 'on' } });
     expect(on.data.embeds).toHaveLength(2);
-    expect(on.data.embeds![1]).toEqual({ title: ZONE_COPY.atlasCredit, url: 'https://www.mnmatlas.com/rothold/', image: { url: 'https://www.mnmatlas.com/assets/cards/rothold.jpg' } });
+    // Order 19: the map on top, as its own embed, then the zone card; different urls, so Discord never merges them.
+    expect(on.data.embeds![0]).toEqual({ title: ZONE_COPY.atlasCredit, url: 'https://www.mnmatlas.com/rothold/', image: { url: 'https://www.mnmatlas.com/assets/cards/rothold.jpg' } });
+    expect(on.data.embeds![1].title).toBe('Rothold');
+    expect((on.data.embeds![1] as { url?: string }).url).not.toBe((on.data.embeds![0] as { url?: string }).url);
+    expect(on.data.embeds!.length).toBeLessThanOrEqual(EMBED_LIMITS.embeds);
+    expect(embedChars(on.data.embeds!)).toBeLessThanOrEqual(EMBED_LIMITS.total);
     expect(field(on, ZONE_COPY.map)).toBeUndefined();
+    // Post to channel reposts both, in the same order.
+    const posted = await send(press(ann, 'pub:zone:rothold'), { env: { ATLAS_ZONE_IMAGES: 'on' } });
+    expect(posted.data.embeds!.map((e) => e.title)).toEqual([ZONE_COPY.atlasCredit, 'Rothold']);
+  });
+
+  it('order 19: a licensed map whose page is the card\'s own link loses its url, so Discord never merges the two', () => {
+    const page = 'https://monstersandmemories.miraheze.org/wiki/Somewhere';
+    const map = { url: 'https://static.wikitide.net/x.png', author: 'A', via: 'the wiki', licence: 'CC BY-SA 4.0', licence_url: 'https://creativecommons.org/licenses/by-sa/4.0/', page };
+    const zone = { key: 'somewhere', name: 'Somewhere', level: null, description: null, adjacent_json: null, atlas_id: null, wiki_url: page, map_json: JSON.stringify(map), markers_json: null };
+    const [first, second] = zoneEmbeds({ zone, creatures: [], rowsRead: 0 } as never, false);
+    expect(first.image).toEqual({ url: map.url });
+    expect(first.url).toBeUndefined();
+    expect(second.title).toBe('Somewhere');
+    expect(second.url).toBe(page);
   });
 
   it('Post to channel posts the card publicly, links kept; its buttons answer each presser privately', async () => {

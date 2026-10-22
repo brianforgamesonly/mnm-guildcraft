@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport, type WikiData } from '../../scripts/import/core.ts';
 import { COMMANDS, commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
-import { DETAILS_PREFIX, GEAR_COPY, PAGE_PREFIX } from '../../src/commands/gear.ts';
+import { DETAILS_PREFIX, GEAR_COPY, PAGE_PREFIX, PLANNER_URL } from '../../src/commands/gear.ts';
 import { pageText } from '../../src/commands/help.ts';
 import { ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MAX_OPEN_REPORTS } from '../../src/commands/reports.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
@@ -182,14 +182,16 @@ describe('/gear find', () => {
     const r = await gear({ class: 'Any', slot: 'FINGER' });
     expect(names(r.data.embeds![0].description)).toHaveLength(10);
     const [nav, menu] = r.data.components!;
-    expect(nav.components.map((b: any) => b.disabled ?? false)).toEqual([true, false]);
+    expect(nav.components.map((b: any) => b.disabled ?? false)).toEqual([true, false, false]);
+    // Order 19 (ITEM 5): the planner, as a link button in the paging row.
+    expect(nav.components[2]).toEqual({ type: 2, style: 5, label: GEAR_COPY.plannerButton, url: PLANNER_URL });
     expect(menu.components[0].custom_id).toBe(DETAILS_PREFIX);
     expect(menu.components[0].options).toHaveLength(10);
     const next = await send(press(ann, nav.components[1].custom_id));
     expect(next.type).toBe(7);
     expect(names(next.data.embeds![0].description)).toEqual(['Ring 04', 'Ring 03', 'Ring 02', 'Ring 01', 'Ring 00']);
     expect(next.data.embeds![0].footer!.text).toMatch(/^Page 2 · sorted by AC/);
-    expect(next.data.components![0].components.map((b: any) => b.disabled ?? false)).toEqual([false, true]);
+    expect(next.data.components![0].components.map((b: any) => b.disabled ?? false)).toEqual([false, true, false]);
   });
 
   it('every reply fits the embed limits with room for the welcome', async () => {
@@ -240,10 +242,13 @@ describe('the item card, and item reports', () => {
     expect(r.data.embeds![1].title).toBe('Blacksmithing · trivial 40');
     expect(JSON.stringify(r.data.embeds![1])).toContain('Smithy');
     const ids = r.data.components!.flatMap((row: any) => row.components.map((b: any) => b.custom_id ?? b.url));
-    expect(ids).toEqual(expect.arrayContaining([`pub:gear:${id}`, `${ITEM_REPORT_PREFIX}${id}`, `img:${id}`]));
+    expect(ids).toEqual(expect.arrayContaining([`pub:gear:${id}`, `${ITEM_REPORT_PREFIX}${id}`, `img:${id}`, PLANNER_URL]));
+    // Every row stays within Discord's five per row.
+    expect(r.data.components!.every((row: any) => row.components.length <= 5)).toBe(true);
     const posted = await send(press(ann, `pub:gear:${id}`));
     expect(posted.data.flags ?? 0).toBe(0);
     expect(posted.data.embeds![0].title).toBe('Fine Sword');
+    expect(posted.data.components!.flatMap((row: any) => row.components.map((b: any) => b.url))).toContain(PLANNER_URL);
     const drop = (await one<{ id: number }>("SELECT id FROM item WHERE name = 'Iron Breastplate'")).id;
     const card = await send(select(ann, DETAILS_PREFIX, [String(drop)]));
     expect(JSON.stringify(card.data.embeds![0].fields)).toContain('a skeleton (L3 - 10, Tomb)');

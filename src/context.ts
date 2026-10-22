@@ -8,6 +8,11 @@ export interface Effects {
   rebuild?: boolean;
   /** Order 7: a read's audit row (craft.find, roster.view, guildcraft.status), written after delivery. */
   audit?: { guildId: string; actor: string; action: string; target: string; detail: unknown };
+  /**
+   * Order 19: Discord calls the handler already made in this invocation (Create GuildCraft channels), so the board run
+   * after it stays inside the same 40-call budget (src/board/api.ts BOARD_CALL_CAP).
+   */
+  discordCalls?: number;
 }
 
 /** What every command handler gets: the caller, their guild and their rights, checked for this request. */

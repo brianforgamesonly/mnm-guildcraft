@@ -185,3 +185,10 @@ Treat the clock as authoritative over any date an order states.
 - Order 18's explicit override 2: the board index post and `/help` are rewritten for the new names; the bot's own posts are edited in place, with no pings.
 - Every command a reply, a page of `/help`, the welcome or the board index names in backticks is a registered command (test/worker/interactions.test.ts); `/help`'s pages list every registered command, each on one page, from its own description.
 - New commands are registered from the reviewed branch before its merge deploys the removal of the old entry points, so no registered name is ever without a route.
+
+## Order 19
+
+- Order 19's explicit override 2 of order 5's "The session never creates channels or posts on the owner's server" (as extended by orders 7–9 and 16): the bot creates its own channels (a GuildCraft category and the board, review, vault and request channels, with their permission overwrites), sets a forum's default sort order, and adds the officer role's overwrite to the private channels it created, only when an admin presses **Create GuildCraft channels** in `/guildcraft setup` (src/commands/channels.ts). The session itself creates nothing; tests use a mocked Discord.
+- Order 19's explicit override 3: the install permissions add Manage Channels and Manage Roles (361045806096), still derived from src/permissions.ts ROUTES. Every bit a created channel's overwrites allow or deny is one the bot holds (Create Guild Channel: "only permissions your bot has in the guild can be allowed/denied"), and every channel that denies @everyone something allows the bot's own member what its routes there need (`channelBits`).
+- A handler that calls Discord before a board run in the same invocation passes its count on (`Effects.discordCalls`), so the board's 40-call cap covers the whole invocation.
+- Order 19's override 1 (Workers Logs omissions as platform omissions) was not applied: ITEM 1 stopped on a contradiction, named in the order's FINAL REPORT. Order 15's rule stands.

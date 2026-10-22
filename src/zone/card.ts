@@ -212,7 +212,11 @@ interface MapImage {
   page: string;
 }
 
-/** The card's embeds: the zone, then its map (when one may be shown). `atlasImages`: ATLAS_ZONE_IMAGES is on. */
+/**
+ * The card's embeds: its map (when one may be shown), then the zone. `atlasImages`: ATLAS_ZONE_IMAGES is on.
+ * Order 19 (ITEM 3): Discord draws an embed's image below its fields, so the map is an embed of its own, sent first, to
+ * sit at the top. The two never share a url: Discord merges embeds with the same url into one image gallery.
+ */
 export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   const z = d.zone;
   const atlas = z.atlas_id ? atlasMapUrl(z.atlas_id) : null;
@@ -248,7 +252,9 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
     fields,
     footer: { text: ZONE_COPY.footer },
   };
-  return mapEmbed ? [main, mapEmbed] : [main];
+  if (!mapEmbed) return [main];
+  if (mapEmbed.url && mapEmbed.url === main.url) delete mapEmbed.url;
+  return [mapEmbed, main];
 }
 
 // ---------------------------------------------------------------- the paged list (More creatures)
