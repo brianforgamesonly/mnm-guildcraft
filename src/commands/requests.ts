@@ -433,7 +433,7 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
 // ---------------------------------------------------------------- /craft requests (private): open requests, with Cancel
 
 /** Open requests' lines and the Cancel select (custom_id rql:, handled by cancelFromList), for /craft requests and /officer requests. */
-async function requestList(c: Ctx, reqs: RequestRow[], withRequester: boolean): Promise<{ lines: string[]; select: unknown }> {
+export async function requestList(c: Ctx, reqs: RequestRow[], withRequester: boolean): Promise<{ lines: string[]; select: unknown }> {
   const { results: items } = await c.db.prepare(ITEMS_SQL).bind(JSON.stringify(reqs.map((r) => r.id))).all<ItemRow>();
   const names = await namesOf(c.db, c.guild.id, reqs.map((r) => r.requester));
   const summary = (r: RequestRow) => {

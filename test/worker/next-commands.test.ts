@@ -63,13 +63,12 @@ beforeEach(async () => {
 });
 
 describe('the new definitions (order 18)', () => {
-  // PR A: nine of the approved table's ten; /me (which replaces /character) arrives in PR A2.
-  it('are the commands of the approved table, and only /officer and /guildcraft carry Manage Server', () => {
-    expect(NEXT_COMMANDS.map((c) => c.name).sort()).toEqual(['gear', 'guildcraft', 'help', 'item', 'officer', 'request', 'roster', 'skills', 'zone'].sort());
+  it('are the ten commands of the approved table, and only /officer and /guildcraft carry Manage Server', () => {
+    expect(NEXT_COMMANDS.map((c) => c.name).sort()).toEqual(['gear', 'guildcraft', 'help', 'item', 'me', 'officer', 'request', 'roster', 'skills', 'zone'].sort());
     for (const c of NEXT_COMMANDS)
       expect('default_member_permissions' in c ? c.default_member_permissions : undefined, c.name).toBe(c.name === 'officer' || c.name === 'guildcraft' ? String(1 << 5) : undefined);
     const subs = (n: string) => ((NEXT_COMMANDS.find((c) => c.name === n) as { options: readonly { name: string }[] }).options).map((o) => o.name);
-    expect(subs('officer')).toEqual(['recipe-source', 'recipe-fix', 'remove-member', 'requests']);
+    expect(subs('officer')).toEqual(['recipe-source', 'recipe-fix', 'remove-member', 'edit-member', 'requests']);
     expect(subs('guildcraft')).toEqual(['setup', 'status', 'rebuild-board']);
   });
 
@@ -204,7 +203,7 @@ describe('/gear, /request, /help', () => {
 
 describe('/officer', () => {
   it('a member who is not an officer is refused on every subcommand, whatever Discord shows them', async () => {
-    for (const sub of ['recipe-source', 'recipe-fix', 'remove-member', 'requests'])
+    for (const sub of ['recipe-source', 'recipe-fix', 'remove-member', 'edit-member', 'requests'])
       expect((await send(cmd(ann, 'officer', sub))).data.content, sub).toBe(OFFICER_ONLY);
   });
   it('recipe-source, recipe-fix and remove-member run the old officer handlers', async () => {

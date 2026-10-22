@@ -277,6 +277,13 @@ const officerMember = (description: string) => ({ type: USER, name: 'member', de
 
 export const NEXT_COMMANDS = [
   {
+    name: 'me',
+    description: 'Your characters, skills, recipes, notices and requests, with buttons to change them',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [{ ...characterOption, description: 'Optional: show one character' }],
+  },
+  {
     name: 'skills',
     description: 'Set one tradeskill level, or leave the options out to update up to 5 at once',
     type: 1,
@@ -346,6 +353,12 @@ export const NEXT_COMMANDS = [
         name: 'remove-member',
         description: "Remove a member's characters and mark them as left (shows a preview first)",
         options: [officerMember('The member to remove')],
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'edit-member',
+        description: "Open a member's /me panel to change their characters and skills",
+        options: [officerMember('The member')],
       },
       { type: SUBCOMMAND, name: 'requests', description: 'Every open craft request in this server, with Cancel' },
     ],
