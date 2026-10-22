@@ -2,7 +2,7 @@ import { InteractionResponseFlags, InteractionResponseType, InteractionType } fr
 import { ensureGuild, isAdmin, isOfficer, loadGuild, passesMemberGate, touchMember, type Guild, type WaitUntil } from './access.ts';
 import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
-import { HELP_TEXT } from './commands/help.ts';
+import { helpReply } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
 import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, removeMemberButton } from './commands/members.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
@@ -19,6 +19,9 @@ import {
   ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftNotify, craftRequest, craftRequests, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, requestFromFind, SEND_PREFIX, sendUnsent,
 } from './commands/requests.ts';
 import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
+import {
+  CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, GEAR_SORT_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear, zoneGearClass, zoneGearSort, zoneList, zoneListPage,
+} from './commands/zone.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -66,14 +69,21 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'craft request': { access: 'member', run: craftRequest },
   'craft notify': { access: 'member', run: craftNotify },
   'craft requests': { access: 'member', run: craftRequests },
-  'craft help': { access: 'open', run: async () => ephemeral(HELP_TEXT) },
+  // Order 17: a zone's card, private with Post to channel (as /craft find); 'zone.view' is its only write.
+  zone: { access: 'member', search: true, audit: 'zone.view', run: zoneCommand },
+  'craft help': { access: 'open', run: async () => helpReply() },
   'guildcraft setup': { access: 'admin', run: guildcraftSetup },
   'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
   'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
   'guildcraft remove-member': { access: 'officer', run: guildcraftRemoveMember },
 };
 
-const routeOf = (i: Interaction) => ROUTES[`${i.data?.name} ${subcommand(i).name}`];
+/** "name sub", or "name" for a command without subcommands (order 17: /zone). */
+const routeKey = (i: Interaction) => {
+  const sub = subcommand(i).name;
+  return sub === undefined ? `${i.data?.name}` : `${i.data?.name} ${sub}`;
+};
+const routeOf = (i: Interaction) => ROUTES[routeKey(i)];
 
 const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: Interaction): Ctx => ({
   db: env.DB,
@@ -86,6 +96,7 @@ const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: In
   applicationId: i?.application_id,
   botToken: env.DISCORD_BOT_TOKEN,
   copy: env.GUILDCRAFT_COPY,
+  atlasZoneImages: env.ATLAS_ZONE_IMAGES === 'on',
 });
 
 /** Adds the one-time welcome to a reply, as an extra embed, and keeps the reply private. */
@@ -148,7 +159,7 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effect
       guildId: guild.id,
       actor: m.user.id,
       action: route.audit,
-      target: `${i.data?.name} ${subcommand(i).name}`,
+      target: routeKey(i),
       detail: Object.fromEntries(options.filter((o) => !o.focused).map((o) => [o.name, o.value ?? null])),
     };
   return isNew ? withWelcome(reply) : reply;
@@ -187,6 +198,13 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 13: /gear find's paging (edits the private results) and details menu (a new private card).
   if (id.startsWith(GEAR_PAGE_PREFIX)) return gearPage(c, id);
   if (id.startsWith(DETAILS_PREFIX)) return gearDetails(c, i.data?.values ?? []);
+  // Order 17: /zone's buttons, private or on a posted card; each from the card answers with a new private message,
+  // and the menus and pages they open are edited in place.
+  if (id.startsWith(ZONE_GEAR_PREFIX)) return zoneGear(c, id);
+  if (id.startsWith(GEAR_SORT_PREFIX)) return zoneGearSort(c, id, i.data?.values ?? []);
+  if (id.startsWith(GEAR_CLASS_PREFIX)) return zoneGearClass(c, id, i.data?.values ?? []);
+  if (id.startsWith(CREATURES_PREFIX) || id.startsWith(DROPS_PREFIX)) return zoneList(c, id);
+  if (id.startsWith(CREATURES_PAGE_PREFIX) || id.startsWith(DROPS_PAGE_PREFIX)) return zoneListPage(c, id);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
   if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);
   if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
@@ -194,6 +212,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
     const what = id.slice(POST_PREFIX.length);
     if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
     if (what.startsWith(GEAR_POST)) return postGear(c, Number(what.slice(GEAR_POST.length)));
+    if (what.startsWith(ZONE_POST)) return postZone(c, what.slice(ZONE_POST.length));
     if (what.startsWith('rr:')) return postRosterRecipes(c, what.slice(3).split(':'));
     return (await postRoster(c, what)) ?? ephemeral(STALE_FORM);
   }

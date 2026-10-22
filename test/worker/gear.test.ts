@@ -71,7 +71,7 @@ beforeEach(async () => {
 describe('the command definition (Discord limits)', () => {
   it('class is the first option and required; options in the order set; every list derived', () => {
     const find = COMMANDS.find((c) => c.name === 'gear')!.options[0];
-    expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort']);
+    expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort', 'zone']);
     expect(find.options[0]).toMatchObject({ required: true });
     const opt = (n: string) => find.options.find((o) => o.name === n) as { choices?: { value: string }[] };
     expect(opt('slot').choices!.map((c) => c.value)).toEqual([...SLOTS]);

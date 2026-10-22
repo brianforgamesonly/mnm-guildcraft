@@ -74,6 +74,8 @@ export function gearFindOptions(classes: readonly string[]) {
     })),
     { type: STRING, name: 'source', description: 'Where it comes from, as the wiki records it', choices: SOURCE_CHOICES.map((s) => choice(s)) },
     { type: STRING, name: 'sort', description: 'Highest first (Name: A→Z). Default: Ratio for weapons, otherwise AC', choices: SORTS.map((s) => choice(s.label, s.key)) },
+    // Order 17: the zone list is data (the zone table), so it is offered by autocomplete, not as choices.
+    { type: STRING, name: 'zone', description: 'Only items the wiki lists for this zone', autocomplete: true, max_length: 100 },
   ];
 }
 
@@ -89,7 +91,12 @@ export interface GearQuery {
   stats: StatKey[];
   source?: (typeof SOURCES)[number];
   sort: Sort;
+  /** Order 17: a zone key (src/zone/names.ts zoneKey): items whose wikiZones name that zone. */
+  zone?: string;
 }
+
+/** A zone key longer than this does not fit the paging state (see encodeState); /zone's Gear here is then left off. */
+export const ZONE_STATE_MAX = 40;
 
 /** The default sort: Ratio when weapon_type or min_ratio is set, otherwise AC. */
 export const defaultSort = (q: Pick<GearQuery, 'weaponType' | 'minRatio'>) => sortByKey(q.weaponType || q.minRatio !== undefined ? 'RATIO' : 'AC')!;
@@ -104,8 +111,16 @@ const at = <T>(list: readonly T[], s: string | undefined): T | undefined => (s =
  * The query as a compact string: "<class>.<slot>.<weapon>.<min_ac>.<min_ratio ×1000>.<stats>.<source>.<sort>", each list
  * value as its index (stats as up to three indexes joined by '-'). Worst case (every option set, the longest values)
  * is checked in test/worker/gear.test.ts against Discord's 100-character custom_id.
+ * Order 17: then ".<zone key>" when a zone is set, last, so a "." in a zone name cannot split the state.
  */
 export function encodeState(q: GearQuery): string {
+  return [
+    ...stateFields(q),
+    ...(q.zone === undefined ? [] : [q.zone]),
+  ].join('.');
+}
+
+function stateFields(q: GearQuery): (string | number)[] {
   return [
     q.cls === ANY ? '' : q.cls,
     idx(SLOTS, q.slot),
@@ -115,12 +130,14 @@ export function encodeState(q: GearQuery): string {
     q.stats.map((s) => STAT_FILTERS.indexOf(s)).join('-'),
     idx(SOURCES, q.source),
     String(SORTS.indexOf(q.sort)),
-  ].join('.');
+  ];
 }
 
 export function decodeState(s: string): GearQuery | null {
-  const p = s.split('.');
-  if (p.length !== 8) return null;
+  const all = s.split('.');
+  if (all.length < 8) return null;
+  const p = all.slice(0, 8);
+  const zone = all.length > 8 ? all.slice(8).join('.') : undefined;
   const sort = at(SORTS, p[7]);
   if (!sort) return null;
   const num = (v: string) => (v === '' ? undefined : Number(v));
@@ -133,5 +150,6 @@ export function decodeState(s: string): GearQuery | null {
     stats: p[5] ? p[5].split('-').map((i) => STAT_FILTERS[Number(i)]).filter(Boolean) : [],
     source: at(SOURCES, p[6]),
     sort,
+    ...(zone === undefined ? {} : { zone }),
   };
 }

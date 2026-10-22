@@ -5,6 +5,7 @@ import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow } from '../crafters.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { decodeState, defaultSort, encodeState, roundRatio, sortByKey, STAT_FILTERS, type GearQuery } from '../gear/options.ts';
+import { zoneKey } from '../zone/names.ts';
 import { GEAR_COLS, PAGE_SIZE, relaxStatement, searchStatement, type GearRow } from '../gear/search.ts';
 import { ALL_CLASSES, SLOTS, SOURCES, WEAPON_TYPES, type Source } from '../gear/vocab.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
@@ -78,7 +79,9 @@ export function parseQuery(opts: Option[]): GearQuery | string {
     stats: [...new Set(stats)],
     source: pick(SOURCES, 'source'),
   };
-  return { ...q, sort: sortByKey(optString(opts, 'sort')) ?? defaultSort(q) };
+  // Order 17: the zone by its key (case and apostrophes folded, as the zone table's keys are).
+  const zone = optString(opts, 'zone');
+  return { ...q, ...(zone ? { zone: zoneKey(zone) } : {}), sort: sortByKey(optString(opts, 'sort')) ?? defaultSort(q) };
 }
 
 // ---------------------------------------------------------------- the data behind a page
@@ -300,9 +303,18 @@ async function page(c: Ctx, q: GearQuery, n: number): Promise<{ rows: GearRow[];
 export async function gearFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const q = parseQuery(opts);
   if (typeof q === 'string') return ephemeral(q);
+  return gearResults(c, q, false);
+}
+
+/** The first results page for a query: a new private message, or (`inPlace`: /zone's Gear here) an edit of the menu. */
+export async function gearResults(c: Ctx, q: GearQuery, inPlace: boolean): Promise<MessageReply> {
   const p = await page(c, q, 0);
-  if (!p) return zeroResults(c, q);
-  return ephemeral(GEAR_COPY.help, { embeds: [pageEmbed(p.rows, q, p.data, 0, c.guild.learning_window)], components: pageComponents(p.rows, q, 0, p.hasNext) });
+  if (!p) {
+    const zero = await zeroResults(c, q);
+    return inPlace ? updateMessage({ content: zero.data.content, embeds: [], components: [] }) : zero;
+  }
+  const data = { embeds: [pageEmbed(p.rows, q, p.data, 0, c.guild.learning_window)], components: pageComponents(p.rows, q, 0, p.hasNext) };
+  return inPlace ? updateMessage({ content: GEAR_COPY.help, ...data }) : ephemeral(GEAR_COPY.help, data);
 }
 
 /** gp:<page>:<state>: Previous / Next, editing the private results in place. */

@@ -26,4 +26,6 @@ export interface Ctx {
   botToken?: string;
   /** Which copy answered: 'dev' or 'production' (Env.GUILDCRAFT_COPY). */
   copy?: string;
+  /** Order 17: Env.ATLAS_ZONE_IMAGES is 'on'. */
+  atlasZoneImages?: boolean;
 }

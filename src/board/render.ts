@@ -106,6 +106,8 @@ export const HOW_TO_GET_LISTED = [
   '`/gear find` gear for your class, by slot, stats and source',
   // Order 16.
   '`/craft request` ask the crafters who can make an item · `/craft notify` be added to requests you can craft',
+  // Order 17.
+  "`/zone` a zone's levels, creatures, drops and map links",
 ].join('\n');
 
 /**
