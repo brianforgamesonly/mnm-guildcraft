@@ -48,8 +48,9 @@ interface UsedIn {
 
 /**
  * The recipes this guild sees that take the item as an ingredient: the imported ingredients, or the guild's corrected
- * list where it has one (src/recipes.ts, order 9). One statement; recipe_component has no item index, so it reads that
- * table once (2,446 rows on the 2026-10-21 data, measured by scripts/bench/item-cards.ts).
+ * list where it has one (src/recipes.ts, order 9). One statement; recipe_component is read through recipe_component_by_item
+ * (migrations/0014, order 19): on the 2026-10-22 data, rows_read median 2, max 475 (was 2,448 and 2,841 scanning the
+ * table), measured by scripts/bench/item-cards.ts. The plan is pinned by test/worker/next-commands.test.ts.
  */
 export const USED_IN_SQL = `SELECT i.name AS item, t.name AS tradeskill, ${CORRECTED.trivial} AS trivial
   FROM recipe r JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id ${correctionJoin('?2')}

@@ -38,6 +38,8 @@ describe('schema (migrations/0001_init.sql)', () => {
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
       'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live', 'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+      // Order 19 (0014): /item's "used in" statement.
+      'recipe_component_by_item',
     ]);
     expect(indexes.map((i) => i.name)).toEqual([...prdIndexes, ...new Set(departureIndexes)].sort());
     expect(prdIndexes).toEqual(['character_by_owner', 'image_by_item', 'recipe_by_result', 'skill_ranking']);
