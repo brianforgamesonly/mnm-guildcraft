@@ -10,7 +10,8 @@ import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { decodeState, encodeState, sortByKey, ANY } from '../../src/gear/options.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
-import { cleanNotes, creaturesOf, fitLines, ZONE_COPY } from '../../src/zone/card.ts';
+import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_COPY } from '../../src/zone/card.ts';
+import { ZONE_SUGGEST_COPY } from '../../src/zone/suggest.ts';
 import { count, reset } from '../db.ts';
 import { as, botApi, GUILD, press, select, send, type Member } from '../discord.ts';
 import small from '../fixtures/wiki-small.json';
@@ -86,7 +87,8 @@ describe('/zone: the card', () => {
 
   it('a zone with no data says what is missing and links to the atlas', async () => {
     const r = await zone("Ail'Vorith");
-    expect(field(r, ZONE_COPY.missingName)!.value).toBe(ZONE_COPY.missing(['creatures', 'drops', 'map'], 'https://www.mnmatlas.com/'));
+    expect(field(r, ZONE_COPY.missingName)!.value).toBe(ZONE_COPY.missing(['creatures', 'drops'], 'https://www.mnmatlas.com/'));
+    expect(field(r, ZONE_COPY.map)!.value).toBe(`${ZONE_COPY.noMap} · [${ZONE_COPY.openAtlas}](https://www.mnmatlas.com/)`);
     // A merchant is stored, never shown as a creature.
     expect(field(r, /^Creatures/)).toBeUndefined();
     const [, actions] = r.data.components!;
@@ -95,9 +97,22 @@ describe('/zone: the card', () => {
 
   it('an unknown zone gets suggestions, never a dead end', async () => {
     const r = await zone('Evershade');
-    expect(r.data.content).toBe([ZONE_REPLY_COPY.unknown('Evershade'), ZONE_REPLY_COPY.suggest(['Evershade Weald'])].join('\n'));
+    expect(r.data.content).toBe([ZONE_SUGGEST_COPY.unknown('Evershade'), ZONE_SUGGEST_COPY.suggest(['Evershade Weald'])].join('\n'));
     const none = await zone('Qqq');
-    expect(none.data.content).toContain(ZONE_REPLY_COPY.allZones(["Ail'Vorith", 'Evershade Weald', "Keeper's Bight", 'Rothold', 'Sunken Resort']));
+    expect(none.data.content).toContain(ZONE_SUGGEST_COPY.allZones(["Ail'Vorith", 'Evershade Weald', "Keeper's Bight", 'Rothold', 'Sunken Resort']));
+  });
+
+  it('/gear find zone: an unknown zone gets the same suggestions, not a silent zero', async () => {
+    await zone('Rothold');
+    const r = await send({ type: 2, guild_id: GUILD, member: ann, data: { name: 'gear', options: [{ type: 1, name: 'find', options: [{ type: 3, name: 'class', value: 'Any' }, { type: 3, name: 'zone', value: 'Rothol' }] }] } });
+    expect(r.data.content).toBe([ZONE_SUGGEST_COPY.unknown('Rothol'), ZONE_SUGGEST_COPY.suggest(['Rothold'])].join('\n'));
+  });
+
+  it('a find-on-map link survives brackets in a name; a non-https wiki link is left out', async () => {
+    expect(creatureLine({ name: 'a skeleton (rare)', level: null }, 'x')).toBe('a skeleton (rare) · [find on map](https://www.mnmatlas.com/?find=a%20skeleton%20%28rare%29&map=x)');
+    expect(safeUrl('javascript:alert(1)')).toBeNull();
+    expect(safeUrl('/wiki/Rothold')).toBeNull();
+    expect(safeUrl('https://monstersandmemories.miraheze.org/wiki/Rothold')).toBe('https://monstersandmemories.miraheze.org/wiki/Rothold');
   });
 
   it('shows MnM Atlas\'s whole-zone picture only while ATLAS_ZONE_IMAGES is on, credited and linked', async () => {
@@ -168,6 +183,7 @@ describe('/zone: More creatures, More drops, Gear here', () => {
     const names = [...results.data.embeds![0].description!.matchAll(/^\*\*(?:\[)?([^\]*]+)/gm)].map((x) => x[1]);
     // Gear only, from this zone, by Name; Removed Items and other zones' gear left out.
     expect(names).toEqual(['Another Ring', 'Weald Mail', 'Weald Ring']);
+    expect(results.data.content!.split('\n')[0]).toBe(ZONE_REPLY_COPY.gearFrom('Evershade Weald'));
   });
 
   it('/gear find zone: the same filter from the command, by name in any case', async () => {

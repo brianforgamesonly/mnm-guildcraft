@@ -24,8 +24,9 @@ export const ZONE_COPY = {
   findOnMap: 'find on map',
   more: (n: number) => `+${n} more`,
   missingName: 'Not recorded yet',
-  missing: (parts: string[], atlas: string) => `No ${parts.join(', ')} recorded for this zone yet. [MnM Atlas](${atlas}) may have more.`,
-  missingParts: { creatures: 'creatures', drops: 'drops', map: 'map', level: 'level range', description: 'description' },
+  missing: (parts: string[], atlas: string) =>
+    `No ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]} recorded for this zone yet. [MnM Atlas](${atlas}) may have more.`,
+  missingParts: { creatures: 'creatures', drops: 'drops', level: 'level range', description: 'description' },
   atlasCredit: 'Map: MnM Atlas (mnmatlas.com) and its original map authors',
   mapCredit: (author: string | null, via: string) => `Map: ${author ? `${author} · ` : ''}via ${via}`,
   licence: (licence: string, licenceUrl: string, page: string) => `[${licence}](${licenceUrl}) · [file page](${page})`,
@@ -39,14 +40,19 @@ export const ZONE_COPY = {
   next: 'Next',
 } as const;
 
-// ---------------------------------------------------------------- MnM Atlas addresses (its embed page, mnmatlas.com/embed/)
+// ---------------------------------------------------------------- MnM Atlas addresses (documented on mnmatlas.com/embed/)
 
 export const ATLAS = 'https://www.mnmatlas.com';
-export const atlasMapUrl = (id: string | null) => (id ? `${ATLAS}/${encodeURIComponent(id)}/` : `${ATLAS}/`);
-/** "Looks on one map only" with &map= (the atlas's embed page). */
-export const atlasFindUrl = (name: string, id: string | null) => `${ATLAS}/?find=${encodeURIComponent(name)}${id ? `&map=${encodeURIComponent(id)}` : ''}`;
+/** encodeURIComponent, plus the brackets it leaves alone, which would end a markdown link early. */
+const enc = (text: string) => encodeURIComponent(text).replace(/[()]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+/** A map's own address, "/<map id>/"; the atlas's front page when the zone has no atlas map. */
+export const atlasMapUrl = (id: string | null) => (id ? `${ATLAS}/${enc(id)}/` : `${ATLAS}/`);
+/** "/?find=<name>", which "looks on one map only" with &map= (the atlas's embed page). */
+export const atlasFindUrl = (name: string, id: string | null) => `${ATLAS}/?find=${enc(name)}${id ? `&map=${enc(id)}` : ''}`;
 /** The atlas's whole-zone picture: shown only while ATLAS_ZONE_IMAGES is on (order 17, override 3). */
-export const atlasCardUrl = (id: string) => `${ATLAS}/assets/cards/${encodeURIComponent(id)}.jpg`;
+export const atlasCardUrl = (id: string) => `${ATLAS}/assets/cards/${enc(id)}.jpg`;
+/** A link from the data is used only when it is an https address (Discord rejects a whole message over a bad URL). */
+export const safeUrl = (u: string | null) => (u && /^https:\/\/[^\s()<>]+$/.test(u) ? u : null);
 
 // ---------------------------------------------------------------- data
 
@@ -70,6 +76,8 @@ export interface Drop {
   name: string;
   ac: number | null;
   wiki_url: string | null;
+  /** 1 when the item is gear (a slot): what Gear here can find. */
+  gear: number;
 }
 export interface ZoneData {
   zone: ZoneRecord;
@@ -88,7 +96,7 @@ export const NPCS_SQL = 'SELECT name, kind, level, race, class, loot_json FROM n
  * The zone's items: wikiZones names the zone (through the mapping), Removed Items left out. One sort key at a time
  * (the owner, order 13: "no combined score"): AC, highest first, then name; items without AC last.
  */
-export const DROPS_SQL = `SELECT id, name, ac, wiki_url FROM item WHERE origin_json IS NOT NULL AND (source_mask & ${REMOVED_BIT}) = 0 AND EXISTS (
+export const DROPS_SQL = `SELECT id, name, ac, wiki_url, slot_mask <> 0 AS gear FROM item WHERE origin_json IS NOT NULL AND (source_mask & ${REMOVED_BIT}) = 0 AND EXISTS (
   SELECT 1 FROM json_each(item.origin_json, '$.wikiZones') j WHERE j.value IN ${zoneNamesSql(WIKI_ZONES_SOURCE)})
   ORDER BY ac DESC NULLS LAST, name COLLATE NOCASE`;
 
@@ -159,7 +167,10 @@ export async function loadZone(db: D1Database, key: string): Promise<ZoneData | 
 
 export const creatureLine = (c: Creature, atlasId: string | null) =>
   `${md(c.name)}${c.level ? ` (L${md(c.level)})` : ''} · [${ZONE_COPY.findOnMap}](${atlasFindUrl(c.name, atlasId)})`;
-export const dropLine = (d: Drop) => `${d.wiki_url ? `[${md(d.name)}](${d.wiki_url})` : md(d.name)}${d.ac !== null ? ` · AC ${d.ac}` : ''}`;
+export const dropLine = (d: Drop) => {
+  const url = safeUrl(d.wiki_url);
+  return `${url ? `[${md(d.name)}](${url})` : md(d.name)}${d.ac !== null ? ` · AC ${d.ac}` : ''}`;
+};
 
 /** Marker notes may hold URLs and line breaks: the URLs are dropped, the whitespace made one line, the rest kept short. */
 export const cleanNotes = (s: string | null): string | null => {
@@ -236,13 +247,13 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
     ...(z.description ? [] : [P.description]),
     ...(d.creatures.length ? [] : [P.creatures]),
     ...(d.drops.length ? [] : [P.drops]),
-    ...(mapEmbed ? [] : [P.map]),
+    // No map is already said, with the atlas link, in the Map field above.
   ];
   if (missing.length) fields.push({ name: ZONE_COPY.missingName, value: ZONE_COPY.missing(missing, atlas) });
 
   const main: Embed = {
     title: truncate(z.name, EMBED_LIMITS.title),
-    ...(z.wiki_url ? { url: z.wiki_url } : {}),
+    ...(safeUrl(z.wiki_url) ? { url: safeUrl(z.wiki_url)! } : {}),
     description: [ZONE_COPY.levels(z.level), oneLine(z.description)].filter(Boolean).join('\n'),
     fields,
     footer: { text: ZONE_COPY.footer },

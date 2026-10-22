@@ -3,10 +3,11 @@
 // runs /gear find on this zone), More creatures and More drops (paged, private). No writes beyond the read audit row
 // 'zone.view' (src/interactions.ts).
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, linkButton, matchChoices, md, optString, row, updateMessage, type MessageReply, type Option } from '../discord.ts';
+import { button, ephemeral, linkButton, md, optString, row, updateMessage, type MessageReply, type Option } from '../discord.ts';
+import { unknownZone } from '../zone/suggest.ts';
 import { ANY, SORTS, ZONE_STATE_MAX, type GearQuery } from '../gear/options.ts';
 import { gameList } from '../gamedata.ts';
-import { atlasMapUrl, listEmbed, loadZone, ZONE_COPY, zoneEmbeds, type ZoneData } from '../zone/card.ts';
+import { atlasMapUrl, listEmbed, loadZone, safeUrl, ZONE_COPY, zoneEmbeds, type ZoneData } from '../zone/card.ts';
 import { zoneKey } from '../zone/names.ts';
 import { gearResults } from './gear.ts';
 import { postedReply, searchReply } from './share.ts';
@@ -28,11 +29,8 @@ export const DROPS_PAGE_PREFIX = 'zdn:';
 // ---------------------------------------------------------------- copy (order 17; listed for approval in docs/COPY.md)
 
 export const ZONE_REPLY_COPY = {
-  noZones: 'No zones are loaded yet. They arrive with the nightly import.',
-  unknown: (typed: string) => `No zone is called **${md(typed)}**.`,
-  suggest: (names: string[]) => `Did you mean: ${names.map((n) => `**${md(n)}**`).join(', ')}?`,
-  allZones: (names: string[]) => `The zones: ${names.map(md).join(', ')}.`,
   gone: 'That zone is no longer in the data. Run `/zone` again.',
+  gearFrom: (zone: string) => `**Gear from ${md(zone)}**`,
   gearPick: (zone: string) => `Gear from **${md(zone)}**: pick a sort if you like (AC by default), then your class.`,
   sortPlaceholder: 'Sort (AC by default)',
   sortChosen: (label: string) => `Sort: ${label}`,
@@ -45,9 +43,11 @@ export const ZONE_REPLY_COPY = {
 /** The card's link buttons (kept on a posted copy) and its action row (each press answers the presser privately). */
 function cardButtons(d: ZoneData): { links: unknown[]; actions: unknown } {
   const z = d.zone;
-  const links = [linkButton(ZONE_COPY.openAtlas, atlasMapUrl(z.atlas_id)), ...(z.wiki_url ? [linkButton(ZONE_COPY.wikiPage, z.wiki_url)] : [])];
+  const wiki = safeUrl(z.wiki_url);
+  const links = [linkButton(ZONE_COPY.openAtlas, atlasMapUrl(z.atlas_id)), ...(wiki ? [linkButton(ZONE_COPY.wikiPage, wiki)] : [])];
   const actions = row([
-    button(`${GEAR_PREFIX}${z.key}`, ZONE_COPY.gearHere, undefined, !d.drops.length || z.key.length > ZONE_STATE_MAX),
+    // Gear here searches gear only: it is offered when some of the zone's drops are gear.
+    button(`${GEAR_PREFIX}${z.key}`, ZONE_COPY.gearHere, undefined, !d.drops.some((x) => x.gear) || z.key.length > ZONE_STATE_MAX),
     // The card may show fewer than 10 lines when long ones fill a field, so a list is pageable whenever it has rows.
     button(`${CREATURES_PREFIX}${z.key}`, ZONE_COPY.moreCreatures, undefined, !d.creatures.length),
     button(`${DROPS_PREFIX}${z.key}`, ZONE_COPY.moreDrops, undefined, !d.drops.length),
@@ -55,19 +55,10 @@ function cardButtons(d: ZoneData): { links: unknown[]; actions: unknown } {
   return { links, actions };
 }
 
-/** An unknown name: the zones whose names contain what was typed, or, failing that, the whole list. Never a dead end. */
-async function unknownZone(c: Ctx, typed: string): Promise<MessageReply> {
-  const names = await gameList(c.db, 'zones');
-  if (!names.length) return ephemeral(ZONE_REPLY_COPY.noZones);
-  const words = typed.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-  const near = [...new Set([...matchChoices(names, typed, 5), ...names.filter((n) => words.some((w) => n.toLowerCase().includes(w)))])].slice(0, 5);
-  return ephemeral([ZONE_REPLY_COPY.unknown(typed), near.length ? ZONE_REPLY_COPY.suggest(near) : ZONE_REPLY_COPY.allZones(names)].join('\n'));
-}
-
 export async function zoneCommand(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const typed = optString(opts, 'name') ?? '';
   const d = await loadZone(c.db, zoneKey(typed));
-  if (!d) return unknownZone(c, typed);
+  if (!d) return unknownZone(c.db, typed);
   const { links, actions } = cardButtons(d);
   return searchReply({ embeds: zoneEmbeds(d, c.atlasZoneImages === true) }, `${POST_WHAT}${d.zone.key}`, links, [actions]);
 }
@@ -157,6 +148,8 @@ export async function zoneGearClass(c: Ctx, customId: string, values: string[]):
   const [, idx, key] = /^zgc:(\d+):(.*)$/.exec(customId) ?? [];
   const sort = SORTS[Number(idx)];
   if (!sort || key === undefined || !values[0]) return ephemeral(ZONE_REPLY_COPY.gone);
+  const name = (await c.db.prepare('SELECT name FROM zone WHERE key = ? AND active = 1').bind(key).first<{ name: string }>())?.name;
+  if (!name) return ephemeral(ZONE_REPLY_COPY.gone);
   const q: GearQuery = { cls: values[0], stats: [], sort, zone: key };
-  return gearResults(c, q, true);
+  return gearResults(c, q, true, ZONE_REPLY_COPY.gearFrom(name));
 }

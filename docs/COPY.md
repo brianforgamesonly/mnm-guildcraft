@@ -779,18 +779,19 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 | src/commands/definitions.ts:167, 170 | `/zone`: A zone: map, level range, creatures, drops and links · `name`: The zone: pick from the list | DRAFT |
 | src/gear/options.ts:78 | `/gear find` option `zone`: Only items the wiki lists for this zone | DRAFT |
 | src/commands/help.ts:38 | `/craft help`: `/zone` a zone's level range, creatures, drops and spots, with MnM Atlas and wiki links | DRAFT |
-| src/commands/help.ts:50-56 | `/craft help` is now sent as an embed (its text unchanged): it no longer fit a message's 2,000 characters | DRAFT (changes approved presentation) |
+| src/commands/help.ts:54-58 | `/craft help` is now sent as an embed (its text unchanged): it no longer fit a message's 2,000 characters | DRAFT (changes approved presentation) |
 | src/board/render.ts:110 | Board index: `/zone` a zone's levels, creatures, drops and map links | DRAFT |
 | src/zone/card.ts:12 | **Levels:** \<level text> / not recorded | DRAFT |
 | src/zone/card.ts:13-14, 15 | Field: Map · No map yet · [Open in MnM Atlas](\<atlas>) | DRAFT |
 | src/zone/card.ts:15-19 | Buttons: Open in MnM Atlas · Wiki page · Gear here · More creatures · More drops | DRAFT |
 | src/zone/card.ts:20-25 | Fields: Adjacent zones · Creatures (\<n>) · Notable drops (\<n>) · Notable spots · line: \<creature> (L\<level>) · [find on map](\<atlas ?find>) · \<item> · AC \<n> · +\<n> more | DRAFT |
-| src/zone/card.ts:26-28 | Field: Not recorded yet · No \<level range, description, creatures, drops, map> recorded for this zone yet. [MnM Atlas](\<atlas>) may have more. | DRAFT |
+| src/zone/card.ts:26-29 | Field: Not recorded yet · No \<level range, description, creatures> or \<drops> recorded for this zone yet. [MnM Atlas](\<atlas>) may have more. | DRAFT |
 | src/zone/card.ts:29 | Map credit (MnM Atlas pictures, off until ATLAS_ZONE_IMAGES is on): Map: MnM Atlas (mnmatlas.com) and its original map authors | DRAFT |
 | src/zone/card.ts:30-31 | Map credit (a licensed map; none today): Map: \<author> · via \<source> · [\<licence>](\<licence link>) · [file page](\<wiki file page>) | DRAFT |
 | src/zone/card.ts:32 | Footer: Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools · Mo Betta | DRAFT |
 | src/zone/card.ts:33-39 | Pages: Creatures in \<zone> · Drops in \<zone> · Page \<n> of \<m> · by level, lowest first / by AC, highest first, then name · Previous · Next | DRAFT |
-| src/commands/zone.ts:31-35 | No zones are loaded yet. They arrive with the nightly import. · No zone is called **\<typed>**. · Did you mean: **\<zone>**, …? · The zones: \<zone>, …. · That zone is no longer in the data. Run `/zone` again. | DRAFT |
-| src/commands/zone.ts:36-40 | Gear here: Gear from **\<zone>**: pick a sort if you like (AC by default), then your class. · Sort (AC by default) · Sort: \<sort> · Your class, or Any · No classes are loaded yet. Try `/gear find` once the nightly import has run. | DRAFT |
+| src/zone/suggest.ts:9-12 | (`/zone`, and `/gear find zone:`) No zones are loaded yet. They arrive with the nightly import. · No zone is called **\<typed>**. · Did you mean: **\<zone>**, …? · The zones: \<zone>, …. | DRAFT |
+| src/commands/zone.ts:32 | That zone is no longer in the data. Run `/zone` again. | DRAFT |
+| src/commands/zone.ts:33-38 | Gear here: Gear from **\<zone>**: pick a sort if you like (AC by default), then your class. · Sort (AC by default) · Sort: \<sort> · Your class, or Any · No classes are loaded yet. Try `/gear find` once the nightly import has run. · (above the results) **Gear from \<zone>** | DRAFT |
 | docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" and "Turning on MnM Atlas's zone pictures (operator)" | DRAFT |
 | README.md | Credits: mnm-tools maps.json; Mo Betta (zones.json, npcs.json, from the wiki under CC BY-SA); MnM Atlas and its original map authors | DRAFT |
