@@ -935,20 +935,20 @@ The zone map's title, "Map: MnM Atlas (mnmatlas.com) and its original map author
 |---|---|---|
 | src/commands/setup.ts:219 | (button) Create GuildCraft channels | DRAFT |
 | src/commands/channels.ts:23, 36-39 | (names) GuildCraft (category) · GC-Crafting Roster · GC-Officer Review · GC-Item Vault · GC-Craft Requests | DRAFT |
-| src/commands/channels.ts:86 | GuildCraft is already creating channels for this server. Wait a minute, then press the button again. | DRAFT |
-| src/commands/channels.ts:87 | Sorry, GuildCraft can't reach Discord right now. Nothing was changed; please try again. | DRAFT |
-| src/commands/channels.ts:88 | Sorry, I couldn't read this server's channels and roles from Discord. Nothing was changed; please try again. | DRAFT |
-| src/commands/channels.ts:89-90 | Nothing was created. GuildCraft is missing **\<permissions>** in this server.<br>Grant them to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi): servers that added GuildCraft before this button did not grant **Manage Channels** or **Manage Permissions**. Picking your own channels with `/guildcraft setup`'s options still works. | DRAFT |
-| src/commands/channels.ts:91 | Created #\<channel> (forum / private text channel / text channel). | DRAFT |
-| src/commands/channels.ts:92 | Kept #\<channel> (…): it already exists. | DRAFT |
-| src/commands/channels.ts:93 | Could not create **\<name>** (Discord answered \<status>). Press the button again to retry; nothing is duplicated. | DRAFT |
-| src/commands/channels.ts:94-95 | **GC-Crafting Roster** (the roster board) was not created: forum channels need **Community**. Turn it on (Server Settings → Enable Community), then press the button again. | DRAFT |
-| src/commands/channels.ts:96 | No officer role is set, so the review and vault channels are visible to admins only. Run `/guildcraft setup officer_role:`, then press the button again to add the role to them. | DRAFT |
-| src/commands/channels.ts:97 | Added the officer role to #\<channel>. | DRAFT |
-| src/commands/channels.ts:98 | Could not add the officer role to #\<channel>: add it in the channel's settings (Permissions). | DRAFT |
-| src/commands/channels.ts:99 | Set #\<channel>'s default sort order to Creation Time, so the board reads A→Z. | DRAFT |
-| src/commands/channels.ts:100 | Every GuildCraft channel already exists and is saved. Nothing was changed. | DRAFT |
-| src/commands/channels.ts:101 | Could not create the **GuildCraft** category (Discord answered \<status>). Nothing else was created; press the button again to retry. | DRAFT |
+| src/commands/channels.ts:93 | GuildCraft is already creating channels for this server. Wait a minute, then press the button again. | DRAFT |
+| src/commands/channels.ts:94 | Sorry, GuildCraft can't reach Discord right now. Nothing was changed; please try again. | DRAFT |
+| src/commands/channels.ts:95 | Sorry, I couldn't read this server's channels and roles from Discord. Nothing was changed; please try again. | DRAFT |
+| src/commands/channels.ts:96-97 | Nothing was created. GuildCraft is missing **\<permissions>** in this server.<br>Grant them to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi): servers that added GuildCraft before this button did not grant **Manage Channels** or **Manage Permissions**. Picking your own channels with `/guildcraft setup`'s options still works. | DRAFT |
+| src/commands/channels.ts:98 | Created #\<channel> (forum / private text channel / text channel). | DRAFT |
+| src/commands/channels.ts:99 | Kept #\<channel> (…): it already exists. | DRAFT |
+| src/commands/channels.ts:100 | Could not create **\<name>** (Discord answered \<status>). Press the button again to retry; nothing is duplicated. | DRAFT |
+| src/commands/channels.ts:101-102 | **GC-Crafting Roster** (the roster board) was not created: forum channels need **Community**. Turn it on (Server Settings → Enable Community), then press the button again. | DRAFT |
+| src/commands/channels.ts:103 | No officer role is set, so the new review and vault channels are visible only to members with Administrator (and GuildCraft). Run `/guildcraft setup officer_role:`, then press **Create GuildCraft channels** on its reply to add the role to them. | DRAFT |
+| src/commands/channels.ts:104 | Added the officer role to #\<channel>. | DRAFT |
+| src/commands/channels.ts:105 | Could not add the officer role to #\<channel>: add it in the channel's settings (Permissions). | DRAFT |
+| src/commands/channels.ts:106 | Set #\<channel>'s default sort order to Creation Time, so the board reads A→Z. | DRAFT |
+| src/commands/channels.ts:107 | Every GuildCraft channel already exists and is saved. Nothing was changed. | DRAFT |
+| src/commands/channels.ts:108 | Could not create the **GuildCraft** category (Discord answered \<status>). Nothing else was created; press the button again to retry. | DRAFT |
 | src/commands/gear.ts:69 | (link button) Character planner (Stories of MnM) | DRAFT |
 | docs/LAUNCH-GUIDE.md:10, 25-26, 32, 34-36 | The install link (permissions=361045806096), the Manage Channels and Manage Permissions rows, "Or let GuildCraft create its channels", "Servers that added GuildCraft before Create GuildCraft channels" | DRAFT |
 | docs/SELF-HOSTING.md:111, 114, 126-127 | The install link and number (361045806096), the Manage Channels and Manage Permissions rows | DRAFT |

@@ -218,7 +218,7 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
 export const CREATE_CHANNELS_PREFIX = 'gcc:';
 export const CREATE_CHANNELS_LABEL = 'Create GuildCraft channels';
 const CHANNEL_SETTINGS = ['board_channel_id', 'review_channel_id', 'vault_channel_id', 'request_channel_id'] as const;
-/** The button: always on the settings reply (`always`), and on a save that leaves any of the four channels unset. */
+/** The button: on the settings reply and after an officer role is saved (`always`), and on a save that leaves any of the four channels unset. */
 export function setupButtons(s: Pick<Guild, (typeof CHANNEL_SETTINGS)[number]>, always = false): { components?: unknown[] } {
   if (!always && CHANNEL_SETTINGS.every((k) => s[k])) return {};
   return { components: [row([button(CREATE_CHANNELS_PREFIX, CREATE_CHANNELS_LABEL, STYLE_PRIMARY)])] };
@@ -267,7 +267,8 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     lines.push(boardBuildLine(skills, posts));
     if (moved) lines.push(`The old board's posts in <#${before.board_channel_id}> are left as they are.`);
   }
-  return ephemeral(lines.join('\n'), setupButtons(after));
+  // An officer role saved: the button is offered, so a press adds it to the channels it created (review of PR B).
+  return ephemeral(lines.join('\n'), setupButtons(after, officerRole !== undefined));
 }
 
 /** What the setup reply says about building the board, from the tradeskill and post counts. */

@@ -13,7 +13,7 @@
 import type { Ctx } from '../context.ts';
 import { botApi, type BotApi } from '../board/api.ts';
 import {
-  ADMINISTRATOR, ephemeral, GUILD_CATEGORY, GUILD_FORUM, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, READ_MESSAGE_HISTORY, SEND_MESSAGES,
+  ADMINISTRATOR, CREATE_PRIVATE_THREADS, ephemeral, GUILD_CATEGORY, GUILD_FORUM, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, READ_MESSAGE_HISTORY, SEND_MESSAGES,
   SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL, type MessageReply,
 } from '../discord.ts';
 import { channelBits, PERMISSION_NAMES, type ChannelKind } from '../permissions.ts';
@@ -56,14 +56,21 @@ const CALL_CAP = 14;
 export function overwritesFor(p: Planned, guildId: string, botId: string, officerRoleId: string | null): Overwrite[] {
   const everyone: Overwrite = p.private
     ? { id: guildId, type: 0, allow: '0', deny: String(VIEW_CHANNEL) }
-    : // Everyone reads it and replies in threads; nobody but the bot starts a post or sends in the channel itself.
-      { id: guildId, type: 0, allow: String(VIEW_CHANNEL | SEND_MESSAGES_IN_THREADS), deny: String(SEND_MESSAGES) };
+    : // Everyone reads it and replies in threads; nobody but the bot starts a post or sends in the channel itself. In the
+      // request channel members do not open private threads of their own either (review of PR B). Create Public Threads
+      // is not denied: the bot does not hold it, so it may not set it (Create Guild Channel).
+      {
+        id: guildId,
+        type: 0,
+        allow: String(VIEW_CHANNEL | SEND_MESSAGES_IN_THREADS),
+        deny: String(p.type === GUILD_TEXT ? SEND_MESSAGES | CREATE_PRIVATE_THREADS : SEND_MESSAGES),
+      };
   const officer: Overwrite[] = p.private && officerRoleId ? [{ id: officerRoleId, type: 0, allow: String(OFFICER_ALLOW), deny: '0' }] : [];
   return [everyone, ...officer, { id: botId, type: 1, allow: String(channelBits(p.kind)), deny: '0' }];
 }
 
 /** Every bit the overwrites set, allowed or denied: the bot must hold each one in the server. */
-export const BITS_SET = LAYOUT.reduce((b, p) => b | channelBits(p.kind), VIEW_CHANNEL | SEND_MESSAGES | SEND_MESSAGES_IN_THREADS | OFFICER_ALLOW);
+export const BITS_SET = LAYOUT.reduce((b, p) => b | channelBits(p.kind), VIEW_CHANNEL | SEND_MESSAGES | SEND_MESSAGES_IN_THREADS | CREATE_PRIVATE_THREADS | OFFICER_ALLOW);
 /** What the button needs besides those: creating channels, and editing their overwrites later. */
 export const BUTTON_NEEDS = MANAGE_CHANNELS | MANAGE_ROLES | BITS_SET;
 
@@ -93,7 +100,7 @@ export const CHANNELS_COPY = {
   failed: (name: string, status: number) => `Could not create **${name}** (Discord answered ${status || 'nothing'}). Press the button again to retry; nothing is duplicated.`,
   noCommunity: (name: string) =>
     `**${name}** (the roster board) was not created: forum channels need **Community**. Turn it on (Server Settings → Enable Community), then press the button again.`,
-  noOfficer: 'No officer role is set, so the review and vault channels are visible to admins only. Run `/guildcraft setup officer_role:`, then press the button again to add the role to them.',
+  noOfficer: 'No officer role is set, so the new review and vault channels are visible only to members with Administrator (and GuildCraft). Run `/guildcraft setup officer_role:`, then press **Create GuildCraft channels** on its reply to add the role to them.',
   officerAdded: (id: string) => `Added the officer role to <#${id}>.`,
   officerFailed: (id: string) => `Could not add the officer role to <#${id}>: add it in the channel's settings (Permissions).`,
   sorted: (id: string) => `Set <#${id}>'s default sort order to Creation Time, so the board reads A→Z.`,
@@ -113,7 +120,8 @@ export async function createChannelsButton(c: Ctx): Promise<MessageReply> {
     .bind(lease, c.guild.id, new Date(now).toISOString())
     .run();
   if (took.meta.changes !== 1) return ephemeral(CHANNELS_COPY.busy);
-  const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: CALL_CAP, deadline: now + 20_000 });
+  // 10 s for new calls (each may run 10 s more), leaving the board run after it room inside waitUntil's 30 s.
+  const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: CALL_CAP, deadline: now + 10_000 });
   try {
     return await createChannels(c, api, c.applicationId);
   } finally {
@@ -144,6 +152,7 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
   let changed = false;
   /** A write that saves no setting: a forum's sort order, an officer overwrite. */
   let acted = false;
+  let createdPrivate = false;
 
   let category = all.find((ch) => sameChannel(ch, { name: CATEGORY_NAME, type: GUILD_CATEGORY }));
   const needsCategory = LAYOUT.some((p) => !findExisting(c, all, p, undefined) && (p.type !== GUILD_FORUM || community));
@@ -199,6 +208,7 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
     lines.push(CHANNELS_COPY.created(made.body.id, what(p)));
     saved[p.key] = made.body.id;
     changed = true;
+    createdPrivate ||= p.private;
   }
 
   if (!changed) return ephemeral([...lines, ...(acted ? [] : [CHANNELS_COPY.nothing])].join('\n'));
@@ -207,15 +217,17 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
     c.effects.board = true;
     lines.push(boardBuildLine(skills, posts));
   }
-  if (!c.guild.officer_role_id) lines.push(CHANNELS_COPY.noOfficer);
+  if (createdPrivate && !c.guild.officer_role_id) lines.push(CHANNELS_COPY.noOfficer);
   return ephemeral(lines.join('\n'));
 }
 
-/** A saved channel that still exists, else one of the planned type and name (in the category first). */
+/**
+ * A saved channel that still exists, else one of the planned type and name inside the GuildCraft category. A channel of
+ * that name elsewhere is not adopted (review of PR B): setup's options, with their checks, are the way to pick it.
+ */
 function findExisting(c: Ctx, all: GuildChannel[], p: Planned, categoryId: string | undefined): GuildChannel | undefined {
   const savedId = c.guild[p.key];
   const saved = savedId ? all.find((ch) => ch.id === savedId) : undefined;
   if (saved) return saved;
-  const named = all.filter((ch) => sameChannel(ch, p));
-  return named.find((ch) => categoryId && ch.parent_id === categoryId) ?? named[0];
+  return categoryId ? all.find((ch) => ch.parent_id === categoryId && sameChannel(ch, p)) : undefined;
 }

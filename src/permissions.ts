@@ -51,7 +51,7 @@ export const ROUTES: Route[] = [
   // Order 19 (ITEM 4): Create GuildCraft channels (read 2026-10-22). Overwrites: "only permissions your bot has in the
   // guild can be allowed/denied" (Create Guild Channel), so every bit it sets is one the install link asks for.
   { method: 'GET', path: '/guilds/{}/channels', channel: null, needs: [], why: 'channel setup: the channels that already exist, to reuse them (Get Guild Channels: no permission stated)' },
-  { method: 'POST', path: '/guilds/{}/channels', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: create the category and its channels, with their overwrites (Create Guild Channel: "Requires the MANAGE_CHANNELS permission")' },
+  { method: 'POST', path: '/guilds/{}/channels', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: create the category and its channels, with their overwrites (Create Guild Channel: "Requires the MANAGE_CHANNELS permission"; it does not say whether overwrites also need MANAGE_ROLES, so the button requires both before any create)' },
   { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
   { method: 'PUT', path: '/channels/{}/permissions/{}', channel: null, needs: [MANAGE_ROLES], why: 'channel setup: add the officer role to its private channels later (Edit Channel Permissions: "Requires the MANAGE_ROLES permission")' },
 ];

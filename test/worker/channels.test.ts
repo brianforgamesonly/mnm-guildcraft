@@ -117,7 +117,8 @@ describe('Create GuildCraft channels', () => {
     expect(ow(vault, APP_ID)!.allow).toBe(bits(VIEW_CHANNEL, SEND_MESSAGES, ATTACH_FILES, READ_MESSAGE_HISTORY));
 
     const requests = byName('GC-Craft Requests');
-    expect(ow(requests, GUILD)).toEqual({ id: GUILD, type: 0, allow: bits(VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS), deny: bits(SEND_MESSAGES) });
+    // Members reply in the bot's private threads; they neither send in the channel nor open private threads of their own.
+    expect(ow(requests, GUILD)).toEqual({ id: GUILD, type: 0, allow: bits(VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS), deny: bits(SEND_MESSAGES, CREATE_PRIVATE_THREADS) });
     expect(ow(requests, APP_ID)!.allow).toBe(bits(VIEW_CHANNEL, READ_MESSAGE_HISTORY, MANAGE_THREADS, CREATE_PRIVATE_THREADS, SEND_MESSAGES_IN_THREADS));
 
     // Every channel that denies @everyone something lets the bot's own member back in.
@@ -148,14 +149,21 @@ describe('Create GuildCraft channels', () => {
     expect(r.data.content!.match(/^Kept/gm)).toHaveLength(4);
   });
 
-  it('a channel that already exists by name (as Discord stores it) is reused, not duplicated; a saved channel is kept', async () => {
-    fake.channels.push({ id: '700000000000009001', name: 'gc-item-vault', type: GUILD_TEXT, parent_id: null, permission_overwrites: [], default_sort_order: null });
+  it('a channel in the GuildCraft category by name (as Discord stores it) is reused; a saved channel is kept; one elsewhere is not adopted', async () => {
+    fake.channels.push({ id: '700000000000009000', name: 'GuildCraft', type: GUILD_CATEGORY, parent_id: null, permission_overwrites: [], default_sort_order: null });
+    fake.channels.push({ id: '700000000000009001', name: 'gc-item-vault', type: GUILD_TEXT, parent_id: '700000000000009000', permission_overwrites: [], default_sort_order: null });
     fake.channels.push({ id: '700000000000009002', name: 'my-own-review', type: GUILD_TEXT, parent_id: null, permission_overwrites: [], default_sort_order: null });
+    // An unrelated public channel with the request channel's name, outside the category: setup's options are the way to pick it.
+    fake.channels.push({ id: '700000000000009004', name: 'gc-craft-requests', type: GUILD_TEXT, parent_id: null, permission_overwrites: [], default_sort_order: null });
     await setup();
     await env.DB.prepare('UPDATE guild SET review_channel_id = ?').bind('700000000000009002').run();
-    await pressCreate();
-    expect(creates().map((c) => c.body.name)).toEqual([CATEGORY_NAME, 'GC-Crafting Roster', 'GC-Craft Requests']);
-    expect(await saved()).toMatchObject({ vault_channel_id: '700000000000009001', review_channel_id: '700000000000009002' });
+    const r = await pressCreate();
+    expect(creates().map((c) => [c.body.name, c.body.parent_id])).toEqual([['GC-Crafting Roster', '700000000000009000'], ['GC-Craft Requests', '700000000000009000']]);
+    const s = await saved();
+    expect(s).toMatchObject({ vault_channel_id: '700000000000009001', review_channel_id: '700000000000009002' });
+    expect(s.request_channel_id).not.toBe('700000000000009004');
+    // No private channel was created by this press, so no admins-only warning about channels it did not make.
+    expect(r.data.content).not.toContain(CHANNELS_COPY.noOfficer);
   });
 
   it('without Community: the other three are created, and setup says Community is needed for the roster board', async () => {
@@ -177,7 +185,9 @@ describe('Create GuildCraft channels', () => {
     const r = await pressCreate();
     expect(r.data.content).toContain(CHANNELS_COPY.noOfficer);
     expect(ow(byName('GC-Officer Review'), OFFICER)).toBeUndefined();
-    await setup({ officer_role: OFFICER });
+    // Every channel is saved now, and the officer role's save still offers the button the warning points to.
+    const officerSaved = await setup({ officer_role: OFFICER });
+    expect(officerSaved.data.components![0].components[0].custom_id).toBe(CREATE_CHANNELS_PREFIX);
     fake.calls = [];
     const again = await pressCreate();
     expect(fake.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toEqual([
@@ -217,9 +227,10 @@ describe('Create GuildCraft channels', () => {
     expect(creates()).toEqual([]);
   });
 
-  it('a reused forum not sorted by creation time is set to it', async () => {
-    fake.channels.push({ id: '700000000000009003', name: 'gc-crafting-roster', type: GUILD_FORUM, parent_id: null, permission_overwrites: [], default_sort_order: 0 });
+  it('a saved forum not sorted by creation time is set to it', async () => {
+    fake.channels.push({ id: '700000000000009003', name: 'our-board', type: GUILD_FORUM, parent_id: null, permission_overwrites: [], default_sort_order: 0 });
     await setup();
+    await env.DB.prepare('UPDATE guild SET board_channel_id = ?').bind('700000000000009003').run();
     await pressCreate();
     expect(fake.channels.find((c) => c.id === '700000000000009003')!.default_sort_order).toBe(FORUM_SORT_CREATION);
   });

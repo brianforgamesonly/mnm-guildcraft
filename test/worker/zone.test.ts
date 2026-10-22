@@ -11,7 +11,7 @@ import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { decodeState, encodeState, sortByKey, ANY } from '../../src/gear/options.ts';
 import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
 import { GEAR_COPY } from '../../src/commands/gear.ts';
-import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneSites } from '../../src/zone/card.ts';
+import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneEmbeds, zoneSites } from '../../src/zone/card.ts';
 import { ZONE_SUGGEST_COPY } from '../../src/zone/suggest.ts';
 import { count, reset } from '../db.ts';
 import { as, botApi, GUILD, press, select, send, type Member } from '../discord.ts';
@@ -187,6 +187,17 @@ describe('/zone: the card', () => {
     // Post to channel reposts both, in the same order.
     const posted = await send(press(ann, 'pub:zone:rothold'), { env: { ATLAS_ZONE_IMAGES: 'on' } });
     expect(posted.data.embeds!.map((e) => e.title)).toEqual([ZONE_COPY.atlasCredit, 'Rothold']);
+  });
+
+  it('order 19: a licensed map whose page is the card\'s own link loses its url, so Discord never merges the two', () => {
+    const page = 'https://monstersandmemories.miraheze.org/wiki/Somewhere';
+    const map = { url: 'https://static.wikitide.net/x.png', author: 'A', via: 'the wiki', licence: 'CC BY-SA 4.0', licence_url: 'https://creativecommons.org/licenses/by-sa/4.0/', page };
+    const zone = { key: 'somewhere', name: 'Somewhere', level: null, description: null, adjacent_json: null, atlas_id: null, wiki_url: page, map_json: JSON.stringify(map), markers_json: null };
+    const [first, second] = zoneEmbeds({ zone, creatures: [], rowsRead: 0 } as never, false);
+    expect(first.image).toEqual({ url: map.url });
+    expect(first.url).toBeUndefined();
+    expect(second.title).toBe('Somewhere');
+    expect(second.url).toBe(page);
   });
 
   it('Post to channel posts the card publicly, links kept; its buttons answer each presser privately', async () => {
