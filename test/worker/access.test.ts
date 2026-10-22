@@ -39,7 +39,7 @@ describe('guild row', () => {
   it('a failed lookup stores the id as the name; a later command refreshes it', async () => {
     guildLookup.respond = () => new Response('nope', { status: 500 });
     const first = await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
-    expect(first.data.content).toMatch(/^## GuildCraft/); // the reply is not held up
+    expect(first.data.embeds![0].description).toMatch(/^## GuildCraft/); // the reply is not held up (order 17: the guide is an embed)
     expect(await one('SELECT name FROM guild')).toEqual({ name: GUILD });
     guildLookup.respond = () => Response.json({ id: GUILD, name: 'Renamed Later' });
     await send(cmd(as(ANN), 'craft', 'help'), { env: { DISCORD_BOT_TOKEN: 'test-token' } });
@@ -101,7 +101,7 @@ describe('access', () => {
   it('/craft help answers a caller the gate refuses, without creating a member row', async () => {
     await gate();
     const r = await send(cmd(as(BO), 'craft', 'help'));
-    expect(r.data.content).toMatch(/^## GuildCraft/);
+    expect(r.data.embeds![0].description).toMatch(/^## GuildCraft/);
     expect(await count('member', 'discord_user_id = ?', BO)).toBe(0);
   });
 

@@ -3,6 +3,7 @@
 // ('gear.find', src/interactions.ts).
 import { ANY, statSql, type GearQuery } from './options.ts';
 import { REMOVED_BIT, SLOTS, SOURCES } from './vocab.ts';
+import { WIKI_ZONES_SOURCE, zoneNamesSql } from '../zone/names.ts';
 
 export const PAGE_SIZE = 10;
 
@@ -29,6 +30,13 @@ export function filters(q: GearQuery): Filter[] {
   if (q.minRatio !== undefined) f.push({ label: `min_ratio: ${q.minRatio}`, sql: 'ratio >= ?', binds: [q.minRatio] });
   for (const s of q.stats) f.push({ label: `stat: ${s.label}`, sql: `${statSql(s)} > 0`, binds: [] });
   if (q.source) f.push({ label: `source: ${q.source}`, sql: '(source_mask & ?) <> 0', binds: [1 << SOURCES.indexOf(q.source)] });
+  // Order 17: the item's wikiZones name the zone, through the derived mapping (zone_name), as /zone's drops do.
+  if (q.zone !== undefined)
+    f.push({
+      label: `zone: ${q.zone}`,
+      sql: `EXISTS (SELECT 1 FROM json_each(item.origin_json, '$.wikiZones') j WHERE j.value IN ${zoneNamesSql(WIKI_ZONES_SOURCE, '?')})`,
+      binds: [q.zone],
+    });
   return f;
 }
 

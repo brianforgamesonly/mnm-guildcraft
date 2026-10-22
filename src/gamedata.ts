@@ -21,6 +21,8 @@ const LISTS = {
   // offers each one (src/commands/autocomplete.ts). The imported trivial: a guild's correction shows on /craft find.
   recipes: `SELECT i.name || char(31) || t.name || char(31) || ifnull(r.trivial, '') || char(31) || r.id AS name
     FROM recipe r JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id WHERE r.active = 1 AND r.guild_id IS NULL`,
+  // Order 17: the zones (/zone name, /gear find zone), written by the same import.
+  zones: 'SELECT name FROM zone WHERE active = 1',
 } as const;
 export type GameList = keyof typeof LISTS;
 

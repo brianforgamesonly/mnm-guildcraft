@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
 import { DEFINED } from '../../src/commands/definitions.ts';
-import { COMING_SOON, HELP_FOOTER, HELP_LINES, HELP_TEXT } from '../../src/commands/help.ts';
+import { COMING_SOON, HELP_FOOTER, HELP_LIMIT, HELP_LINES, HELP_TEXT } from '../../src/commands/help.ts';
 import { APP_ID, as, cmd, exchange, post } from '../discord.ts';
 
 const helpCommand = cmd(as('100000000000000001'), 'craft', 'help');
@@ -24,7 +24,8 @@ describe('Discord interactions endpoint', () => {
     const { ack, calls } = await exchange(helpCommand);
     expect(ack).toEqual({ type: 5, data: { flags: 64 } });
     expect(calls.map((c) => [c.method, c.url])).toEqual([['PATCH', `https://discord.com/api/v10/webhooks/${APP_ID}/${calls[0].token}/messages/@original`]]);
-    expect(calls[0].body.content).toBe(HELP_TEXT);
+    // Order 17: the guide is an embed's description (it outgrew a message's 2,000 characters of content).
+    expect(calls[0].body.embeds[0].description).toBe(HELP_TEXT);
     expect(calls[0].body.flags).toBeUndefined(); // an edit cannot change visibility; the defer set it
   });
 
@@ -67,12 +68,13 @@ describe('/craft help copy', () => {
     for (const c of DEFINED) expect(entries.some((e) => e.cmds.includes(c)), c).toBe(true);
     // Order 13: /gear find is a named departure from the PRD (CHECKLIST A15), the one command beyond it.
     // Order 16: the craft request commands (CHECKLIST A18), named departures from the PRD too.
-    const BEYOND_PRD = ['/gear find', '/craft request', '/craft requests', '/craft notify'];
+    // Order 17: /zone (CHECKLIST A16, A19).
+    const BEYOND_PRD = ['/gear find', '/craft request', '/craft requests', '/craft notify', '/zone'];
     for (const c of entries.flatMap((e) => e.cmds)) expect([...prdCommands, ...BEYOND_PRD], c).toContain(c);
     expect([...DEFINED].sort()).toEqual([
       '/character add', '/character edit', '/character remove', '/craft find', '/craft forget', '/craft help', '/craft know', '/craft me', '/craft notify', '/craft report',
       '/craft request', '/craft requests', '/craft set', '/craft update', '/gear find', '/guildcraft rebuild-board', '/guildcraft remove-member', '/guildcraft setup', '/guildcraft status', '/item image', '/recipe override',
-      '/recipe source', '/roster member', '/roster recipes', '/roster skill', '/roster top',
+      '/recipe source', '/roster member', '/roster recipes', '/roster skill', '/roster top', '/zone',
     ]);
     // Order 9: /recipe add is out of scope (override 3), so it alone stays "(coming soon)", derived.
     expect(HELP_TEXT.split('\n').filter((l) => l.endsWith(COMING_SOON))).toEqual([expect.stringMatching(/^`\/recipe add`/)]);
@@ -83,8 +85,8 @@ describe('/craft help copy', () => {
       expect(HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${c}\``))!.endsWith(COMING_SOON), c).toBe(false);
   });
 
-  it('fits one Discord message and carries the attribution footer, with no "draft" left (order 11)', () => {
-    expect(HELP_TEXT.length).toBeLessThanOrEqual(2000);
+  it('fits one embed description and carries the attribution footer, with no "draft" left (order 11)', () => {
+    expect(HELP_TEXT.length).toBeLessThanOrEqual(HELP_LIMIT);
     expect(HELP_TEXT.endsWith('-# Item data: Monsters and Memories Wiki (CC BY-SA 4.0)')).toBe(true);
     expect(HELP_TEXT).toContain(HELP_FOOTER);
     expect(HELP_TEXT).not.toMatch(/draft/i);

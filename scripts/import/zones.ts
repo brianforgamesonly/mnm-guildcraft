@@ -11,6 +11,8 @@
 // - a map image is kept only where a checked record states its licence and its author or source (map-licences.ts).
 
 import { mergeCreature, type CreatureFields } from '../../src/zone/creatures.ts';
+import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE, zoneKey } from '../../src/zone/names.ts';
+export { levelSort, zoneKey } from '../../src/zone/names.ts';
 import { MAP_LICENCES, type MapLicence } from './map-licences.ts';
 
 // ---------------------------------------------------------------- sources
@@ -39,7 +41,7 @@ export interface ZoneInput {
 }
 
 /** The mapping's sources: each names where a zone name was read. */
-export const NAME_SOURCES = ['mo-betta:zones', 'mnm-tools:maps', 'mnm-tools:wikiZones', 'mnm-tools:mobs', 'atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs'] as const;
+export const NAME_SOURCES = ['mo-betta:zones', 'mnm-tools:maps', WIKI_ZONES_SOURCE, MOB_ZONES_SOURCE, 'atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs'] as const;
 export type NameSource = (typeof NAME_SOURCES)[number];
 /** The sources whose names are zones; in this order, the first one to use a zone's name gives its display name. */
 const REGISTRIES: readonly NameSource[] = ['mo-betta:zones', 'mnm-tools:maps', 'mnm-tools:wikiZones', 'mnm-tools:mobs'];
@@ -61,20 +63,11 @@ function list(raw: unknown, file: string, key: string): Record<string, unknown>[
 
 // ---------------------------------------------------------------- names
 
-/** The only two normalisations allowed (order 17, section D): case, and curly to straight apostrophes. */
-export const zoneKey = (name: string): string => name.replace(/[‘’]/g, "'").toLowerCase();
-
 /**
  * Mo Betta's NPC zone text: split only on ", " and " or ", then de-duplicated. Nothing is trimmed or guessed. Empty text
  * names no zone (counted as noZone), not an unmatched name.
  */
 export const npcZoneParts = (text: string): string[] => (text === '' ? [] : [...new Set(text.split(/, | or /))]);
-
-/** The first whole number in a level text ("~36-37" → 36, "< 20" → 20); null when it holds none. The sort key only. */
-export function levelSort(level: string | null | undefined): number | null {
-  const m = /\d+/.exec(level ?? '');
-  return m ? Number(m[0]) : null;
-}
 
 // ---------------------------------------------------------------- rows
 

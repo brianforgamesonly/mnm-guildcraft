@@ -47,4 +47,6 @@ Then fix the hook and run `npm run test:hook`.
 ## Credits
 
 - Item and recipe data: the [Monsters and Memories Wiki](https://monstersandmemories.miraheze.org/), licensed [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
-- Data extraction: [mnm-tools](https://github.com/Boisteroux/mnm-tools) by Boisteroux, MIT licence. This project reads its `mnmdb/wiki.json`.
+- Data extraction: [mnm-tools](https://github.com/Boisteroux/mnm-tools) by Boisteroux, MIT licence. This project reads its `mnmdb/wiki.json` and, for `/zone`, `mnmdb/maps.json` (zone names and map markers).
+- Zone and NPC data for `/zone`: [Mo Betta](https://github.com/amyklindley/mo-betta-quests) by Amy Lindley, MIT licence for its code. Its `zones.json` and `npcs.json` are taken from the Monsters and Memories Wiki, whose contributors hold them under that wiki's CC BY-SA licence.
+- Maps: [MnM Atlas](https://www.mnmatlas.com/), an illustrated fan atlas, and the original map authors it credits. `/zone` links to its maps by id (from its `data/maps.json`) and, as its [embed page](https://www.mnmatlas.com/embed/) asks, credits "MnM Atlas" and the original map authors.

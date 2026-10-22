@@ -86,6 +86,8 @@ export async function autocomplete(db: D1Database, i: Interaction): Promise<Choi
   }
   // Order 16: /craft notify's tradeskill, with All first.
   if (command === 'craft' && sub === 'notify' && f.name === 'tradeskill') return asChoices(matchChoices([ALL_SKILLS, ...(await gameList(db, 'skills'))], typed));
+  // Order 17: /zone name and /gear find zone, from the zone list (25 of the ~29 as the member types).
+  if ((command === 'zone' && f.name === 'name') || (command === 'gear' && f.name === 'zone')) return asChoices(matchChoices(await gameList(db, 'zones'), typed));
   const list = GAME_OPTIONS[f.name];
   if (list) return asChoices(matchChoices(await gameList(db, list), typed));
   if (f.name === 'name' || f.name === 'character') {

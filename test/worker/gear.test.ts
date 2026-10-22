@@ -9,7 +9,7 @@ import { HELP_TEXT } from '../../src/commands/help.ts';
 import { ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MAX_OPEN_REPORTS } from '../../src/commands/reports.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
-import { ANY, decodeState, encodeState, SORTS, STAT_FILTERS, sortByKey, TOTAL_STATS_SQL, type GearQuery } from '../../src/gear/options.ts';
+import { ANY, decodeState, encodeState, SORTS, STAT_FILTERS, sortByKey, TOTAL_STATS_SQL, ZONE_STATE_MAX, type GearQuery } from '../../src/gear/options.ts';
 import migration11 from '../../migrations/0011_item_reports.sql?raw';
 import { filters, searchStatement } from '../../src/gear/search.ts';
 import { RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES } from '../../src/gear/vocab.ts';
@@ -71,7 +71,7 @@ beforeEach(async () => {
 describe('the command definition (Discord limits)', () => {
   it('class is the first option and required; options in the order set; every list derived', () => {
     const find = COMMANDS.find((c) => c.name === 'gear')!.options[0];
-    expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort']);
+    expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort', 'zone']);
     expect(find.options[0]).toMatchObject({ required: true });
     const opt = (n: string) => find.options.find((o) => o.name === n) as { choices?: { value: string }[] };
     expect(opt('slot').choices!.map((c) => c.value)).toEqual([...SLOTS]);
@@ -107,6 +107,8 @@ describe('the command definition (Discord limits)', () => {
       stats: STAT_FILTERS.slice(-3),
       source: SOURCES[SOURCES.length - 1],
       sort: longest(SORTS, (s) => String(SORTS.indexOf(s)).length),
+      // Order 17: the longest zone key the state carries (/gear find and Gear here refuse longer ones).
+      zone: 'z'.repeat(ZONE_STATE_MAX),
     };
     const id = `${PAGE_PREFIX}999:${encodeState(q)}`;
     expect(id.length).toBeLessThanOrEqual(100);

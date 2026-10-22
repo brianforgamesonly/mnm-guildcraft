@@ -51,12 +51,16 @@ jobs:
           node --input-type=module -e "import { currentCopy } from './scripts/copies.ts'; console.log('database=' + currentCopy().database)" >> "$GITHUB_OUTPUT"
       - name: Apply migrations (remote D1)
         run: npx wrangler d1 migrations apply "${{ steps.copy.outputs.database }}" --remote --env "$GUILDCRAFT_COPY"
+      # Order 17, override 3: ATLAS_ZONE_IMAGES (a repository variable, not a secret) switches MnM Atlas's whole-zone
+      # pictures on /zone cards. Unset means off; the owner sets it to "on" once the atlas's maker agrees, then re-runs this.
       - name: Deploy the Worker
         env:
           DISCORD_PUBLIC_KEY: ${{ secrets[format('{0}DISCORD_PUBLIC_KEY', matrix.prefix)] }}
+          ATLAS_ZONE_IMAGES: ${{ vars.ATLAS_ZONE_IMAGES || 'off' }}
         run: |
           test -n "$DISCORD_PUBLIC_KEY" || { echo "::error::${{ matrix.prefix }}DISCORD_PUBLIC_KEY is not set"; exit 1; }
-          npx wrangler deploy --env "$GUILDCRAFT_COPY" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY"
+          echo "ATLAS_ZONE_IMAGES=$ATLAS_ZONE_IMAGES"
+          npx wrangler deploy --env "$GUILDCRAFT_COPY" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY" --var "ATLAS_ZONE_IMAGES:$ATLAS_ZONE_IMAGES"
       - name: Set DISCORD_BOT_TOKEN as a Worker secret
         env:
           DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', matrix.prefix)] }}

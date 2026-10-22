@@ -162,6 +162,14 @@ export const COMMANDS = [
     ],
   },
   {
+    // Order 17: no subcommand; the zone list is data, offered by autocomplete.
+    name: 'zone',
+    description: 'A zone: map, level range, creatures, drops and links',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [{ type: STRING, name: 'name', description: 'The zone: pick from the list', required: true, autocomplete: true, max_length: 100 }],
+  },
+  {
     name: 'recipe',
     description: 'Officers: correct recipes for this server',
     type: 1,
@@ -297,5 +305,10 @@ export function commandLimitProblems(commands: readonly Def[]): string[] {
   return out;
 }
 
-/** "/name sub" for every defined subcommand: the commands that are built. */
-export const DEFINED = new Set(COMMANDS.flatMap((c) => c.options.map((o) => `/${c.name} ${o.name}`)));
+/** "/name sub" for every defined subcommand, and "/name" for a command without subcommands (order 17): the commands that are built. */
+export const DEFINED = new Set(
+  COMMANDS.flatMap((c) => {
+    const subs = (c.options as readonly { type: number; name: string }[]).filter((o) => o.type === SUBCOMMAND);
+    return subs.length ? subs.map((o) => `/${c.name} ${o.name}`) : [`/${c.name}`];
+  }),
+);

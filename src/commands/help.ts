@@ -1,6 +1,7 @@
 // Approved copy (docs/COPY.md, order 11).
 // Lists every command in docs/PRD.md (FR-1 to FR-9). "(coming soon)" is derived, never typed: an entry
 // is marked when its commands are not in the registered definitions (src/commands/definitions.ts).
+import { ephemeral } from '../discord.ts';
 import { DEFINED } from './definitions.ts';
 
 export const HELP_FOOTER = 'Item data: Monsters and Memories Wiki (CC BY-SA 4.0)';
@@ -33,6 +34,8 @@ export const HELP_LINES: HelpLine[] = [
   { cmds: ['/craft notify'], text: 'get added to requests you can craft (off by default)' },
   '**Items and data**',
   { cmds: ['/gear find'], text: '— gear for your class by slot, type, AC, ratio, stats and source' },
+  // Order 17.
+  { cmds: ['/zone'], text: "a zone's level range, creatures, drops and spots, with MnM Atlas and wiki links" },
   { cmds: ['/item image'], text: 'send an item window screenshot; it shows under **Stat image** once an officer approves' },
   { cmds: ['/craft report'], text: 'report wrong recipe data or a missing recipe (or press **Report a problem**)' },
   { cmds: ['/recipe add'], text: 'record a recipe the data is missing (officer-approved)' },
@@ -46,6 +49,13 @@ export const HELP_LINES: HelpLine[] = [
 ];
 
 export const isBuilt = (cmd: string) => DEFINED.has(cmd);
+
+/**
+ * Order 17: the guide no longer fits a message's 2,000 characters of content (it was at 1,998 before /zone), so it is
+ * sent as an embed's description (4,096); the text is unchanged.
+ */
+export const HELP_LIMIT = 4096;
+export const helpReply = () => ephemeral('', { embeds: [{ description: HELP_TEXT }] });
 
 export const HELP_TEXT = [
   '## GuildCraft — every command',

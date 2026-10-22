@@ -83,6 +83,21 @@ Screenshots sent with `/item image` wait in a private channel until an officer p
 1. Create a private text channel (for example `guildcraft-vault`) that only officers and MNM-Guildcraft can see.
 2. Run `/guildcraft setup vault:#guildcraft-vault`. GuildCraft checks it can View Channel, Send Messages, Attach Files and Read Message History there, and names any permission it is missing. It warns (and still saves) if @everyone can see the channel.
 
+## Zones (`/zone`, order 17)
+
+`/zone name:` shows a zone's card, privately, with **Post to channel**. The card has the zone's level range and a line about it, the zones next to it, its creatures by level (each with a **find on map** link to MnM Atlas), its notable drops by AC, and spots from the community maps. Buttons open the zone in MnM Atlas and on the wiki, page through every creature and drop, or run **Gear here**: `/gear find` for that zone, after you pick your class. `/gear find` also has a `zone:` option.
+
+The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas, mnm-tools and Mo Betta, and updates with the nightly import. A map picture appears only where the map's licence and author are known. Today that is no zone, so each card links to MnM Atlas instead.
+
+### Turning on MnM Atlas's zone pictures (operator)
+
+The cards can show MnM Atlas's picture of each zone. It is off until the atlas's maker agrees. Once they do:
+
+1. GitHub → the GuildCraft repository → **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**: name `ATLAS_ZONE_IMAGES`, value `on`.
+2. **Actions** → **deploy** → **Run workflow**.
+
+The cards then show the atlas's picture, credited "Map: MnM Atlas (mnmatlas.com) and its original map authors" and linked to the zone in the atlas. To turn it off, set the variable to `off` and run **deploy** again.
+
 ## Coming soon
 
 - `/recipe add`: members record a recipe the community data lacks, kept private to the guild until an officer approves it (PRD FR-3.1). Moved to after launch by order 9.
