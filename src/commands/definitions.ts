@@ -266,11 +266,108 @@ export const COMMANDS = [
   },
 ] as const;
 
-/** The definitions to register: /gear find's class option offers "Any" and `classes` (the copy's game_class codes). */
-export const commandsWith = (classes: readonly string[]) =>
-  COMMANDS.map((c) =>
-    c.name !== 'gear' ? c : { ...c, options: c.options.map((s) => (s.name === 'find' ? { ...s, options: gearFindOptions(classes) } : s)) },
-  );
+// ---------------------------------------------------------------- order 18: the simpler command list (CHECKLIST A20)
+// Eight member commands, /officer and /guildcraft. The Worker answers both lists while the old one is registered;
+// work order 18's PR B registers this one instead (src/interactions.ts ROUTES carries both until then).
+
+const ROSTER = COMMANDS.find((c) => c.name === 'roster')!;
+const ZONE = COMMANDS.find((c) => c.name === 'zone')!;
+const GUILDCRAFT = COMMANDS.find((c) => c.name === 'guildcraft')!;
+const officerMember = (description: string) => ({ type: USER, name: 'member', description, required: true });
+
+export const NEXT_COMMANDS = [
+  {
+    name: 'skills',
+    description: 'Set one tradeskill level, or leave the options out to update up to 5 at once',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      { ...skillOption, required: false, description: 'With level: the tradeskill to set. Leave both out to pick up to 5' },
+      { type: INTEGER, name: 'level', description: 'With skill: its level', min_value: 0 },
+      characterOption,
+    ],
+  },
+  {
+    name: 'item',
+    description: 'Any item: stats, where it comes from, its recipe and crafters, and recipes that use it',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      { type: STRING, name: 'name', description: 'The item: pick from the list (craftable ones are marked)', required: true, autocomplete: true, max_length: 100 },
+      { type: ATTACHMENT, name: 'screenshot', description: 'Optional: a screenshot of the item window, for an officer to approve' },
+    ],
+  },
+  {
+    // The class choices are the copy's game_class codes, filled in at registration (commandsWith).
+    name: 'gear',
+    description: 'Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: gearFindOptions([]),
+  },
+  // Kept as subcommands: each view has its own required option (skill, member), which Discord then asks for and checks.
+  ROSTER,
+  ZONE,
+  {
+    name: 'request',
+    description: 'Ask the opted-in crafters who can make an item, in a private thread',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      { type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 },
+      { type: INTEGER, name: 'quantity', description: 'How many (default 1)', min_value: 1, max_value: 1000 },
+      { type: STRING, name: 'note', description: 'Optional: anything the crafter should know (up to 300 characters)', max_length: 300 },
+    ],
+  },
+  { name: 'help', description: 'A guide to every command, a page at a time', type: 1, contexts: GUILD_ONLY },
+  {
+    name: 'officer',
+    description: 'Officers: recipe data, members and craft requests',
+    type: 1,
+    contexts: GUILD_ONLY,
+    // Shown to Manage Server by default; a server admin grants it to the officer role once (Server Settings →
+    // Integrations → the app → /officer). src/interactions.ts re-checks the officer role on every call.
+    default_member_permissions: MANAGE_GUILD,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'recipe-source',
+        description: 'Set how a recipe is obtained (this server only)',
+        options: COMMANDS.find((c) => c.name === 'recipe')!.options.find((s) => s.name === 'source')!.options,
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'recipe-fix',
+        description: "Correct a recipe's trivial or ingredients (this server only)",
+        options: COMMANDS.find((c) => c.name === 'recipe')!.options.find((s) => s.name === 'override')!.options,
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'remove-member',
+        description: "Remove a member's characters and mark them as left (shows a preview first)",
+        options: [officerMember('The member to remove')],
+      },
+      { type: SUBCOMMAND, name: 'requests', description: 'Every open craft request in this server, with Cancel' },
+    ],
+  },
+  {
+    ...GUILDCRAFT,
+    description: 'GuildCraft settings for this server (admins)',
+    // remove-member moved to /officer.
+    options: GUILDCRAFT.options.filter((s) => s.name !== 'remove-member'),
+  },
+] as const;
+
+type Gear = { name: string; options?: readonly { type: number; name: string; options?: unknown }[] };
+/** /gear find (the old list) or /gear (order 18): its options with the class choices filled in. */
+function gearWith<C extends Gear>(c: C, classes: readonly string[]): C {
+  const subs = (c.options ?? []).some((o) => o.type === SUBCOMMAND);
+  return { ...c, options: subs ? c.options!.map((s) => (s.name === 'find' ? { ...s, options: gearFindOptions(classes) } : s)) : gearFindOptions(classes) };
+}
+
+/** The definitions to register: /gear's class option offers "Any" and `classes` (the copy's game_class codes). */
+export const commandsWith = <T extends Gear = (typeof COMMANDS)[number]>(classes: readonly string[], list: readonly T[] = COMMANDS as unknown as readonly T[]): T[] =>
+  list.map((c) => (c.name === 'gear' ? gearWith(c, classes) : c));
 
 /**
  * Discord's documented maximums for a slash command (https://docs.discord.com/developers/interactions/application-commands):
@@ -282,7 +379,8 @@ export const commandsWith = (classes: readonly string[]) =>
 export const DISCORD_COMMAND_LIMITS = { choices: 25, options: 25, name: 32, description: 100, choice: 100, combined: 8000 } as const;
 type Def = { name: string; description?: string; options?: readonly Def[]; choices?: readonly { name: string; value: string | number }[] };
 
-export function commandLimitProblems(commands: readonly Def[]): string[] {
+export function commandLimitProblems(list: readonly object[]): string[] {
+  const commands = list as readonly Def[];
   const L = DISCORD_COMMAND_LIMITS;
   const out: string[] = [];
   const visit = (d: Def, at: string): number => {

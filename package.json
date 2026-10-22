@@ -22,6 +22,7 @@
     "import:remote": "node scripts/import/run.ts --remote",
     "bench:import-writes": "node scripts/bench/import-writes.ts",
     "bench:gear-search": "node scripts/bench/gear-search.mjs",
+    "bench:item-cards": "node scripts/bench/item-cards.ts",
     "commands:register": "node scripts/discord/register.ts"
   },
   "dependencies": {

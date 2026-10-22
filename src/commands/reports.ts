@@ -40,7 +40,8 @@ const ts = (iso: string) => `<t:${Math.floor(Date.parse(iso) / 1000)}:f>`;
 export function reportCard(r: ReportRow): Embed {
   const item = r.kind === 'item';
   return {
-    title: truncate(`${item ? 'Item report' : 'Report'}: ${r.item ?? 'unknown item'}`, 256),
+    // Order 18: a name the data lacks is the details' first line ("Item: <name>").
+    title: truncate(`${item ? 'Item report' : 'Report'}: ${r.item ?? /^Item: (.+)$/m.exec(r.details ?? '')?.[1] ?? 'unknown item'}`, 256),
     description: [`**Issue:** ${issueLabel(r.issue, r.kind)}`, `**From:** <@${r.reporter}> · ${ts(r.created_at)}`, r.details ? `**Details:** ${md(r.details)}` : null].filter(Boolean).join('\n'),
     footer: {
       text: item
@@ -52,8 +53,11 @@ export function reportCard(r: ReportRow): Embed {
 
 const cardButtons = (id: number) => [row([button(`${FIXED_PREFIX}${id}`, 'Mark fixed', 3), button(`${DISMISS_PREFIX}${id}`, 'Dismiss', STYLE_SECONDARY)])];
 
-/** Files a report: one row and its audit row, then the card in the review channel (when one is set). */
-async function fileReport(c: Ctx, item: { id: number; name: string }, issue: string, rawDetails: string | undefined, kind: ReportKind = 'recipe'): Promise<MessageReply> {
+/**
+ * Files a report: one row and its audit row, then the card in the review channel (when one is set). Order 18: an item the
+ * data does not hold has no id (recipe_report.item_id is nullable); its typed name travels in the details.
+ */
+async function fileReport(c: Ctx, item: { id: number | null; name: string }, issue: string, rawDetails: string | undefined, kind: ReportKind = 'recipe'): Promise<MessageReply> {
   const issues = issuesFor(kind);
   if (!issues.some((i) => i.value === issue)) return ephemeral(`Pick an issue from the list: ${issues.map((i) => i.label).join(', ')}.`);
   const details = rawDetails?.trim() || null;
@@ -66,7 +70,7 @@ async function fileReport(c: Ctx, item: { id: number; name: string }, issue: str
     c.db
       .prepare("INSERT INTO recipe_report (guild_id, item_id, reporter, issue, details, status, created_at, kind) VALUES (?, ?, ?, ?, ?, 'open', ?, ?) RETURNING id")
       .bind(c.guild.id, item.id, c.userId, issue, details, createdAt, kind),
-    audit(c.db, c.guild.id, c.userId, 'report.create', `item:${item.id}`, null, { issue, kind }),
+    audit(c.db, c.guild.id, c.userId, 'report.create', item.id === null ? 'item:none' : `item:${item.id}`, null, { issue, kind }),
   ]);
   const id = (inserted.results as { id: number }[])[0].id;
   const saved = `Thanks: your report on **${md(item.name)}** (${issueLabel(issue, kind)}) is saved`;
@@ -141,6 +145,50 @@ export async function reportSubmitted(c: Ctx, customId: string, components: Moda
   if (!item) return ephemeral('That item is no longer in the data. Nothing was saved.');
   const v = modalValues(components);
   return fileReport(c, item, v.get(ISSUE_INPUT) ?? '', v.get(DETAILS_INPUT), kind);
+}
+
+// ---------------------------------------------------------------- order 18: a missing recipe for a name the data lacks
+
+/** /item's "No item called X" reply: Report a missing recipe ("rpn:<typed name>", a modal at once) and its submit. */
+export const MISSING_PREFIX = 'rpn:';
+export const MISSING_MODAL_PREFIX = 'rpnm:';
+const NAME_INPUT = 'name';
+/** The name and the member's words share the 300-character details: "Item: <up to 100>\n<up to 190>". */
+const MISSING_DETAILS_MAX = 190;
+/** A custom_id holds 100 characters; a longer name is cut, and the member can correct it in the form. */
+export const missingId = (typed: string) => `${MISSING_PREFIX}${typed.slice(0, 100 - MISSING_PREFIX.length).replace(/[\uD800-\uDBFF]$/, '')}`;
+
+export function missingModal(customId: string): InteractionReply {
+  return {
+    type: InteractionResponseType.MODAL,
+    data: {
+      custom_id: MISSING_MODAL_PREFIX,
+      title: 'Report a missing recipe',
+      components: [
+        {
+          type: MessageComponentTypes.LABEL,
+          label: 'Item name',
+          component: { type: MessageComponentTypes.INPUT_TEXT, custom_id: NAME_INPUT, style: 1, required: true, max_length: 100, value: customId.slice(MISSING_PREFIX.length) || undefined },
+        },
+        {
+          type: MessageComponentTypes.LABEL,
+          label: 'Details (optional)',
+          description: `Its tradeskill, ingredients or trivial, if you know them. Up to ${MISSING_DETAILS_MAX} characters.`,
+          component: { type: MessageComponentTypes.INPUT_TEXT, custom_id: DETAILS_INPUT, style: 2, required: false, max_length: MISSING_DETAILS_MAX },
+        },
+      ],
+    },
+  };
+}
+
+/** rpnm: the missing-recipe form: a 'missing' recipe report, with the item when the data has one by that name. */
+export async function missingSubmitted(c: Ctx, components: ModalComponent[] | undefined): Promise<MessageReply> {
+  const v = modalValues(components);
+  const name = (v.get(NAME_INPUT) ?? '').trim().slice(0, 100);
+  if (!name) return ephemeral('Give the item name. Nothing was saved.');
+  const words = (v.get(DETAILS_INPUT) ?? '').trim().slice(0, MISSING_DETAILS_MAX);
+  const item = await findItem(c.db, { key: name.toLowerCase() });
+  return fileReport(c, item ?? { id: null, name }, 'missing', item ? words : [`Item: ${name}`, words].filter(Boolean).join('\n'));
 }
 
 /** rpf:<id> / rpd:<id>: an officer records the outcome. The card is edited to say who and when; its buttons go. */

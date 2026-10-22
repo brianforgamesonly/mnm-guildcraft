@@ -15,8 +15,11 @@ export const OFFICER_ONLY = 'Only officers can do that.';
 const listOf = (characters: CharacterBrief[]) => characters.map(describeCharacter).join(', ');
 
 /** The preview: what Confirm would do, with Confirm and Cancel. Nothing changes until Confirm. */
-export async function guildcraftRemoveMember(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const userId = optString(opts, 'user');
+export const guildcraftRemoveMember = (c: Ctx, opts: Option[]) => removeMemberPreview(c, optString(opts, 'user'));
+/** Order 18: /officer remove-member member: (the same preview). */
+export const officerRemoveMember = (c: Ctx, opts: Option[]) => removeMemberPreview(c, optString(opts, 'member'));
+
+async function removeMemberPreview(c: Ctx, userId: string | undefined): Promise<MessageReply> {
   if (!userId) return ephemeral('Pick the member to remove.');
   const { member, characters } = await membersCharacters(c.db, c.guild.id, userId);
   if (!member) return ephemeral(`<@${userId}> has never used GuildCraft in this server, so there is nothing to remove.`);

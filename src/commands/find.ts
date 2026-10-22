@@ -260,8 +260,11 @@ const LINE_STEPS = [15, 10, 6, 3, 1];
 /** Room left for the one-time welcome embed (src/commands/welcome.ts, about 520 characters) on a first command. */
 const WELCOME_RESERVE = 1000;
 
-/** The embeds, shrinking the per-tier line count until the whole message is inside the 6,000 limit. */
-export function findEmbeds(d: FindData, window: number): { embeds: Embed[]; note: string | null } {
+/**
+ * The embeds, shrinking the per-tier line count until the whole message is inside the 6,000 limit. `beside` (order 18:
+ * /item's larger card and its "used in") are counted too, so the lines shrink before whole recipes are left off.
+ */
+export function findEmbeds(d: FindData, window: number, beside: Embed[] = []): { embeds: Embed[]; note: string | null } {
   const item = d.item!;
   const shown = d.recipes.slice(0, MAX_RECIPES);
   let embeds: Embed[] = [];
@@ -270,7 +273,7 @@ export function findEmbeds(d: FindData, window: number): { embeds: Embed[]; note
       itemCard(item, d.version),
       ...shown.map((r, i) => recipeEmbed(r, i, d.recipes.length, componentsFor(d, r.id), d.crafters, window, maxLines)),
     ];
-    if (embedChars(embeds) <= EMBED_LIMITS.total - WELCOME_RESERVE) break;
+    if (embedChars([...embeds, ...beside]) <= EMBED_LIMITS.total - WELCOME_RESERVE) break;
   }
   return { embeds, note: d.recipes.length > shown.length ? `Showing ${shown.length} of ${d.recipes.length} recipes.` : null };
 }

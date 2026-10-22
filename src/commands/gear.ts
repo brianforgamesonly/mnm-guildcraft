@@ -126,10 +126,13 @@ interface PageData {
 const parse = <T>(s: string | null): T => (s ? JSON.parse(s) : {}) as T;
 const sourcesOf = (mask: number): Source[] => SOURCES.filter((_, i) => mask & (1 << i));
 
-/** The mobs the page's items name (first LINE_MOBS each, or all for a card), their recipes and their crafters. One batch. */
-export async function pageData(c: Pick<Ctx, 'db' | 'guild'>, rows: GearRow[], mobsPerItem = LINE_MOBS): Promise<PageData> {
+/**
+ * The mobs the page's items name (first LINE_MOBS each, or all for a card), their recipes and their crafters. One batch.
+ * `withRecipes` false (order 18's /item card, which reads them with /craft find's loadFind) leaves the recipes out.
+ */
+export async function pageData(c: Pick<Ctx, 'db' | 'guild'>, rows: GearRow[], mobsPerItem = LINE_MOBS, withRecipes = true): Promise<PageData> {
   const names = [...new Set(rows.flatMap((r) => (parse<Origin>(r.origin_json).from ?? []).slice(0, mobsPerItem)))];
-  const crafted = rows.filter((r) => sourcesOf(r.source_mask).includes('Crafted')).map((r) => r.id);
+  const crafted = withRecipes ? rows.filter((r) => sourcesOf(r.source_mask).includes('Crafted')).map((r) => r.id) : [];
   const db = c.db;
   const [classes, mobs, recipes, version, ...crafters] = await db.batch([
     db.prepare('SELECT code, bit FROM game_class WHERE item_count > 0 AND bit IS NOT NULL'),
@@ -244,7 +247,7 @@ function flagsOf(r: GearRow): string[] {
   const s = parse<{ flags?: string[] }>(r.stats_json);
   return (s.flags ?? []).filter((f) => SHOWN_FLAGS.includes(f));
 }
-const incorrectStats = (r: GearRow) => (parse<Origin>(r.origin_json).categories ?? []).includes(INCORRECT_STATS_CATEGORY);
+export const incorrectStats = (r: GearRow) => (parse<Origin>(r.origin_json).categories ?? []).includes(INCORRECT_STATS_CATEGORY);
 
 export function resultEntry(r: GearRow, q: GearQuery, d: PageData, window: number, caps = { mobs: LINE_MOBS, zones: LINE_ZONES, vendors: 3, stats: 4 }): string {
   const name = r.wiki_url ? `**[${md(r.name)}](${r.wiki_url})**` : `**${md(r.name)}**`;
@@ -373,7 +376,7 @@ export async function gearPage(c: Ctx, customId: string): Promise<MessageReply> 
 // ---------------------------------------------------------------- the item card
 
 /** Full sources on the card: every mob (up to the field limit), the zones, the vendors as recorded. */
-function cardSourceFields(r: GearRow, d: PageData): EmbedField[] {
+export function cardSourceFields(r: GearRow, d: PageData): EmbedField[] {
   const o = parse<Origin>(r.origin_json);
   const f: EmbedField[] = [];
   for (const s of sourcesOf(r.source_mask)) {

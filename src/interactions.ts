@@ -4,19 +4,23 @@ import { autocomplete } from './commands/autocomplete.ts';
 import { characterAdd, characterEdit, characterRemove } from './commands/character.ts';
 import { helpReply } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
-import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, removeMemberButton } from './commands/members.ts';
+import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
+import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
 import { craftForget, craftKnow, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
-import { craftReport, DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted } from './commands/reports.ts';
+import {
+  craftReport, DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, MISSING_MODAL_PREFIX, MISSING_PREFIX, missingModal, missingSubmitted, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted,
+} from './commands/reports.ts';
 import { DETAILS_PREFIX, gearDetails, gearFind, gearPage, gearSort, PAGE_PREFIX as GEAR_PAGE_PREFIX, postGear, POST_WHAT as GEAR_POST, SORT_PREFIX as GEAR_SORT_PREFIX } from './commands/gear.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
-import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
+import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, skillsCommand, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
 import { WELCOME } from './commands/welcome.ts';
 import {
-  ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftNotify, craftRequest, craftRequests, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, requestFromFind, SEND_PREFIX, sendUnsent,
+  ADD_MODAL_PREFIX, ADD_PREFIX, addItemModal, addItemSubmitted, cancelFromList, craftNotify, craftRequest, craftRequests, DISCARD_PREFIX, discardUnsent, itemButton, LIST_PREFIX, OFFICER_PAGE_PREFIX, officerRequests, officerRequestsPage,
+  requestFromFind, SEND_PREFIX, sendUnsent,
 } from './commands/requests.ts';
 import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
 import {
@@ -42,7 +46,7 @@ type Access = 'open' | 'member' | 'officer' | 'admin';
  * lookups in its audit log"; craft.find is the PRD's action, roster.view and guildcraft.status are named additions).
  * Writes keep their own audit rows inside their write batch.
  */
-const ROUTES: Record<string, { access: Access; search?: true; audit?: string; run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
+const ROUTES: Record<string, { access: Access; search?: true; audit?: string | ((opts: Option[]) => string | undefined); run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
   'character add': { access: 'member', run: characterAdd },
   'character edit': { access: 'member', run: characterEdit },
   'character remove': { access: 'member', run: characterRemove },
@@ -76,6 +80,18 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string; ru
   'guildcraft status': { access: 'admin', audit: 'guildcraft.status', run: guildcraftStatus },
   'guildcraft rebuild-board': { access: 'admin', run: guildcraftRebuildBoard },
   'guildcraft remove-member': { access: 'officer', run: guildcraftRemoveMember },
+  // Order 18 (CHECKLIST A20): the simpler list (src/commands/definitions.ts NEXT_COMMANDS), on the old handlers. The audit
+  // action names stay as they were (craft.find, gear.find), so history stays comparable; the target is the new route key.
+  skills: { access: 'member', run: skillsCommand },
+  // A screenshot attached is a submission (its own audit row), not a lookup.
+  item: { access: 'member', search: true, audit: (opts) => (opts.some((o) => o.name === 'screenshot') ? undefined : 'craft.find'), run: itemCommand },
+  gear: { access: 'member', audit: 'gear.find', run: gearFind },
+  request: { access: 'member', run: craftRequest },
+  help: { access: 'open', run: async () => helpReply() },
+  'officer recipe-source': { access: 'officer', run: recipeSource },
+  'officer recipe-fix': { access: 'officer', run: recipeOverride },
+  'officer remove-member': { access: 'officer', run: officerRemoveMember },
+  'officer requests': { access: 'officer', run: officerRequests },
 };
 
 /** "name sub", or "name" for a command without subcommands (order 17: /zone). */
@@ -115,7 +131,13 @@ function withWelcome(reply: MessageReply): MessageReply {
  * Commands defer with type 5, carrying the reply's private flag (Discord keeps the flag from the defer);
  * components defer with type 6; modal submits with type 5, private (their reply is always private).
  */
-export type Plan = { defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
+/**
+ * The components that answer with a modal, at once (skillSelect below): a modal cannot follow a deferral. Order 18:
+ * Report a missing recipe on /item's "No item called" reply.
+ */
+export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX];
+
+export type Plan ={ defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
 
 export function planFor(i: Interaction): Plan {
   const inGuild = !!i.guild_id && !!i.member;
@@ -128,7 +150,7 @@ export function planFor(i: Interaction): Plan {
     case InteractionType.MESSAGE_COMPONENT:
       // The skill select and Report a problem open a modal, which cannot follow a deferral.
       // Order 16: Add item (on an unsent craft request) opens a modal too.
-      if (!inGuild || [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX].some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: false };
+      if (!inGuild || OPENS_MODAL.some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: false };
       return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
     case InteractionType.MODAL_SUBMIT:
       if (!inGuild) return { defer: false };
@@ -154,11 +176,12 @@ async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effect
   // Only a command that passes the member gate creates the member row, and only a new row shows the welcome.
   const isNew = passesGate ? (await touchMember(env.DB, guild.id, m)).isNew : false;
   const reply = await route.run(ctxFor(env, guild, m, effects, i), options);
-  if (route.audit)
+  const action = typeof route.audit === 'function' ? route.audit(options) : route.audit;
+  if (action)
     effects.audit = {
       guildId: guild.id,
       actor: m.user.id,
-      action: route.audit,
+      action,
       target: routeKey(i),
       detail: Object.fromEntries(options.filter((o) => !o.focused).map((o) => [o.name, o.value ?? null])),
     };
@@ -181,8 +204,11 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
     if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
     if (id.startsWith(REPORT_MODAL_PREFIX) || id.startsWith(ITEM_REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
     if (id.startsWith(ADD_MODAL_PREFIX)) return addItemSubmitted(c, id, i.data?.components);
+    if (id.startsWith(MISSING_MODAL_PREFIX)) return missingSubmitted(c, i.data?.components);
     return ephemeral(STALE_FORM);
   }
+  // Order 18: /officer requests' paging (re-checks the officer role).
+  if (id.startsWith(OFFICER_PAGE_PREFIX)) return officerRequestsPage(c, id);
   // Order 16: craft requests. Request a craft answers privately (also on a posted card); the thread's buttons re-check
   // who may press them; an unsent request's and /craft requests' controls are private messages, edited in place.
   if (id.startsWith(FROM_FIND_PREFIX)) return requestFromFind(c, Number(id.slice(FROM_FIND_PREFIX.length)));
@@ -211,6 +237,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
   if (id.startsWith(POST_PREFIX)) {
     const what = id.slice(POST_PREFIX.length);
+    if (what.startsWith(ITEM_POST)) return postItem(c, Number(what.slice(ITEM_POST.length)));
     if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
     if (what.startsWith(GEAR_POST)) return postGear(c, Number(what.slice(GEAR_POST.length)));
     if (what.startsWith(ZONE_POST)) return postZone(c, what.slice(ZONE_POST.length));
@@ -239,6 +266,7 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
   if (id.startsWith(ITEM_REPORT_PREFIX)) return reportModal(Number(id.slice(ITEM_REPORT_PREFIX.length)), 'item');
   if (id.startsWith(ADD_PREFIX)) return addItemModal(id);
+  if (id.startsWith(MISSING_PREFIX)) return missingModal(id);
   return updateSelected(ctxFor(env, guild, i.member!, {}), id, i.data?.values ?? []);
 }
 

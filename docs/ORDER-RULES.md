@@ -175,3 +175,9 @@ Treat the clock as authoritative over any date an order states.
 - A link to a page a site does not have is never offered: no fallback to a site's index or to MnM Atlas's root (which opens its world map). The card's MnM Atlas addresses name a registry id or nothing (`test/worker/zone.test.ts`, the order 17b regression test, applies the atlas's own address rule).
 - The other sites' addresses live in one derived file, `src/zone/sites.json`; CI fails when a link it held on main disappears for a zone it still holds (`scripts/ci/zone-sites.test.ts`).
 - A link check is proven in a real browser on the address the member is given, never only by comparing strings in a test.
+
+## Order 18
+
+- An autocomplete list is chosen by command and option (`src/commands/autocomplete.ts` LISTS), never by the option's name alone; every autocomplete option in the definitions has a list and every list names one (test/worker/next-commands.test.ts).
+- A button on a message the bot already sent keeps working after a rename: every custom_id prefix the code has ever sent is still handled.
+- A button that answers with a modal is never deferred (`src/interactions.ts` OPENS_MODAL).

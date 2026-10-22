@@ -14,6 +14,7 @@ import {
 } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
 import { noRecipe } from './find.ts';
+import { OFFICER_ONLY } from './members.ts';
 import { modalValues } from './reports.ts';
 
 export const SEND_PREFIX = 'rqs:';
@@ -431,23 +432,18 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
 
 // ---------------------------------------------------------------- /craft requests (private): open requests, with Cancel
 
-export async function craftRequests(c: Ctx): Promise<MessageReply> {
-  if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
-  const { results: reqs } = await c.db
-    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE r.guild_id = ?1 AND r.status = 'open' AND r.thread_id IS NOT NULL AND (?3 = 1 OR r.requester = ?2) ORDER BY r.id LIMIT 25`)
-    .bind(c.guild.id, c.userId, c.officer ? 1 : 0)
-    .all<RequestRow>();
-  if (!reqs.length) return ephemeral(c.officer ? 'No open craft requests in this server.' : 'You have no open craft requests. `/craft request` starts one.');
+/** Open requests' lines and the Cancel select (custom_id rql:, handled by cancelFromList), for /craft requests and /officer requests. */
+async function requestList(c: Ctx, reqs: RequestRow[], withRequester: boolean): Promise<{ lines: string[]; select: unknown }> {
   const { results: items } = await c.db.prepare(ITEMS_SQL).bind(JSON.stringify(reqs.map((r) => r.id))).all<ItemRow>();
   const names = await namesOf(c.db, c.guild.id, reqs.map((r) => r.requester));
   const summary = (r: RequestRow) => {
     const its = items.filter((i) => i.request_id === r.id);
     return `${its[0] ? `${its[0].name} ×${its[0].quantity}` : 'Craft request'}${its.length > 1 ? ` +${its.length - 1} more` : ''}`;
   };
-  const lines = [
-    c.officer ? `**Open craft requests** (as an officer you see all ${reqs.length}${reqs.length === 25 ? '+' : ''}):` : '**Your open craft requests:**',
-    ...reqs.map((r) => `**#${r.id}** ${r.thread_id ? `<#${r.thread_id}>` : ''} · ${md(summary(r))} · ${prefixOf(r, items.filter((i) => i.request_id === r.id))}${c.officer ? ` · from ${tagOf(names, r.requester)}` : ''} · <t:${Math.floor(Date.parse(r.opened_at ?? r.created_at) / 1000)}:R>`),
-  ];
+  const lines = reqs.map(
+    (r) =>
+      `**#${r.id}** ${r.thread_id ? `<#${r.thread_id}>` : ''} · ${md(summary(r))} · ${prefixOf(r, items.filter((i) => i.request_id === r.id))}${withRequester ? ` · from ${tagOf(names, r.requester)}` : ''} · <t:${Math.floor(Date.parse(r.opened_at ?? r.created_at) / 1000)}:R>`,
+  );
   const select = {
     type: 3,
     custom_id: LIST_PREFIX,
@@ -456,7 +452,63 @@ export async function craftRequests(c: Ctx): Promise<MessageReply> {
     max_values: 1,
     options: reqs.map((r) => ({ label: truncate(`#${r.id} ${summary(r)}`, 100), value: String(r.id) })),
   };
-  return ephemeral(lines.join('\n').slice(0, 2000), { components: [row([select])] });
+  return { lines, select };
+}
+
+export async function craftRequests(c: Ctx): Promise<MessageReply> {
+  if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
+  const { results: reqs } = await c.db
+    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE r.guild_id = ?1 AND r.status = 'open' AND r.thread_id IS NOT NULL AND (?3 = 1 OR r.requester = ?2) ORDER BY r.id LIMIT 25`)
+    .bind(c.guild.id, c.userId, c.officer ? 1 : 0)
+    .all<RequestRow>();
+  if (!reqs.length) return ephemeral(c.officer ? 'No open craft requests in this server.' : 'You have no open craft requests. `/craft request` starts one.');
+  const { lines, select } = await requestList(c, reqs, c.officer);
+  const head = c.officer ? `**Open craft requests** (as an officer you see all ${reqs.length}${reqs.length === 25 ? '+' : ''}):` : '**Your open craft requests:**';
+  return ephemeral([head, ...lines].join('\n').slice(0, 2000), { components: [row([select])] });
+}
+
+// ---------------------------------------------------------------- /officer requests (order 18): every open request, paged
+
+export const OFFICER_PAGE_PREFIX = 'rqp:';
+const OFFICER_PAGE_SIZE = 10;
+
+export const OFFICER_REQUESTS_COPY = {
+  none: 'No open craft requests in this server.',
+  head: (from: number, to: number, total: number) => `**Open craft requests** ${from}–${to} of ${total}, oldest first:`,
+} as const;
+
+async function officerPage(c: Ctx, page: number): Promise<{ content: string; components: unknown[] } | null> {
+  const where = "r.guild_id = ?1 AND r.status = 'open' AND r.thread_id IS NOT NULL";
+  const total = (await c.db.prepare(`SELECT count(*) AS n FROM craft_request r WHERE ${where}`).bind(c.guild.id).first<{ n: number }>())?.n ?? 0;
+  if (!total) return null;
+  const pages = Math.ceil(total / OFFICER_PAGE_SIZE);
+  const p = Math.min(Math.max(0, page), pages - 1);
+  const { results: reqs } = await c.db
+    .prepare(`SELECT ${REQUEST_COLS} FROM craft_request r WHERE ${where} ORDER BY r.id LIMIT ?2 OFFSET ?3`)
+    .bind(c.guild.id, OFFICER_PAGE_SIZE, p * OFFICER_PAGE_SIZE)
+    .all<RequestRow>();
+  const { lines, select } = await requestList(c, reqs, true);
+  const head = OFFICER_REQUESTS_COPY.head(p * OFFICER_PAGE_SIZE + 1, p * OFFICER_PAGE_SIZE + reqs.length, total);
+  const nav = row([
+    button(`${OFFICER_PAGE_PREFIX}${p - 1}`, '◀ Previous', STYLE_SECONDARY, p === 0),
+    button(`${OFFICER_PAGE_PREFIX}${p + 1}`, 'Next ▶', STYLE_SECONDARY, p >= pages - 1),
+  ]);
+  return { content: [head, ...lines].join('\n').slice(0, 2000), components: [row([select]), ...(pages > 1 ? [nav] : [])] };
+}
+
+/** /officer requests: page 1 (the route re-checks the officer role). */
+export async function officerRequests(c: Ctx): Promise<MessageReply> {
+  if (!c.guild.request_channel_id) return ephemeral(NO_REQUEST_CHANNEL);
+  const p = await officerPage(c, 0);
+  return p ? ephemeral(p.content, { components: p.components }) : ephemeral(OFFICER_REQUESTS_COPY.none);
+}
+
+/** rqp:<page>: Previous / Next, edited in place; officers only, re-checked on every press. */
+export async function officerRequestsPage(c: Ctx, customId: string): Promise<MessageReply> {
+  if (!c.officer) return ephemeral(OFFICER_ONLY);
+  if (!c.guild.request_channel_id) return updateMessage({ content: NO_REQUEST_CHANNEL, components: [] });
+  const p = await officerPage(c, Number(customId.slice(OFFICER_PAGE_PREFIX.length)) || 0);
+  return p ? updateMessage(p) : updateMessage({ content: OFFICER_REQUESTS_COPY.none, components: [] });
 }
 
 /** rql: the Cancel select on /craft requests: the requester's own request, or any for an officer. */
