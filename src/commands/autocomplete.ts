@@ -140,6 +140,7 @@ export const LISTS: Record<string, Lister> = {
   // Order 18's list.
   '/skills skill': game('skills'),
   '/skills character': characters,
+  '/me character': characters,
   '/item name': allItems,
   '/gear zone': game('zones'),
   '/request item': game('items'),

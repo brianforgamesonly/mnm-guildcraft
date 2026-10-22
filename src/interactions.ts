@@ -6,6 +6,7 @@ import { helpReply } from './commands/help.ts';
 import { guildcraftRebuildBoard, guildcraftSetup, guildcraftStatus } from './commands/setup.ts';
 import { guildcraftRemoveMember, noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
+import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
@@ -82,6 +83,8 @@ const ROUTES: Record<string, { access: Access; search?: true; audit?: string | (
   'guildcraft remove-member': { access: 'officer', run: guildcraftRemoveMember },
   // Order 18 (CHECKLIST A20): the simpler list (src/commands/definitions.ts NEXT_COMMANDS), on the old handlers. The audit
   // action names stay as they were (craft.find, gear.find), so history stays comparable; the target is the new route key.
+  me: { access: 'member', run: meCommand },
+  'officer edit-member': { access: 'officer', run: officerEditMember },
   skills: { access: 'member', run: skillsCommand },
   // A screenshot attached is a submission (its own audit row), not a lookup.
   item: { access: 'member', search: true, audit: (opts) => (opts.some((o) => o.name === 'screenshot') ? undefined : 'craft.find'), run: itemCommand },
@@ -118,6 +121,8 @@ const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: In
 /** Adds the one-time welcome to a reply, as an extra embed, and keeps the reply private. */
 function withWelcome(reply: MessageReply): MessageReply {
   if (reply.type !== InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE) return reply;
+  // Order 18: /me with no characters already carries it.
+  if (reply.data.embeds?.includes(WELCOME)) return reply;
   const embeds = [...(reply.data.embeds ?? []).slice(0, 9), WELCOME];
   return { ...reply, data: { ...reply.data, embeds, flags: (reply.data.flags ?? 0) | InteractionResponseFlags.EPHEMERAL } };
 }
@@ -133,9 +138,9 @@ function withWelcome(reply: MessageReply): MessageReply {
  */
 /**
  * The components that answer with a modal, at once (skillSelect below): a modal cannot follow a deferral. Order 18:
- * Report a missing recipe on /item's "No item called" reply.
+ * Report a missing recipe on /item's "No item called" reply; /me's Add character and Edit character (and its select).
  */
-export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX];
+export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL];
 
 export type Plan ={ defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
 
@@ -199,7 +204,14 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
   if (id.startsWith(FIXED_PREFIX) || id.startsWith(DISMISS_PREFIX)) return reportButton(c, id);
   if (id.startsWith(APPROVE_PREFIX) || id.startsWith(REJECT_PREFIX)) return imageButton(c, id);
-  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
+  // Order 18: /me's panel. Each press re-checks that the presser may act on the panel's member (src/commands/me.ts); an
+  // officer acting on a member's panel (/officer edit-member) needs no member role, as with the other officer tools.
+  const passes = passesMemberGate(guild, i.member!);
+  if (passes || c.officer) {
+    const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
+    if (panel) return panel;
+  }
+  if (!passes) return ephemeral(roleRequired(guild));
   if (i.type === InteractionType.MODAL_SUBMIT) {
     if (id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
     if (id.startsWith(REPORT_MODAL_PREFIX) || id.startsWith(ITEM_REPORT_MODAL_PREFIX)) return reportSubmitted(c, id, i.data?.components);
@@ -261,13 +273,20 @@ export function deferredReply(i: Interaction, env: Env, ctx: WaitUntil, effects:
 async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> {
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
-  if (!passesMemberGate(guild, i.member!)) return ephemeral(roleRequired(guild));
   const id = i.data?.custom_id ?? '';
+  const c = ctxFor(env, guild, i.member!, {});
+  const passes = passesMemberGate(guild, i.member!);
+  // Order 18: /me's forms (the officer path as in component()).
+  if (passes || c.officer) {
+    const panel = meImmediate(c, id, i.data?.values ?? []);
+    if (panel) return panel;
+  }
+  if (!passes) return ephemeral(roleRequired(guild));
   if (id.startsWith(REPORT_PREFIX)) return reportModal(Number(id.slice(REPORT_PREFIX.length)));
   if (id.startsWith(ITEM_REPORT_PREFIX)) return reportModal(Number(id.slice(ITEM_REPORT_PREFIX.length)), 'item');
   if (id.startsWith(ADD_PREFIX)) return addItemModal(id);
   if (id.startsWith(MISSING_PREFIX)) return missingModal(id);
-  return updateSelected(ctxFor(env, guild, i.member!, {}), id, i.data?.values ?? []);
+  return updateSelected(c, id, i.data?.values ?? []);
 }
 
 /** The reply to an interaction planFor answers at once. */

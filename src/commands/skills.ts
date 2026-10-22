@@ -115,7 +115,7 @@ export function updateSelects(characterId: number, skills: Tradeskill[], levels:
 }
 
 /** The skill-select step of /craft update, for one character. Also what an Update skills button opens. */
-async function updatePicker(c: Ctx, ch: Character): Promise<MessageReply> {
+export async function updatePicker(c: Ctx, ch: Character): Promise<MessageReply> {
   const skills = await allTradeskills(c.db);
   if (!skills.length) return ephemeral("The tradeskill list hasn't loaded yet. Try again later.");
   return ephemeral(`Pick up to ${MAX_PICK} tradeskills for **${md(ch.name)}**. A form then opens with a level box for each.`, {
@@ -257,7 +257,7 @@ export async function updateSubmitted(c: Ctx, customId: string, components: Moda
 
 // ---------------------------------------------------------------- /craft me
 
-const EMBED_MAX = 10;
+export const EMBED_MAX = 10;
 const DAY_MS = 86_400_000;
 
 export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
@@ -272,6 +272,18 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
     if (!chars.length) return ephemeral(noCharacters(c, c.userId));
   }
   const shown = chars.slice(0, EMBED_MAX);
+  const { embeds, anyStale } = await characterEmbeds(c, shown);
+  const notes = [
+    chars.length > EMBED_MAX ? `Showing ${EMBED_MAX} of ${chars.length} characters.` : null,
+    // Order 16: the member's craft request opt-ins (per member, not per character).
+    await notifyLine(c.db, c.guild.id, c.userId),
+    anyStale ? `-# *stale* = not updated in ${c.guild.stale_days} days.` : null,
+  ].filter(Boolean);
+  return ephemeral(notes.join('\n'), { embeds, components: updateButtons(shown) });
+}
+
+/** One embed per character: class and level, skills with their dates and stale markers, known recipes (/craft me, /me). */
+export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ embeds: Embed[]; anyStale: boolean }> {
   const { results } = await c.db
     .prepare(
       `SELECT s.character_id, t.name, s.level, s.updated_at FROM character_skill s JOIN tradeskill t ON t.id = s.tradeskill_id
@@ -297,11 +309,5 @@ export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
       description: truncate([head, lines.length ? lines.join('\n') : 'No skills yet: `/craft set` or `/craft update`.', knownLine(known.get(ch.id))].filter(Boolean).join('\n'), 4096),
     };
   });
-  const notes = [
-    chars.length > EMBED_MAX ? `Showing ${EMBED_MAX} of ${chars.length} characters.` : null,
-    // Order 16: the member's craft request opt-ins (per member, not per character).
-    await notifyLine(c.db, c.guild.id, c.userId),
-    anyStale ? `-# *stale* = not updated in ${c.guild.stale_days} days.` : null,
-  ].filter(Boolean);
-  return ephemeral(notes.join('\n'), { embeds, components: updateButtons(shown) });
+  return { embeds, anyStale };
 }
