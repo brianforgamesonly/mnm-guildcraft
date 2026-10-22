@@ -11,7 +11,7 @@ import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { decodeState, encodeState, sortByKey, ANY } from '../../src/gear/options.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
 import { GEAR_COPY } from '../../src/commands/gear.ts';
-import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY } from '../../src/zone/card.ts';
+import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneSites } from '../../src/zone/card.ts';
 import { ZONE_SUGGEST_COPY } from '../../src/zone/suggest.ts';
 import { count, reset } from '../db.ts';
 import { as, botApi, GUILD, press, select, send, type Member } from '../discord.ts';
@@ -88,10 +88,12 @@ describe('/zone: the card', () => {
     const r = await zone('evershade weald');
     const [links, actions] = r.data.components!;
     expect(r.data.components).toHaveLength(2);
+    const sites = zoneSites('evershade weald'); // the derived file's verified pages (both exist today)
+    expect(sites.mnmWiki && sites.stories).toBeTruthy();
     expect(links.components.map((b: any) => [b.label, b.url])).toEqual([
       [ZONE_COPY.wikiPage, 'https://monstersandmemories.miraheze.org/wiki/Evershade_Weald'],
-      [ZONE_COPY.mnmWiki, 'https://monstersandmemories.wiki/zones/evershade-weald'],
-      [ZONE_COPY.stories, 'https://storiesofmnm.com/zone/evershade-weald/'],
+      [ZONE_COPY.mnmWiki, sites.mnmWiki],
+      [ZONE_COPY.stories, sites.stories],
       [ZONE_COPY.connections, ZONE_CONNECTIONS],
       [ZONE_COPY.openAtlas, 'https://www.mnmatlas.com/evershade-weald/'],
     ]);
@@ -129,11 +131,23 @@ describe('/zone: the card', () => {
     // A merchant is stored, never shown as a creature.
     expect(field(r, /^Creatures/)).toBeUndefined();
     const [links, actions] = r.data.components!;
-    expect(links.components.map((b: any) => b.label)).toEqual([ZONE_COPY.wikiPage, ZONE_COPY.mnmWiki, ZONE_COPY.stories, ZONE_COPY.connections]);
+    const expected = (key: string) => {
+      const s = zoneSites(key);
+      return [...(s.mnmWiki ? [ZONE_COPY.mnmWiki] : []), ...(s.stories ? [ZONE_COPY.stories] : []), ZONE_COPY.connections];
+    };
+    expect(links.components.map((b: any) => b.label)).toEqual([ZONE_COPY.wikiPage, ...expected("ail'vorith")]);
     expect(actions.components.map((b: any) => b.disabled ?? false)).toEqual([false, false, true]);
-    // Sunken Resort: monstersandmemories.wiki has a page, Stories of MnM does not (src/zone/sites.json), so no button.
+    // Sunken Resort has no wiki link in the fixture and no atlas map; each site's button only where src/zone/sites.json has a page.
     const sunken = await zone('Sunken Resort');
-    expect(sunken.data.components![0].components.map((b: any) => b.label)).toEqual([ZONE_COPY.mnmWiki, ZONE_COPY.connections]);
+    expect(sunken.data.components![0].components.map((b: any) => b.label)).toEqual(expected('sunken resort'));
+    // A zone the file does not hold gets no other-site buttons at all.
+    expect(zoneSites('no such zone')).toEqual({ mnmWiki: null, stories: null });
+  });
+
+  it('Gear here on a zone with no gear says so instead of offering a class menu', async () => {
+    await zone("Ail'Vorith");
+    const r = await send(press(ann, "zg:ail'vorith"));
+    expect([r.type, r.data.content, r.data.components ?? []]).toEqual([4, ZONE_REPLY_COPY.noGear("Ail'Vorith"), []]);
   });
 
   it('an unknown zone gets suggestions, never a dead end', async () => {
@@ -222,6 +236,9 @@ describe('/zone: More creatures, Gear here', () => {
     expect(names(byName)).toEqual(['Another Ring', 'Weald Mail', 'Weald Ring']);
     expect(byName.data.content!.split('\n')[0]).toBe(GEAR_COPY.fromZone('Evershade Weald'));
     expect(byName.data.components!.at(-1).components[0].options.find((o: any) => o.default).label).toBe(GEAR_COPY.sortOption('Name'));
+    // An order 17 menu still open ("zgc:<sort index>:<key>") still reaches the zone.
+    const old = await send(select(ann, 'zgc:0:evershade weald', [ANY]));
+    expect(old.data.content!.split('\n')[0]).toBe(GEAR_COPY.fromZone('Evershade Weald'));
   });
 
   it('/gear find zone: the same filter from the command, by name in any case', async () => {

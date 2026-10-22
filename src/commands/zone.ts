@@ -9,7 +9,8 @@ import { unknownZone } from '../zone/suggest.ts';
 import { ANY, SORTS, ZONE_STATE_MAX, type GearQuery } from '../gear/options.ts';
 import { gameList } from '../gamedata.ts';
 import { atlasMapUrl, listEmbed, loadZone, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneEmbeds, zoneSites, type ZoneData } from '../zone/card.ts';
-import { zoneKey } from '../zone/names.ts';
+import { WIKI_ZONES_SOURCE, zoneKey, zoneNamesSql } from '../zone/names.ts';
+import { REMOVED_BIT } from '../gear/vocab.ts';
 import { gearResults } from './gear.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -35,7 +36,15 @@ export const ZONE_REPLY_COPY = {
   gearPick: (zone: string) => `Gear from **${md(zone)}**: pick your class (or Any). You can change the sort on the results.`,
   classPlaceholder: 'Your class, or Any',
   noClasses: 'No classes are loaded yet. Try `/gear find` once the nightly import has run.',
+  noGear: (zone: string) => `The wiki lists no gear from **${md(zone)}** yet.`,
 } as const;
+
+/**
+ * Whether the wiki lists any gear (a slot, Removed Items left out) from the zone. Read when Gear here is pressed, never per
+ * card (it may scan the item table: order 17b moved this cost off the card).
+ */
+const GEAR_EXISTS_SQL = `SELECT 1 FROM item WHERE slot_mask <> 0 AND origin_json IS NOT NULL AND (source_mask & ${REMOVED_BIT}) = 0 AND EXISTS (
+  SELECT 1 FROM json_each(item.origin_json, '$.wikiZones') j WHERE j.value IN ${zoneNamesSql(WIKI_ZONES_SOURCE)}) LIMIT 1`;
 
 // ---------------------------------------------------------------- the card
 
@@ -121,6 +130,7 @@ export async function zoneGear(c: Ctx, customId: string): Promise<MessageReply> 
   const key = customId.slice(GEAR_PREFIX.length);
   const name = (await c.db.prepare('SELECT name FROM zone WHERE key = ? AND active = 1').bind(key).first<{ name: string }>())?.name;
   if (!name) return ephemeral(ZONE_REPLY_COPY.gone);
+  if (!(await c.db.prepare(GEAR_EXISTS_SQL).bind(key).first())) return ephemeral(ZONE_REPLY_COPY.noGear(name));
   const classes = await gameList(c.db, 'classes');
   if (!classes.length) return ephemeral(ZONE_REPLY_COPY.noClasses);
   const cls = row([
@@ -135,9 +145,13 @@ export async function zoneGear(c: Ctx, customId: string): Promise<MessageReply> 
   return ephemeral(ZONE_REPLY_COPY.gearPick(name), { components: [cls] });
 }
 
-/** zgc:<key>: the class picked; /gear find's first page for this zone, sorted by AC, replaces the select. */
+/**
+ * zgc:<key>: the class picked; /gear find's first page for this zone, sorted by AC, replaces the select. An order 17 menu
+ * still open sends "zgc:<sort index>:<key>": its key is read the same way, and its sort is AC.
+ */
 export async function zoneGearClass(c: Ctx, customId: string, values: string[]): Promise<MessageReply> {
-  const key = customId.slice(GEAR_CLASS_PREFIX.length);
+  const raw = customId.slice(GEAR_CLASS_PREFIX.length);
+  const key = (await c.db.prepare('SELECT 1 FROM zone WHERE key = ? AND active = 1').bind(raw).first()) ? raw : raw.replace(/^\d+:/, '');
   if (!values[0] || key.length > ZONE_STATE_MAX) return ephemeral(ZONE_REPLY_COPY.gone);
   if (!(await c.db.prepare('SELECT 1 FROM zone WHERE key = ? AND active = 1').bind(key).first())) return ephemeral(ZONE_REPLY_COPY.gone);
   const q: GearQuery = { cls: values[0], stats: [], sort: DEFAULT_SORT, zone: key };

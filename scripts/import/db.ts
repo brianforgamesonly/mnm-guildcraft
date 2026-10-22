@@ -64,13 +64,15 @@ export function remoteDb(opts: { accountId: string; apiToken: string; databaseId
 
 /**
  * Order 17b: a read-only D1Database over the same HTTP query API, for rendering the Worker's own replies from a remote
- * copy (scripts/bench/zone-cards.ts --remote). prepare/bind/all/first and batch (run one by one); anything but a SELECT is
- * refused before it is sent. meta.rows_read is D1's own count.
+ * copy (scripts/bench/zone-cards.ts --remote). prepare/bind/all/first and batch (run one by one); anything but a single
+ * SELECT is refused before it is sent. A guard against mistakes, not a boundary: the token itself can write. meta.rows_read
+ * is D1's own count.
  */
 export function remoteReadD1(opts: { accountId: string; apiToken: string; databaseId: string }): D1Database {
   const url = `https://api.cloudflare.com/client/v4/accounts/${opts.accountId}/d1/database/${opts.databaseId}/query`;
   async function query(sql: string, params: unknown[]) {
-    if (!/^\s*SELECT\b/i.test(sql)) throw new Error(`read-only: refused ${sql.slice(0, 40)}`);
+    // One statement, a SELECT: D1's /query runs every statement in the string, so a ";" before the end is refused too.
+    if (!/^\s*SELECT\b/i.test(sql) || /;\s*\S/.test(sql)) throw new Error(`read-only: refused ${sql.slice(0, 40)}`);
     const res = await fetch(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${opts.apiToken}`, 'Content-Type': 'application/json' },

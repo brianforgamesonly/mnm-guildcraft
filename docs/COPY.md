@@ -811,6 +811,7 @@ Replaces the order 17 rows above for the drops list, More drops, the Wiki page l
 | src/zone/card.ts:37, 39 | Page: Creatures in \<zone> · by level, lowest first | DRAFT |
 | src/commands/zone.ts:34 | (More drops on a card posted before this order) Zone cards no longer list drops. Press **Gear here** on the card to find the zone's gear for your class. | DRAFT |
 | src/commands/zone.ts:35-36 | Gear here: Gear from **\<zone>**: pick your class (or Any). You can change the sort on the results. · Your class, or Any | DRAFT |
+| src/commands/zone.ts:38 | Gear here on a zone with no gear: The wiki lists no gear from **\<zone>** yet. | DRAFT |
 | src/commands/gear.ts:50-52 | (one zone's results: Gear here, or `/gear find zone:`) **Gear from \<zone>** · sort menu: Sort · Sort: \<sort> | DRAFT |
 | docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" rewritten; "MnM Atlas's zone pictures (operator)" records the permission | DRAFT |
 | README.md | Credits: MnM Atlas's permission (2026-10-21); zone links to monstersandmemories.wiki and Stories of MnM | DRAFT |

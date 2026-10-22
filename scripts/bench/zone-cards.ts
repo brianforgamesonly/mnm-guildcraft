@@ -31,6 +31,7 @@ try {
   const { results: zones } = await db.prepare('SELECT key FROM zone WHERE active = 1 ORDER BY key').all<{ key: string }>();
   let worst = { total: 0, field: 0, zone: '' };
   const rows: number[] = [];
+  const problems: string[] = [];
   for (const { key } of zones) {
     const d = (await loadZone(db, key))!;
     const embeds = zoneEmbeds(d, args['atlas-images']);
@@ -39,12 +40,21 @@ try {
     if (total > worst.total) worst = { total, field, zone: d.zone.name };
     rows.push(d.rowsRead);
     const over = total > EMBED_LIMITS.total || field > EMBED_LIMITS.fieldValue ? ' OVER' : '';
-    const links = (zoneLinks(d) as { label: string; url: string }[]).map((b) => `${b.label}=${b.url}`).join(' | ');
+    const buttons = zoneLinks(d) as { label: string; url: string }[];
+    const links = buttons.map((b) => `${b.label}=${b.url}`).join(' | ');
+    // An atlas link names a map (/<id>/), never the root, which opens the world map (order 17b).
+    for (const b of buttons) if (b.url.includes('mnmatlas.com') && !/^https:\/\/www\.mnmatlas\.com\/[a-z0-9-]+\/$/.test(b.url)) problems.push(`${d.zone.name}: atlas link ${b.url}`);
+    if (over) problems.push(`${d.zone.name}: over Discord's limits`);
+    if (d.rowsRead >= ROWS_TARGET) problems.push(`${d.zone.name}: rows_read ${d.rowsRead}`);
     if (args.show?.includes(key)) console.log(JSON.stringify(embeds, null, 1));
     console.log(`${d.zone.name}\tatlas_id ${d.zone.atlas_id ?? '-'}\tcreatures ${d.creatures.length}\trows_read ${d.rowsRead}\tlongest field ${field}\ttotal ${total}${over}\tlinks: ${links}`);
   }
   console.log(`largest card: ${worst.zone} (${worst.total} of ${EMBED_LIMITS.total}; longest field ${worst.field} of ${EMBED_LIMITS.fieldValue})`);
   console.log(`rows read per card: max ${Math.max(...rows)}, median ${[...rows].sort((a, b) => a - b)[Math.floor(rows.length / 2)]}; ${rows.filter((n) => n < ROWS_TARGET).length} of ${rows.length} cards under ${ROWS_TARGET}`);
+  if (problems.length) {
+    console.error(`problems:\n  ${problems.join('\n  ')}`);
+    process.exitCode = 1;
+  }
   if (!args.remote) {
     // Each statement on its own, for the zone with the most creatures: rows_read and the query plan.
     const key = 'night harbor';
