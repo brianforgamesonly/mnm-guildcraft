@@ -1,4 +1,4 @@
-// Work order 17, ITEMs 2–3: /zone in workerd, on zone data loaded by the real import (scripts/import/core.ts, zones.ts).
+// Work order 17, ITEMs 2–3, and 17b: /zone in workerd, on zone data loaded by the real import (scripts/import/core.ts, zones.ts).
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
@@ -10,12 +10,28 @@ import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { decodeState, encodeState, sortByKey, ANY } from '../../src/gear/options.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
-import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_COPY } from '../../src/zone/card.ts';
+import { GEAR_COPY } from '../../src/commands/gear.ts';
+import { cleanNotes, creatureLine, creaturesOf, fitLines, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneSites } from '../../src/zone/card.ts';
 import { ZONE_SUGGEST_COPY } from '../../src/zone/suggest.ts';
 import { count, reset } from '../db.ts';
 import { as, botApi, GUILD, press, select, send, type Member } from '../discord.ts';
 import small from '../fixtures/wiki-small.json';
 import { withZoneWiki, zoneInput } from '../fixtures/zones-small.ts';
+
+/**
+ * MnM Atlas's own address rule (its app.js, read for order 17b): mapIdOf opens the map named by the path's first segment
+ * when the registry has it, else ?map=, else the world map; a ?find= link looks on &map= only when the registry has it.
+ * So an atlas address opens a zone only when it names a registry id. The ids come from the registry the import read.
+ */
+const ATLAS_IDS = new Set((zoneInput().files['mnmatlas/maps.json'] as { maps: { id: string }[] }).maps.map((m) => m.id).filter((id) => id !== 'world'));
+const opensAZone = (u: string) => {
+  const url = new URL(u);
+  const first = decodeURIComponent(url.pathname.split('/')[1] ?? '').toLowerCase();
+  return ATLAS_IDS.has(first) || (first === '' && url.searchParams.has('find') && ATLAS_IDS.has(url.searchParams.get('map') ?? ''));
+};
+/** Every MnM Atlas address in a reply: link buttons, embed links and markdown links (the card's picture is not a link). */
+const atlasAddresses = (r: Awaited<ReturnType<typeof send>>) =>
+  [...JSON.stringify(r.data).matchAll(/https:\/\/(?:www\.)?mnmatlas\.com[^"\s)\\]*/g)].map((m) => m[0]).filter((u) => !u.includes('/assets/cards/'));
 
 const ann = as('100000000000000001');
 const zone = (name: string, m: Member = ann, opts: { env?: Record<string, unknown> } = {}) =>
@@ -44,7 +60,7 @@ beforeEach(async () => {
 });
 
 describe('/zone: the card', () => {
-  it('a big zone: level text, a one-line description, creatures by level with find-on-map links, drops by AC then name, spots, credits', async () => {
+  it('a big zone: level text, a one-line description, creatures by level with find-on-map links, no drops list, spots, credits', async () => {
     const r = await zone('Evershade Weald');
     expect(r.data.flags).toBe(64);
     const e = r.data.embeds![0] as { title: string; url?: string; description: string; footer: { text: string } };
@@ -59,8 +75,8 @@ describe('/zone: the card', () => {
       'A gnoll scout (L8 - 10) · [find on map](https://www.mnmatlas.com/?find=A%20gnoll%20scout&map=evershade-weald)',
       'Marshal Harding (L20) · [find on map](https://www.mnmatlas.com/?find=Marshal%20Harding&map=evershade-weald)',
     ]);
-    // AC first (highest), then name; Removed Items left out; items without AC last.
-    expect(field(r, /^Notable drops/)!.value.split('\n')).toEqual(['Weald Mail · AC 9', 'Another Ring · AC 2', 'Weald Ring · AC 2', 'Gnoll Tooth']);
+    // Order 17b: the drops list is gone (Gear here finds the zone's gear).
+    expect(field(r, /drops/i)).toBeUndefined();
     expect(field(r, ZONE_COPY.spots)!.value.split('\n')).toEqual(['Copper Vein (ore)', 'Old Hermit (quest) — Ask twice']);
     expect(field(r, ZONE_COPY.adjacent)!.value).toBe("Keeper's Bight · Fields of the Lost");
     expect(field(r, ZONE_COPY.map)!.value).toBe(`${ZONE_COPY.noMap} · [${ZONE_COPY.openAtlas}](https://www.mnmatlas.com/evershade-weald/)`);
@@ -68,31 +84,70 @@ describe('/zone: the card', () => {
     expect(r.data.embeds!.filter((x) => x.title !== WELCOME.title)).toHaveLength(1); // no licensed map, atlas pictures off
   });
 
-  it('the buttons: Post to channel and two links, then Gear here, More creatures, More drops (2 rows)', async () => {
+  it('the buttons: five links in one row (src/zone/sites.json), then Post to channel, Gear here, More creatures', async () => {
     const r = await zone('evershade weald');
     const [links, actions] = r.data.components!;
     expect(r.data.components).toHaveLength(2);
-    expect(links.components.map((b: any) => b.label)).toEqual(['Post to channel', ZONE_COPY.openAtlas, ZONE_COPY.wikiPage]);
-    expect(links.components[1].url).toBe('https://www.mnmatlas.com/evershade-weald/');
+    const sites = zoneSites('evershade weald'); // the derived file's verified pages (both exist today)
+    expect(sites.mnmWiki && sites.stories).toBeTruthy();
+    expect(links.components.map((b: any) => [b.label, b.url])).toEqual([
+      [ZONE_COPY.wikiPage, 'https://monstersandmemories.miraheze.org/wiki/Evershade_Weald'],
+      [ZONE_COPY.mnmWiki, sites.mnmWiki],
+      [ZONE_COPY.stories, sites.stories],
+      [ZONE_COPY.connections, ZONE_CONNECTIONS],
+      [ZONE_COPY.openAtlas, 'https://www.mnmatlas.com/evershade-weald/'],
+    ]);
     expect(actions.components.map((b: any) => [b.label, b.custom_id, b.disabled ?? false])).toEqual([
+      ['Post to channel', 'pub:zone:evershade weald', false],
       [ZONE_COPY.gearHere, 'zg:evershade weald', false],
       [ZONE_COPY.moreCreatures, 'zc:evershade weald', false],
-      [ZONE_COPY.moreDrops, 'zd:evershade weald', false],
     ]);
+  });
+
+  it('order 17b regression: every MnM Atlas address on every card opens that zone, never the world map', async () => {
+    // Order 17 linked a zone without an atlas map to the atlas's root, which opens its world map (Ail'Vorith, Sunken Resort).
+    for (const name of ["Ail'Vorith", 'Evershade Weald', "Keeper's Bight", 'Rothold', 'Sunken Resort']) {
+      for (const images of [false, true]) {
+        const r = await zone(name, ann, images ? { env: { ATLAS_ZONE_IMAGES: 'on' } } : {});
+        const bad = atlasAddresses(r).filter((u) => !opensAZone(u));
+        expect(bad, `${name}${images ? ' (pictures on)' : ''}`).toEqual([]);
+        const posted = await send(press(ann, `pub:zone:${name.toLowerCase()}`), images ? { env: { ATLAS_ZONE_IMAGES: 'on' } } : {});
+        expect(atlasAddresses(posted).filter((u) => !opensAZone(u)), `${name}, posted`).toEqual([]);
+      }
+    }
+    const withMap = await zone('Rothold');
+    expect(atlasAddresses(withMap)).toContain('https://www.mnmatlas.com/rothold/');
+    expect(opensAZone('https://www.mnmatlas.com/')).toBe(false); // the control: the rule rejects the root
   });
 
   it('matches only on case and curly apostrophes', async () => {
     expect((await zone('KEEPER’S BIGHT')).data.embeds![0].title).toBe("Keeper's Bight");
   });
 
-  it('a zone with no data says what is missing and links to the atlas', async () => {
+  it('a zone with no data and no atlas map says what is missing, with no atlas link and only the pages that exist', async () => {
     const r = await zone("Ail'Vorith");
-    expect(field(r, ZONE_COPY.missingName)!.value).toBe(ZONE_COPY.missing(['creatures', 'drops'], 'https://www.mnmatlas.com/'));
-    expect(field(r, ZONE_COPY.map)!.value).toBe(`${ZONE_COPY.noMap} · [${ZONE_COPY.openAtlas}](https://www.mnmatlas.com/)`);
+    expect(field(r, ZONE_COPY.missingName)!.value).toBe(ZONE_COPY.missing(['creatures'], null));
+    expect(field(r, ZONE_COPY.map)!.value).toBe(ZONE_COPY.noMap);
     // A merchant is stored, never shown as a creature.
     expect(field(r, /^Creatures/)).toBeUndefined();
-    const [, actions] = r.data.components!;
-    expect(actions.components.map((b: any) => b.disabled ?? false)).toEqual([true, true, true]);
+    const [links, actions] = r.data.components!;
+    const expected = (key: string) => {
+      const s = zoneSites(key);
+      return [...(s.mnmWiki ? [ZONE_COPY.mnmWiki] : []), ...(s.stories ? [ZONE_COPY.stories] : []), ZONE_COPY.connections];
+    };
+    expect(links.components.map((b: any) => b.label)).toEqual([ZONE_COPY.wikiPage, ...expected("ail'vorith")]);
+    expect(actions.components.map((b: any) => b.disabled ?? false)).toEqual([false, false, true]);
+    // Sunken Resort has no wiki link in the fixture and no atlas map; each site's button only where src/zone/sites.json has a page.
+    const sunken = await zone('Sunken Resort');
+    expect(sunken.data.components![0].components.map((b: any) => b.label)).toEqual(expected('sunken resort'));
+    // A zone the file does not hold gets no other-site buttons at all.
+    expect(zoneSites('no such zone')).toEqual({ mnmWiki: null, stories: null });
+  });
+
+  it('Gear here on a zone with no gear says so instead of offering a class menu', async () => {
+    await zone("Ail'Vorith");
+    const r = await send(press(ann, "zg:ail'vorith"));
+    expect([r.type, r.data.content, r.data.components ?? []]).toEqual([4, ZONE_REPLY_COPY.noGear("Ail'Vorith"), []]);
   });
 
   it('an unknown zone gets suggestions, never a dead end', async () => {
@@ -125,12 +180,13 @@ describe('/zone: the card', () => {
     expect(field(on, ZONE_COPY.map)).toBeUndefined();
   });
 
-  it('Post to channel posts the card publicly; its buttons answer each presser privately', async () => {
+  it('Post to channel posts the card publicly, links kept; its buttons answer each presser privately', async () => {
     const r = await zone('Evershade Weald');
-    const posted = await send(press(ann, r.data.components![0].components[0].custom_id));
+    const posted = await send(press(ann, r.data.components![1].components[0].custom_id));
     expect(posted.data.flags).toBeUndefined();
     expect(posted.data.embeds![0].title).toBe('Evershade Weald');
     expect(posted.data.content).toBe(`-# Shared by <@${ann.user.id}>`);
+    expect(posted.data.components![0]).toEqual(r.data.components![0]); // the same five links, Open in MnM Atlas included
     const more = await send(press(as('100000000000000002'), posted.data.components!.at(-1).components[1].custom_id));
     expect(more.type).toBe(4);
     expect(more.data.flags).toBe(64);
@@ -144,46 +200,45 @@ describe('/zone: the card', () => {
   });
 });
 
-describe('/zone: More creatures, More drops, Gear here', () => {
-  it('More drops: a private page, sorted by AC then name; Previous/Next edit it in place', async () => {
-    const f = withZoneWiki(small);
-    for (let i = 0; i < 25; i++) f.items[`Weald Trinket ${String(i).padStart(2, '0')}`] = { slot: 'NECK', class: 'ALL', ac: i % 5, wikiZones: ['Evershade Weald'] };
-    await runImport(bindingDb(env.DB as never), f, { sourceSha: 'c'.repeat(40), now: () => new Date().toISOString(), zones: zoneInput() });
+describe('/zone: More creatures, Gear here', () => {
+  it('More drops on an order 17 card already posted says the list is gone; More creatures still pages', async () => {
     await zone('Evershade Weald'); // a command first: buttons read the guild row, never create it
-    const page = await send(press(ann, 'zd:evershade weald'));
-    expect(page.type).toBe(4);
-    expect(page.data.flags).toBe(64);
-    expect(page.data.embeds![0].title).toBe(ZONE_COPY.dropsTitle('Evershade Weald'));
-    const lines = page.data.embeds![0].description!.split('\n');
-    expect(lines).toHaveLength(20);
-    const acs = lines.map((l) => Number(/AC (\d+)$/.exec(l)?.[1] ?? -1));
-    expect(acs).toEqual([...acs].sort((a, b) => b - a)); // AC, highest first
-    expect(lines.filter((l) => l.endsWith('AC 4'))).toEqual(['Weald Trinket 04 · AC 4', 'Weald Trinket 09 · AC 4', 'Weald Trinket 14 · AC 4', 'Weald Trinket 19 · AC 4', 'Weald Trinket 24 · AC 4']); // then name
-    expect(page.data.embeds![0].footer!.text).toBe(ZONE_COPY.pageFooter(1, 2, ZONE_COPY.dropSort));
-    const next = await send(press(ann, page.data.components![0].components[1].custom_id));
-    expect(next.type).toBe(7);
-    expect(next.data.embeds![0].footer!.text).toBe(ZONE_COPY.pageFooter(2, 2, ZONE_COPY.dropSort));
+    for (const id of ['zd:evershade weald', 'zdn:1:evershade weald']) {
+      const r = await send(press(ann, id));
+      expect([r.type, r.data.flags, r.data.content]).toEqual([4, 64, ZONE_REPLY_COPY.dropsRemoved]);
+    }
+    const page = await send(press(ann, 'zc:evershade weald'));
+    expect(page.data.embeds![0].title).toBe(ZONE_COPY.creaturesTitle('Evershade Weald'));
+    expect(page.data.embeds![0].footer!.text).toBe(ZONE_COPY.pageFooter(1, 1, ZONE_COPY.creatureSort));
   });
 
-  it('Gear here: asks for the class (sorts offered), then shows /gear find filtered to the zone', async () => {
+  it('Gear here: the class first; the results replace it, by AC, with a sort select that re-sorts them', async () => {
     await env.DB.prepare("INSERT INTO game_class (code, item_count, bit) VALUES ('CLR', 10, 0)").run();
     await zone('Evershade Weald'); // a command first: buttons read the guild row, never create it
     const menu = await send(press(ann, 'zg:evershade weald'));
     expect(menu.type).toBe(4);
     expect(menu.data.content).toBe(ZONE_REPLY_COPY.gearPick('Evershade Weald'));
-    const [sorts, classes] = menu.data.components!;
-    expect(sorts.components[0].options.find((o: any) => o.default).label).toBe(ZONE_REPLY_COPY.sortChosen('AC'));
-    expect(sorts.components[0].options.length).toBeLessThanOrEqual(25);
-    expect(classes.components[0].options[0].value).toBe(ANY);
-    const byName = await send(select(ann, sorts.components[0].custom_id, [String(sorts.components[0].options.findIndex((o: any) => o.label === ZONE_REPLY_COPY.sortChosen('Name')))]));
-    expect(byName.type).toBe(7);
-    const cls = byName.data.components![1].components[0];
-    const results = await send(select(ann, cls.custom_id, [ANY]));
+    expect(menu.data.components).toHaveLength(1); // the class select only
+    const classes = menu.data.components![0].components[0];
+    expect(classes.options[0].value).toBe(ANY);
+    const results = await send(select(ann, classes.custom_id, [ANY]));
     expect(results.type).toBe(7);
-    const names = [...results.data.embeds![0].description!.matchAll(/^\*\*(?:\[)?([^\]*]+)/gm)].map((x) => x[1]);
-    // Gear only, from this zone, by Name; Removed Items and other zones' gear left out.
-    expect(names).toEqual(['Another Ring', 'Weald Mail', 'Weald Ring']);
-    expect(results.data.content!.split('\n')[0]).toBe(ZONE_REPLY_COPY.gearFrom('Evershade Weald'));
+    const names = (r: typeof results) => [...r.data.embeds![0].description!.matchAll(/^\*\*(?:\[)?([^\]*]+)/gm)].map((x) => x[1]);
+    // Gear only, from this zone, by AC (highest first); Removed Items and other zones' gear left out.
+    expect(names(results)[0]).toBe('Weald Mail');
+    expect(names(results).sort()).toEqual(['Another Ring', 'Weald Mail', 'Weald Ring']);
+    expect(results.data.content!.split('\n')[0]).toBe(GEAR_COPY.fromZone('Evershade Weald'));
+    const sorts = results.data.components!.at(-1).components[0];
+    expect(sorts.options.find((o: any) => o.default).label).toBe(GEAR_COPY.sortOption('AC'));
+    expect(sorts.options.length).toBeLessThanOrEqual(25);
+    const byName = await send(select(ann, sorts.custom_id, [String(sorts.options.findIndex((o: any) => o.label === GEAR_COPY.sortOption('Name')))]));
+    expect(byName.type).toBe(7);
+    expect(names(byName)).toEqual(['Another Ring', 'Weald Mail', 'Weald Ring']);
+    expect(byName.data.content!.split('\n')[0]).toBe(GEAR_COPY.fromZone('Evershade Weald'));
+    expect(byName.data.components!.at(-1).components[0].options.find((o: any) => o.default).label).toBe(GEAR_COPY.sortOption('Name'));
+    // An order 17 menu still open ("zgc:<sort index>:<key>") still reaches the zone.
+    const old = await send(select(ann, 'zgc:0:evershade weald', [ANY]));
+    expect(old.data.content!.split('\n')[0]).toBe(GEAR_COPY.fromZone('Evershade Weald'));
   });
 
   it('/gear find zone: the same filter from the command, by name in any case', async () => {
@@ -209,6 +264,7 @@ describe('/zone: autocomplete, definition, help', () => {
   it('the gear state carries a zone, last, and still fits a custom_id with the longest key allowed', () => {
     const q = { cls: 'ABCDEFGH', stats: [], sort: sortByKey('AC')!, zone: 'z'.repeat(40) };
     expect(`gp:999:${encodeState(q)}`.length).toBeLessThanOrEqual(100);
+    expect(`gs:${encodeState(q)}`.length).toBeLessThanOrEqual(100); // order 17b: the sort select
     expect(decodeState(encodeState({ ...q, zone: 'st. odd.zone' }))).toEqual({ ...q, zone: 'st. odd.zone' });
   });
 });

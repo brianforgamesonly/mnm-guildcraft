@@ -1,10 +1,12 @@
-// Order 17, ITEM 2: the zone card. One D1 batch reads the zone, its mobs and NPCs, and its drops; nothing is written
-// (the command's only write is its read audit row, 'zone.view', src/interactions.ts). Every field is fitted to Discord's
-// limits here (fitLines), with "+N more" for what is left off; the paged lists show the rest.
+// Order 17, ITEM 2: the zone card. One D1 batch reads the zone, its mobs and its NPCs; nothing is written (the command's
+// only write is its read audit row, 'zone.view', src/interactions.ts). Every field is fitted to Discord's limits here
+// (fitLines), with "+N more" for what is left off; the paged list shows the rest. Order 17b: the drops list is gone (it
+// read about 10,000 item rows per card; Gear here finds the zone's gear), and the other sites' links come from
+// src/zone/sites.json (scripts/zone/sites.ts).
 import { EMBED_LIMITS, md, truncate, type Embed, type EmbedField } from '../discord.ts';
-import { REMOVED_BIT } from '../gear/vocab.ts';
 import { mergeCreature } from './creatures.ts';
-import { levelSort, MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE, zoneNamesSql } from './names.ts';
+import { levelSort, MOB_ZONES_SOURCE, zoneNamesSql } from './names.ts';
+import SITES from './sites.json' with { type: 'json' };
 
 // ---------------------------------------------------------------- copy (order 17; listed for approval in docs/COPY.md)
 
@@ -13,29 +15,28 @@ export const ZONE_COPY = {
   map: 'Map',
   noMap: 'No map yet',
   openAtlas: 'Open in MnM Atlas',
-  wikiPage: 'Wiki page',
+  wikiPage: 'Wiki',
+  mnmWiki: 'MnM Wiki',
+  stories: 'Stories of MnM',
+  connections: 'Zone connections',
   gearHere: 'Gear here',
   moreCreatures: 'More creatures',
-  moreDrops: 'More drops',
   adjacent: 'Adjacent zones',
   creatures: (n: number) => `Creatures (${n})`,
-  drops: (n: number) => `Notable drops (${n})`,
   spots: 'Notable spots',
   findOnMap: 'find on map',
   more: (n: number) => `+${n} more`,
   missingName: 'Not recorded yet',
-  missing: (parts: string[], atlas: string) =>
-    `No ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]} recorded for this zone yet. [MnM Atlas](${atlas}) may have more.`,
-  missingParts: { creatures: 'creatures', drops: 'drops', level: 'level range', description: 'description' },
+  missing: (parts: string[], atlas: string | null) =>
+    `No ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]} recorded for this zone yet.${atlas ? ` [MnM Atlas](${atlas}) may have more.` : ''}`,
+  missingParts: { creatures: 'creatures', level: 'level range', description: 'description' },
   atlasCredit: 'Map: MnM Atlas (mnmatlas.com) and its original map authors',
   mapCredit: (author: string | null, via: string) => `Map: ${author ? `${author} · ` : ''}via ${via}`,
   licence: (licence: string, licenceUrl: string, page: string) => `[${licence}](${licenceUrl}) · [file page](${page})`,
   footer: 'Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools · Mo Betta',
   creaturesTitle: (zone: string) => `Creatures in ${zone}`,
-  dropsTitle: (zone: string) => `Drops in ${zone}`,
   pageFooter: (page: number, pages: number, sort: string) => `Page ${page} of ${pages} · ${sort}`,
   creatureSort: 'by level, lowest first',
-  dropSort: 'by AC, highest first, then name',
   previous: 'Previous',
   next: 'Next',
 } as const;
@@ -45,14 +46,31 @@ export const ZONE_COPY = {
 export const ATLAS = 'https://www.mnmatlas.com';
 /** encodeURIComponent, plus the brackets it leaves alone, which would end a markdown link early. */
 const enc = (text: string) => encodeURIComponent(text).replace(/[()]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
-/** A map's own address, "/<map id>/"; the atlas's front page when the zone has no atlas map. */
-export const atlasMapUrl = (id: string | null) => (id ? `${ATLAS}/${enc(id)}/` : `${ATLAS}/`);
-/** "/?find=<name>", which "looks on one map only" with &map= (the atlas's embed page). */
-export const atlasFindUrl = (name: string, id: string | null) => `${ATLAS}/?find=${enc(name)}${id ? `&map=${enc(id)}` : ''}`;
+/**
+ * A map's own address, "/<map id>/". Order 17b: there is no address for a zone without an atlas map. The atlas opens its
+ * world map for an empty path (app.js mapIdOf: the root, or an id it does not know), so the root is never offered as a zone.
+ */
+export const atlasMapUrl = (id: string) => `${ATLAS}/${enc(id)}/`;
+/** "/?find=<name>&map=<id>", which "looks on one map only" (the atlas's embed page); without &map= it may open the world map. */
+export const atlasFindUrl = (name: string, id: string) => `${ATLAS}/?find=${enc(name)}&map=${enc(id)}`;
 /** The atlas's whole-zone picture: shown only while ATLAS_ZONE_IMAGES is on (order 17, override 3). */
 export const atlasCardUrl = (id: string) => `${ATLAS}/assets/cards/${enc(id)}.jpg`;
 /** A link from the data is used only when it is an https address (Discord rejects a whole message over a bad URL). */
 export const safeUrl = (u: string | null) => (u && /^https:\/\/[^\s()<>]+$/.test(u) ? u : null);
+
+// ---------------------------------------------------------------- the other sites (order 17b, ITEM 3)
+
+/** monstersandmemories.wiki's zone and world schematic. */
+export const ZONE_CONNECTIONS = 'https://monstersandmemories.wiki/zones';
+export interface ZoneSites {
+  /** monstersandmemories.wiki's page for the zone, verified; null when the site has none. */
+  mnmWiki: string | null;
+  /** storiesofmnm.com's page for the zone, verified; null when the site has none. */
+  stories: string | null;
+}
+const NO_SITES: ZoneSites = { mnmWiki: null, stories: null };
+/** The zone's verified addresses on the other sites (src/zone/sites.json); none for a zone the file does not hold. */
+export const zoneSites = (key: string): ZoneSites => (SITES.zones as Record<string, ZoneSites & { name: string }>)[key] ?? NO_SITES;
 
 // ---------------------------------------------------------------- data
 
@@ -71,18 +89,9 @@ export interface Creature {
   name: string;
   level: string | null;
 }
-export interface Drop {
-  id: number;
-  name: string;
-  ac: number | null;
-  wiki_url: string | null;
-  /** 1 when the item is gear (a slot): what Gear here can find. */
-  gear: number;
-}
 export interface ZoneData {
   zone: ZoneRecord;
   creatures: Creature[];
-  drops: Drop[];
   /** D1's rows_read across the batch (order 17: reported per card). */
   rowsRead: number;
 }
@@ -92,13 +101,6 @@ export const ZONE_SQL = 'SELECT key, name, level, description, adjacent_json, at
 export const MOBS_SQL = `SELECT key, title, level, race, class, loot_json FROM mob WHERE active = 1 AND EXISTS (
   SELECT 1 FROM json_each(mob.zones_json) j WHERE j.value IN ${zoneNamesSql(MOB_ZONES_SOURCE)})`;
 export const NPCS_SQL = 'SELECT name, kind, level, race, class, loot_json FROM npc WHERE zone_key = ?1 AND active = 1';
-/**
- * The zone's items: wikiZones names the zone (through the mapping), Removed Items left out. One sort key at a time
- * (the owner, order 13: "no combined score"): AC, highest first, then name; items without AC last.
- */
-export const DROPS_SQL = `SELECT id, name, ac, wiki_url, slot_mask <> 0 AS gear FROM item WHERE origin_json IS NOT NULL AND (source_mask & ${REMOVED_BIT}) = 0 AND EXISTS (
-  SELECT 1 FROM json_each(item.origin_json, '$.wikiZones') j WHERE j.value IN ${zoneNamesSql(WIKI_ZONES_SOURCE)})
-  ORDER BY ac DESC NULLS LAST, name COLLATE NOCASE`;
 
 interface MobRow {
   key: string;
@@ -147,30 +149,21 @@ export function creaturesOf(mobs: MobRow[], npcs: NpcRow[]): Creature[] {
 }
 
 export async function loadZone(db: D1Database, key: string): Promise<ZoneData | null> {
-  const [z, mobs, npcs, drops] = await db.batch([
-    db.prepare(ZONE_SQL).bind(key),
-    db.prepare(MOBS_SQL).bind(key),
-    db.prepare(NPCS_SQL).bind(key),
-    db.prepare(DROPS_SQL).bind(key),
-  ]);
+  const [z, mobs, npcs] = await db.batch([db.prepare(ZONE_SQL).bind(key), db.prepare(MOBS_SQL).bind(key), db.prepare(NPCS_SQL).bind(key)]);
   const zone = (z.results as ZoneRecord[])[0];
   if (!zone) return null;
   return {
     zone,
     creatures: creaturesOf(mobs.results as MobRow[], npcs.results as NpcRow[]),
-    drops: drops.results as Drop[],
-    rowsRead: [z, mobs, npcs, drops].reduce((n, r) => n + (r.meta?.rows_read ?? 0), 0),
+    rowsRead: [z, mobs, npcs].reduce((n, r) => n + (r.meta?.rows_read ?? 0), 0),
   };
 }
 
 // ---------------------------------------------------------------- lines
 
+/** A creature, with its find-on-map link when the zone has an atlas map (without one, ?find= may open the world map). */
 export const creatureLine = (c: Creature, atlasId: string | null) =>
-  `${md(c.name)}${c.level ? ` (L${md(c.level)})` : ''} · [${ZONE_COPY.findOnMap}](${atlasFindUrl(c.name, atlasId)})`;
-export const dropLine = (d: Drop) => {
-  const url = safeUrl(d.wiki_url);
-  return `${url ? `[${md(d.name)}](${url})` : md(d.name)}${d.ac !== null ? ` · AC ${d.ac}` : ''}`;
-};
+  `${md(c.name)}${c.level ? ` (L${md(c.level)})` : ''}${atlasId ? ` · [${ZONE_COPY.findOnMap}](${atlasFindUrl(c.name, atlasId)})` : ''}`;
 
 /** Marker notes may hold URLs and line breaks: the URLs are dropped, the whitespace made one line, the rest kept short. */
 export const cleanNotes = (s: string | null): string | null => {
@@ -205,7 +198,6 @@ export function fitLines(lines: string[], cap: number, max: number = EMBED_LIMIT
 // ---------------------------------------------------------------- the card
 
 export const CARD_CREATURES = 10;
-export const CARD_DROPS = 10;
 export const CARD_SPOTS = 5;
 
 /** The first line of the description, kept to one short line. */
@@ -223,22 +215,21 @@ interface MapImage {
 /** The card's embeds: the zone, then its map (when one may be shown). `atlasImages`: ATLAS_ZONE_IMAGES is on. */
 export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   const z = d.zone;
-  const atlas = atlasMapUrl(z.atlas_id);
+  const atlas = z.atlas_id ? atlasMapUrl(z.atlas_id) : null;
   const licensed = z.map_json ? (JSON.parse(z.map_json) as MapImage) : null;
   // The atlas's picture takes precedence over a licensed map (override 3), only while the setting is on.
   const mapEmbed: Embed | null =
-    atlasImages && z.atlas_id
+    atlasImages && z.atlas_id && atlas
       ? { title: ZONE_COPY.atlasCredit, url: atlas, image: { url: atlasCardUrl(z.atlas_id) } }
       : licensed
         ? { title: truncate(ZONE_COPY.mapCredit(licensed.author, licensed.via), EMBED_LIMITS.title), url: licensed.page, image: { url: licensed.url }, description: ZONE_COPY.licence(licensed.licence, licensed.licence_url, licensed.page) }
         : null;
 
   const fields: EmbedField[] = [];
-  if (!mapEmbed) fields.push({ name: ZONE_COPY.map, value: `${ZONE_COPY.noMap} · [${ZONE_COPY.openAtlas}](${atlas})` });
+  if (!mapEmbed) fields.push({ name: ZONE_COPY.map, value: atlas ? `${ZONE_COPY.noMap} · [${ZONE_COPY.openAtlas}](${atlas})` : ZONE_COPY.noMap });
   const adjacent = list(z.adjacent_json);
   if (adjacent.length) fields.push({ name: ZONE_COPY.adjacent, value: truncate(adjacent.map(md).join(' · '), 300) });
   if (d.creatures.length) fields.push({ name: ZONE_COPY.creatures(d.creatures.length), value: fitLines(d.creatures.map((c) => creatureLine(c, z.atlas_id)), CARD_CREATURES) });
-  if (d.drops.length) fields.push({ name: ZONE_COPY.drops(d.drops.length), value: fitLines(d.drops.map(dropLine), CARD_DROPS) });
   const spots = spotLines(z.markers_json);
   if (spots.length) fields.push({ name: ZONE_COPY.spots, value: fitLines(spots, CARD_SPOTS, 600) });
   const P = ZONE_COPY.missingParts;
@@ -246,8 +237,7 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
     ...(z.level ? [] : [P.level]),
     ...(z.description ? [] : [P.description]),
     ...(d.creatures.length ? [] : [P.creatures]),
-    ...(d.drops.length ? [] : [P.drops]),
-    // No map is already said, with the atlas link, in the Map field above.
+    // No map is already said, with the atlas link when there is one, in the Map field above.
   ];
   if (missing.length) fields.push({ name: ZONE_COPY.missingName, value: ZONE_COPY.missing(missing, atlas) });
 
@@ -261,12 +251,12 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   return mapEmbed ? [main, mapEmbed] : [main];
 }
 
-// ---------------------------------------------------------------- the paged lists (More creatures, More drops)
+// ---------------------------------------------------------------- the paged list (More creatures)
 
 export const LIST_PAGE = 20;
 
-export function listEmbed(d: ZoneData, kind: 'creatures' | 'drops', page: number): { embed: Embed; pages: number; page: number } {
-  const lines = kind === 'creatures' ? d.creatures.map((c) => creatureLine(c, d.zone.atlas_id)) : d.drops.map(dropLine);
+export function listEmbed(d: ZoneData, page: number): { embed: Embed; pages: number; page: number } {
+  const lines = d.creatures.map((c) => creatureLine(c, d.zone.atlas_id));
   const pages = Math.max(1, Math.ceil(lines.length / LIST_PAGE));
   const p = Math.min(Math.max(0, page), pages - 1);
   const slice = lines.slice(p * LIST_PAGE, (p + 1) * LIST_PAGE);
@@ -274,9 +264,9 @@ export function listEmbed(d: ZoneData, kind: 'creatures' | 'drops', page: number
   while (slice.length > 1 && slice.join('\n').length > EMBED_LIMITS.description) slice.pop();
   return {
     embed: {
-      title: truncate(kind === 'creatures' ? ZONE_COPY.creaturesTitle(d.zone.name) : ZONE_COPY.dropsTitle(d.zone.name), EMBED_LIMITS.title),
+      title: truncate(ZONE_COPY.creaturesTitle(d.zone.name), EMBED_LIMITS.title),
       description: slice.join('\n'),
-      footer: { text: ZONE_COPY.pageFooter(p + 1, pages, kind === 'creatures' ? ZONE_COPY.creatureSort : ZONE_COPY.dropSort) },
+      footer: { text: ZONE_COPY.pageFooter(p + 1, pages, ZONE_COPY.creatureSort) },
     },
     pages,
     page: p,

@@ -12,13 +12,15 @@ export const postButton = (what: string) => button(`${POST_PREFIX}${what}`, 'Pos
 
 /**
  * A search reply. `extraRows` are the action rows a private reply carries (paging, switchers); `links`
- * are link buttons, kept on both the private reply and the public post.
+ * are link buttons, kept on both the private reply and the public post. `postBeside` (order 17b: /zone, whose links
+ * fill a row of five) puts Post to channel in a row of its own with those buttons, after the links.
  */
-export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, post: string, links: unknown[] = [], extraRows: unknown[] = []): MessageReply {
+export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, post: string, links: unknown[] = [], extraRows: unknown[] = [], postBeside?: unknown[]): MessageReply {
   if (!SEARCH_REPLIES_PRIVATE) return publicReply({ ...data, components: links.length ? [row(links)] : [] });
+  const rows = postBeside ? [...(links.length ? [row(links)] : []), row([postButton(post), ...postBeside])] : [row([postButton(post), ...links])];
   return {
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-    data: { ...data, components: [row([postButton(post), ...links]), ...extraRows], flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
+    data: { ...data, components: [...rows, ...extraRows], flags: InteractionResponseFlags.EPHEMERAL, allowed_mentions: { parse: [] } },
   };
 }
 

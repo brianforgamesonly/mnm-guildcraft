@@ -107,7 +107,7 @@ export const HOW_TO_GET_LISTED = [
   // Order 16.
   '`/craft request` ask the crafters who can make an item · `/craft notify` be added to requests you can craft',
   // Order 17.
-  "`/zone` a zone's levels, creatures, drops and map links",
+  "`/zone` a zone's levels, creatures, wiki and map links",
 ].join('\n');
 
 /**

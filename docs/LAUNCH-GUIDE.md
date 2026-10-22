@@ -85,18 +85,15 @@ Screenshots sent with `/item image` wait in a private channel until an officer p
 
 ## Zones (`/zone`, order 17)
 
-`/zone name:` shows a zone's card, privately, with **Post to channel**. The card has the zone's level range and a line about it, the zones next to it, its creatures by level (each with a **find on map** link to MnM Atlas), its notable drops by AC, and spots from the community maps. Buttons open the zone in MnM Atlas and on the wiki, page through every creature and drop, or run **Gear here**: `/gear find` for that zone, after you pick your class. `/gear find` also has a `zone:` option.
+`/zone name:` shows a zone's card, privately, with **Post to channel**. The card has MnM Atlas's picture of the zone, its level range and a line about it, the zones next to it, its creatures by level (each with a **find on map** link to MnM Atlas), and spots from the community maps. Link buttons open the zone's page on the Monsters and Memories Wiki (**Wiki**), on monstersandmemories.wiki (**MnM Wiki**) and on Stories of MnM, the zone and world schematic (**Zone connections**), and the zone in MnM Atlas. A button appears only when that site has a page for the zone. **More creatures** pages through every creature. **Gear here** asks for your class, then shows `/gear find` for that zone, by AC, with a sort menu. `/gear find` also has a `zone:` option.
 
-The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas, mnm-tools and Mo Betta, and updates with the nightly import. A map picture appears only where the map's licence and author are known. Today that is no zone, so each card links to MnM Atlas instead.
+The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas, mnm-tools and Mo Betta, and updates with the nightly import. The other sites' addresses are checked one by one, by hand, when zones change (`scripts/zone/sites.ts`).
 
-### Turning on MnM Atlas's zone pictures (operator)
+### MnM Atlas's zone pictures (operator)
 
-The cards can show MnM Atlas's picture of each zone. It is off until the atlas's maker agrees. Once they do:
+MnM Atlas's maker granted permission to show its zone images, credited, on 2026-10-21 (reported by the owner). The pictures are on: the repository variable `ATLAS_ZONE_IMAGES` is `on`. Each picture is credited "Map: MnM Atlas (mnmatlas.com) and its original map authors" and linked to the zone in the atlas.
 
-1. GitHub → the GuildCraft repository → **Settings** → **Secrets and variables** → **Actions** → **Variables** → **New repository variable**: name `ATLAS_ZONE_IMAGES`, value `on`.
-2. **Actions** → **deploy** → **Run workflow**.
-
-The cards then show the atlas's picture, credited "Map: MnM Atlas (mnmatlas.com) and its original map authors" and linked to the zone in the atlas. To turn it off, set the variable to `off` and run **deploy** again.
+To turn them off: GitHub → the GuildCraft repository → **Settings** → **Secrets and variables** → **Actions** → **Variables** → set `ATLAS_ZONE_IMAGES` to `off`, then **Actions** → **deploy** → **Run workflow**.
 
 ## Coming soon
 
