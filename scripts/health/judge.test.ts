@@ -30,6 +30,8 @@ test('the expected slots come from the cron expression in wrangler.jsonc: 96 a d
   assert.deepEqual(cronSlots(['5,35 1-2 * * *'], DAY, DAY + DAY_MS).length, 4);
   assert.throws(() => cronSlots(['0 8 * * MON'], DAY, DAY + DAY_MS), /unsupported/);
   assert.throws(() => cronSlots(['* * * *'], DAY, DAY + DAY_MS), /5 fields/);
+  // A copy with no cron trigger is a broken config: the check cannot run, never a pass.
+  assert.throws(() => judgeSweeps({ crons: [], dayStart: DAY, rows: [], trackStart: null, deploys: [] }), /no cron trigger/);
 });
 
 test('a clean day passes', () => {

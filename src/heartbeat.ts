@@ -6,6 +6,6 @@
 export const sweepStarted = (db: D1Database, scheduledMs: number, at: string) =>
   db.prepare('INSERT OR IGNORE INTO sweep_run (scheduled_ms, started_at) VALUES (?, ?)').bind(scheduledMs, at);
 
-/** Only the row this invocation started (finished_at still NULL). */
+/** The slot's row, while finished_at is still NULL (a repeat invocation for the same slot can finish it too). */
 export const sweepFinished = (db: D1Database, scheduledMs: number, at: string) =>
   db.prepare('UPDATE sweep_run SET finished_at = ? WHERE scheduled_ms = ? AND finished_at IS NULL').bind(at, scheduledMs);

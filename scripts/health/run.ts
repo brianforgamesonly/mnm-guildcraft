@@ -67,14 +67,13 @@ async function runs(file: string, from: number, to: number): Promise<Run[]> {
   return out.filter((x) => Date.parse(x.created_at) >= from && Date.parse(x.created_at) < to);
 }
 interface Step { name: string; started_at: string | null; completed_at: string | null }
-interface Job { name: string; started_at: string | null; completed_at: string | null; steps?: Step[] }
+interface Job { name: string; conclusion: string | null; started_at: string | null; completed_at: string | null; steps?: Step[] }
 /** This copy's deploys (deploy.yml's job for the copy, its "Deploy the Worker" step) from the day before through the day. */
 async function deployWindows(): Promise<Window[]> {
   const out: Window[] = [];
   for (const run of await runs('deploy.yml', dayStart - DAY_MS, dayEnd)) {
-    const { jobs } = await gh<{ jobs: Job[] }>(`/actions/runs/${run.id}/jobs?per_page=100`);
-    // The matrix job's name is "deploy (<copy>, <prefix>)" (deploy.yml, one job per copy).
-    for (const j of jobs.filter((x) => new RegExp(`^deploy \\(${COPY.name}\\b`).test(x.name))) {
+    // The matrix job's name is "deploy (<copy>, <prefix>)" (deploy.yml, one job per copy); every attempt counts.
+    for (const j of (await jobsOf(run.id)).filter((x) => x.name.startsWith('deploy (') && forCopy(x.name))) {
       const s = j.steps?.find((x) => x.name === 'Deploy the Worker' && x.started_at) ?? j;
       if (!s.started_at) continue;
       out.push({ start: Date.parse(s.started_at), end: s.completed_at ? Date.parse(s.completed_at) : Date.now() });
@@ -82,9 +81,23 @@ async function deployWindows(): Promise<Window[]> {
   }
   return out;
 }
+/** A workflow run's jobs, every attempt (a re-run's earlier attempt still deployed, or still failed and mailed). */
+const jobsOf = async (runId: number) => (await gh<{ jobs: Job[] }>(`/actions/runs/${runId}/jobs?filter=all&per_page=100`)).jobs;
+/** "<job> (<copy>, <prefix>)": the per-copy matrix jobs every workflow here runs (scripts/copies.ts matrix). */
+const forCopy = (name: string) => new RegExp(`\\(${COPY.name}\\b`).test(name);
+/**
+ * Failed runs of the workflow on the day that concern this copy: one whose job for this copy failed, or that failed
+ * before any job for this copy ran (a startup failure, or the copies job). A run that failed only for the other copy
+ * does not excuse this copy's missing row (order 20 review).
+ */
 const failedRunsOf = async (file: string): Promise<number | null> => {
   try {
-    return (await runs(file, dayStart, dayEnd)).filter((r) => r.conclusion && FAILED.has(r.conclusion)).length;
+    let n = 0;
+    for (const r of (await runs(file, dayStart, dayEnd)).filter((x) => x.conclusion && FAILED.has(x.conclusion))) {
+      const mine = r.conclusion === 'startup_failure' ? [] : (await jobsOf(r.id)).filter((j) => forCopy(j.name));
+      if (!mine.length || mine.some((j) => j.conclusion && FAILED.has(j.conclusion))) n++;
+    }
+    return n;
   } catch (e) {
     console.log(`${file} runs unread: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -129,7 +142,7 @@ if (evFrom) {
   const b = Date.parse(evTo);
   if (!(a < b)) throw new Error('--evidence FROM TO: two ISO times, FROM before TO');
   const cols = await select<{ t: string; c: string }>(
-    "SELECT m.name AS t, p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '_cf_%' AND m.name <> 'd1_migrations' AND (p.name LIKE '%\\_at' ESCAPE '\\' OR p.name LIKE '%\\_until' ESCAPE '\\') ORDER BY 1, 2",
+    "SELECT m.name AS t, p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite_%' AND m.name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND m.name <> 'd1_migrations' AND (p.name LIKE '%\\_at' ESCAPE '\\' OR p.name LIKE '%\\_until' ESCAPE '\\') ORDER BY 1, 2",
   );
   const q = (s: string) => `"${s.replace(/"/g, '""')}"`;
   const bySlot = new Map<string, string[]>();

@@ -97,6 +97,8 @@ const hhmm = (ms: number) => new Date(ms).toISOString().slice(11, 16);
  */
 export function judgeSweeps(input: { crons: string[]; dayStart: number; rows: SweepRow[]; trackStart: number | null; deploys: Window[] }): Line[] {
   const { crons, dayStart, rows, trackStart, deploys } = input;
+  // A copy with no cron trigger has nothing to judge: that is a broken config, never a pass (order 20 review).
+  if (!crons.length) throw new Error('no cron trigger in wrangler.jsonc for this copy: the expected slots cannot be derived');
   const dayEnd = dayStart + DAY_MS;
   const daySlots = cronSlots(crons, dayStart, dayEnd);
   const before = cronSlots(crons, dayStart - DAY_MS, dayStart).slice(-(CONSECUTIVE_FAIL - 1));
