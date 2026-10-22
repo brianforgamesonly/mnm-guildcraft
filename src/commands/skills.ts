@@ -129,6 +129,23 @@ export async function craftUpdate(c: Ctx, opts: Option[]): Promise<MessageReply>
   return updatePicker(c, target.character);
 }
 
+// ---------------------------------------------------------------- /skills [skill] [level] [character] (order 18)
+
+export const SKILLS_COPY = {
+  levelWithoutSkill: 'Give the `skill` that level is for, or leave both out to update up to 5 skills at once.',
+  skillWithoutLevel: (skill: string) => `Give a \`level\` for **${md(skill)}**, or leave both out to update up to 5 skills at once.`,
+} as const;
+
+/** Both skill and level: /craft set. Neither: /craft update's pick-up-to-5. One without the other: says what is missing. */
+export async function skillsCommand(c: Ctx, opts: Option[]): Promise<MessageReply> {
+  const skill = optString(opts, 'skill');
+  const level = optInt(opts, 'level');
+  if (skill === undefined && level === undefined) return craftUpdate(c, opts);
+  if (skill === undefined) return ephemeral(SKILLS_COPY.levelWithoutSkill);
+  if (level === undefined) return ephemeral(SKILLS_COPY.skillWithoutLevel(skill.trim()));
+  return craftSet(c, opts);
+}
+
 // ---------------------------------------------------------------- Update skills buttons (order 3, ITEM 2)
 
 export const BUTTON_PREFIX = 'upb:';

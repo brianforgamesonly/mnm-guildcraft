@@ -23,6 +23,8 @@ const LISTS = {
     FROM recipe r JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id WHERE r.active = 1 AND r.guild_id IS NULL`,
   // Order 17: the zones (/zone name, /gear find zone), written by the same import.
   zones: 'SELECT name FROM zone WHERE active = 1',
+  // Order 18: every item (/item name), a shared recipe's result ending in char(31) so the choice can say it is craftable.
+  allItems: `SELECT i.name || CASE WHEN EXISTS (SELECT 1 FROM recipe r WHERE r.result_item_id = i.id AND r.active = 1 AND r.guild_id IS NULL) THEN char(31) ELSE '' END AS name FROM item i`,
 } as const;
 export type GameList = keyof typeof LISTS;
 

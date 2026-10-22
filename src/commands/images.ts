@@ -80,13 +80,16 @@ async function vaultMessageGone(c: Ctx, channelId: string, messageId: string): P
   return !r.ok && r.code === UNKNOWN_MESSAGE;
 }
 
-export async function itemImage(c: Ctx, opts: Option[]): Promise<MessageReply> {
+export const itemImage = (c: Ctx, opts: Option[]) => submitImage(c, optString(opts, 'item'), optString(opts, 'image'), 'image');
+
+/** Order 18: /item name: screenshot: and the old /item image item: image: send the same screenshot the same way. */
+export async function submitImage(c: Ctx, itemName: string | undefined, attachment: string | undefined, box: string): Promise<MessageReply> {
   const started = Date.now();
   const vault = c.guild.vault_channel_id;
   if (!vault || !c.botToken) return ephemeral(NO_VAULT);
-  const typed = (optString(opts, 'item') ?? '').trim();
-  const att = c.resolved?.attachments?.[optString(opts, 'image') ?? ''];
-  if (!att) return ephemeral('Attach the screenshot in the `image:` box. Nothing was saved.');
+  const typed = (itemName ?? '').trim();
+  const att = c.resolved?.attachments?.[attachment ?? ''];
+  if (!att) return ephemeral(`Attach the screenshot in the \`${box}:\` box. Nothing was saved.`);
   if (att.size > IMAGE_MAX_BYTES) return ephemeral(`That file is ${(att.size / 1048576).toFixed(1)} MB; the limit is ${IMAGE_MAX_BYTES / 1048576} MB. A cropped screenshot of the item window is plenty.`);
   const [itemRes, pendingRes] = await c.db.batch([
     c.db.prepare('SELECT id, name FROM item WHERE name_key = ?').bind(typed.toLowerCase()),
