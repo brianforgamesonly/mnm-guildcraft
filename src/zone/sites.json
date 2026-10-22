@@ -1,0 +1,151 @@
+{
+  "about": "Derived by scripts/zone/sites.ts (order 17b); never edited by hand.",
+  "checkedAt": "2026-10-22T01:10:46.899Z",
+  "zones": {
+    "ail'vorith": {
+      "name": "Ail'Vorith",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/ailvorith",
+      "stories": "https://storiesofmnm.com/zone/ailvorith-zone-info-and-map/"
+    },
+    "ancient crypt": {
+      "name": "Ancient Crypt",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/ancient-crypt",
+      "stories": "https://storiesofmnm.com/zone/ancient-crypt/"
+    },
+    "blacktide bay": {
+      "name": "Blacktide Bay",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/blacktide-bay",
+      "stories": "https://storiesofmnm.com/zone/blacktide-bay/"
+    },
+    "blind midden": {
+      "name": "Blind Midden",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/blind-midden",
+      "stories": null
+    },
+    "caves of irem": {
+      "name": "Caves of Irem",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/caves-of-irem",
+      "stories": "https://storiesofmnm.com/zone/caves-of-irem/"
+    },
+    "evershade weald": {
+      "name": "Evershade Weald",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/evershade-weald",
+      "stories": "https://storiesofmnm.com/zone/evershade-weald/"
+    },
+    "faelindral": {
+      "name": "Faelindral",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/faelindral",
+      "stories": "https://storiesofmnm.com/zone/faelindral/"
+    },
+    "fallen pass": {
+      "name": "Fallen Pass",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/fallen-pass",
+      "stories": "https://storiesofmnm.com/zone/fallen-pass/"
+    },
+    "fallen watch": {
+      "name": "Fallen Watch",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/fallen-watch",
+      "stories": "https://storiesofmnm.com/zone/fallen-watch/"
+    },
+    "glass flats": {
+      "name": "Glass Flats",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/glass-flats",
+      "stories": "https://storiesofmnm.com/zone/glass-flats/"
+    },
+    "glinting hollow": {
+      "name": "Glinting Hollow",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/glinting-hollow",
+      "stories": "https://storiesofmnm.com/zone/glinting-hollow/"
+    },
+    "grain cellar": {
+      "name": "Grain Cellar",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/grain-cellar",
+      "stories": "https://storiesofmnm.com/zone/grain-cellar/"
+    },
+    "great cavern sea": {
+      "name": "Great Cavern Sea",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/great-cavern-sea",
+      "stories": null
+    },
+    "grimtide sanctum": {
+      "name": "Grimtide Sanctum",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/grimtide-sanctum",
+      "stories": "https://storiesofmnm.com/zone/grimtide-sanctum/"
+    },
+    "infested crypt": {
+      "name": "Infested Crypt",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/infested-crypt",
+      "stories": "https://storiesofmnm.com/zone/infested-crypt/"
+    },
+    "keeper's bight": {
+      "name": "Keeper's Bight",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/keepers-bight",
+      "stories": "https://storiesofmnm.com/zone/keepers-bight/"
+    },
+    "night harbor": {
+      "name": "Night Harbor",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/night-harbor",
+      "stories": "https://storiesofmnm.com/zone/night-harbor/"
+    },
+    "night harbor sewers": {
+      "name": "Night Harbor Sewers",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/night-harbor-sewers",
+      "stories": "https://storiesofmnm.com/zone/night-harbor-sewers/"
+    },
+    "rothold": {
+      "name": "Rothold",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/rothold",
+      "stories": "https://storiesofmnm.com/zone/rothold/"
+    },
+    "scarwood": {
+      "name": "Scarwood",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/scarwood",
+      "stories": "https://storiesofmnm.com/zone/scarwood/"
+    },
+    "shaded dunes": {
+      "name": "Shaded Dunes",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/shaded-dunes",
+      "stories": "https://storiesofmnm.com/zone/shaded-dunes/"
+    },
+    "shallow shoals": {
+      "name": "Shallow Shoals",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/shallow-shoals",
+      "stories": "https://storiesofmnm.com/zone/shallow-shoals/"
+    },
+    "sungreet strand": {
+      "name": "Sungreet Strand",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/sungreet-strand",
+      "stories": "https://storiesofmnm.com/zone/sungreet-strand/"
+    },
+    "sunken resort": {
+      "name": "Sunken Resort",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/sunken-resort",
+      "stories": null
+    },
+    "tel ekir": {
+      "name": "Tel Ekir",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/tel-ekir",
+      "stories": "https://storiesofmnm.com/zone/tel-ekir/"
+    },
+    "the hidden grotto": {
+      "name": "The Hidden Grotto",
+      "mnmWiki": null,
+      "stories": null
+    },
+    "tomb of the last wyrmsbane": {
+      "name": "Tomb of the Last Wyrmsbane",
+      "mnmWiki": null,
+      "stories": "https://storiesofmnm.com/zone/tomb-of-the-last-wyrmsbane/"
+    },
+    "underdocks": {
+      "name": "Underdocks",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/underdocks",
+      "stories": "https://storiesofmnm.com/zone/underdocks-zone-info-and-map/"
+    },
+    "vale of zintar": {
+      "name": "Vale of Zintar",
+      "mnmWiki": "https://monstersandmemories.wiki/zones/vale-of-zintar",
+      "stories": "https://storiesofmnm.com/zone/vale-of-zintar/"
+    }
+  }
+}

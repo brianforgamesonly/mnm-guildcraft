@@ -164,7 +164,7 @@ export const COMMANDS = [
   {
     // Order 17: no subcommand; the zone list is data, offered by autocomplete.
     name: 'zone',
-    description: 'A zone: map, level range, creatures, drops and links',
+    description: 'A zone: map, level range, creatures, and links to the wikis and MnM Atlas',
     type: 1,
     contexts: GUILD_ONLY,
     options: [{ type: STRING, name: 'name', description: 'The zone: pick from the list', required: true, autocomplete: true, max_length: 100 }],

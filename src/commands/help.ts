@@ -35,7 +35,7 @@ export const HELP_LINES: HelpLine[] = [
   '**Items and data**',
   { cmds: ['/gear find'], text: '— gear for your class by slot, type, AC, ratio, stats and source' },
   // Order 17.
-  { cmds: ['/zone'], text: "a zone's level range, creatures, drops and spots, with MnM Atlas and wiki links" },
+  { cmds: ['/zone'], text: "a zone's level range, creatures and spots, with MnM Atlas and wiki links" },
   { cmds: ['/item image'], text: 'send an item window screenshot; it shows under **Stat image** once an officer approves' },
   { cmds: ['/craft report'], text: 'report wrong recipe data or a missing recipe (or press **Report a problem**)' },
   { cmds: ['/recipe add'], text: 'record a recipe the data is missing (officer-approved)' },

@@ -10,7 +10,7 @@ import { craftFind, IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from '.
 import { APPROVE_PREFIX, imageButton, itemImage, REJECT_PREFIX, statImage } from './commands/images.ts';
 import { craftForget, craftKnow, KNOW_SELECT_PREFIX, knowButton, knowSelected, postRosterRecipes, RECIPES_PAGE_PREFIX, recipeOverride, recipeSource, rosterRecipes, rosterRecipesPage } from './commands/recipes.ts';
 import { craftReport, DISMISS_PREFIX, FIXED_PREFIX, ITEM_REPORT_MODAL_PREFIX, ITEM_REPORT_PREFIX, REPORT_MODAL_PREFIX, reportButton, reportModal, reportSubmitted } from './commands/reports.ts';
-import { DETAILS_PREFIX, gearDetails, gearFind, gearPage, PAGE_PREFIX as GEAR_PAGE_PREFIX, postGear, POST_WHAT as GEAR_POST } from './commands/gear.ts';
+import { DETAILS_PREFIX, gearDetails, gearFind, gearPage, gearSort, PAGE_PREFIX as GEAR_PAGE_PREFIX, postGear, POST_WHAT as GEAR_POST, SORT_PREFIX as GEAR_SORT_PREFIX } from './commands/gear.ts';
 import { PAGE_PREFIX, postRoster, rosterMember, rosterPage, rosterSkill, rosterSwitch, rosterTop, SWITCH_PREFIX } from './commands/roster.ts';
 import { POST_PREFIX, SEARCH_REPLIES_PRIVATE } from './commands/share.ts';
 import { BUTTON_PREFIX, craftMe, craftSet, craftUpdate, MODAL_PREFIX, SELECT_PREFIX, updateButton, updateSelected, updateSubmitted } from './commands/skills.ts';
@@ -20,7 +20,7 @@ import {
 } from './commands/requests.ts';
 import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
 import {
-  CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, GEAR_SORT_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear, zoneGearClass, zoneGearSort, zoneList, zoneListPage,
+  CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear, zoneGearClass, zoneList, zoneListPage,
 } from './commands/zone.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
@@ -200,9 +200,10 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(DETAILS_PREFIX)) return gearDetails(c, i.data?.values ?? []);
   // Order 17: /zone's buttons, private or on a posted card; each from the card answers with a new private message,
   // and the menus and pages they open are edited in place.
+  // Order 17b: Gear here asks for the class first; one zone's results carry /gear find's sort select.
   if (id.startsWith(ZONE_GEAR_PREFIX)) return zoneGear(c, id);
-  if (id.startsWith(GEAR_SORT_PREFIX)) return zoneGearSort(c, id, i.data?.values ?? []);
   if (id.startsWith(GEAR_CLASS_PREFIX)) return zoneGearClass(c, id, i.data?.values ?? []);
+  if (id.startsWith(GEAR_SORT_PREFIX)) return gearSort(c, id, i.data?.values ?? []);
   if (id.startsWith(CREATURES_PREFIX) || id.startsWith(DROPS_PREFIX)) return zoneList(c, id);
   if (id.startsWith(CREATURES_PAGE_PREFIX) || id.startsWith(DROPS_PAGE_PREFIX)) return zoneListPage(c, id);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);

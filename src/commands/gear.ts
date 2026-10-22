@@ -4,7 +4,7 @@
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow } from '../crafters.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
-import { decodeState, defaultSort, encodeState, roundRatio, sortByKey, STAT_FILTERS, type GearQuery } from '../gear/options.ts';
+import { decodeState, defaultSort, encodeState, roundRatio, sortByKey, SORTS, STAT_FILTERS, type GearQuery } from '../gear/options.ts';
 import { zoneKey } from '../zone/names.ts';
 import { unknownZone } from '../zone/suggest.ts';
 import { ZONE_STATE_MAX } from '../gear/options.ts';
@@ -18,6 +18,8 @@ import { postedReply, searchReply } from './share.ts';
 
 export const PAGE_PREFIX = 'gp:';
 export const DETAILS_PREFIX = 'gd:';
+/** Order 17b: the sort select on one zone's results, "gs:<state>"; a pick redraws page 1 in place. */
+export const SORT_PREFIX = 'gs:';
 /** Post to channel for an item card: "pub:gear:<item id>" (src/commands/share.ts POST_PREFIX). */
 export const POST_WHAT = 'gear:';
 
@@ -44,6 +46,10 @@ export const GEAR_COPY = {
   allClasses: 'All',
   noClass: 'no class listed',
   details: 'Details: pick an item',
+  /** Order 17b: one zone's results (Gear here, or /gear find zone:) say which zone, and carry a sort select. */
+  fromZone: (zone: string) => `**Gear from ${md(zone)}**`,
+  sortPlaceholder: 'Sort',
+  sortOption: (label: string) => `Sort: ${label}`,
   previous: 'Previous',
   next: 'Next',
   gone: 'That item is no longer in the data. Run `/gear find` again.',
@@ -284,8 +290,26 @@ function pageComponents(rows: GearRow[], q: GearQuery, page: number, hasNext: bo
       options: rows.map((r) => ({ label: truncate(r.name, 100), value: String(r.id), description: truncate(r.slot ?? '', 100) || undefined })),
     },
   ]);
-  return [nav, select];
+  if (q.zone === undefined) return [nav, select];
+  // A select holds 25 options; the sort list is shorter (src/gear/options.ts SORTS).
+  const sorts = row([
+    {
+      type: 3,
+      custom_id: `${SORT_PREFIX}${state}`,
+      placeholder: GEAR_COPY.sortPlaceholder,
+      options: SORTS.slice(0, 25).map((s, i) => ({ label: GEAR_COPY.sortOption(s.label), value: String(i), ...(s.key === q.sort.key ? { default: true } : {}) })),
+    },
+  ]);
+  return [nav, select, sorts];
 }
+
+/** "Gear from <zone>" above one zone's results; nothing for other searches, or a zone gone from the data. */
+async function zoneHeading(c: Ctx, q: GearQuery): Promise<string | null> {
+  if (q.zone === undefined) return null;
+  const name = (await c.db.prepare('SELECT name FROM zone WHERE key = ? AND active = 1').bind(q.zone).first<{ name: string }>())?.name;
+  return name ? GEAR_COPY.fromZone(name) : null;
+}
+const withHeading = (heading: string | null) => (heading ? `${heading}\n${GEAR_COPY.help}` : GEAR_COPY.help);
 
 async function zeroResults(c: Ctx, q: GearQuery): Promise<MessageReply> {
   const relax = relaxStatement(c.db, q);
@@ -314,18 +338,26 @@ export async function gearFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
 }
 
 /**
- * The first results page for a query: a new private message, or (`inPlace`: /zone's Gear here) an edit of the menu.
- * `heading` (Gear here: "Gear from <zone>") goes above the help, so the zone filter stays visible.
+ * The first results page for a query: a new private message, or (`inPlace`: /zone's Gear here, or a new sort) an edit.
+ * One zone's results carry "Gear from <zone>" above the help, so the zone filter stays visible.
  */
-export async function gearResults(c: Ctx, q: GearQuery, inPlace: boolean, heading?: string): Promise<MessageReply> {
+export async function gearResults(c: Ctx, q: GearQuery, inPlace: boolean): Promise<MessageReply> {
   const p = await page(c, q, 0);
   if (!p) {
     const zero = await zeroResults(c, q);
     return inPlace ? updateMessage({ content: zero.data.content, embeds: [], components: [] }) : zero;
   }
-  const content = heading ? `${heading}\n${GEAR_COPY.help}` : GEAR_COPY.help;
+  const content = withHeading(await zoneHeading(c, q));
   const data = { embeds: [pageEmbed(p.rows, q, p.data, 0, c.guild.learning_window)], components: pageComponents(p.rows, q, 0, p.hasNext) };
   return inPlace ? updateMessage({ content, ...data }) : ephemeral(content, data);
+}
+
+/** gs:<state>: a sort picked on one zone's results; page 1 in that sort replaces the results. */
+export async function gearSort(c: Ctx, customId: string, values: string[]): Promise<MessageReply> {
+  const q = decodeState(customId.slice(SORT_PREFIX.length));
+  const sort = SORTS[Number(values[0])];
+  if (!q || !sort) return ephemeral(GEAR_COPY.gone);
+  return gearResults(c, { ...q, sort }, true);
 }
 
 /** gp:<page>:<state>: Previous / Next, editing the private results in place. */
@@ -335,7 +367,7 @@ export async function gearPage(c: Ctx, customId: string): Promise<MessageReply> 
   if (!q) return ephemeral(GEAR_COPY.gone);
   const p = await page(c, q, Number(n));
   if (!p) return updateMessage({ content: GEAR_COPY.none, embeds: [], components: [] });
-  return updateMessage({ content: GEAR_COPY.help, embeds: [pageEmbed(p.rows, q, p.data, Number(n), c.guild.learning_window)], components: pageComponents(p.rows, q, Number(n), p.hasNext) });
+  return updateMessage({ content: withHeading(await zoneHeading(c, q)), embeds: [pageEmbed(p.rows, q, p.data, Number(n), c.guild.learning_window)], components: pageComponents(p.rows, q, Number(n), p.hasNext) });
 }
 
 // ---------------------------------------------------------------- the item card

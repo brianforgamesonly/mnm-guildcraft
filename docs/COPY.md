@@ -795,3 +795,22 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 | src/commands/zone.ts:33-38 | Gear here: Gear from **\<zone>**: pick a sort if you like (AC by default), then your class. · Sort (AC by default) · Sort: \<sort> · Your class, or Any · No classes are loaded yet. Try `/gear find` once the nightly import has run. · (above the results) **Gear from \<zone>** | DRAFT |
 | docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" and "Turning on MnM Atlas's zone pictures (operator)" | DRAFT |
 | README.md | Credits: mnm-tools maps.json; Mo Betta (zones.json, npcs.json, from the wiki under CC BY-SA); MnM Atlas and its original map authors | DRAFT |
+
+## Work order 17b: zone card fixes (DRAFT)
+
+Replaces the order 17 rows above for the drops list, More drops, the Wiki page label and the Gear here menu.
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/definitions.ts:167 | `/zone`: A zone: map, level range, creatures, and links to the wikis and MnM Atlas | DRAFT |
+| src/commands/help.ts:38 | `/craft help`: `/zone` a zone's level range, creatures and spots, with MnM Atlas and wiki links | DRAFT |
+| src/board/render.ts:110 | Board index: `/zone` a zone's levels, creatures, wiki and map links | DRAFT |
+| src/zone/card.ts:16, 229 | Field: Map · No map yet (no atlas link when the zone has no atlas map) | DRAFT |
+| src/zone/card.ts:18-21 | Link buttons: Wiki · MnM Wiki · Stories of MnM · Zone connections (and Open in MnM Atlas, unchanged) | DRAFT |
+| src/zone/card.ts:30-32 | Field: Not recorded yet · No \<level range, description> or \<creatures> recorded for this zone yet. [MnM Atlas](\<atlas>) may have more. (the last sentence only when the zone has an atlas map) | DRAFT |
+| src/zone/card.ts:37, 39 | Page: Creatures in \<zone> · by level, lowest first | DRAFT |
+| src/commands/zone.ts:34 | (More drops on a card posted before this order) Zone cards no longer list drops. Press **Gear here** on the card to find the zone's gear for your class. | DRAFT |
+| src/commands/zone.ts:35-36 | Gear here: Gear from **\<zone>**: pick your class (or Any). You can change the sort on the results. · Your class, or Any | DRAFT |
+| src/commands/gear.ts:50-52 | (one zone's results: Gear here, or `/gear find zone:`) **Gear from \<zone>** · sort menu: Sort · Sort: \<sort> | DRAFT |
+| docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" rewritten; "MnM Atlas's zone pictures (operator)" records the permission | DRAFT |
+| README.md | Credits: MnM Atlas's permission (2026-10-21); zone links to monstersandmemories.wiki and Stories of MnM | DRAFT |

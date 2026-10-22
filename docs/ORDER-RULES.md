@@ -166,3 +166,12 @@ Treat the clock as authoritative over any date an order states.
 - Order 17's explicit override 2: a map image appears on a zone card only if its wiki file page states its licence and its author or source. The check's record is `scripts/import/map-licences.ts`; it is read from archived copies, because order 14's "Nothing else contacts the wiki" stands.
 - Order 17's explicit override 3: MnM Atlas's whole-zone images (`assets/cards/<map id>.jpg`) are shown only while the repository variable `ATLAS_ZONE_IMAGES` is `on`, set by the owner once the atlas's maker agrees. It ships off.
 - A list sort uses one named key, never a combined score (the owner, order 13): zone drops sort by AC, then name.
+
+## Order 17b
+
+- Order 17b's explicit override 1 of order 17's override 3: MnM Atlas's maker granted permission to show its zone images, credited, on 2026-10-21 (reported by the owner). `ATLAS_ZONE_IMAGES` is `on`.
+- Order 17b's explicit override 2: the zone card no longer lists drops (order 17's "Notable drops" and More drops); Gear here finds a zone's gear.
+- Order 17b's explicit override 3 of order 14's "Nothing else contacts the wiki", for monstersandmemories.wiki and storiesofmnm.com only: `scripts/zone/sites.ts`, run by hand when zones change (never on a schedule), makes at most one request per zone per site to verify each link (status and final address after redirects), plus one read of Stories of MnM's `/zones/` index, with order 14's named User-Agent and polite-guest rules. Miraheze is never contacted; its links are built from the import as before.
+- A link to a page a site does not have is never offered: no fallback to a site's index or to MnM Atlas's root (which opens its world map). The card's MnM Atlas addresses name a registry id or nothing (`test/worker/zone.test.ts`, the order 17b regression test, applies the atlas's own address rule).
+- The other sites' addresses live in one derived file, `src/zone/sites.json`; CI fails when a link it held on main disappears for a zone it still holds (`scripts/ci/zone-sites.test.ts`).
+- A link check is proven in a real browser on the address the member is given, never only by comparing strings in a test.
