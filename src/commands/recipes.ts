@@ -1,6 +1,6 @@
 // Known recipes and how recipes are obtained (order 9, ITEMs 1–2; PRD FR-2, FR-3.1, FR-7):
-//   /craft know recipe: [character] · /craft forget recipe: [character] · the "I know this recipe" button on /craft find
-//   /recipe source item: how: [faction] [note] · /recipe override item: [trivial] [components] [reset]   (officers)
+//   the "I know this recipe" button on /item (and on /craft find cards from before order 18) · /me's Forget a recipe
+//   /officer recipe-source item: how: [faction] [note] · /officer recipe-fix item: [trivial] [components] [reset]
 //   /roster recipes [skill]
 // /recipe writes this guild's correction layer (src/recipes.ts, migration 0009), never the shared recipe row.
 import { audit, now } from '../access.ts';
@@ -8,7 +8,7 @@ import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, ephemeral, md, memberTag, optBool, optInt, optString, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, CORRECTED, correctionJoin, FACTION_MAX, GATED, GUILD_RECIPE_COLS, guildRecipeFrom, RECIPE_VALUE, recipeLabel, visibleTo, type Acquisition, type GuildRecipe } from '../recipes.ts';
 import { findById, liveCharacters, noCharacters, resolveCharacter, type Character } from './character.ts';
-import { fitLines, KNOWN_MARK } from './find.ts';
+import { fitLines, GONE_RECIPE, KNOWN_MARK } from './find.ts';
 import { postButton, postedReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { SELECT_MAX_OPTIONS, type Tradeskill } from './skills.ts';
 
@@ -44,7 +44,7 @@ function markStatements(c: Ctx, ch: Character, r: GuildRecipe): D1PreparedStatem
 const markedText = (ch: Pick<Character, 'name'>, r: GuildRecipe, already: boolean) =>
   already
     ? `**${md(ch.name)}** already has **${md(recipeLabel(r))}** marked known.`
-    : `Marked **${md(recipeLabel(r))}** as known for **${md(ch.name)}**: \`/craft find\` shows the ${KNOWN_MARK} marker. \`/craft forget\` undoes it.`;
+    : `Marked **${md(recipeLabel(r))}** as known for **${md(ch.name)}**: \`/item\` shows the ${KNOWN_MARK} marker. **Forget a recipe** on \`/me\` undoes it.`;
 
 async function markKnown(c: Ctx, ch: Character, r: GuildRecipe): Promise<string> {
   const known = await c.db.prepare('SELECT 1 FROM character_recipe WHERE character_id = ? AND recipe_id = ?').bind(ch.id, r.id).first();
@@ -53,14 +53,7 @@ async function markKnown(c: Ctx, ch: Character, r: GuildRecipe): Promise<string>
   return markedText(ch, r, false);
 }
 
-export async function craftKnow(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const target = await resolveCharacter(c, c.userId, optString(opts, 'character'));
-  if ('reply' in target) return target.reply;
-  const found = await resolveRecipe(c.db, c.guild.id, optString(opts, 'recipe'));
-  if ('reply' in found) return found.reply;
-  return ephemeral(await markKnown(c, target.character, found.recipe));
-}
-
+/** Unmarks a recipe for the caller's character (order 18: /me's Forget a recipe passes the picked character and recipe). */
 export async function craftForget(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const target = await resolveCharacter(c, c.userId, optString(opts, 'character'));
   if ('reply' in target) return target.reply;
@@ -95,12 +88,12 @@ export async function knowButton(c: Ctx, itemId: number): Promise<MessageReply> 
       .then((r) => r.results),
   ]);
   if (!chars.length) return ephemeral(noCharacters(c, c.userId));
-  if (!recipes.length) return ephemeral('That item no longer has a recipe. Run `/craft find` again.');
+  if (!recipes.length) return ephemeral(GONE_RECIPE);
   if (chars.length === 1 && recipes.length === 1) return ephemeral(await markKnown(c, chars[0], recipes[0]));
   const pairs = chars.flatMap((ch) => recipes.map((r) => ({ ch, r })));
   const shown = pairs.slice(0, SELECT_MAX_OPTIONS);
   return ephemeral(
-    [`Which character knows which recipe?${pairs.length > shown.length ? ` (showing ${shown.length} of ${pairs.length}: use \`/craft know\` for the rest)` : ''}`].join('\n'),
+    [`Which character knows which recipe?${pairs.length > shown.length ? ` (showing the first ${shown.length} of ${pairs.length})` : ''}`].join('\n'),
     {
       components: [
         row([
@@ -126,9 +119,9 @@ export async function knowButton(c: Ctx, itemId: number): Promise<MessageReply> 
 export async function knowSelected(c: Ctx, values: string[]): Promise<MessageReply> {
   const [chId, recipeId] = (values[0] ?? '').split(':').map(Number);
   const ch = Number.isInteger(chId) ? await findById(c.db, c.guild.id, chId) : null;
-  if (!ch || ch.owner_user_id !== c.userId) return updateMessage({ content: 'That character is no longer available. Run `/craft find` again.', components: [] });
+  if (!ch || ch.owner_user_id !== c.userId) return updateMessage({ content: 'That character is no longer available. Run `/item` again.', components: [] });
   const found = await resolveRecipe(c.db, c.guild.id, `#${recipeId}`);
-  if ('reply' in found) return updateMessage({ content: 'That recipe is no longer in the data. Run `/craft find` again.', components: [] });
+  if ('reply' in found) return updateMessage({ content: 'That recipe is no longer in the data. Run `/item` again.', components: [] });
   // The dropdown is the presser's own private message: replacing it with the answer changes no one else's view.
   return updateMessage({ content: await markKnown(c, ch, found.recipe), components: [] });
 }
@@ -187,8 +180,8 @@ export async function recipeSource(c: Ctx, opts: Option[]): Promise<MessageReply
     how === 'reputation' || how === 'discovery'
       ? `Only characters who marked it known now count as able to make it; others with ${r.tradeskill} show as ${how === 'reputation' ? `"has skill, needs reputation (${md(keepFaction!)})"` : '"has skill, recipe not marked known"'}.`
       : how === 'vendor'
-        ? '`/craft find` groups crafters by skill as usual (Reliable, Still learning) and says it may need buying first.'
-        : '`/craft find` groups crafters by skill as usual (Reliable, Still learning), with a note to check the crafter has the recipe.';
+        ? '`/item` groups crafters by skill as usual (Reliable, Still learning) and says it may need buying first.'
+        : '`/item` groups crafters by skill as usual (Reliable, Still learning), with a note to check the crafter has the recipe.';
   return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** is now **${ACQUISITION_LABEL[how]}**${keepFaction ? ` (${md(keepFaction)})` : ''}${keepNote ? ` · ${md(keepNote)}` : ''}. ${effect}\n${SERVER_ONLY}`);
 }
 
@@ -236,7 +229,7 @@ export async function recipeOverride(c: Ctx, opts: Option[]): Promise<MessageRep
       .all<{ id: number; name_key: string }>();
     const byKey = new Map(results.map((x) => [x.name_key, x.id]));
     const unmatched = parsed.filter((p) => !byKey.has(p.name.toLowerCase()));
-    if (unmatched.length) return ephemeral(`Nothing was changed. No item is named exactly: ${unmatched.map((p) => `**${md(p.name)}**`).join(', ')}. Check the spelling against \`/craft find\`.`);
+    if (unmatched.length) return ephemeral(`Nothing was changed. No item is named exactly: ${unmatched.map((p) => `**${md(p.name)}**`).join(', ')}. Check the spelling against \`/item\`.`);
     const ids = parsed.map((p) => byKey.get(p.name.toLowerCase())!);
     if (new Set(ids).size !== ids.length) return ephemeral('Nothing was changed: an item is listed twice. Give each item once, with its total quantity.');
     parts = parsed.map((p, i) => ({ ...p, id: ids[i] }));
@@ -254,7 +247,7 @@ export async function recipeOverride(c: Ctx, opts: Option[]): Promise<MessageRep
   stmts.push(audit(c.db, c.guild.id, c.userId, 'recipe.override', `recipe:${r.id}`, null, { trivial: trivial ?? null, components: parts.map((p) => [p.id, p.qty]) }));
   await c.db.batch(stmts);
   const bits = [trivial !== undefined ? `trivial **${trivial}**` : null, text !== undefined ? `ingredients ${parts.map((p) => `${p.qty} × ${md(p.name)}`).join(', ')}` : null].filter(Boolean);
-  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** now shows ${bits.join(' and ')}, marked guild-corrected on \`/craft find\`. \`reset:True\` removes the correction.\n${SERVER_ONLY}`);
+  return ephemeral(`Saved for this server: **${md(recipeLabel(r))}** now shows ${bits.join(' and ')}, marked guild-corrected on \`/item\`. \`reset:True\` removes the correction.\n${SERVER_ONLY}`);
 }
 
 // ---------------------------------------------------------------- /roster recipes [skill] (FR-3.1)
@@ -290,7 +283,7 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
 }
 
 export const RARE_EMPTY =
-  'No one has marked a reputation or discovery recipe as known yet. Officers set how a recipe is obtained with `/recipe source`; members then mark the ones they know with `/craft know` or the **I know this recipe** button on `/craft find`.';
+  'No one has marked a reputation or discovery recipe as known yet. Officers set how a recipe is obtained with `/officer recipe-source`; members then mark the ones they know with the **I know this recipe** button on `/item`.';
 
 /** Knowers named per recipe line; the rest are counted (order 16: a knower is now a mention and a name, ~50 characters). */
 const WHO_MAX = 5;

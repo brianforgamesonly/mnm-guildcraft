@@ -116,6 +116,7 @@ export interface Reply {
 
 /** The immediate answer (an ack for deferred interactions) and the webhook calls that followed it. */
 export async function exchange(body: unknown, opts: { env?: Record<string, unknown> } = {}): Promise<{ ack: Reply; calls: WebhookCall[] }> {
+  if (body && typeof body === 'object' && '__legacy' in body) body = await fromLegacy((body as { __legacy: Legacy }).__legacy, opts);
   const res = await post(body, opts);
   const token = lastToken;
   const ack = (await res.json()) as Reply;
@@ -159,21 +160,159 @@ const optType = (v: unknown) => (typeof v === 'number' ? 4 : typeof v === 'boole
 const toOptions = (o: Record<string, unknown>, focus?: string) =>
   Object.entries(o).map(([name, value]) => ({ type: optType(value), name, value, ...(name === focus ? { focused: true } : {}) }));
 
-/** An APPLICATION_COMMAND interaction for /name sub. */
-export const cmd = (m: Member, name: string, sub: string, options: Record<string, unknown> = {}) => ({
-  type: 2,
+/** An APPLICATION_COMMAND interaction for /name sub, exactly as Discord sends it (no translation; see `cmd`). */
+export const rawCmd = (m: Member, name: string, sub: string | undefined, options: Record<string, unknown> = {}, type = 2, focus?: string) => ({
+  type,
   guild_id: GUILD,
   member: m,
-  data: { name, options: [{ type: 1, name: sub, options: toOptions(options) }] },
+  data: { name, options: sub === undefined ? toOptions(options, focus) : [{ type: 1, name: sub, options: toOptions(options, focus) }] },
 });
+/** A command without subcommands (/me, /skills, /item, /gear, /request, /zone, /help): its options at the top. */
+export const top = (m: Member, name: string, options: Record<string, unknown> = {}) => rawCmd(m, name, undefined, options);
+
+// ---------------------------------------------------------------- order 18: the old names, as the new entry points
+// Work order 18 removed /character, /craft, /item image, /gear find, /recipe and /guildcraft remove-member as commands.
+// The fixtures written for them keep their calls: `cmd` sends each old name the way a member now does the same thing
+// (a new command, or /me's form or select, or a card's button), through the Worker. The old names themselves answer
+// "not available" (test/worker/next-commands.test.ts sends them raw).
+
+/** Old name → a new command with the same options (renamed where the new one names them differently). */
+const RENAMED: Record<string, (o: Record<string, unknown>) => [string, string | undefined, Record<string, unknown>]> = {
+  'craft update': (o) => ['skills', undefined, o],
+  'craft me': (o) => ['me', undefined, o],
+  'craft find': ({ item, ...o }) => ['item', undefined, { name: item, ...o }],
+  'craft request': (o) => ['request', undefined, o],
+  'craft help': () => ['help', undefined, {}],
+  'item image': ({ item, image }) => ['item', undefined, { name: item, screenshot: image }],
+  'gear find': (o) => ['gear', undefined, o],
+  'recipe source': (o) => ['officer', 'recipe-source', o],
+  'recipe override': (o) => ['officer', 'recipe-fix', o],
+  'guildcraft remove-member': ({ user }) => ['officer', 'remove-member', { member: user }],
+};
+/** Old names that become a form, a select or a button: resolved when sent (fromLegacy), as they need the rows. */
+const VIA_PANEL = new Set(['character add', 'character edit', 'character remove', 'craft know', 'craft forget', 'craft report', 'craft notify', 'craft requests']);
+
+interface Legacy {
+  m: Member;
+  key: string;
+  options: Record<string, unknown>;
+}
+
+/** An interaction for /name sub: the new command for an old name (above), or exactly as given for a current one. */
+export function cmd(m: Member, name: string, sub: string, options: Record<string, unknown> = {}) {
+  const key = `${name} ${sub}`;
+  // /craft set member: (an officer for someone else) goes through that member's Update skills form.
+  if (VIA_PANEL.has(key) || (key === 'craft set' && options.member !== undefined)) return { ...rawCmd(m, name, sub, options), __legacy: { m, key, options } as Legacy };
+  if (key === 'craft set') return top(m, 'skills', options);
+  const r = RENAMED[key];
+  if (r) {
+    const [n, s, o] = r(options);
+    return rawCmd(m, n, s, o);
+  }
+  return rawCmd(m, name, sub, options);
+}
+
+/** Old autocomplete keys → the new command and option offering the same list. */
+const AUTO_RENAMED: Record<string, [string, string | undefined, string]> = {
+  'craft find item': ['request', undefined, 'item'],
+  'craft request item': ['request', undefined, 'item'],
+  'craft set skill': ['skills', undefined, 'skill'],
+  'craft set character': ['skills', undefined, 'character'],
+  'craft update character': ['skills', undefined, 'character'],
+  'craft me character': ['me', undefined, 'character'],
+  'craft know recipe': ['officer', 'recipe-source', 'item'],
+  'gear find zone': ['gear', undefined, 'zone'],
+  'recipe source item': ['officer', 'recipe-source', 'item'],
+  'recipe source faction': ['officer', 'recipe-source', 'faction'],
+  'recipe override item': ['officer', 'recipe-fix', 'item'],
+};
 
 /** An APPLICATION_COMMAND_AUTOCOMPLETE interaction with `focus` as the focused option. */
-export const auto = (m: Member, name: string, sub: string, options: Record<string, unknown>, focus: string) => ({
-  type: 4,
-  guild_id: GUILD,
-  member: m,
-  data: { name, options: [{ type: 1, name: sub, options: toOptions(options, focus) }] },
-});
+export const auto = (m: Member, name: string, sub: string | undefined, options: Record<string, unknown>, focus: string) => {
+  const r = sub === undefined ? undefined : AUTO_RENAMED[`${name} ${sub} ${focus}`];
+  if (!r) return rawCmd(m, name, sub, options, 4, focus);
+  const [n, s, f] = r;
+  const { [focus]: value, ...rest } = options;
+  return rawCmd(m, n, s, { ...rest, [f]: value }, 4, f);
+};
+
+const row1 = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).first<T>()) ?? null;
+/** The named character (or the main) of `owner`, live, or any when `removed`. */
+const characterOf = (owner: string, name: unknown, removed = false) =>
+  name === undefined
+    ? row1<{ id: number; name: string; class: string | null; level: number | null }>(`SELECT id, name, class, level FROM character WHERE guild_id = ? AND owner_user_id = ? AND deleted_at IS NULL ORDER BY is_main DESC, created_at, id LIMIT 1`, GUILD, owner)
+    : row1<{ id: number; name: string; class: string | null; level: number | null }>(`SELECT id, name, class, level FROM character WHERE guild_id = ? AND owner_user_id = ? AND name_key = lower(trim(?))${removed ? '' : ' AND deleted_at IS NULL'}`, GUILD, owner, String(name));
+/** A recipe option ("#<id>", or an item name with one recipe) → its id and its item's id. */
+const recipeOf = async (raw: unknown) => {
+  const s = String(raw ?? '');
+  const by = /^#(\d+)$/.exec(s);
+  return by
+    ? row1<{ id: number; item: number }>('SELECT id, result_item_id AS item FROM recipe WHERE id = ?', Number(by[1]))
+    : row1<{ id: number; item: number }>('SELECT r.id, r.result_item_id AS item FROM recipe r JOIN item i ON i.id = r.result_item_id WHERE i.name_key = lower(trim(?)) AND r.active = 1', s);
+};
+
+async function fromLegacy({ m, key, options: o }: Legacy, opts: { env?: Record<string, unknown> }): Promise<unknown> {
+  const me = m.user.id;
+  switch (key) {
+    case 'character add': {
+      // /me first, as a member does: its command creates (or reactivates) the member row, which a form never does.
+      await post(top(m, 'me'), opts);
+      return submit(m, `meam:${me}`, {
+        name: String(o.name ?? ''),
+        ...(o.class !== undefined ? { class: String(o.class) } : {}),
+        ...(o.level !== undefined ? { level: String(o.level) } : {}),
+        ...(o.main === true ? { main: 'yes' } : {}),
+      });
+    }
+    case 'character edit': {
+      const owner = (o.member as string | undefined) ?? me;
+      const ch = await characterOf(owner, o.name, owner !== me);
+      return submit(m, `meem:${ch?.id ?? 0}`, {
+        name: String(o.new_name ?? ch?.name ?? o.name ?? ''),
+        class: String(o.class ?? ch?.class ?? ''),
+        level: o.level !== undefined ? String(o.level) : '',
+        main: o.main === true ? 'yes' : o.main === false ? 'no' : '',
+      });
+    }
+    case 'character remove': {
+      const owner = (o.member as string | undefined) ?? me;
+      const ch = await characterOf(owner, o.name);
+      return select(m, `mers:${owner}`, [String(ch?.id ?? 0)]);
+    }
+    case 'craft set': {
+      const owner = o.member as string;
+      const ch = await characterOf(owner, o.character);
+      const skill = await row1<{ id: number }>('SELECT id FROM tradeskill WHERE name = ? COLLATE NOCASE', String(o.skill ?? ''));
+      return submit(m, `updm:${ch?.id ?? 0}`, { [`lvl:${skill?.id ?? 0}`]: String(o.level ?? '') });
+    }
+    case 'craft know': {
+      const [ch, r] = await Promise.all([characterOf(me, o.character), recipeOf(o.recipe)]);
+      return select(m, `knows:${r?.item ?? 0}`, [`${ch?.id ?? 0}:${r?.id ?? 0}`]);
+    }
+    case 'craft forget': {
+      const [ch, r] = await Promise.all([characterOf(me, o.character), recipeOf(o.recipe)]);
+      return select(m, 'mefs:', [`${ch?.id ?? 0}:${r?.id ?? 0}`]);
+    }
+    case 'craft report': {
+      const item = await row1<{ id: number }>('SELECT id FROM item WHERE name_key = lower(trim(?))', String(o.item ?? ''));
+      return submit(m, `rptm:${item?.id ?? 0}`, { issue: String(o.issue ?? ''), ...(o.details !== undefined ? { details: String(o.details) } : {}) });
+    }
+    case 'craft notify': {
+      // /me's Notices: one select per group of up to 25 tradeskills (the fixtures hold fewer: group 0).
+      const { results: skills } = await env.DB.prepare('SELECT id, name FROM tradeskill ORDER BY name COLLATE NOCASE').all<{ id: number; name: string }>();
+      const { results: on } = await env.DB.prepare('SELECT tradeskill_id AS id FROM craft_notify WHERE guild_id = ? AND discord_user_id = ?').bind(GUILD, me).all<{ id: number }>();
+      const typed = String(o.tradeskill ?? '').toLowerCase();
+      const these = skills.filter((s) => typed === 'all' || s.name.toLowerCase() === typed).map((s) => s.id);
+      const now = new Set(on.map((r) => r.id));
+      for (const id of these) o.on ? now.add(id) : now.delete(id);
+      return select(m, 'mens:0', [...now].map(String));
+    }
+    case 'craft requests':
+      // A member's own: /me's Cancel a request. An officer's all: /officer requests.
+      return o.__officer ? rawCmd(m, 'officer', 'requests') : press(m, `mec:${me}`);
+  }
+  throw new Error(`no translation for /${key}`);
+}
 
 export const select = (m: Member, custom_id: string, values: string[]) => ({
   type: 3,

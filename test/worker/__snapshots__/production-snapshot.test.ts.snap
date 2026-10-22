@@ -50,8 +50,8 @@ exports[`production departure notes in status, as at 2b204aa > the notice itself
       "description": "**Characters**
 **Bochar** (WIZ, level 30)
 
-While they are away their characters are hidden from \`/craft find\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
-**Remove characters** removes the characters (their skills are kept; \`/character add\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
+While they are away their characters are hidden from \`/item\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+**Remove characters** removes the characters (their skills are kept; **Add character** on \`/me\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
       "title": "Bo left the server",
     },
   ],
@@ -88,8 +88,8 @@ exports[`production departure notes in status, as at 2b204aa > the notice itself
       "description": "**Characters**
 No characters registered.
 
-While they are away their characters are hidden from \`/craft find\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
-**Remove characters** removes the characters (their skills are kept; \`/character add\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
+While they are away their characters are hidden from \`/item\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+**Remove characters** removes the characters (their skills are kept; **Add character** on \`/me\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
       "title": "A member left the server",
     },
   ],

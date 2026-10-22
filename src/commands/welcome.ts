@@ -1,19 +1,18 @@
-// Approved copy (docs/COPY.md, order 11).
-// Shown once, privately, with a new member's first command reply (PRD FR-9).
-// "(coming soon)" is derived from the registered definitions, as in /craft help.
+// Shown once, privately, with a new member's first command reply (PRD FR-9). Order 18: the new command names
+// (docs/COPY.md lists it for approval).
 import type { Embed } from '../discord.ts';
-import { CONTACT, isBuilt } from './help.ts';
+import { CONTACT } from './help.ts';
 
 export const WELCOME: Embed = {
   title: 'Welcome to GuildCraft',
   description: [
     'Three steps to get started:',
-    '**1.** `/character add`: register your character. Your first one becomes your main.',
-    '**2.** `/craft update`: press Enter, pick up to 5 tradeskills, then type their levels. (`/craft set` sets one skill.)',
-    'Or press the **Update skills** button under your `/craft me`, `/craft set` or `/character add` reply.',
-    `**3.** \`/craft find\`: look up who in the guild can make an item.${isBuilt('/craft find') ? '' : ' *(coming soon: not available yet)*'}`,
+    '**1.** `/me`: press **Add character** to register your character. Your first one becomes your main.',
+    '**2.** `/skills`: press Enter, pick up to 5 tradeskills, then type their levels. (`/skills skill: level:` sets one.)',
+    'Or press **Update skills** on your `/me`.',
+    '**3.** `/item`: look up any item, and who in the guild can make it.',
     '',
-    '*You see this message once. `/craft help` lists every command.*',
+    '*You see this message once. `/help` shows every command.*',
     CONTACT,
   ].join('\n'),
 };

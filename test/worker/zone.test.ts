@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport } from '../../scripts/import/core.ts';
 import { COMMANDS, commandLimitProblems, DEFINED } from '../../src/commands/definitions.ts';
-import { HELP_TEXT } from '../../src/commands/help.ts';
+import { pageText } from '../../src/commands/help.ts';
 import { ZONE_REPLY_COPY } from '../../src/commands/zone.ts';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
@@ -159,7 +159,7 @@ describe('/zone: the card', () => {
 
   it('/gear find zone: an unknown zone gets the same suggestions, not a silent zero', async () => {
     await zone('Rothold');
-    const r = await send({ type: 2, guild_id: GUILD, member: ann, data: { name: 'gear', options: [{ type: 1, name: 'find', options: [{ type: 3, name: 'class', value: 'Any' }, { type: 3, name: 'zone', value: 'Rothol' }] }] } });
+    const r = await send({ type: 2, guild_id: GUILD, member: ann, data: { name: 'gear', options: [{ type: 3, name: 'class', value: 'Any' }, { type: 3, name: 'zone', value: 'Rothol' }] } });
     expect(r.data.content).toBe([ZONE_SUGGEST_COPY.unknown('Rothol'), ZONE_SUGGEST_COPY.suggest(['Rothold'])].join('\n'));
   });
 
@@ -242,7 +242,7 @@ describe('/zone: More creatures, Gear here', () => {
   });
 
   it('/gear find zone: the same filter from the command, by name in any case', async () => {
-    const r = await send({ type: 2, guild_id: GUILD, member: ann, data: { name: 'gear', options: [{ type: 1, name: 'find', options: [{ type: 3, name: 'class', value: 'Any' }, { type: 3, name: 'zone', value: 'ROTHOLD' }] }] } });
+    const r = await send({ type: 2, guild_id: GUILD, member: ann, data: { name: 'gear', options: [{ type: 3, name: 'class', value: 'Any' }, { type: 3, name: 'zone', value: 'ROTHOLD' }] } });
     expect(r.data.embeds![0].description).toContain('Elsewhere Helm');
     expect(r.data.embeds![0].description).not.toContain('Weald Mail');
   });
@@ -251,13 +251,13 @@ describe('/zone: More creatures, Gear here', () => {
 describe('/zone: autocomplete, definition, help', () => {
   it('autocomplete filters the zone list as the member types (25 at most), for /zone and /gear find zone', async () => {
     expect((await auto('zone', null, 'name', 'r')).data.choices!.map((c) => c.name)).toEqual(['Rothold', "Ail'Vorith", 'Evershade Weald', "Keeper's Bight", 'Sunken Resort']);
-    expect((await auto('gear', 'find', 'zone', 'sunk')).data.choices!.map((c) => c.value)).toEqual(['Sunken Resort']);
+    expect((await auto('gear', null, 'zone', 'sunk')).data.choices!.map((c) => c.value)).toEqual(['Sunken Resort']);
   });
 
-  it('is defined within Discord\'s limits and counts as built; /craft help and the board index list it once', () => {
+  it('is defined within Discord\'s limits and counts as built; /help and the board index list it once', () => {
     expect(commandLimitProblems(COMMANDS)).toEqual([]);
     expect(DEFINED.has('/zone')).toBe(true);
-    expect(HELP_TEXT.split('\n').filter((l) => l.startsWith('`/zone`'))).toHaveLength(1);
+    expect(pageText('find').split('\n').filter((l) => l.startsWith('`/zone`'))).toHaveLength(1);
     expect(HOW_TO_GET_LISTED.split('\n').filter((l) => l.includes('`/zone`'))).toHaveLength(1);
   });
 

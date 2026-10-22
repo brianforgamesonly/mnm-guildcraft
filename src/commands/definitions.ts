@@ -1,10 +1,11 @@
 // Slash-command definitions registered with Discord (scripts/discord/register.ts).
-// Order 2 shipped /character, /craft set|update|me|help and /guildcraft setup; order 3 adds /craft find
-// and /roster skill|member|top; later orders add the rest.
-// /craft help marks every PRD command not defined here as "coming soon" (src/commands/help.ts).
+// Work order 18 (CHECKLIST A20) replaced the earlier orders' list (/character, /craft, /item image, /gear find, /recipe,
+// /guildcraft remove-member) with eight member commands, /officer and /guildcraft. Buttons on messages sent before the
+// switch keep working: their custom_ids are still handled (src/interactions.ts).
+// /help's pages are built from these definitions (src/commands/help.ts), so a command cannot be missing from them.
 
 import { gearFindOptions } from '../gear/options.ts';
-import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX, REPORT_ISSUES } from '../recipes.ts';
+import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
 const STRING = 3;
@@ -13,6 +14,7 @@ const BOOLEAN = 5;
 const USER = 6;
 const CHANNEL = 7;
 const ROLE = 8;
+const ATTACHMENT = 11;
 /** Channel type GUILD_FORUM (also src/discord.ts GUILD_FORUM; kept literal so the registration script reads this file alone). */
 const GUILD_FORUM_CHANNEL = 15;
 /** Channel type GUILD_TEXT (also src/discord.ts GUILD_TEXT). */
@@ -22,260 +24,13 @@ const GUILD_ONLY = [0];
 /** Manage Server. Administrators hold every permission, so they see the command too. */
 const MANAGE_GUILD = String(1 << 5);
 
-const memberOption = {
-  type: USER,
-  name: 'member',
-  description: "Officers only: act on another member's character",
-};
-const classOption = { type: STRING, name: 'class', description: 'Class: pick from the list, or type your own', autocomplete: true, max_length: 32 };
-const levelOption = { type: INTEGER, name: 'level', description: 'Character level', min_value: 1, max_value: 100 };
-const mainOption = { type: BOOLEAN, name: 'main', description: 'Make this your main character' };
 const characterOption = { type: STRING, name: 'character', description: 'Optional; defaults to your main', autocomplete: true, max_length: 32 };
 const skillOption = { type: STRING, name: 'skill', description: 'Tradeskill', required: true, autocomplete: true };
-/** Order 9: one choice per recipe, with its tradeskill and trivial (src/commands/autocomplete.ts). */
-const recipeOption = { type: STRING, name: 'recipe', description: 'A recipe: pick from the list (each shows its tradeskill and trivial)', required: true, autocomplete: true, max_length: 100 };
-const itemOption = { type: STRING, name: 'item', description: 'An item: pick from the list', required: true, autocomplete: true, max_length: 100 };
-/** /recipe picks a recipe through item: (autocomplete offers each of an item's recipes). */
-const recipeItemOption = { ...recipeOption, name: 'item', description: 'The item: pick its recipe from the list (each shows its tradeskill and trivial)' };
-const ATTACHMENT = 11;
-
-export const COMMANDS = [
-  {
-    name: 'character',
-    description: 'Register and manage your characters',
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'add',
-        description: 'Register a character',
-        options: [{ type: STRING, name: 'name', description: 'Character name', required: true, max_length: 32 }, classOption, levelOption, mainOption],
-      },
-      {
-        type: SUBCOMMAND,
-        name: 'edit',
-        description: 'Rename a character, or change its class, level or main flag',
-        options: [
-          { type: STRING, name: 'name', description: 'The character to change', required: true, autocomplete: true, max_length: 32 },
-          { type: STRING, name: 'new_name', description: 'A new name', max_length: 32 },
-          classOption,
-          levelOption,
-          mainOption,
-          memberOption,
-        ],
-      },
-      {
-        type: SUBCOMMAND,
-        name: 'remove',
-        description: 'Remove a character and hide its skills',
-        options: [
-          { type: STRING, name: 'name', description: 'The character to remove', required: true, autocomplete: true, max_length: 32 },
-          memberOption,
-        ],
-      },
-    ],
-  },
-  {
-    name: 'craft',
-    description: 'Guild crafting: find crafters and track tradeskills',
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'set',
-        description: 'Set one tradeskill level',
-        options: [skillOption, { type: INTEGER, name: 'level', description: 'Skill level', required: true, min_value: 0 }, characterOption, memberOption],
-      },
-      { type: SUBCOMMAND, name: 'update', description: 'Update up to 5 skills: press Enter, pick skills, then type levels', options: [characterOption] },
-      { type: SUBCOMMAND, name: 'me', description: 'Your characters, skills and last updates (private)', options: [characterOption] },
-      {
-        type: SUBCOMMAND,
-        name: 'find',
-        description: 'Who in the guild can make an item: recipe, stats and crafters',
-        options: [{ type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 }],
-      },
-      { type: SUBCOMMAND, name: 'know', description: 'Mark a recipe as known by your character', options: [recipeOption, characterOption] },
-      { type: SUBCOMMAND, name: 'forget', description: 'Unmark a recipe your character marked known', options: [recipeOption, characterOption] },
-      {
-        type: SUBCOMMAND,
-        name: 'report',
-        description: 'Report a wrong trivial, ingredient or source, or a missing recipe, to the officers',
-        options: [
-          itemOption,
-          { type: STRING, name: 'issue', description: 'What is wrong', required: true, choices: REPORT_ISSUES.map((i) => ({ name: i.label, value: i.value })) },
-          { type: STRING, name: 'details', description: 'Optional: what it should be (up to 300 characters)', max_length: 300 },
-        ],
-      },
-      // Order 16: craft requests.
-      {
-        type: SUBCOMMAND,
-        name: 'request',
-        description: 'Ask the opted-in crafters who can make an item, in a private thread',
-        options: [
-          { type: STRING, name: 'item', description: 'An item that has a recipe: pick from the list', required: true, autocomplete: true, max_length: 100 },
-          { type: INTEGER, name: 'quantity', description: 'How many (default 1)', min_value: 1, max_value: 1000 },
-          { type: STRING, name: 'note', description: 'Optional: anything the crafter should know (up to 300 characters)', max_length: 300 },
-        ],
-      },
-      {
-        type: SUBCOMMAND,
-        name: 'notify',
-        description: 'Turn craft request notices on or off for a tradeskill (off by default)',
-        options: [
-          { type: STRING, name: 'tradeskill', description: 'A tradeskill, or All', required: true, autocomplete: true, max_length: 100 },
-          { type: BOOLEAN, name: 'on', description: 'True: be added to requests you can craft. False: stop.', required: true },
-        ],
-      },
-      { type: SUBCOMMAND, name: 'requests', description: 'Your open craft requests (officers: all of them), with Cancel (private)' },
-      { type: SUBCOMMAND, name: 'help', description: 'A one-screen guide to every command' },
-    ],
-  },
-  {
-    name: 'item',
-    description: 'Item screenshots',
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'image',
-        description: 'Send a screenshot of an item window; an officer approves it before it shows',
-        options: [itemOption, { type: ATTACHMENT, name: 'image', description: 'PNG, JPEG or WebP, up to 8 MB', required: true }],
-      },
-    ],
-  },
-  {
-    // Order 13. The class choices are the copy's game_class codes, filled in at registration (commandsWith).
-    name: 'gear',
-    description: 'Find gear upgrades in the community wiki data',
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'find',
-        description: 'Gear for your class, by slot, weapon type, AC, ratio, stats and source',
-        options: gearFindOptions([]),
-      },
-    ],
-  },
-  {
-    // Order 17: no subcommand; the zone list is data, offered by autocomplete.
-    name: 'zone',
-    description: 'A zone: map, level range, creatures, and links to the wikis and MnM Atlas',
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [{ type: STRING, name: 'name', description: 'The zone: pick from the list', required: true, autocomplete: true, max_length: 100 }],
-  },
-  {
-    name: 'recipe',
-    description: 'Officers: correct recipes for this server',
-    type: 1,
-    contexts: GUILD_ONLY,
-    // Order 9: its own top-level command, so a server admin can grant it to the officer role (Server Settings →
-    // Integrations → MNM-Guildcraft → /recipe) without granting /guildcraft. src/interactions.ts re-checks the officer
-    // role on every call (FR-8).
-    default_member_permissions: MANAGE_GUILD,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'source',
-        description: 'Set how a recipe is obtained (this server only)',
-        options: [
-          recipeItemOption,
-          { type: STRING, name: 'how', description: 'How it is obtained', required: true, choices: ACQUISITIONS.map((a) => ({ name: ACQUISITION_LABEL[a], value: a })) },
-          // Order 10, ITEM 0: free text up to FACTION_MAX; autocomplete suggests this server's factions and echoes the typed name first.
-          { type: STRING, name: 'faction', description: 'Reputation recipes: the faction that sells it (type any name)', autocomplete: true, max_length: FACTION_MAX },
-          { type: STRING, name: 'note', description: 'Optional: vendor, standing needed, or a hint', max_length: 200 },
-        ],
-      },
-      {
-        type: SUBCOMMAND,
-        name: 'override',
-        description: "Correct a recipe's trivial or ingredients (this server only)",
-        options: [
-          recipeItemOption,
-          { type: INTEGER, name: 'trivial', description: 'The correct trivial', min_value: 0 },
-          { type: STRING, name: 'components', description: 'The full ingredient list, e.g. 2 Copper Bar, 1 Flux', max_length: 500 },
-          { type: BOOLEAN, name: 'reset', description: "True: remove this server's correction" },
-        ],
-      },
-    ],
-  },
-  {
-    name: 'roster',
-    description: "The guild's crafters, by tradeskill or by member",
-    type: 1,
-    contexts: GUILD_ONLY,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'skill',
-        description: 'Everyone with a tradeskill, ranked by skill level',
-        options: [skillOption, { type: INTEGER, name: 'min_level', description: 'Only show skill levels at or above this', min_value: 0 }],
-      },
-      {
-        type: SUBCOMMAND,
-        name: 'member',
-        description: "One member's characters and skills",
-        options: [{ type: USER, name: 'member', description: 'The member', required: true }],
-      },
-      { type: SUBCOMMAND, name: 'top', description: 'The top 3 characters in each tradeskill' },
-      {
-        type: SUBCOMMAND,
-        name: 'recipes',
-        description: 'Who knows the reputation and discovery recipes',
-        options: [{ ...skillOption, required: false, description: 'Optional: one tradeskill' }],
-      },
-    ],
-  },
-  {
-    name: 'guildcraft',
-    description: 'GuildCraft settings for this server',
-    type: 1,
-    contexts: GUILD_ONLY,
-    // Shown to Manage Server by default. remove-member is officer-level (src/interactions.ts re-checks it): an
-    // officer role without Manage Server sees it once a server admin allows that role in Server Settings →
-    // Integrations → MNM-Guildcraft (a Discord setting; unverified on the live server).
-    default_member_permissions: MANAGE_GUILD,
-    options: [
-      {
-        type: SUBCOMMAND,
-        name: 'setup',
-        description: 'Set the roles, roster board, and review, vault and request channels (leave all out to see them)',
-        options: [
-          { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
-          { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
-          { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
-          { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
-          { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
-          { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
-        ],
-      },
-      { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },
-      { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
-      {
-        type: SUBCOMMAND,
-        name: 'remove-member',
-        description: "Officers: remove a member's characters and mark them as left (shows a preview first)",
-        options: [{ type: USER, name: 'user', description: 'The member to remove', required: true }],
-      },
-    ],
-  },
-] as const;
-
-// ---------------------------------------------------------------- order 18: the simpler command list (CHECKLIST A20)
-// Eight member commands, /officer and /guildcraft. The Worker answers both lists while the old one is registered;
-// work order 18's PR B registers this one instead (src/interactions.ts ROUTES carries both until then).
-
-const ROSTER = COMMANDS.find((c) => c.name === 'roster')!;
-const ZONE = COMMANDS.find((c) => c.name === 'zone')!;
-const GUILDCRAFT = COMMANDS.find((c) => c.name === 'guildcraft')!;
+/** /officer picks a recipe through item: (autocomplete offers each of an item's recipes, with its tradeskill and trivial). */
+const recipeItemOption = { type: STRING, name: 'item', description: 'The item: pick its recipe from the list (each shows its tradeskill and trivial)', required: true, autocomplete: true, max_length: 100 };
 const officerMember = (description: string) => ({ type: USER, name: 'member', description, required: true });
 
-export const NEXT_COMMANDS = [
+export const COMMANDS = [
   {
     name: 'me',
     description: 'Your characters, skills, recipes, notices and requests, with buttons to change them',
@@ -305,17 +60,52 @@ export const NEXT_COMMANDS = [
     ],
   },
   {
-    // The class choices are the copy's game_class codes, filled in at registration (commandsWith).
+    // Order 13. The class choices are the copy's game_class codes, filled in at registration (commandsWith).
     name: 'gear',
     description: 'Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone',
     type: 1,
     contexts: GUILD_ONLY,
     options: gearFindOptions([]),
   },
-  // Kept as subcommands: each view has its own required option (skill, member), which Discord then asks for and checks.
-  ROSTER,
-  ZONE,
   {
+    // Kept as subcommands (order 18): each view has its own required option (skill, member), which Discord then asks for
+    // and checks; as options of one command, nothing could make member: required for one view only.
+    name: 'roster',
+    description: "The guild's crafters, by tradeskill or by member",
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'skill',
+        description: 'Everyone with a tradeskill, ranked by skill level',
+        options: [skillOption, { type: INTEGER, name: 'min_level', description: 'Only show skill levels at or above this', min_value: 0 }],
+      },
+      {
+        type: SUBCOMMAND,
+        name: 'member',
+        description: "One member's characters and skills",
+        options: [{ type: USER, name: 'member', description: 'The member', required: true }],
+      },
+      { type: SUBCOMMAND, name: 'top', description: 'The top 3 characters in each tradeskill' },
+      {
+        type: SUBCOMMAND,
+        name: 'recipes',
+        description: 'Who knows the reputation and discovery recipes',
+        options: [{ ...skillOption, required: false, description: 'Optional: one tradeskill' }],
+      },
+    ],
+  },
+  {
+    // Order 17: no subcommand; the zone list is data, offered by autocomplete.
+    name: 'zone',
+    description: 'A zone: map, level range, creatures, and links to the wikis and MnM Atlas',
+    type: 1,
+    contexts: GUILD_ONLY,
+    options: [{ type: STRING, name: 'name', description: 'The zone: pick from the list', required: true, autocomplete: true, max_length: 100 }],
+  },
+  {
+    // Order 16: craft requests.
     name: 'request',
     description: 'Ask the opted-in crafters who can make an item, in a private thread',
     type: 1,
@@ -333,20 +123,31 @@ export const NEXT_COMMANDS = [
     type: 1,
     contexts: GUILD_ONLY,
     // Shown to Manage Server by default; a server admin grants it to the officer role once (Server Settings →
-    // Integrations → the app → /officer). src/interactions.ts re-checks the officer role on every call.
+    // Integrations → the app → /officer). src/interactions.ts re-checks the officer role on every call (FR-8).
     default_member_permissions: MANAGE_GUILD,
     options: [
       {
         type: SUBCOMMAND,
         name: 'recipe-source',
         description: 'Set how a recipe is obtained (this server only)',
-        options: COMMANDS.find((c) => c.name === 'recipe')!.options.find((s) => s.name === 'source')!.options,
+        options: [
+          recipeItemOption,
+          { type: STRING, name: 'how', description: 'How it is obtained', required: true, choices: ACQUISITIONS.map((a) => ({ name: ACQUISITION_LABEL[a], value: a })) },
+          // Order 10, ITEM 0: free text up to FACTION_MAX; autocomplete suggests this server's factions and echoes the typed name first.
+          { type: STRING, name: 'faction', description: 'Reputation recipes: the faction that sells it (type any name)', autocomplete: true, max_length: FACTION_MAX },
+          { type: STRING, name: 'note', description: 'Optional: vendor, standing needed, or a hint', max_length: 200 },
+        ],
       },
       {
         type: SUBCOMMAND,
         name: 'recipe-fix',
         description: "Correct a recipe's trivial or ingredients (this server only)",
-        options: COMMANDS.find((c) => c.name === 'recipe')!.options.find((s) => s.name === 'override')!.options,
+        options: [
+          recipeItemOption,
+          { type: INTEGER, name: 'trivial', description: 'The correct trivial', min_value: 0 },
+          { type: STRING, name: 'components', description: 'The full ingredient list, e.g. 2 Copper Bar, 1 Flux', max_length: 500 },
+          { type: BOOLEAN, name: 'reset', description: "True: remove this server's correction" },
+        ],
       },
       {
         type: SUBCOMMAND,
@@ -364,23 +165,35 @@ export const NEXT_COMMANDS = [
     ],
   },
   {
-    ...GUILDCRAFT,
+    name: 'guildcraft',
     description: 'GuildCraft settings for this server (admins)',
-    // remove-member moved to /officer.
-    options: GUILDCRAFT.options.filter((s) => s.name !== 'remove-member'),
+    type: 1,
+    contexts: GUILD_ONLY,
+    default_member_permissions: MANAGE_GUILD,
+    options: [
+      {
+        type: SUBCOMMAND,
+        name: 'setup',
+        description: 'Set the roles, roster board, and review, vault and request channels (leave all out to see them)',
+        options: [
+          { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
+          { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
+          { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
+          { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
+          { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
+          { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
+        ],
+      },
+      { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },
+      { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
+    ],
   },
 ] as const;
 
 type Gear = { name: string; options?: readonly { type: number; name: string; options?: unknown }[] };
-/** /gear find (the old list) or /gear (order 18): its options with the class choices filled in. */
-function gearWith<C extends Gear>(c: C, classes: readonly string[]): C {
-  const subs = (c.options ?? []).some((o) => o.type === SUBCOMMAND);
-  return { ...c, options: subs ? c.options!.map((s) => (s.name === 'find' ? { ...s, options: gearFindOptions(classes) } : s)) : gearFindOptions(classes) };
-}
 
 /** The definitions to register: /gear's class option offers "Any" and `classes` (the copy's game_class codes). */
-export const commandsWith = <T extends Gear = (typeof COMMANDS)[number]>(classes: readonly string[], list: readonly T[] = COMMANDS as unknown as readonly T[]): T[] =>
-  list.map((c) => (c.name === 'gear' ? gearWith(c, classes) : c));
+export const commandsWith = (classes: readonly string[]) => COMMANDS.map((c) => (c.name === 'gear' ? { ...c, options: gearFindOptions(classes) } : c)) as readonly Gear[];
 
 /**
  * Discord's documented maximums for a slash command (https://docs.discord.com/developers/interactions/application-commands):
@@ -416,10 +229,15 @@ export function commandLimitProblems(list: readonly object[]): string[] {
   return out;
 }
 
-/** "/name sub" for every defined subcommand, and "/name" for a command without subcommands (order 17): the commands that are built. */
-export const DEFINED = new Set(
-  COMMANDS.flatMap((c) => {
-    const subs = (c.options as readonly { type: number; name: string }[]).filter((o) => o.type === SUBCOMMAND);
-    return subs.length ? subs.map((o) => `/${c.name} ${o.name}`) : [`/${c.name}`];
-  }),
-);
+export interface Defined {
+  /** "/name sub", or "/name" for a command without subcommands (order 17). */
+  cmd: string;
+  command: string;
+  description: string;
+}
+/** Every command and subcommand that is built, with its description: what /help lists (order 18). */
+export const DEFINED_LIST: Defined[] = COMMANDS.flatMap((c) => {
+  const subs = ((c as { options?: readonly { type: number; name: string; description: string }[] }).options ?? []).filter((o) => o.type === SUBCOMMAND);
+  return subs.length ? subs.map((o) => ({ cmd: `/${c.name} ${o.name}`, command: c.name, description: o.description })) : [{ cmd: `/${c.name}`, command: c.name, description: c.description }];
+});
+export const DEFINED = new Set(DEFINED_LIST.map((d) => d.cmd));

@@ -94,18 +94,22 @@ describe('/craft know and /craft forget', () => {
     expect(await count('character_recipe')).toBe(0);
   });
 
-  it('marks the main by default, confirms which character, and forget offers only marked recipes', async () => {
-    const k = await send(cmd(ann, 'craft', 'know', { recipe: 'Copper Sword' }));
-    expect(k.data.content).toBe('Marked **Copper Sword · Blacksmithing · trivial 20** as known for **Annsmith**: `/craft find` shows the 📜 marker. `/craft forget` undoes it.');
+  // Order 18: /craft know and /craft forget are the I know this recipe button (/item) and Forget a recipe (/me).
+  it('one character, one recipe: the button marks it privately; Forget a recipe offers only the presser\'s marked ones', async () => {
+    const swordItem = (await one<{ id: number }>("SELECT id FROM item WHERE name = 'Copper Sword'")).id;
+    const k = await send(press(ann, `know:${swordItem}`));
+    expect(k.data.content).toBe('Marked **Copper Sword · Blacksmithing · trivial 20** as known for **Annsmith**: `/item` shows the 📜 marker. **Forget a recipe** on `/me` undoes it.');
     expect(k.data.flags).toBe(64);
-    const again = await send(cmd(ann, 'craft', 'know', { recipe: `#${swordRecipe}` }));
+    const again = await send(press(ann, `know:${swordItem}`));
     expect(again.data.content).toBe('**Annsmith** already has **Copper Sword · Blacksmithing · trivial 20** marked known.');
     expect(await count('character_recipe')).toBe(1);
-    // An item with two recipes, typed rather than picked: told apart, never guessed.
-    expect((await send(cmd(ann, 'craft', 'know', { recipe: 'Rawhide Canvas' }))).data.content).toMatch(/has 2 recipes \(Tailoring, trivial 12; Tailoring, trivial unknown\)/);
-    const offered = await send(auto(ann, 'craft', 'forget', { recipe: '' }, 'recipe'));
-    expect(offered.data.choices!.map((c) => c.name)).toEqual(['Copper Sword · Blacksmithing · trivial 20']);
-    expect((await send(auto(bo, 'craft', 'forget', { recipe: '' }, 'recipe'))).data.choices).toEqual([]); // Bo's own only
+    // An item with two recipes: the presser picks which; never guessed.
+    const canvas = (await one<{ id: number }>("SELECT id FROM item WHERE name = 'Rawhide Canvas'")).id;
+    const pick = await send(press(ann, `know:${canvas}`));
+    expect(pick.data.components![0].components[0].options.map((o: any) => o.description)).toEqual(['Tailoring · trivial 12', 'Tailoring · trivial unknown']);
+    const offered = await send(press(ann, `mef:${ANN}:0`));
+    expect(offered.data.components![0].components[0].options.map((o: any) => o.label)).toEqual(['Copper Sword · Blacksmithing']);
+    expect((await send(press(bo, `mef:${BO}:0`))).data.content).toMatch(/^No recipes are marked known yet/); // Bo's own only
     const f = await send(cmd(ann, 'craft', 'forget', { recipe: `#${swordRecipe}` }));
     expect(f.data.content).toBe('**Annsmith** no longer has **Copper Sword · Blacksmithing · trivial 20** marked known.');
     expect(await count('character_recipe')).toBe(0);
@@ -121,7 +125,8 @@ describe('the I know this recipe button', () => {
   const findButtons = async (m = ann) => (await find('Copper Sword', m)).data.components!.flatMap((r: any) => r.components);
 
   it('is on /craft find with Report a problem and Stat image', async () => {
-    expect((await findButtons()).map((b: any) => b.label)).toEqual(['Post to channel', 'MnMdb', 'MNM Realm', 'I know this recipe', 'Report a problem', 'Stat image', 'Request a craft']);
+    // Order 18: /item's card for a craftable item.
+    expect((await findButtons()).map((b: any) => b.label)).toEqual(['Post to channel', 'MnMdb', 'MNM Realm', 'I know this recipe', 'Report a recipe problem', 'Report item data', 'Request a craft', 'Stat image']);
   });
 
   it('one character, one recipe: one press marks it, with a new private reply naming the character', async () => {
@@ -161,7 +166,7 @@ describe('the I know this recipe button', () => {
   });
 
   it('a member with no character gets the same guidance as everywhere else', async () => {
-    expect((await send(press(as('100000000000000055'), `know:${sword}`))).data.content).toBe('You have no characters yet. Add one with `/character add`.');
+    expect((await send(press(as('100000000000000055'), `know:${sword}`))).data.content).toBe('You have no characters yet. Add one with **Add character** on `/me`.');
   });
 });
 
@@ -268,7 +273,7 @@ describe('/roster recipes', () => {
 describe('/recipe override (officers)', () => {
   it('refuses unmatched component names, listing them, and writes nothing', async () => {
     const r = await send(cmd(officer, 'recipe', 'override', { item: `#${swordRecipe}`, components: '2 Copper Bar, 1 Flux, 1 Copper Bars, 1 Magic Dust' }));
-    expect(r.data.content).toBe('Nothing was changed. No item is named exactly: **Copper Bars**, **Magic Dust**. Check the spelling against `/craft find`.');
+    expect(r.data.content).toBe('Nothing was changed. No item is named exactly: **Copper Bars**, **Magic Dust**. Check the spelling against `/item`.');
     expect(await count('recipe_correction')).toBe(0);
     expect(parseComponents('2 Copper Bar, Flux')).toEqual([{ qty: 2, name: 'Copper Bar' }, { qty: 1, name: 'Flux' }]);
   });

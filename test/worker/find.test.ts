@@ -3,6 +3,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CONFIRM_NOTE, fitLines, mnmdbUrl, mnmrealmUrl } from '../../src/commands/find.ts';
+import { ITEM_COPY } from '../../src/commands/item.ts';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { crafterTier } from '../../src/crafters.ts';
 import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
@@ -182,13 +183,16 @@ describe('/craft find reply', () => {
     expect(r.data.components![0].components.map((b: any) => b.label)).toEqual(['Post to channel']);
   });
 
-  it('no recipe: a polite message, with the wiki link when the item has a page', async () => {
+  // Order 18: /item answers for any item, so an item with no recipe gets its card (and its wiki link); a name the data
+  // lacks gets "No item called", with Report a missing recipe.
+  it('no recipe: the item card, with the wiki link when the item has a page; an unknown name: No item called', async () => {
     const ore = await find('Copper Ore');
-    expect(ore.data.content).toBe('No recipe found for **Copper Ore**. Pick an item from the list as you type.');
-    expect(ore.data.components![0].components[0]).toMatchObject({ style: 5, label: 'Wiki', url: `${WIKI}Copper_Ore` });
+    expect(ore.data.embeds![0].title).toBe('Copper Ore');
+    expect(ore.data.embeds!.length).toBe(1);
+    expect(ore.data.components![0].components).toContainEqual(expect.objectContaining({ style: 5, label: 'Wiki', url: `${WIKI}Copper_Ore` }));
     const none = await find('Basket of Dreams');
-    expect(none.data.content).toBe('No recipe found for **Basket of Dreams**. Pick an item from the list as you type.');
-    expect(none.data.components).toBeUndefined();
+    expect(none.data.content).toBe(ITEM_COPY.noItem('Basket of Dreams'));
+    expect(none.data.components![0].components.map((b: any) => b.label)).toEqual([ITEM_COPY.missingButton]);
   });
 
   it('removed characters and departed members never appear', async () => {
@@ -234,7 +238,11 @@ describe('Post to channel', () => {
   it('re-posts the same content publicly, link buttons kept, mentions never ping', async () => {
     const priv = await find('Tarnished Bronze Plate Boots');
     const id = priv.data.components![0].components[0].custom_id;
-    expect(id).toMatch(/^pub:find:\d+$/);
+    expect(id).toMatch(/^pub:item:\d+$/);
+    // A /craft find reply sent before order 18 carries pub:find:<id>: its Post to channel still posts that card.
+    const old = await send({ type: 3, guild_id: GUILD, member: ann, data: { custom_id: id.replace('pub:item:', 'pub:find:'), component_type: 2 } });
+    expect(old.type).toBe(4);
+    expect(old.data.embeds![0].title).toBe('Tarnished Bronze Plate Boots');
     const pub = await send({ type: 3, guild_id: GUILD, member: ann, data: { custom_id: id, component_type: 2 } });
     expect(pub.type).toBe(4);
     expect(pub.data.flags).toBeUndefined();

@@ -47,7 +47,7 @@ export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: nu
   const title = truncate(skill, EMBED_LIMITS.title);
   const head = lines.length
     ? `${countText(lines)}, ranked by skill level.`
-    : `No one in the guild has recorded ${skill} yet. Use \`/craft set\` to get listed.`;
+    : `No one in the guild has recorded ${skill} yet. Use \`/skills\` to get listed.`;
   const footer = anyStale ? { text: `stale = not updated in ${staleDays} days` } : undefined;
   // Room reserved in every message for the title and footer, so any message may carry them.
   const reserve = title.length + (footer?.text.length ?? 0);
@@ -94,20 +94,16 @@ export interface IndexEntry {
 /** How to get listed (PRD FR-9). */
 export const HOW_TO_GET_LISTED = [
   '**How to get listed**',
-  '1. `/character add` your character.',
-  '2. `/craft set` a tradeskill level, or `/craft update` for several at once.',
+  // Order 18: the new command names.
+  '1. `/me`, then **Add character**.',
+  '2. `/skills` a tradeskill level, or `/skills` alone for several at once.',
   '3. Your tradeskill posts update within about a minute.',
   '',
-  // Order 9: the new commands, one line each.
   '**Also**',
-  '`/craft find` who can make an item · `/craft know` mark a recipe you know · `/roster recipes` who knows the hard-to-get ones',
-  '`/craft report` report wrong data · `/item image` send an item screenshot · `/craft help` every command',
-  // Order 13.
-  '`/gear find` gear for your class, by slot, stats and source',
-  // Order 16.
-  '`/craft request` ask the crafters who can make an item · `/craft notify` be added to requests you can craft',
-  // Order 17.
-  "`/zone` a zone's levels, creatures, wiki and map links",
+  '`/item` any item: its stats, sources, recipe and who can make it · `/roster recipes` who knows the hard-to-get ones',
+  '`/gear` gear for your class, by slot, stats and source · `/zone` a zone\'s levels, creatures, wiki and map links',
+  '`/request` ask the crafters who can make an item · **Notices** on `/me` add you to requests you can craft',
+  '`/help` every command',
 ].join('\n');
 
 /**

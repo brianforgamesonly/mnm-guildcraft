@@ -35,7 +35,7 @@ export const ZONE_REPLY_COPY = {
   dropsRemoved: 'Zone cards no longer list drops. Press **Gear here** on the card to find the zone\'s gear for your class.',
   gearPick: (zone: string) => `Gear from **${md(zone)}**: pick your class (or Any). You can change the sort on the results.`,
   classPlaceholder: 'Your class, or Any',
-  noClasses: 'No classes are loaded yet. Try `/gear find` once the nightly import has run.',
+  noClasses: 'No classes are loaded yet. Try `/gear` once the nightly import has run.',
   noGear: (zone: string) => `The wiki lists no gear from **${md(zone)}** yet.`,
 } as const;
 

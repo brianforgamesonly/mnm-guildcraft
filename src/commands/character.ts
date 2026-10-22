@@ -42,12 +42,12 @@ export function notFound(c: Ctx, ownerId: string, name: string): string {
 }
 
 export function noCharacters(c: Ctx, ownerId: string): string {
-  return ownerId === c.userId ? 'You have no characters yet. Add one with `/character add`.' : `<@${ownerId}> has no characters yet.`;
+  return ownerId === c.userId ? 'You have no characters yet. Add one with **Add character** on `/me`.' : `<@${ownerId}> has no characters yet.`;
 }
 
 function removedByOther(c: Ctx, name: string, owner: string): string {
   const base = `**${md(name)}** belongs to a removed character, so it can't be reused yet. An officer can rename the removed character to free the name.`;
-  return c.officer ? `${base} It belongs to <@${owner}>: use \`/character edit\` with \`member:\` set to them and a \`new_name\`.` : base;
+  return c.officer ? `${base} It belongs to <@${owner}>: \`/officer edit-member\` on them, then **Edit character** on the removed one, with a new name.` : base;
 }
 
 /** Whose characters a command acts on: the caller's, or (officers only) member:@user's. */
@@ -65,8 +65,17 @@ export function findByName(db: D1Database, guildId: string, ownerId: string, nam
     .first<Character>();
 }
 
-export function findById(db: D1Database, guildId: string, id: number): Promise<Character | null> {
-  return db.prepare(`SELECT ${COLS} FROM character WHERE guild_id = ? AND id = ? AND deleted_at IS NULL`).bind(guildId, id).first<Character>();
+export function findById(db: D1Database, guildId: string, id: number, includeRemoved = false): Promise<Character | null> {
+  return db.prepare(`SELECT ${COLS} FROM character WHERE guild_id = ? AND id = ?${includeRemoved ? '' : ' AND deleted_at IS NULL'}`).bind(guildId, id).first<Character>();
+}
+
+/** Order 18: an officer's Edit character on another member's panel also lists their removed characters (to free a name). */
+export async function charactersWithRemoved(db: D1Database, guildId: string, ownerId: string): Promise<Character[]> {
+  const { results } = await db
+    .prepare(`SELECT ${COLS} FROM character WHERE guild_id = ? AND owner_user_id = ? ORDER BY deleted_at IS NOT NULL, is_main DESC, created_at, id`)
+    .bind(guildId, ownerId)
+    .all<Character>();
+  return results;
 }
 
 export async function liveCharacters(db: D1Database, guildId: string, ownerId: string): Promise<Character[]> {
@@ -108,9 +117,6 @@ function checkLevel(level: number | undefined): string | null {
   if (level === undefined) return null;
   return Number.isInteger(level) && level >= LEVEL_MIN && level <= LEVEL_MAX ? null : `Level must be a whole number from ${LEVEL_MIN} to ${LEVEL_MAX}.`;
 }
-
-/** Text placed inside a `code span`, where markdown escapes would show literally. */
-const inCode = (s: string) => s.replaceAll('`', "'");
 
 const isUniqueViolation =(e: unknown) => e instanceof Error && /UNIQUE constraint failed/i.test(e.message);
 
@@ -204,7 +210,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   const level = optInt(opts, 'level');
   const main = optBool(opts, 'main');
   if (rawNew === undefined && rawClass === undefined && level === undefined && main === undefined)
-    return ephemeral('Nothing to change: give a `new_name`, `class`, `level` or `main`.');
+    return ephemeral('Nothing changed.');
 
   const after = { ...ch };
   const notes: string[] = [];
@@ -216,7 +222,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
       const clash = await byKey(c.db, c.guild.id, key);
       if (clash && !clash.deleted_at) return ephemeral(TAKEN(n.name));
       if (clash && clash.owner_user_id === ch.owner_user_id)
-        return ephemeral(`There is a removed character of yours named **${md(clash.name)}**. \`/character add name:${inCode(clash.name)}\` restores it; or pick another name.`);
+        return ephemeral(`There is a removed character of yours named **${md(clash.name)}**. **Add character** on \`/me\` with that name restores it; or pick another name.`);
       if (clash) return ephemeral(removedByOther(c, clash.name, clash.owner_user_id));
     }
     after.name = n.name;
@@ -234,7 +240,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   }
   if (main !== undefined) {
     if (ch.deleted_at) return ephemeral(`**${md(ch.name)}** is removed; it can't be made a main until it is restored.`);
-    if (!main && ch.is_main) return ephemeral(`**${md(ch.name)}** is your main. To change that, set \`main\` on another character.`);
+    if (!main && ch.is_main) return ephemeral(`**${md(ch.name)}** is your main. To change that, make another character your main.`);
     after.is_main = main ? 1 : 0;
   }
 
@@ -276,7 +282,7 @@ export async function characterRemove(c: Ctx, opts: Option[]): Promise<MessageRe
     audit(c.db, c.guild.id, c.userId, 'character.remove', `character:${ch.id}`, snapshot(ch), snapshot({ ...ch, is_main: 0, deleted_at: at })),
     markCharacterDirty(c, ch.id),
   ]);
-  const lines = [`Removed **${md(ch.name)}**. Its skills are kept: \`/character add name:${inCode(ch.name)}\` restores it.`];
+  const lines = [`Removed **${md(ch.name)}**. Its skills are kept: **Add character** on \`/me\` with the name **${md(ch.name)}** restores it.`];
   if (next) lines.push(`**${md(next.name)}** is now your main.`);
   return ephemeral(lines.join('\n'));
 }

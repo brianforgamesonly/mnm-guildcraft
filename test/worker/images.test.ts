@@ -5,7 +5,7 @@ import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { imageType, linkExpiry } from '../../src/commands/images.ts';
 import { all, count, markImported, one, reset } from '../db.ts';
-import { ADMIN, as, botApi, CDN, cdn, cmd, GUILD, press, send } from '../discord.ts';
+import { ADMIN, as, botApi, CDN, cdn, cmd, GUILD, press, send, top } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const ann = as(ANN);
@@ -64,8 +64,9 @@ function setupVault(app_permissions = VAULT_BITS) {
   return send(i, TOKEN);
 }
 function upload(o: { file?: string; size?: number; m?: typeof ann } = {}) {
-  const i = cmd(o.m ?? ann, 'item', 'image', { item: 'Copper Sword', image: '999000000000000001' }) as any;
-  i.data.options[0].options[1].type = 11;
+  // Order 18: /item name: screenshot: (formerly /item image item: image:); the attachment is option type 11.
+  const i = top(o.m ?? ann, 'item', { name: 'Copper Sword', screenshot: '999000000000000001' }) as any;
+  i.data.options[1].type = 11;
   i.data.resolved = { attachments: { '999000000000000001': { id: '999000000000000001', filename: 'shot.png', size: o.size ?? 2008, content_type: 'image/png', url: `${CDN}attachments/1/${o.file ?? 'member'}/shot.png?ex=0` } } };
   return send(i, TOKEN);
 }
@@ -97,7 +98,7 @@ describe('/item image', () => {
   it('re-uploads the bytes to the vault (multipart), stores the ids, and never the member\'s link', async () => {
     await setupVault();
     const r = await upload();
-    expect(r.data.content).toBe('Thanks: your screenshot of **Copper Sword** is waiting for an officer to approve it. Once approved, it shows under **Stat image** on `/craft find`.');
+    expect(r.data.content).toBe('Thanks: your screenshot of **Copper Sword** is waiting for an officer to approve it. Once approved, it shows under **Stat image** on `/item`.');
     expect(uploads).toHaveLength(1);
     expect(uploads[0].payload.content).toBe('Screenshot of **Copper Sword** from <@100000000000000001> · waiting for an officer');
     expect(uploads[0].payload.components[0].components.map((b: any) => b.label)).toEqual(['Approve', 'Reject']);
@@ -147,7 +148,7 @@ describe('Approve, Reject and Stat image', () => {
   });
 
   it('Stat image: none yet invites /item image; then the cached link; an expiring one is refreshed by re-reading the vault message', async () => {
-    expect((await send(press(ann, `img:${swordId}`), TOKEN)).data.content).toBe('No screenshot of **Copper Sword** yet. Have one? Send it with `/item image`: an officer approves it, then it shows here.');
+    expect((await send(press(ann, `img:${swordId}`), TOKEN)).data.content).toBe('No screenshot of **Copper Sword** yet. Have one? Send it with `/item` and `screenshot:`: an officer approves it, then it shows here.');
     await setupVault();
     await upload();
     await send(press(officer, approveId()), TOKEN);

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
-import { DEFINED } from '../../src/commands/definitions.ts';
-import { COMING_SOON, HELP_FOOTER, HELP_LIMIT, HELP_LINES, HELP_TEXT } from '../../src/commands/help.ts';
-import { APP_ID, as, cmd, exchange, post } from '../discord.ts';
+import { COMMANDS, DEFINED, DEFINED_LIST } from '../../src/commands/definitions.ts';
+import { COMING, COMING_SOON, HELP_FOOTER, HELP_PREFIX, helpPage, PAGE_OF, pageText, PAGES } from '../../src/commands/help.ts';
+import { WELCOME } from '../../src/commands/welcome.ts';
+import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
+import { EMBED_LIMITS } from '../../src/discord.ts';
+import { NOT_YET } from '../../src/interactions.ts';
+import { APP_ID, as, exchange, post, press, rawCmd, send, top } from '../discord.ts';
 
-const helpCommand = cmd(as('100000000000000001'), 'craft', 'help');
+const helpCommand = top(as('100000000000000001'), 'help');
 
 describe('Discord interactions endpoint', () => {
   it('a valid signature returns 200', async () => {
@@ -20,13 +24,23 @@ describe('Discord interactions endpoint', () => {
     expect(await (await post({ type: 1 })).json()).toEqual({ type: 1 });
   });
 
-  it('/craft help defers privately (type 5, flag 64), then edits @original with the help text', async () => {
+  it('/help defers privately (type 5, flag 64), then edits @original with its first page', async () => {
     const { ack, calls } = await exchange(helpCommand);
     expect(ack).toEqual({ type: 5, data: { flags: 64 } });
     expect(calls.map((c) => [c.method, c.url])).toEqual([['PATCH', `https://discord.com/api/v10/webhooks/${APP_ID}/${calls[0].token}/messages/@original`]]);
-    // Order 17: the guide is an embed's description (it outgrew a message's 2,000 characters of content).
-    expect(calls[0].body.embeds[0].description).toBe(HELP_TEXT);
+    expect(calls[0].body.embeds[0].description).toBe(pageText('start'));
     expect(calls[0].body.flags).toBeUndefined(); // an edit cannot change visibility; the defer set it
+  });
+
+  it('order 18: the old command names, sent as Discord would, answer "not available" and point to /help', async () => {
+    const old: [string, string][] = [
+      ['character', 'add'], ['craft', 'set'], ['craft', 'find'], ['craft', 'help'], ['craft', 'request'], ['item', 'image'], ['gear', 'find'], ['recipe', 'source'], ['guildcraft', 'remove-member'],
+    ];
+    for (const [name, sub] of old) {
+      const r = await send(rawCmd(as('100000000000000001'), name, sub));
+      expect(r.data.content, `/${name} ${sub}`).toBe(NOT_YET);
+    }
+    expect(NOT_YET).toContain('`/help`');
   });
 
   it('an unknown command returns a polite ephemeral error, never a 500', async () => {
@@ -45,51 +59,60 @@ describe('Discord interactions endpoint', () => {
   });
 });
 
-describe('/craft help copy', () => {
-  // Commands are derived from docs/PRD.md, not typed by hand. Two prose matches are not commands:
-  // "/auction channel" (an example channel name) and "/character and" (the delivery plan's wording).
-  const NOT_COMMANDS = new Set(['/auction channel', '/character and']);
-  const prdCommands = [...new Set([...prd.matchAll(/(?:^|[ |(])(\/[a-z]+ [a-z][a-z-]*)/gm)].map((m) => m[1]))].filter((c) => !NOT_COMMANDS.has(c));
+describe('/help pages (order 18: derived from the definitions)', () => {
+  const all = PAGES.map((p) => pageText(p.key)).join('\n');
 
-  it('lists every command in the PRD', () => {
-    expect(prdCommands.length).toBe(23);
-    for (const c of prdCommands) expect(HELP_TEXT, c).toContain(c);
-  });
-
-  it('marks exactly the commands that are not registered as coming soon', () => {
-    const entries = HELP_LINES.filter((l) => typeof l !== 'string');
-    for (const e of entries) {
-      const built = e.cmds.map((c) => DEFINED.has(c));
-      expect(new Set(built).size, `${e.cmds.join(', ')}: one status per entry`).toBe(1);
-      const line = HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${e.cmds[0]}\``))!;
-      expect(line.endsWith(COMING_SOON), e.cmds[0]).toBe(!built[0]);
+  it('every registered command and subcommand is on exactly one page, with its own description', () => {
+    expect(Object.keys(PAGE_OF).sort()).toEqual(COMMANDS.map((c) => c.name).sort());
+    expect(DEFINED_LIST.length).toBe(DEFINED.size);
+    for (const d of DEFINED_LIST) {
+      const on = PAGES.filter((p) => pageText(p.key).split('\n').includes(`\`${d.cmd}\` ${d.description}`));
+      expect(on.map((p) => p.key), d.cmd).toEqual([PAGE_OF[d.command as keyof typeof PAGE_OF]]);
     }
-    // Every registered subcommand is listed, and the help lists nothing that is not in the PRD.
-    for (const c of DEFINED) expect(entries.some((e) => e.cmds.includes(c)), c).toBe(true);
-    // Order 13: /gear find is a named departure from the PRD (CHECKLIST A15), the one command beyond it.
-    // Order 16: the craft request commands (CHECKLIST A18), named departures from the PRD too.
-    // Order 17: /zone (CHECKLIST A16, A19).
-    const BEYOND_PRD = ['/gear find', '/craft request', '/craft requests', '/craft notify', '/zone'];
-    for (const c of entries.flatMap((e) => e.cmds)) expect([...prdCommands, ...BEYOND_PRD], c).toContain(c);
-    expect([...DEFINED].sort()).toEqual([
-      '/character add', '/character edit', '/character remove', '/craft find', '/craft forget', '/craft help', '/craft know', '/craft me', '/craft notify', '/craft report',
-      '/craft request', '/craft requests', '/craft set', '/craft update', '/gear find', '/guildcraft rebuild-board', '/guildcraft remove-member', '/guildcraft setup', '/guildcraft status', '/item image', '/recipe override',
-      '/recipe source', '/roster member', '/roster recipes', '/roster skill', '/roster top', '/zone',
-    ]);
-    // Order 9: /recipe add is out of scope (override 3), so it alone stays "(coming soon)", derived.
-    expect(HELP_TEXT.split('\n').filter((l) => l.endsWith(COMING_SOON))).toEqual([expect.stringMatching(/^`\/recipe add`/)]);
-    // Order 7: /guildcraft remove-member is registered, so its "(coming soon)" mark is gone, derived.
-    expect(HELP_TEXT.split('\n').find((l) => l.startsWith('`/guildcraft remove-member`'))).not.toContain(COMING_SOON);
-    // Order 3: the four search entries lose "(coming soon)" because they are now registered.
-    for (const c of ['/craft find', '/roster skill', '/roster member', '/roster top'])
-      expect(HELP_TEXT.split('\n').find((l) => l.startsWith(`\`${c}\``))!.endsWith(COMING_SOON), c).toBe(false);
   });
 
-  it('fits one embed description and carries the attribution footer, with no "draft" left (order 11)', () => {
-    expect(HELP_TEXT.length).toBeLessThanOrEqual(HELP_LIMIT);
-    expect(HELP_TEXT.endsWith('-# Item data: Monsters and Memories Wiki (CC BY-SA 4.0)')).toBe(true);
-    expect(HELP_TEXT).toContain(HELP_FOOTER);
-    expect(HELP_TEXT).not.toMatch(/draft/i);
+  // The PRD's commands, derived from docs/PRD.md's backticked names, not typed by hand. The order 18 rename table's
+  // rows ("old → new") name the old commands on purpose and are left out.
+  const current = prd.split('\n').filter((l) => !l.includes('→')).join('\n');
+  const prdCommands = [...new Set([...current.matchAll(/`(\/[a-z]+(?: [a-z][a-z-]*)?)[` ]/g)].map((m) => m[1]))];
+
+  it('"coming soon" is exactly the PRD\'s commands that are not built (/recipe add), derived', () => {
+    const unbuilt = prdCommands.filter((c) => !DEFINED.has(c) && !COMMANDS.some((k) => `/${k.name}` === c));
+    expect(COMING.map((c) => c.cmd).sort()).toEqual(unbuilt.sort());
+    expect(all.split('\n').filter((l) => l.endsWith(COMING_SOON))).toEqual([expect.stringMatching(/^`\/recipe add`/)]);
+  });
+
+  it('every command the pages, the welcome and the board index name is registered', () => {
+    const named = [...`${all}\n${WELCOME.description}\n${HOW_TO_GET_LISTED}`.matchAll(/`\/([a-z-]+)(?: ([a-z-]+))?/g)];
+    expect(named.length).toBeGreaterThan(10);
+    for (const [, name, sub] of named) {
+      if (COMING.some((c) => c.cmd === `/${name}${sub ? ` ${sub}` : ''}`)) continue;
+      const c = COMMANDS.find((k) => k.name === name);
+      expect(c, `/${name}`).toBeDefined();
+      const subs = ((c as { options?: readonly { type: number; name: string }[] }).options ?? []).filter((o) => o.type === 1).map((o) => o.name);
+      if (subs.length && sub) expect(subs, `/${name} ${sub}`).toContain(sub);
+    }
+  });
+
+  it('each page fits an embed with the attribution footer; six page buttons in rows of at most 5; no "draft" left', () => {
+    for (const p of PAGES) {
+      const page = helpPage(p.key);
+      expect(page.embeds[0].description!.length, p.key).toBeLessThanOrEqual(EMBED_LIMITS.description / 2);
+      expect(page.embeds[0].footer!.text).toBe(HELP_FOOTER);
+      expect(page.embeds[0].description).not.toMatch(/draft/i);
+      const rows = page.components as { components: { custom_id: string; disabled?: boolean }[] }[];
+      expect(rows.flatMap((r) => r.components).length).toBe(6);
+      for (const r of rows) expect(r.components.length).toBeLessThanOrEqual(5);
+      expect(rows.flatMap((r) => r.components).filter((b) => b.disabled).map((b) => b.custom_id)).toEqual([`${HELP_PREFIX}${p.key}`]);
+    }
+    expect(PAGES.map((p) => p.label)).toEqual(['Getting started', 'Finding things', 'Your profile', 'Requests', 'Officers', 'Admins']);
+  });
+
+  it('a page button edits the help in place, for anyone', async () => {
+    const r = await send(press(as('100000000000000005'), `${HELP_PREFIX}officers`));
+    expect(r.type).toBe(7);
+    expect(r.data.embeds![0].title).toBe('GuildCraft help · Officers (5 of 6)');
+    expect(r.data.embeds![0].description).toContain('`/officer edit-member`');
   });
 });
 

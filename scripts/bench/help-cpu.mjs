@@ -1,4 +1,4 @@
-// CPU cost of one /craft help request through the Worker's own code (Hono app + Ed25519 verify).
+// CPU cost of one /help request (order 18; formerly /craft help) through the Worker's own code (Hono app + Ed25519 verify).
 // A PROXY measured in Node 24, not a Worker measurement: workerd's CPU accounting is not reproduced here.
 // Usage: node scripts/bench/help-cpu.mjs [requests]
 
@@ -8,7 +8,7 @@ const N = Number(process.argv[2] ?? 500);
 const hex = (b) => Buffer.from(b).toString('hex');
 const keys = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
 const env = { DISCORD_PUBLIC_KEY: hex(await crypto.subtle.exportKey('raw', keys.publicKey)) };
-const body = JSON.stringify({ type: 2, data: { name: 'craft', options: [{ type: 1, name: 'help' }] } });
+const body = JSON.stringify({ type: 2, data: { name: 'help' } });
 
 async function signed() {
   const ts = String(Math.floor(Date.now() / 1000));

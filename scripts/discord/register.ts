@@ -93,19 +93,26 @@ function plainIcon(size = 256, rgb: [number, number, number] = [0x2e, 0x7d, 0x32
   return `data:image/png;base64,${png.toString('base64')}`;
 }
 
-type Command = { id: string; name: string; options?: { name: string; description?: string; options?: { name: string; description?: string }[] }[] };
-const describe = (cmds: Command[]) => cmds.map((c) => ({ id: c.id, name: c.name, subcommands: (c.options ?? []).map((o) => o.name) }));
-/** Each subcommand's description and its options' descriptions, as Discord stored them. */
-const descriptions = (cmds: Command[]) =>
-  cmds.flatMap((c) => (c.options ?? []).map((o) => ({ cmd: `/${c.name} ${o.name}`, description: o.description, options: (o.options ?? []).map((p) => `${p.name}: ${p.description}`) })));
+type Opt = { name: string; type: number; description?: string; required?: boolean; choices?: unknown[]; autocomplete?: boolean; min_length?: number; max_length?: number; options?: Opt[] };
+type Command = { id: string; name: string; description?: string; default_member_permissions?: string | null; options?: Opt[] };
+/** Option types SUB_COMMAND and SUB_COMMAND_GROUP. */
+const isSub = (o: Opt) => o.type === 1 || o.type === 2;
+/** Order 18: a command's subcommands, or the command itself (/me, /item, /zone ...) when its options are plain. */
+const entries = (c: { name: string; description?: string; options?: readonly Opt[] }) => {
+  const subs = (c.options ?? []).filter(isSub);
+  return subs.length ? subs.map((s) => ({ at: `/${c.name} ${s.name}`, description: s.description, options: s.options ?? [] })) : [{ at: `/${c.name}`, description: c.description, options: c.options ?? [] }];
+};
+const describe = (cmds: Command[]) =>
+  cmds.map((c) => ({ id: c.id, name: c.name, default_member_permissions: c.default_member_permissions ?? null, subcommands: (c.options ?? []).filter(isSub).map((o) => o.name) }));
+/** Each command's (or subcommand's) description and its options' descriptions, as Discord stored them. */
+const descriptions = (cmds: Command[]) => cmds.flatMap((c) => entries(c).map((e) => ({ cmd: e.at, description: e.description, options: e.options.map((p) => `${p.name}: ${p.description}`) })));
 
-type Opt = { name: string; type: number; required?: boolean; choices?: unknown[]; autocomplete?: boolean; min_length?: number; max_length?: number; options?: Opt[] };
 /** Every leaf option's validation fields: what the Discord client checks a typed value against. */
-const shapes = (cmds: { name: string; options?: readonly Opt[] }[]) =>
+const shapes = (cmds: readonly { name: string; description?: string; options?: readonly Opt[] }[]) =>
   cmds.flatMap((c) =>
-    (c.options ?? []).flatMap((s) =>
-      (s.options ?? []).map((o) => ({
-        at: `/${c.name} ${s.name} ${o.name}`,
+    entries(c).flatMap((e) =>
+      e.options.map((o) => ({
+        at: `${e.at} ${o.name}`,
         type: o.type,
         required: o.required ?? false,
         choices: o.choices?.length ?? 0,
@@ -125,6 +132,9 @@ if (process.env.READ_ONLY === '1') {
   const live = new Map(shapes(registered).map((s) => [s.at, s]));
   for (const s of shapes(registered)) console.log('registered option:', JSON.stringify(s));
   const code = shapes(COMMANDS as unknown as { name: string; options?: Opt[] }[]);
+  // Order 18: the registered names against the code's (a stale list shows up here).
+  const names = (l: { name: string }[]) => l.map((c) => c.name).sort().join(' ');
+  console.log(`registered names: ${names(registered)} · in the code: ${names(COMMANDS as unknown as { name: string }[])}`);
   const differ = code.filter((s) => JSON.stringify(s) !== JSON.stringify(live.get(s.at)));
   for (const s of differ) console.log('differs from the code:', JSON.stringify({ code: s, registered: live.get(s.at) ?? null }));
   console.log(`read-only: ${live.size} registered options, ${code.length} in the code, ${differ.length} differ`);

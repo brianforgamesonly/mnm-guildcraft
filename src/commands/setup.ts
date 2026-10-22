@@ -259,12 +259,12 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}\n${describeRequests(after)}`];
   if (requests !== undefined) {
     lines.push(
-      `Craft requests will open private threads in <#${requests}>: one per request, holding the requester and the crafters who opted in with \`/craft notify\` and can make the item. Members need to see the channel to see their thread.`,
+      `Craft requests will open private threads in <#${requests}>: one per request, holding the requester and the crafters who turned on **Notices** in \`/me\` and can make the item. Members need to see the channel to see their thread.`,
       threadReadersNote(requests, c.botToken ? await threadReaders(c.botToken, c.guild.id, requests) : null),
     );
   }
   if (vault !== undefined) {
-    lines.push(`Screenshots from \`/item image\` will wait in <#${vault}> for an officer's **Approve** or **Reject**. Screenshots already in an earlier vault stay where they are.`);
+    lines.push(`Screenshots sent with \`/item screenshot:\` will wait in <#${vault}> for an officer's **Approve** or **Reject**. Screenshots already in an earlier vault stay where they are.`);
     const open = c.botToken ? await everyoneCanView(c.botToken, c.guild.id, vault) : null;
     if (open === true) lines.push(vaultPublicWarning(vault));
     else if (open === null) lines.push(`**Note:** I couldn't check who can see <#${vault}>. The vault should be a channel only officers can see.`);

@@ -1,17 +1,16 @@
 // Autocomplete. At most one D1 statement per keystroke, and never a write (order 3, ITEM 3.2):
-// - skill, class, item: public game data, not role-gated; one statement that checks the import key and
-//   reads the list only when it changed (src/gamedata.ts).
+// - tradeskills, items, zones: public game data, not role-gated; one statement that checks the import key and
+//   reads the list only when it changed (src/gamedata.ts). /item name: offers every item, /request item: the recipe results.
 // - character: the caller's own characters (an officer who filled member: sees that member's), with the
 //   member-role gate and the officer check inside the same statement (src/access.ts SQL_*).
 // - recipe (order 9): every recipe, one choice each, labelled with its tradeskill and trivial so an item's recipes
-//   can be told apart (public game data, cached like the item list). /recipe source and /recipe override pick a
-//   recipe through their item: option. /craft forget offers only the recipes that character has marked known.
-// - faction (order 10): /recipe source's free-text faction, with this guild's earlier factions as suggestions.
+//   can be told apart (public game data, cached like the item list). /officer recipe-source and recipe-fix pick a
+//   recipe through their item: option.
+// - faction (order 10): /officer recipe-source's free-text faction, with this guild's earlier factions as suggestions.
 import { SQL_IS_OFFICER, SQL_PASSES_MEMBER_GATE, sqlAccessParams } from '../access.ts';
 import { focused, matchChoices, optString, subcommand, truncate, type Choice, type Interaction, type Option } from '../discord.ts';
 import { gameList, type GameList } from '../gamedata.ts';
 import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
-import { ALL_SKILLS } from './requests.ts';
 
 const CHOICE_MAX = 100;
 
@@ -21,16 +20,6 @@ const CHARACTERS_SQL = `SELECT c.name FROM character c
   WHERE c.guild_id = ?1 AND c.deleted_at IS NULL AND ${SQL_PASSES_MEMBER_GATE}
     AND c.owner_user_id = CASE WHEN ?4 IS NOT NULL AND ${SQL_IS_OFFICER} THEN ?4 ELSE ?5 END
   ORDER BY c.is_main DESC, c.name COLLATE NOCASE`;
-
-/** The recipes the caller's named character (or main, when ?4 is NULL) has marked known: the caller's own only. */
-const KNOWN_SQL = `SELECT i.name AS item, t.name AS tradeskill, r.trivial, r.id FROM character_recipe k
-  JOIN character c ON c.id = k.character_id JOIN recipe r ON r.id = k.recipe_id
-  JOIN item i ON i.id = r.result_item_id JOIN tradeskill t ON t.id = r.tradeskill_id
-  WHERE c.guild_id = ?1 AND ${SQL_PASSES_MEMBER_GATE} AND c.owner_user_id = ?5 AND c.deleted_at IS NULL
-    AND c.id = CASE WHEN ?4 IS NULL
-      THEN (SELECT id FROM character WHERE guild_id = ?1 AND owner_user_id = ?5 AND deleted_at IS NULL ORDER BY is_main DESC, created_at, id LIMIT 1)
-      ELSE (SELECT id FROM character WHERE guild_id = ?1 AND owner_user_id = ?5 AND deleted_at IS NULL AND name_key = lower(trim(?4))) END
-  ORDER BY i.name COLLATE NOCASE, t.name COLLATE NOCASE`;
 
 /** Recipe choices; labels made unique so two variants with the same skill and trivial stay distinct. */
 function recipeChoices(rows: { item: string; tradeskill: string; trivial: number | null; id: number }[], typed: string): Choice[] {
@@ -82,14 +71,6 @@ type Lister = (a: Asked) => Promise<Choice[]>;
 
 const game = (list: GameList): Lister => async (a) => asChoices(matchChoices(await gameList(a.db, list), a.typed));
 const allRecipes: Lister = async (a) => recipeChoices((await gameList(a.db, 'recipes')).map(parseRecipe), a.typed);
-/** /craft forget: only the recipes that character has marked known. */
-const knownRecipes: Lister = async ({ db, i, options, typed }) => {
-  const { results } = await db
-    .prepare(KNOWN_SQL)
-    .bind(...sqlAccessParams(i.guild_id, i.member), optString(options, 'character') ?? null, i.member.user.id)
-    .all<{ item: string; tradeskill: string; trivial: number | null; id: number }>();
-  return recipeChoices(results, typed);
-};
 const factions: Lister = async ({ db, i, typed }) => {
   const { results } = await db.prepare(FACTIONS_SQL).bind(i.guild_id).all<{ faction: string }>();
   return factionChoices(results.map((r) => r.faction), typed);
@@ -102,8 +83,6 @@ const characters: Lister = async ({ db, i, options, typed }) => {
     .all<{ name: string }>();
   return asChoices(matchChoices(results.map((r) => r.name), typed));
 };
-// Order 16: /craft notify's tradeskill, with All first.
-const skillsWithAll: Lister = async (a) => asChoices(matchChoices([ALL_SKILLS, ...(await gameList(a.db, 'skills'))], a.typed));
 const allItems: Lister = async (a) => itemChoices(await gameList(a.db, 'allItems'), a.typed);
 
 /**
@@ -112,37 +91,15 @@ const allItems: Lister = async (a) => itemChoices(await gameList(a.db, 'allItems
  * the definitions has an entry, and every entry names one (test/worker/autocomplete.test.ts).
  */
 export const LISTS: Record<string, Lister> = {
-  '/character add class': game('classes'),
-  '/character edit class': game('classes'),
-  '/character edit name': characters,
-  '/character remove name': characters,
-  '/craft set skill': game('skills'),
-  '/craft set character': characters,
-  '/craft update character': characters,
-  '/craft me character': characters,
-  '/craft find item': game('items'),
-  '/craft know recipe': allRecipes,
-  '/craft know character': characters,
-  '/craft forget recipe': knownRecipes,
-  '/craft forget character': characters,
-  '/craft report item': game('items'),
-  '/craft request item': game('items'),
-  '/craft notify tradeskill': skillsWithAll,
-  '/item image item': game('items'),
   // Order 17: the zone list (25 of the ~29 as the member types).
-  '/gear find zone': game('zones'),
   '/zone name': game('zones'),
-  '/recipe source item': allRecipes,
-  '/recipe source faction': factions,
-  '/recipe override item': allRecipes,
+  '/gear zone': game('zones'),
   '/roster skill skill': game('skills'),
   '/roster recipes skill': game('skills'),
-  // Order 18's list.
   '/skills skill': game('skills'),
   '/skills character': characters,
   '/me character': characters,
   '/item name': allItems,
-  '/gear zone': game('zones'),
   '/request item': game('items'),
   '/officer recipe-source item': allRecipes,
   '/officer recipe-source faction': factions,

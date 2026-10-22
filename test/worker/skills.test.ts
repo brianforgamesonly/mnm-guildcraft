@@ -1,6 +1,7 @@
 // ITEM 1.4: /craft set | update | me, the select → modal → submit flow in workerd, and the two-select split.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { ME_COPY } from '../../src/commands/me.ts';
 import { MAX_PICK, SELECT_MAX_OPTIONS, skillGroups } from '../../src/commands/skills.ts';
 import { matchChoices } from '../../src/discord.ts';
 import { all, count, one, reset } from '../db.ts';
@@ -21,9 +22,9 @@ const levels = () => all<{ name: string; level: number; updated_by: string }>(
 );
 
 describe('/craft set', () => {
-  it('with no character, points to /character add', async () => {
+  it('with no character, points to Add character on /me', async () => {
     const r = await set(ann, { skill: 'Blacksmithing', level: 25 });
-    expect(r.data.content).toBe('You have no characters yet. Add one with `/character add`.');
+    expect(r.data.content).toBe('You have no characters yet. Add one with **Add character** on `/me`.');
   });
 
   it("sets the main's level by default, case-insensitive skill; writes updated_at, updated_by and an audit row", async () => {
@@ -52,9 +53,10 @@ describe('/craft set', () => {
 
   it('officer path: member:@user sets another member\'s level, recorded as updated_by the officer; refused for a non-officer', async () => {
     await send(cmd(bo, 'character', 'add', { name: 'Bochar' }));
-    expect((await set(ann, { skill: 'Brewing', level: 9, member: BO })).data.content).toBe("Only officers can change another member's characters.");
+    // Order 18: through that member's Update skills form (/officer edit-member); a non-officer's copy of it is refused.
+    expect((await set(ann, { skill: 'Brewing', level: 9, member: BO })).data.content).toBe('That character is no longer available. Run `/skills` again.');
     expect((await set(ann, { skill: 'Brewing', level: 9, character: 'Bochar' })).data.content).toBe('You have no character named **Bochar**.');
-    expect((await set(officer, { skill: 'Brewing', level: 9, member: BO })).data.content).toBe('**Bochar**: Brewing set to **9**.');
+    expect((await set(officer, { skill: 'Brewing', level: 9, member: BO })).data.content).toBe('Saved for **Bochar**: Brewing **9**.');
     expect(await levels()).toEqual([{ name: 'Brewing', level: 9, updated_by: '100000000000000009' }]);
   });
 });
@@ -106,7 +108,7 @@ describe('/craft update', () => {
     const r = await send(submit(ann, `updm:${charId}`, { [`lvl:${b}`]: '41', [`lvl:${t}`]: 'abc', [`lvl:${f}`]: '999' }));
     expect(r.data.flags).toBe(64);
     expect(r.data.content).toBe(
-      'Nothing was saved. **Tailoring**: "abc" is not a whole number from 0 to 300. **Fletching**: "999" is not a whole number from 0 to 300.\nRun `/craft update` again to retry.',
+      'Nothing was saved. **Tailoring**: "abc" is not a whole number from 0 to 300. **Fletching**: "999" is not a whole number from 0 to 300.\nRun `/skills` again to retry.',
     );
     expect((await levels()).map((l) => [l.name, l.level])).toEqual([['Blacksmithing', 25]]);
   });
@@ -144,8 +146,8 @@ describe('/craft update', () => {
 });
 
 describe('/craft me', () => {
-  it('no characters: a pointer to /character add', async () => {
-    expect((await send(cmd(ann, 'craft', 'me'))).data.content).toBe('You have no characters yet. Add one with `/character add`.');
+  it('no characters: a pointer to Add character', async () => {
+    expect((await send(cmd(ann, 'craft', 'me'))).data.content).toBe(ME_COPY.noCharacters);
   });
 
   it('private; characters, skills, levels and Discord timestamps; stale marked; removed characters excluded', async () => {
@@ -164,9 +166,9 @@ describe('/craft me', () => {
     expect(lines[0]).toBe('CLR · level 10');
     expect(lines[1]).toMatch(/^\*\*Blacksmithing\*\* 25 · <t:\d{10}:d>$/);
     expect(lines[2]).toBe(`**Tailoring** 7 · <t:${Date.parse('2026-01-01T00:00:00.000Z') / 1000}:d> · *stale*`);
-    expect(r.data.embeds![1].description).toBe('No skills yet: `/craft set` or `/craft update`.');
+    expect(r.data.embeds![1].description).toBe('No skills yet: `/skills` or **Update skills**.');
     // Order 16: the member's craft request opt-ins (none yet).
-    expect(r.data.content).toBe('**Craft request notices:** off (`/craft notify` turns them on for a tradeskill)\n-# *stale* = not updated in 60 days.');
+    expect(r.data.content).toBe(`**Craft request notices:** off (**Notices** on \`/me\` turns them on for a tradeskill)\n${ME_COPY.noRequests}\n-# *stale* = not updated in 60 days.`);
   });
 });
 

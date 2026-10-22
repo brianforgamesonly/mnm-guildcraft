@@ -181,3 +181,7 @@ Treat the clock as authoritative over any date an order states.
 - An autocomplete list is chosen by command and option (`src/commands/autocomplete.ts` LISTS), never by the option's name alone; every autocomplete option in the definitions has a list and every list names one (test/worker/next-commands.test.ts).
 - A button on a message the bot already sent keeps working after a rename: every custom_id prefix the code has ever sent is still handled.
 - A button that answers with a modal is never deferred (`src/interactions.ts` OPENS_MODAL).
+- Order 18's explicit override 1 of the earlier orders' and the PRD's command names: the commands are `/me`, `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`, `/officer` and `/guildcraft` (docs/PRD.md, "Work order 18" table). The old names are not registered and answer "not available".
+- Order 18's explicit override 2: the board index post and `/help` are rewritten for the new names; the bot's own posts are edited in place, with no pings.
+- Every command a reply, a page of `/help`, the welcome or the board index names in backticks is a registered command (test/worker/interactions.test.ts); `/help`'s pages list every registered command, each on one page, from its own description.
+- New commands are registered from the reviewed branch before its merge deploys the removal of the old entry points, so no registered name is ever without a route.

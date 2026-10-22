@@ -4,9 +4,8 @@ import { audit, now } from '../access.ts';
 import { markSkillsDirty } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
-import { findById, liveCharacters, noCharacters, resolveCharacter, resolveOwner, type Character } from './character.ts';
+import { findById, resolveCharacter, resolveOwner, type Character } from './character.ts';
 import { knownLine, knownRecipesOf } from './recipes.ts';
-import { notifyLine } from './requests.ts';
 
 export interface Tradeskill {
   id: number;
@@ -25,6 +24,8 @@ export async function allTradeskills(db: D1Database): Promise<Tradeskill[]> {
   return results;
 }
 
+/** A stale skill select or form (order 18: /skills, formerly /craft update). */
+const RERUN = (what: string) => `${what} Run \`/skills\` again.`;
 const levelRange = (c: Ctx) => `Level must be a whole number from 0 to ${c.guild.skill_cap}.`;
 
 // ---------------------------------------------------------------- /craft set
@@ -170,7 +171,7 @@ export async function updateButton(c: Ctx, customId: string): Promise<MessageRep
 async function componentCharacter(c: Ctx, customId: string, prefix: string): Promise<{ character: Character } | { reply: MessageReply }> {
   const id = Number(customId.slice(prefix.length).split(':')[0]);
   const ch = Number.isInteger(id) ? await findById(c.db, c.guild.id, id) : null;
-  if (!ch || (ch.owner_user_id !== c.userId && !c.officer)) return { reply: ephemeral('That character is no longer available. Run `/craft update` again.') };  return { character: ch };
+  if (!ch || (ch.owner_user_id !== c.userId && !c.officer)) return { reply: ephemeral(RERUN('That character is no longer available.')) };  return { character: ch };
 }
 
 /**
@@ -185,7 +186,7 @@ export async function updateSelected(c: Ctx, customId: string, values: string[])
   const ids = [...new Set(values.map(Number))].filter(Number.isInteger).slice(0, MAX_PICK);
   const [allRes, levelRes] = await c.db.batch([allTradeskillsStmt(c.db), levelsStmt(c.db, ch.id)]);
   const chosen = (allRes.results as Tradeskill[]).filter((s) => ids.includes(s.id));
-  if (!chosen.length) return ephemeral('Those tradeskills are no longer in the list. Run `/craft update` again.');
+  if (!chosen.length) return ephemeral(RERUN('Those tradeskills are no longer in the list.'));
   const levels = levelMap(levelRes.results as { tradeskill_id: number; level: number }[]);
   return {
     type: InteractionResponseType.MODAL,
@@ -231,12 +232,12 @@ export async function updateSubmitted(c: Ctx, customId: string, components: Moda
   const entries = modalInputs(components)
     .filter((x) => x.custom_id.startsWith(INPUT_PREFIX))
     .map((x) => ({ skill: byId.get(Number(x.custom_id.slice(INPUT_PREFIX.length))), raw: x.value.trim() }));
-  if (!entries.length || entries.some((e) => !e.skill)) return ephemeral('That form is out of date. Run `/craft update` again.');
+  if (!entries.length || entries.some((e) => !e.skill)) return ephemeral(RERUN('That form is out of date.'));
 
   const bad = entries.filter((e) => !/^\d{1,3}$/.test(e.raw) || Number(e.raw) > c.guild.skill_cap);
   if (bad.length)
     return ephemeral(
-      `Nothing was saved. ${bad.map((e) => `**${e.skill!.name}**: "${md(e.raw)}" is not a whole number from 0 to ${c.guild.skill_cap}.`).join(' ')}\nRun \`/craft update\` again to retry.`,
+      `Nothing was saved. ${bad.map((e) => `**${e.skill!.name}**: "${md(e.raw)}" is not a whole number from 0 to ${c.guild.skill_cap}.`).join(' ')}\nRun \`/skills\` again to retry.`,
     );
 
   const levels = await levelsOf(c.db, ch.id);
@@ -255,34 +256,12 @@ export async function updateSubmitted(c: Ctx, customId: string, components: Moda
   return ephemeral(`Saved for **${md(ch.name)}**: ${list.join(', ')}.`);
 }
 
-// ---------------------------------------------------------------- /craft me
+// ---------------------------------------------------------------- the characters' embeds (/me; formerly /craft me)
 
 export const EMBED_MAX = 10;
 const DAY_MS = 86_400_000;
 
-export async function craftMe(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const name = optString(opts, 'character');
-  let chars: Character[];
-  if (name !== undefined) {
-    const target = await resolveCharacter(c, c.userId, name);
-    if ('reply' in target) return target.reply;
-    chars = [target.character];
-  } else {
-    chars = await liveCharacters(c.db, c.guild.id, c.userId);
-    if (!chars.length) return ephemeral(noCharacters(c, c.userId));
-  }
-  const shown = chars.slice(0, EMBED_MAX);
-  const { embeds, anyStale } = await characterEmbeds(c, shown);
-  const notes = [
-    chars.length > EMBED_MAX ? `Showing ${EMBED_MAX} of ${chars.length} characters.` : null,
-    // Order 16: the member's craft request opt-ins (per member, not per character).
-    await notifyLine(c.db, c.guild.id, c.userId),
-    anyStale ? `-# *stale* = not updated in ${c.guild.stale_days} days.` : null,
-  ].filter(Boolean);
-  return ephemeral(notes.join('\n'), { embeds, components: updateButtons(shown) });
-}
-
-/** One embed per character: class and level, skills with their dates and stale markers, known recipes (/craft me, /me). */
+/** One embed per character: class and level, skills with their dates and stale markers, known recipes. */
 export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ embeds: Embed[]; anyStale: boolean }> {
   const { results } = await c.db
     .prepare(
@@ -306,7 +285,7 @@ export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ emb
       });
     return {
       title: truncate(`${ch.name}${ch.is_main ? ' (main)' : ''}`, 256),
-      description: truncate([head, lines.length ? lines.join('\n') : 'No skills yet: `/craft set` or `/craft update`.', knownLine(known.get(ch.id))].filter(Boolean).join('\n'), 4096),
+      description: truncate([head, lines.length ? lines.join('\n') : 'No skills yet: `/skills` or **Update skills**.', knownLine(known.get(ch.id))].filter(Boolean).join('\n'), 4096),
     };
   });
   return { embeds, anyStale };
