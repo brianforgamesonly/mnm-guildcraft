@@ -12,6 +12,8 @@ import down13 from '../../scripts/rollback/0013_zones.down.sql?raw';
 import up13 from '../../migrations/0013_zones.sql?raw';
 import down14 from '../../scripts/rollback/0014_component_by_item.down.sql?raw';
 import up14 from '../../migrations/0014_component_by_item.sql?raw';
+import down15 from '../../scripts/rollback/0015_channel_setup_lock.down.sql?raw';
+import up15 from '../../migrations/0015_channel_setup_lock.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -25,6 +27,17 @@ const statements = (sql: string) =>
 const run = async (sql: string) => {
   for (const s of statements(sql)) await env.DB.prepare(s).run();
 };
+
+it('order 19: 0015 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down15);
+  expect((await schema()).some((r) => /channel_setup_lock_until/.test(r.sql ?? ''))).toBe(false);
+  await run(up15);
+  // ALTER TABLE rewrites the CREATE TABLE text, so compare names and kinds, then the column.
+  expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
+  const cols = (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('guild') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
+  expect(cols.at(-1)).toBe('channel_setup_lock_until');
+});
 
 it('order 19: 0014 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();
