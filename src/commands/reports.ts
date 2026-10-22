@@ -156,7 +156,7 @@ const NAME_INPUT = 'name';
 /** The name and the member's words share the 300-character details: "Item: <up to 100>\n<up to 190>". */
 const MISSING_DETAILS_MAX = 190;
 /** A custom_id holds 100 characters; a longer name is cut, and the member can correct it in the form. */
-export const missingId = (typed: string) => `${MISSING_PREFIX}${typed.slice(0, 100 - MISSING_PREFIX.length)}`;
+export const missingId = (typed: string) => `${MISSING_PREFIX}${typed.slice(0, 100 - MISSING_PREFIX.length).replace(/[\uD800-\uDBFF]$/, '')}`;
 
 export function missingModal(customId: string): InteractionReply {
   return {

@@ -32,6 +32,8 @@ export const ITEM_COPY = {
   gone: 'That item is no longer in the data. Run `/item` again.',
   knowButton: 'I know this recipe',
   reportButton: 'Report a problem',
+  recipeReportButton: 'Report a recipe problem',
+  itemReportButton: 'Report item data',
   requestButton: 'Request a craft',
   imageButton: 'Stat image',
 } as const;
@@ -89,10 +91,11 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
     footer: { text: footerText(d.version) },
   };
   const used: Embed[] = usedIn.length ? [{ title: ITEM_COPY.usedIn(usedIn.length), description: fitLines(usedIn.map(usedInLine), USED_IN_LINES, USED_IN_CHARS) }] : [];
-  // The recipes, as /craft find shows them, in the room the top card and the uses leave: the 10 embeds and the 6,000
-  // characters, less the welcome's reserve. Whole recipes are left off the end, and the note says so.
-  const all = f.isResult ? findEmbeds(f, c.guild.learning_window).embeds.slice(1) : [];
-  const recipes = all.slice(0, EMBED_LIMITS.embeds - 1 - used.length);
+  // The recipes, as /craft find shows them, in the room the top card and the uses leave: the 10 embeds less one for the
+  // one-time welcome, and the 6,000 characters less the welcome's reserve. Crafter lines shrink first (findEmbeds counts
+  // the card and the uses); then whole recipes are left off the end, and the note says so.
+  const all = f.isResult ? findEmbeds(f, c.guild.learning_window, [top, ...used]).embeds.slice(1) : [];
+  const recipes = all.slice(0, EMBED_LIMITS.embeds - 2 - used.length);
   while (recipes.length && embedChars([top, ...recipes, ...used]) > EMBED_LIMITS.total - WELCOME_RESERVE) recipes.pop();
   const total = f.recipes.length;
   return {
@@ -106,15 +109,17 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
 
 /**
  * The card's buttons, private or posted: each answers the presser with a new private message (order 9). Craftable: I know
- * this recipe, Report a problem (recipe issues), Request a craft, Stat image. Otherwise Report a problem (item issues) and
- * Stat image. The custom_ids are /craft find's and /gear find's, so cards posted before order 18 keep working.
+ * this recipe, Report a recipe problem (recipe issues), Report item data (item issues), Request a craft, Stat image: five,
+ * a row's maximum. Otherwise Report a problem (item issues) and Stat image. The custom_ids are /craft find's and /gear
+ * find's, so cards posted before order 18 keep working.
  */
 const actionRow = (itemId: number, craftable: boolean) =>
   row(
     craftable
       ? [
           button(`${KNOW_PREFIX}${itemId}`, ITEM_COPY.knowButton, STYLE_PRIMARY),
-          button(`${REPORT_PREFIX}${itemId}`, ITEM_COPY.reportButton),
+          button(`${REPORT_PREFIX}${itemId}`, ITEM_COPY.recipeReportButton),
+          button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.itemReportButton),
           button(`${FROM_FIND_PREFIX}${itemId}`, ITEM_COPY.requestButton),
           button(`${IMAGE_PREFIX}${itemId}`, ITEM_COPY.imageButton),
         ]

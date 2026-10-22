@@ -25,10 +25,12 @@ try {
   const rows: number[] = [];
   let worst = { chars: 0, name: '' };
   const problems: string[] = [];
+  const cut: string[] = [];
   for (const it of items) {
     const u = await db.prepare(USED_IN_SQL).bind(it.id, 'bench-guild').all();
     rows.push(u.meta.rows_read);
     const k = (await itemCard({ db, guild }, it.id))!;
+    if (k.note) cut.push(`${it.name}: ${k.note}`);
     const chars = embedChars(k.embeds);
     if (chars > worst.chars) worst = { chars, name: it.name };
     if (k.embeds.length > EMBED_LIMITS.embeds || chars > EMBED_LIMITS.total - 1000) problems.push(`${it.name}: ${k.embeds.length} embeds, ${chars} characters`);
@@ -36,6 +38,7 @@ try {
     if (args.show && it.name.toLowerCase() === args.show.toLowerCase()) console.log(JSON.stringify(k, null, 1));
   }
   console.log(`"used in" statement: ${items.length} items, rows_read max ${Math.max(...rows)}, median ${median(rows)}`);
+  console.log(`cards that leave recipes off: ${cut.length} of ${items.length}${cut.length ? ` (${cut.slice(0, 5).join('; ')})` : ''}`);
   console.log(`largest card: ${worst.name} (${worst.chars} of ${EMBED_LIMITS.total - 1000} with the welcome's reserve)`);
   if (problems.length) {
     console.error(`problems:\n  ${problems.join('\n  ')}`);

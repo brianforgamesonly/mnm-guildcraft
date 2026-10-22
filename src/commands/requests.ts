@@ -506,6 +506,7 @@ export async function officerRequests(c: Ctx): Promise<MessageReply> {
 /** rqp:<page>: Previous / Next, edited in place; officers only, re-checked on every press. */
 export async function officerRequestsPage(c: Ctx, customId: string): Promise<MessageReply> {
   if (!c.officer) return ephemeral(OFFICER_ONLY);
+  if (!c.guild.request_channel_id) return updateMessage({ content: NO_REQUEST_CHANNEL, components: [] });
   const p = await officerPage(c, Number(customId.slice(OFFICER_PAGE_PREFIX.length)) || 0);
   return p ? updateMessage(p) : updateMessage({ content: OFFICER_REQUESTS_COPY.none, components: [] });
 }

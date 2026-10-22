@@ -63,7 +63,8 @@ beforeEach(async () => {
 });
 
 describe('the new definitions (order 18)', () => {
-  it('are the ten commands of the approved table, and only /officer and /guildcraft carry Manage Server', () => {
+  // PR A: nine of the approved table's ten; /me (which replaces /character) arrives in PR A2.
+  it('are the commands of the approved table, and only /officer and /guildcraft carry Manage Server', () => {
     expect(NEXT_COMMANDS.map((c) => c.name).sort()).toEqual(['gear', 'guildcraft', 'help', 'item', 'officer', 'request', 'roster', 'skills', 'zone'].sort());
     for (const c of NEXT_COMMANDS)
       expect('default_member_permissions' in c ? c.default_member_permissions : undefined, c.name).toBe(c.name === 'officer' || c.name === 'guildcraft' ? String(1 << 5) : undefined);
@@ -128,8 +129,8 @@ describe('/item', () => {
     const r = await card('Copper Sword');
     expect(r.data.flags).toBe(64);
     expect(r.data.embeds!.map((e) => e.title)).toEqual(['Copper Sword', 'Blacksmithing · trivial 20']);
-    expect(labels(r)).toEqual([['Post to channel', 'MnMdb', 'MNM Realm'], [ITEM_COPY.knowButton, ITEM_COPY.reportButton, ITEM_COPY.requestButton, ITEM_COPY.imageButton]]);
-    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`know:${ids.sword}`, `rpt:${ids.sword}`, `rqf:${ids.sword}`, `img:${ids.sword}`]);
+    expect(labels(r)).toEqual([['Post to channel', 'MnMdb', 'MNM Realm'], [ITEM_COPY.knowButton, ITEM_COPY.recipeReportButton, ITEM_COPY.itemReportButton, ITEM_COPY.requestButton, ITEM_COPY.imageButton]]);
+    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`know:${ids.sword}`, `rpt:${ids.sword}`, `rpi:${ids.sword}`, `rqf:${ids.sword}`, `img:${ids.sword}`]);
     // Post to channel rebuilds it publicly, with the same buttons.
     const pub = await send(press(ann, r.data.components![0].components[0].custom_id));
     expect(pub.data.flags).toBeUndefined();
