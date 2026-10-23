@@ -53,7 +53,7 @@ const repo = process.env.GITHUB_REPOSITORY;
 const ghToken = process.env.GITHUB_TOKEN;
 /** Conclusions GitHub counts as a failed run (each mails the owner). */
 const FAILED = new Set(['failure', 'timed_out', 'startup_failure']);
-interface Run { id: number; created_at: string; conclusion: string | null }
+interface Run { id: number; created_at: string; conclusion: string | null; updated_at?: string }
 async function gh<T>(path: string): Promise<T> {
   if (!repo || !ghToken) throw new Error('GITHUB_TOKEN and GITHUB_REPOSITORY must be set to read workflow runs');
   const res = await fetch(`https://api.github.com/repos/${repo}${path}`, { headers: { Authorization: `Bearer ${ghToken}`, Accept: 'application/vnd.github+json', 'User-Agent': 'guildcraft-health' } });
@@ -77,8 +77,22 @@ interface Job { name: string; conclusion: string | null; started_at: string | nu
 async function deployWindows(): Promise<Window[]> {
   const out: Window[] = [];
   for (const run of await runs('deploy.yml', dayStart - DAY_MS, dayEnd)) {
+    // Order 21: GitHub answered HTTP 502 for run 39806984504's jobs on 5 of 5 requests (2026-10-23 07:15-07:25 UTC; the
+    // 01:50 scheduled run had read them; the run itself reads; githubstatus.com: no incident). Its window is then the whole
+    // run, from its creation (never later than any attempt's start) to its last update: it holds every job of every
+    // attempt, for both copies, so it is wider, never narrower, and named in the log.
+    let jobs: Job[];
+    try {
+      jobs = await jobsOf(run.id);
+    } catch (e) {
+      const start = Date.parse(run.created_at);
+      const end = run.updated_at ? Date.parse(run.updated_at) : start;
+      console.log(`deploy run ${run.id}: jobs unread (${e instanceof Error ? e.message : String(e)}); its window is the whole run (all attempts, both copies), ${iso(start).slice(0, 19)}→${iso(end).slice(11, 19)}`);
+      out.push({ start, end });
+      continue;
+    }
     // The matrix job's name is "deploy (<copy>, <prefix>)" (deploy.yml, one job per copy); every attempt counts.
-    for (const j of (await jobsOf(run.id)).filter((x) => x.name.startsWith('deploy (') && forCopy(x.name))) {
+    for (const j of jobs.filter((x) => x.name.startsWith('deploy (') && forCopy(x.name))) {
       const s = j.steps?.find((x) => x.name === 'Deploy the Worker' && x.started_at) ?? j;
       if (!s.started_at) continue;
       out.push({ start: Date.parse(s.started_at), end: s.completed_at ? Date.parse(s.completed_at) : Date.now() });
@@ -172,11 +186,14 @@ if (evFrom) {
 
 // ---------------------------------------------------------------- order 21's evidence, on request
 if (sweepRowsEvidence && hasTable) {
-  const all = await select<SweepRow>('SELECT scheduled_ms, started_at, finished_at FROM sweep_run ORDER BY scheduled_ms');
+  // Bounded: from the day before the judged day, so the summary stays a few hundred lines.
+  const all = await select<SweepRow>('SELECT scheduled_ms, started_at, finished_at FROM sweep_run WHERE scheduled_ms >= ? ORDER BY scheduled_ms', dayStart - DAY_MS);
   const slots = all.length ? cronSlots(COPY.crons, all[0].scheduled_ms - DAY_MS, all.at(-1)!.scheduled_ms + DAY_MS) : [];
-  summary(`\n### sweep_run rows (${COPY.name}): ${all.length}; offsets in ms (minute: from the whole minute below; slot: from the nearest expected slot, signed)`);
+  summary(`\n### sweep_run rows (${COPY.name}) from ${iso(dayStart - DAY_MS)}: ${all.length}; offsets in ms (minute: from the whole minute below; slot: from the nearest expected slot, signed)`);
+  let i = 0;
   for (const r of all) {
-    const nearest = slots.reduce((b, s) => (Math.abs(s - r.scheduled_ms) < Math.abs(b - r.scheduled_ms) ? s : b), slots[0]);
+    while (i + 1 < slots.length && Math.abs(slots[i + 1] - r.scheduled_ms) <= Math.abs(slots[i] - r.scheduled_ms)) i++;
+    const nearest = slots[i];
     summary(`- ${r.scheduled_ms} ${iso(r.scheduled_ms)} minute+${r.scheduled_ms % 60_000} slot${r.scheduled_ms - nearest >= 0 ? '+' : ''}${r.scheduled_ms - nearest} (${iso(nearest).slice(11, 16)}) started ${r.started_at} finished ${r.finished_at ?? 'NULL'}`);
   }
 }

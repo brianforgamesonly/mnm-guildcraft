@@ -2,7 +2,9 @@
 # (scripts/health/run.ts, rules in scripts/health/judge.ts): missed sweeps against the cron expression in wrangler.jsonc
 # (from each copy's first heartbeat row, sweep_run; a slot within 15 minutes after a deploy of that copy is reported, not
 # failed), sweeps that started but did not finish, command errors (not measurable: no exact record), and the nightly
-# import, backup and usage rows. Reads only. Expected: <1 billed minute a run per copy (public repository: free).
+# import, backup and usage rows. A heartbeat row matches the slot whose minute holds its scheduledTime; a row on no
+# expected slot fails "check broken" (order 21: the matching, the cron configuration or a manual trigger), except
+# within a deploy window. Reads only. Expected: <1 billed minute a run per copy (public repository: free).
 # Schedule: 01:17 UTC, off the hour (GitHub delays and may drop runs at the start of every hour); the judged day is over.
 #
 # The alarm (order 20's override 2 of ORDER-RULES order 8's fail-once rule, for this alarm only):
