@@ -205,3 +205,8 @@ Treat the clock as authoritative over any date an order states.
 - A check that matches records to expected events states its matching rule. A record that matches no expected event fails the check, or is reported under a named exemption. It is never a silent pass.
 - Order 21's explicit override 1 of order 20's report-only "rows on no expected slot" (scripts/health/judge.ts): such a row fails the health check's "check broken" rule (the cause is the check's matching, the cron configuration, or a manual trigger; never reported as a missed sweep), except inside a deploy window, where it is reported. While it fails, "missed sweeps" fails only on a breach that stands with each unmatched row counted toward the slot before it (genuine missed work, whatever broke the match). On 2026-10-22 that report-only line was the only sign the check was broken while it sent a false "missed sweeps" alarm. Order 20's other alarm rules stand.
 - The health check's matching rule: a heartbeat row belongs to the expected slot whose minute holds its scheduledTime (`slotOf`). Cloudflare's scheduledTime is not aligned to the minute: each Worker's rows carry a constant offset inside it (production +8.996 s, dev +37.257 s, order 21 ITEM 1).
+
+## Order 22
+
+- Order 22's explicit override 1 of order 4's "content: '' breaks a reply": for the rollback of the roster board's first-message line only, a board message edit may send content "" (`src/board/render.ts` LineMode `'clear'`). The message keeps its embeds. Interaction replies never send it.
+- A Discord message edit keeps every field it does not send. Removing something a message carries therefore takes an edit that sends the field empty: reverting the code is never enough on its own.

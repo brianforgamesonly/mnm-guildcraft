@@ -4,11 +4,13 @@
 import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';
-import { BOARD_CALL_CAP, routeOf } from '../../src/board/api.ts';
-import { renderSkillPost, type BoardLine } from '../../src/board/render.ts';
-import { isNightly, PINNED } from '../../src/board/refresh.ts';
+import { BOARD_CALL_CAP, botApi as makeBotApi, routeOf } from '../../src/board/api.ts';
+import { contentHash, plainText, renderIndex, renderSkillPost, type BoardLine } from '../../src/board/render.ts';
+import { isNightly, PINNED, refreshGuildBoard } from '../../src/board/refresh.ts';
+import up17 from '../../migrations/0017_board_preview_line.sql?raw';
+import down17 from '../../scripts/rollback/0017_board_preview_line.down.sql?raw';
 import { BOARD_PERMISSIONS } from '../../src/commands/setup.ts';
-import { EMBED_LIMITS, embedChars } from '../../src/discord.ts';
+import { EMBED_LIMITS, embedChars, plural } from '../../src/discord.ts';
 import { all, count, one, reset } from '../db.ts';
 import { ADMIN, as, botApi, cmd, exchange, GUILD, seen, spyOnFetch, submit, webhook, webhookCalls } from '../discord.ts';
 import { FORUM, fakeForum, TEXT_CHANNEL } from '../fake-forum.ts';
@@ -355,6 +357,122 @@ describe('overflow into bot-owned follow-up messages', () => {
     await runCron();
     expect(post('Brewing')!.messages.size).toBe(1);
     expect(forum.text(post('Brewing'))).toContain('No one in the guild has recorded Brewing yet');
+  });
+});
+
+describe('order 22: each post has a one-line summary (the forum list previews it)', () => {
+  const NOW = Date.parse('2026-10-23T12:00:00Z');
+  const line = (character: string, level: number, owner = ANN): BoardLine => ({ tradeskill_id: 1, character, owner_user_id: owner, member: 'Ann', level, updated_at: '2026-10-22T00:00:00Z' });
+  const sql = (text: string) => text.replace(/--.*$/gm, '').split(';').map((s) => s.trim()).filter(Boolean);
+  const runSql = async (text: string) => {
+    for (const s of sql(text)) await env.DB.prepare(s).run();
+  };
+  /** Every bot-API call that sends a message body, as the body Discord receives. */
+  const bodies = () => forum.calls.filter((c) => (c.method === 'POST' || c.method === 'PATCH') && (c.body?.embeds || c.body?.message)).map((c) => c.body.message ?? c.body);
+  const MARKDOWN_OR_MENTION = /[*_~`|>[\]()\\@<#:](?!​)/;
+
+  it('the line for a populated and an empty tradeskill, from the same ranking as the embed', () => {
+    const [first] = renderSkillPost('Blacksmithing', [line('Thornwick', 142), line('Ash', 90, BO)], 60, NOW);
+    expect(first.content).toBe('Blacksmithing · 2 characters · top: Thornwick 142');
+    expect(first.embeds[0].description).toContain('**1.** **Thornwick**');
+    expect(renderSkillPost('Blacksmithing', [line('Thornwick', 142)], 60, NOW)[0].content).toBe('Blacksmithing · 1 character · top: Thornwick 142');
+    expect(renderSkillPost('Brewing', [], 60, NOW)[0].content).toBe('Brewing · no one listed yet: /skills to get listed');
+  });
+
+  it('a character name with markdown characters is neutralised without backslashes', () => {
+    const name = '*Thorn_wick* ~~x~~ `y` |z| [a](http://b)';
+    const content = renderSkillPost('Blacksmithing', [line(name, 142)], 60, NOW)[0].content!;
+    expect(content).toBe(`Blacksmithing · 1 character · top: ${plainText(name)} 142`);
+    // Every markdown character in the name is followed by a zero-width space; nothing is escaped with a backslash.
+    expect(plainText(name)).not.toMatch(MARKDOWN_OR_MENTION);
+    expect(plainText(name)).not.toContain('\\');
+    expect(plainText(name).replaceAll('​', '')).toBe(name);
+  });
+
+  it('mention syntax in a character name (@everyone, @here, <@123>, <#456>, <@&7>) is neutralised; content has no mention', () => {
+    for (const name of ['@everyone', '@here', '<@123456789012345678>', '<#456789012345678901>', '<@&7>', 'a@everyone']) {
+      const [m] = renderSkillPost('Blacksmithing', [line(name, 5)], 60, NOW);
+      expect(m.content).not.toMatch(/@(everyone|here)|<@[!&]?\d+>|<#\d+>/);
+      expect(m.allowed_mentions).toEqual({ parse: [] });
+    }
+  });
+
+  it('overflow messages carry no content; only the first message has the line', () => {
+    const many = Array.from({ length: 400 }, (_, i) => line(`Character${String(i).padStart(3, '0')}`, 400 - i, String(i % 40)));
+    const msgs = renderSkillPost('Blacksmithing', many, 60, NOW);
+    expect(msgs.length).toBeGreaterThan(1);
+    expect(msgs[0].content).toBe('Blacksmithing · 400 characters · top: Character000 400');
+    for (const m of msgs.slice(1)) expect(m).not.toHaveProperty('content');
+  });
+
+  it('the hash changes when the top crafter changes, and stays the same when nothing changes', async () => {
+    const before = await contentHash(renderSkillPost('Blacksmithing', [line('Thornwick', 142), line('Ash', 90, BO)], 60, NOW));
+    expect(await contentHash(renderSkillPost('Blacksmithing', [line('Thornwick', 142), line('Ash', 90, BO)], 60, NOW))).toBe(before);
+    expect(await contentHash(renderSkillPost('Blacksmithing', [line('Thornwick', 143), line('Ash', 90, BO)], 60, NOW))).not.toBe(before);
+    expect(await contentHash(renderSkillPost('Blacksmithing', [line('Ash', 150, BO), line('Thornwick', 142)], 60, NOW))).not.toBe(before);
+  });
+
+  it('the index line (ITEM 3) is in the hashed text, and the time is not', () => {
+    const entries = [{ skill: 'Blacksmithing', thread_id: null, lines: 1 }, { skill: 'Brewing', thread_id: null, lines: 0 }];
+    const a = renderIndex(entries, NOW);
+    expect(a.message.content).toBe('How to get listed · 2 tradeskills · /me to start');
+    expect(a.hashable).toContain(a.message.content);
+    expect(renderIndex(entries, NOW + 3_600_000).hashable).toBe(a.hashable);
+    expect(renderIndex(entries.slice(0, 1), NOW).message.content).toBe('How to get listed · 1 tradeskill · /me to start');
+    expect(renderIndex(entries, NOW, 'clear').hashable).not.toBe(a.hashable);
+  });
+
+  it('the first build and a rewrite send the line on create and on edit, never empty, and ping nobody', async () => {
+    await liveShape();
+    await setupBoard();
+    const n = await skillCount();
+    expect(forum.line(post('Blacksmithing'))).toBe('Blacksmithing · 1 character · top: Testchar 25');
+    expect(forum.line(post('Brewing'))).toBe('Brewing · no one listed yet: /skills to get listed');
+    expect(forum.line(post('Index: how to get listed'))).toBe(`How to get listed · ${plural(n, 'tradeskill')} · /me to start`);
+    await exchange(cmd(admin, 'craft', 'set', { skill: 'Blacksmithing', level: 30 }), TOKEN);
+    expect(forum.line(post('Blacksmithing'))).toBe('Blacksmithing · 1 character · top: Testchar 30');
+    const sent = bodies();
+    expect(sent.filter((b) => b.content).length).toBe(n + 1 + 2); // the creates, the index, then the edit and the index edit
+    for (const b of sent) {
+      expect(b.content).not.toBe('');
+      expect(b.allowed_mentions).toEqual({ parse: [] });
+    }
+  });
+
+  it('rollout: a post rendered before order 22 is not reached by a sweep; migration 0017 marks it, and the sweep adds the line', async () => {
+    await liveShape();
+    await setupBoard();
+    const n = await skillCount();
+    // The state before this order: no line in Discord, and a hash of the old render.
+    for (const t of forum.posts()) delete [...t.messages.values()][0].content;
+    await env.DB.prepare("UPDATE board_post SET content_hash = 'before-order-22'").run();
+    await env.DB.prepare("UPDATE guild SET board_index_hash = 'before-order-22'").run();
+    expect(await runCron()).toMatchObject({ guilds: 0, discord_calls: 0 }); // a hash change alone marks nothing dirty
+    expect(forum.line(post('Blacksmithing'))).toBeUndefined();
+    await runSql(up17);
+    expect(await count('board_post', 'dirty = 1')).toBe(n);
+    forum.calls.length = 0;
+    const run = await runCron();
+    expect(run.results[0]).toMatchObject({ edited: n, index: 'edited', left_dirty: 0 });
+    for (const t of forum.posts()) expect(forum.line(t), t.name).toMatch(/ · /);
+    expect(await count('board_post', 'dirty <> 0')).toBe(0);
+  });
+
+  it('rollback: BOARD_LINE clear with 0017 down sends content "" and removes the line, keeping the embeds; 0017 up restores it', async () => {
+    await liveShape();
+    await setupBoard();
+    const n = await skillCount();
+    const refresh = (mode: 'on' | 'clear') =>
+      refreshGuildBoard(env.DB, makeBotApi('test-bot-token', { d1: () => 0, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + 60_000 }), GUILD, { line: mode });
+    await runSql(down17);
+    forum.calls.length = 0;
+    expect(await refresh('clear')).toMatchObject({ edited: n, index: 'edited' });
+    for (const t of forum.posts()) expect(forum.line(t), t.name).toBe('');
+    expect(bodies().filter((b) => 'content' in b).every((b) => b.content === '')).toBe(true);
+    expect(forum.text(post('Blacksmithing'))).toContain(`**1.** **Testchar** · <@${ANN}> (Ann) · 25`);
+    await runSql(up17);
+    expect(await refresh('on')).toMatchObject({ edited: n });
+    expect(forum.line(post('Blacksmithing'))).toBe('Blacksmithing · 1 character · top: Testchar 25');
   });
 });
 

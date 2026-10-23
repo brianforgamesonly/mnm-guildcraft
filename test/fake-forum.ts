@@ -63,6 +63,8 @@ export function fakeForum() {
         .map((t) => t.name),
     byName: (name: string) => [...threads.values()].find((t) => t.name === name),
     text: (t: FakeThread | undefined) => (t ? [...t.messages.values()].flatMap((m) => (m.embeds ?? []).map((e: any) => `${e.title ?? ''}\n${e.description ?? ''}\n${e.footer?.text ?? ''}`)).join('\n') : ''),
+    /** Order 22: the first message's text, which the forum list previews (undefined when it has none). */
+    line: (t: FakeThread | undefined) => (t ? [...t.messages.values()][0]?.content : undefined),
     discordCalls: () => calls.length,
     /** A member replies in a post. */
     memberReply: (t: FakeThread) => t.messages.set(id(), { content: 'a member reply', author: MEMBER }),
@@ -124,7 +126,8 @@ export function fakeForum() {
       }
       if (!t.messages.has(m[2])) return json(404, { code: 10008, message: 'Unknown Message' });
       if (method === 'PATCH') {
-        t.messages.set(m[2], body);
+        // Order 22: an edit keeps any field it does not send (Discord: "All parameters to this endpoint are optional").
+        t.messages.set(m[2], { ...t.messages.get(m[2]), ...body });
         return json(200, { id: m[2] });
       }
       if (method === 'DELETE') {
