@@ -6,20 +6,25 @@
 // --evidence FROM TO also prints, per 15-minute slot in [FROM, TO), how many timestamps each of the bot's tables holds
 // (columns *_at and *_until, derived from the schema): counts only, as this repository's logs are public.
 //
-// Usage: node scripts/health/run.ts [--day YYYY-MM-DD] [--report-only] [--evidence FROM TO]
+// --sweep-rows (order 21, ITEM 1) also prints every sweep_run row: scheduled_ms, its offset from the whole minute below
+// it and from the nearest expected slot, started_at and finished_at (timestamps only). It implies --report-only, so the
+// evidence dispatch never mails a verdict.
+//
+// Usage: node scripts/health/run.ts [--day YYYY-MM-DD] [--report-only] [--evidence FROM TO] [--sweep-rows]
 //   Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, GUILDCRAFT_COPY; GITHUB_TOKEN, GITHUB_REPOSITORY.
 import { summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { remoteReadD1 } from '../import/db.ts';
 import { ALARM_IMPORT, FINISHED_IMPORT } from '../../src/import-status.ts';
-import { CONSECUTIVE_FAIL, DAY_MS, failed, judgeCommands, judgeNightly, judgeSweeps, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
+import { CONSECUTIVE_FAIL, cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeSweeps, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
 
 const args = process.argv.slice(2);
 const opt = (name: string) => {
   const i = args.indexOf(name);
   return i === -1 ? undefined : args[i + 1];
 };
-const reportOnly = args.includes('--report-only');
+const sweepRowsEvidence = args.includes('--sweep-rows');
+const reportOnly = args.includes('--report-only') || sweepRowsEvidence;
 const dayArg = opt('--day');
 const dayStart = dayArg ? Date.parse(`${dayArg}T00:00:00Z`) : previousUtcDay(Date.now());
 if (!Number.isFinite(dayStart)) throw new Error(`--day ${dayArg}: expected YYYY-MM-DD`);
@@ -163,6 +168,17 @@ if (evFrom) {
     summary(`- ${k.slice(11)}Z: ${(bySlot.get(k) ?? []).join(', ') || 'nothing'}`);
   }
   summary(`- system audit rows in the window: ${system.length ? system.map((x) => `${x.minute.slice(11)} ${x.action} ×${x.n}`).join(', ') : 'none'}`);
+}
+
+// ---------------------------------------------------------------- order 21's evidence, on request
+if (sweepRowsEvidence && hasTable) {
+  const all = await select<SweepRow>('SELECT scheduled_ms, started_at, finished_at FROM sweep_run ORDER BY scheduled_ms');
+  const slots = all.length ? cronSlots(COPY.crons, all[0].scheduled_ms - DAY_MS, all.at(-1)!.scheduled_ms + DAY_MS) : [];
+  summary(`\n### sweep_run rows (${COPY.name}): ${all.length}; offsets in ms (minute: from the whole minute below; slot: from the nearest expected slot, signed)`);
+  for (const r of all) {
+    const nearest = slots.reduce((b, s) => (Math.abs(s - r.scheduled_ms) < Math.abs(b - r.scheduled_ms) ? s : b), slots[0]);
+    summary(`- ${r.scheduled_ms} ${iso(r.scheduled_ms)} minute+${r.scheduled_ms % 60_000} slot${r.scheduled_ms - nearest >= 0 ? '+' : ''}${r.scheduled_ms - nearest} (${iso(nearest).slice(11, 16)}) started ${r.started_at} finished ${r.finished_at ?? 'NULL'}`);
+  }
 }
 
 // ---------------------------------------------------------------- the summary and the verdict
