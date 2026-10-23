@@ -14,6 +14,8 @@
 //   ACTION=refresh  DRY_RUN=0 only. One board invocation: the Worker's own refreshGuildBoard (src/board/refresh.ts)
 //                   with the same 40-call budget, D1 over HTTP and Discord over fetch. REBUILD=1 first asks
 //                   for the A→Z rebuild (guild.board_rebuild_since, kept if already set) and runs as the rebuild.
+//                   Order 22: ALL=1 re-renders every post, as the nightly run does; LINE=clear renders without the
+//                   first-message line and sends content "" to remove it (the line's rollback, proven on dev).
 //   ACTION=delete   The rollback: deletes the bot-owned forum posts listed in board_post.thread_id and the
 //                   index post, then forgets them and clears the board channel (the board stops). DRY_RUN=1
 //                   (the default) prints what it would delete and changes nothing.
@@ -29,7 +31,7 @@ import { readFileSync } from 'node:fs';
 import { boardStatements, boardFromResults } from '../../src/board/data.ts';
 import { contentHash, renderIndex, renderSkillPost } from '../../src/board/render.ts';
 import { BOARD_CALL_CAP, botApi } from '../../src/board/api.ts';
-import { archivesAt, CRON_RUN_MS, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
+import { archivesAt, BOARD_LINE, CRON_RUN_MS, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
 import { boardInOrder, displayOrder, snowflakeAt, snowflakeMs } from '../../src/board/order.ts';
 import { runDepartures } from '../../src/departures.ts';
 
@@ -50,11 +52,15 @@ if (['archive', 'refresh'].includes(action) && dryRun) throw new Error(`ACTION=$
 if (['inspect', 'archive', 'refresh', 'departures'].includes(action) && !bot) throw new Error(`DISCORD_BOT_TOKEN must be set for ACTION=${action}`);
 
 const redact = (s) => String(s).replace(/\d{15,}/g, '<id>');
+/** Order 22: whether a fetched first message carries the line, and its length; never its text (it holds a character name). */
+const lineOf = (msg) => (!msg?.ok ? `unread (${msg?.status ?? '-'})` : msg.body?.content ? `yes (${msg.body.content.length} chars)` : 'none');
 const tail = (id) => (id ? `…${String(id).slice(-6)}` : '-');
 const iso = (ms) => (ms ? new Date(ms).toISOString().replace('.000Z', 'Z') : '-');
 
 /** A D1Database-shaped adapter over the D1 HTTP query API, so the Worker's own statements run unchanged. */
 let d1Calls = 0;
+/** Order 22: D1's own rows_written (index writes included), summed over the run. */
+let rowsWritten = 0;
 async function query(sql, params) {
   if (readOnly && !/^\s*SELECT\b/i.test(sql)) throw new Error(`read-only run refused a non-SELECT statement: ${sql.slice(0, 60)}`);
   const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/d1/database/${databaseId}/query`, {
@@ -64,6 +70,7 @@ async function query(sql, params) {
   });
   const body = await res.json();
   if (!res.ok || !body.success) throw new Error(`D1 HTTP ${res.status}: ${(body.errors ?? []).map((e) => `${e.code} ${e.message}`).join('; ')}`);
+  rowsWritten += body.result[0]?.meta?.rows_written ?? 0;
   return body.result[0];
 }
 const stmt = (sql, params = []) => ({
@@ -107,13 +114,16 @@ if (action === 'render') {
     for (const t of data.tradeskills) {
       const lines = (data.lines.get(t.id) ?? []).map((l) => ({ ...l, member: member(l.member), character: character(l.character) }));
       if (lines.length) withLines++;
-      const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, now);
+      const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, now, BOARD_LINE);
       const hash = (await contentHash(msgs)).slice(0, 12);
       console.log(`\n--- post "${t.name}" · ${msgs.length} message(s) · ${lines.length} line(s) · hash ${hash}`);
+      // Order 22: the first message's line (names already pseudonymised above), then the embeds.
+      console.log(`line: ${redact(msgs[0].content ?? '(none)')}`);
       console.log(redact(JSON.stringify(msgs.map((m) => m.embeds))));
     }
-    const idx = renderIndex(data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })), now);
+    const idx = renderIndex(data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })), now, BOARD_LINE);
     console.log('\n--- index post "Index: how to get listed" (pinned)');
+    console.log(`line: ${redact(idx.message.content ?? '(none)')}`);
     console.log(redact(JSON.stringify(idx.message.embeds)));
     console.log(`\nsummary: ${data.tradeskills.length + 1} posts would exist (${data.tradeskills.length} tradeskills + index); ${withLines} tradeskills have at least one character.`);
   }
@@ -131,7 +141,7 @@ if (action === 'render') {
     for (const t of archived.body?.threads ?? []) listed.set(t.id, t);
     console.log(`\n=== guild ${gi + 1}: thread lists: active ${active.status}, archived ${archived.status}${archived.body?.has_more ? ' (has_more: incomplete)' : ''}; ${listed.size} threads in the board forum; rebuild ${data.guild.board_rebuild_since ? `in progress since ${data.guild.board_rebuild_since}` : 'not in progress'}`);
     const botId = listed.get(data.guild.board_index_thread_id)?.owner_id ?? [...data.posts.values()].map((p) => listed.get(p.thread_id)?.owner_id).find(Boolean);
-    console.log('tradeskill\tthread\tcreated\tmessage_count\tarchived\tauto_archive_min\tarchives_at\tbot_owned\tlast_skill_change\tfirst_message_edited\tedit_lag_s\tmessages');
+    console.log('tradeskill\tthread\tcreated\tmessage_count\tarchived\tauto_archive_min\tarchives_at\tbot_owned\tlast_skill_change\tfirst_message_edited\tedit_lag_s\tmessages\tline');
     for (const t of displayOrder(data.tradeskills)) {
       const p = data.posts.get(t.id);
       if (!p) {
@@ -148,11 +158,13 @@ if (action === 'render') {
         [
           t.name, tail(p.thread_id), iso(snowflakeMs(p.thread_id)), x?.message_count ?? 'not listed', x ? !!x.thread_metadata?.archived : 'not listed', x?.thread_metadata?.auto_archive_duration ?? '-',
           info ? iso(archivesAt(info)) : '-', x ? x.owner_id === botId : '-', changed.get(t.id) ?? '-', iso(edited), edited && change ? ((edited - change) / 1000).toFixed(1) : '-', JSON.parse(p.message_ids_json).length,
+          lineOf(msg),
         ].join('\t'),
       );
     }
     const idx = listed.get(data.guild.board_index_thread_id);
-    console.log(`index: thread ${tail(data.guild.board_index_thread_id)} · created ${iso(data.guild.board_index_thread_id && snowflakeMs(data.guild.board_index_thread_id))} · pinned ${idx ? (idx.flags & 2) === 2 : 'not listed'} · archived ${idx ? !!idx.thread_metadata?.archived : 'not listed'}`);
+    const idxMsg = data.guild.board_index_message_id ? await discord('GET', `/channels/${data.guild.board_index_thread_id}/messages/${data.guild.board_index_message_id}`) : null;
+    console.log(`index: thread ${tail(data.guild.board_index_thread_id)} · created ${iso(data.guild.board_index_thread_id && snowflakeMs(data.guild.board_index_thread_id))} · pinned ${idx ? (idx.flags & 2) === 2 : 'not listed'} · archived ${idx ? !!idx.thread_metadata?.archived : 'not listed'} · line ${lineOf(idxMsg)}`);
     const others = [...listed.values()].filter((x) => x.id !== data.guild.board_index_thread_id && ![...data.posts.values()].some((p) => p.thread_id === x.id));
     console.log(`other threads in the forum: ${others.length} (${others.map((x) => `${x.owner_id === botId ? 'bot' : 'member'}-owned "${x.owner_id === botId ? x.name : 'member post'}" ${tail(x.id)} messages ${x.message_count}`).join('; ') || 'none'})`);
     const inOrder = boardInOrder(data.tradeskills, (id) => data.posts.get(id)?.thread_id);
@@ -192,9 +204,10 @@ if (action === 'render') {
     const budget = { d1: () => d1Calls, discord: 0, cap: BOARD_CALL_CAP, deadline: Date.now() + CRON_RUN_MS };
     const api = botApi(bot, budget);
     const started = Date.now();
-    const r = await refreshGuildBoard(db, api, g.id, { trigger: rebuild ? 'rebuild' : 'sweep' });
+    // Order 22: ALL=1 re-renders every post (as the nightly run does); LINE=clear is the preview line's rollback.
+    const r = await refreshGuildBoard(db, api, g.id, { trigger: rebuild ? 'rebuild' : 'sweep', all: process.env.ALL === '1', line: process.env.LINE === 'clear' ? 'clear' : undefined });
     const ms = Date.now() - started;
-    console.log(redact(JSON.stringify({ trigger: rebuild ? 'rebuild' : 'sweep', ms, d1_calls: d1Calls, discord_calls: budget.discord, total: d1Calls + budget.discord, cap: BOARD_CALL_CAP, result: r })));
+    console.log(redact(JSON.stringify({ trigger: rebuild ? 'rebuild' : 'sweep', ms, d1_calls: d1Calls, discord_calls: budget.discord, total: d1Calls + budget.discord, cap: BOARD_CALL_CAP, rows_written: rowsWritten, result: r })));
     console.log('calls:', JSON.stringify(api.log.map((c) => `${c.route} ${c.status}${c.code ? ` ${c.code}` : ''}${c.waited_ms ? ` waited ${c.waited_ms}ms` : ''}`)));
     const rows = (await query('SELECT p.thread_id, t.name FROM board_post p JOIN tradeskill t ON t.id = p.tradeskill_id WHERE p.guild_id = ?', [g.id])).results;
     for (const x of [...rows].sort((a, b) => (BigInt(a.thread_id) < BigInt(b.thread_id) ? -1 : 1))) console.log(`  created ${iso(snowflakeMs(x.thread_id))}  ${tail(x.thread_id)}  ${x.name}`);

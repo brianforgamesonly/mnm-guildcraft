@@ -530,26 +530,29 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 
 | Where | Text | Status |
 |---|---|---|
-| src/board/refresh.ts:172 | Post name: \<tradeskill> | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:49 | \<n> character(s) (\<n> member(s)), ranked by skill level. (count at line 31) | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:45 | **\<rank>.** **\<character>** · \<member name> · \<skill level> · *stale* | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:50 | No one in the guild has recorded \<tradeskill> yet. Use `/skills` to get listed. | DRAFT (changes approved copy) |
-| src/board/render.ts:51 | Footer: stale = not updated in \<number> days | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/refresh.ts:178 | Post name: \<tradeskill> | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:52 | (order 22) First-message line, shown in the forum list's preview: \<tradeskill> · \<n> character(s) · top: \<character> \<level> | DRAFT |
+| src/board/render.ts:53 | (order 22) First-message line, no one listed: \<tradeskill> · no one listed yet: /skills to get listed | DRAFT |
+| src/board/render.ts:82 | \<n> character(s) (\<n> member(s)), ranked by skill level. (count at line 62) | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:78 | **\<rank>.** **\<character>** · \<member name> · \<skill level> · *stale* | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:83 | No one in the guild has recorded \<tradeskill> yet. Use `/skills` to get listed. | DRAFT (changes approved copy) |
+| src/board/render.ts:84 | Footer: stale = not updated in \<number> days | APPROVED (owner, by exception, 2026-10-20) |
 
 ### Roster board index (pinned post)
 
 | Where | Text | Status |
 |---|---|---|
-| src/board/render.ts:125 | Post name: Index: how to get listed | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:120 | Title: Crafting roster: index | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:115 | #\<tradeskill post> · \<n> character(s) — or, before the post exists: \<tradeskill> *(post coming)* · \<n> character(s) | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:96 | **How to get listed** | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:98 | 1. `/me`, then **Add character**. | DRAFT (changes approved copy) |
-| src/board/render.ts:99 | 2. `/skills` a tradeskill level, or `/skills` alone for several at once. | DRAFT (changes approved copy) |
-| src/board/render.ts:100 | 3. Your tradeskill posts update within about a minute. | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:102 | **Also** | APPROVED (owner, by exception, 2026-10-20) |
-| src/board/render.ts:103-106 | The "Also" lines (order 18; replace the order 10, 13, 16 and 17b lines): under Work order 18 | DRAFT (changes approved copy) |
-| src/board/render.ts:118 | Last refresh: \<date and time> (\<time ago>) | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:161 | Post name: Index: how to get listed | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:57 | (order 22) First-message line, shown in the forum list's preview: How to get listed · \<n> tradeskill(s) · /me to start | DRAFT |
+| src/board/render.ts:156 | Title: Crafting roster: index | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:150 | #\<tradeskill post> · \<n> character(s) — or, before the post exists: \<tradeskill> *(post coming)* · \<n> character(s) | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:130 | **How to get listed** | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:132 | 1. `/me`, then **Add character**. | DRAFT (changes approved copy) |
+| src/board/render.ts:133 | 2. `/skills` a tradeskill level, or `/skills` alone for several at once. | DRAFT (changes approved copy) |
+| src/board/render.ts:134 | 3. Your tradeskill posts update within about a minute. | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:136 | **Also** | APPROVED (owner, by exception, 2026-10-20) |
+| src/board/render.ts:137-140 | The "Also" lines (order 18; replace the order 10, 13, 16 and 17b lines): under Work order 18 | DRAFT (changes approved copy) |
+| src/board/render.ts:153 | Last refresh: \<date and time> (\<time ago>) | APPROVED (owner, by exception, 2026-10-20) |
 
 ## Help and welcome
 

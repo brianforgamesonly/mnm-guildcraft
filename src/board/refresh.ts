@@ -30,7 +30,7 @@ import { isDevCopy, type Env } from '../env.ts';
 import { BOARD_CALL_CAP, botApi, budgetLeft, THREAD_ARCHIVED, UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, type ApiLogEntry, type BoardBudget, type BotApi } from './api.ts';
 import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } from './data.ts';
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
-import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage } from './render.ts';
+import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage, type LineMode } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
@@ -164,7 +164,11 @@ export function archivesAt(t: ThreadInfo): number | null {
   return last + t.auto_archive_duration * 60_000;
 }
 
-const body = (m: BoardMessage) => ({ embeds: m.embeds, allowed_mentions: m.allowed_mentions });
+/** Order 22: the first-message line is on. The rollback sets 'clear' (src/board/render.ts LineMode). */
+export const BOARD_LINE: LineMode = 'on';
+
+/** Content only when the message carries it (the first message), on create and on edit; allowed_mentions always explicit. */
+const body = (m: BoardMessage) => ({ ...(m.content !== undefined ? { content: m.content } : {}), embeds: m.embeds, allowed_mentions: m.allowed_mentions });
 
 type PostOutcome = { row: Omit<BoardPostRow, 'dirty' | 'last_rendered_at'>; complete: boolean } | { gone: true } | { failed: true };
 
@@ -284,8 +288,9 @@ export async function refreshGuildBoard(
   db: D1Database,
   api: BotApi,
   guildId: string,
-  opts: { all?: boolean; nowMs?: number; trigger?: Trigger } = {},
+  opts: { all?: boolean; nowMs?: number; trigger?: Trigger; line?: LineMode } = {},
 ): Promise<RefreshResult> {
+  const line = opts.line ?? BOARD_LINE;
   const r = emptyResult();
   const nowMs = opts.nowMs ?? Date.now();
   const at = new Date(nowMs).toISOString();
@@ -392,7 +397,7 @@ export async function refreshGuildBoard(
       continue;
     }
     const lines = data.lines.get(t.id) ?? [];
-    const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, nowMs);
+    const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, nowMs, line);
     const hash = await contentHash(msgs);
     const replace = !!post && rebuilding && isOld(post.thread_id) && !guarded.has(t.id);
     if (!post || replace) {
@@ -487,6 +492,7 @@ export async function refreshGuildBoard(
   const idx = renderIndex(
     data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })),
     nowMs,
+    line,
   );
   const idxHash = await contentHash(idx.hashable);
   let indexThread = data.guild.board_index_thread_id;

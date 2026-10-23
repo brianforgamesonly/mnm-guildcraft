@@ -14,14 +14,47 @@ export interface BoardLine {
 
 /** What one bot-owned message of a post carries. */
 export interface BoardMessage {
+  /**
+   * Order 22: the first message's one-line summary. Discord's forum list previews a post by its first message's text,
+   * and shows "Click to see attachment" when there is none. Never '' except under LINE 'clear' (the rollback).
+   */
+  content?: string;
   embeds: Embed[];
   allowed_mentions: AllowedMentions;
 }
+
+/**
+ * Order 22: 'on' renders the summary line. 'clear' is its rollback (order 22's explicit override 1 of order 4's
+ * "content: '' breaks a reply", for board message edits only): no line, and content '' on the first message, because
+ * an edit keeps any field it does not send. Rollback: set BOARD_LINE in src/board/refresh.ts to 'clear', deploy, then
+ * run scripts/rollback/0017_board_preview_line.down.sql so every post is edited once.
+ */
+export type LineMode = 'on' | 'clear';
 
 const DAY_MS = 86_400_000;
 export const BOARD_COLOR = 0x8a6d3b;
 /** Every board create and edit (first post, rewrites, the nightly run, a rebuild) sends this: the board never pings. */
 const NO_MENTIONS = NO_PINGS;
+
+/**
+ * Order 22: member-typed text in a plain-text line. A zero-width space after each markdown or mention character
+ * (* _ ~ ` | > [ ] ( ) \ @ < # : and the masked-link and URL characters among them) keeps the text as typed and stops
+ * Discord from reading it as formatting, a link, an emoji or a mention (@everyone, @here, <@id>, <#id>, <t:…>).
+ * Backslash escapes (md) are not used: a forum list preview may show them literally. allowed_mentions pings nobody
+ * whatever this misses.
+ */
+export const plainText = (s: string): string => s.replace(/([*_~`|>[\]()\\@<#:])/g, '$1​');
+
+/** Order 22: the tradeskill post's first-message line, from the same ranked lines as its embed ("Top" is rank 1). */
+export function skillLine(skill: string, lines: Pick<BoardLine, 'character' | 'level'>[]): string {
+  const name = plainText(skill);
+  return lines.length
+    ? `${name} · ${plural(lines.length, 'character')} · top: ${plainText(lines[0].character)} ${lines[0].level}`
+    : `${name} · no one listed yet: /skills to get listed`;
+}
+
+/** Order 22: the index post's first-message line. */
+export const indexLine = (tradeskills: number): string => `How to get listed · ${plural(tradeskills, 'tradeskill')} · /me to start`;
 
 /** "2 characters (1 member)": the count lives in the body, never the title (thread renames are tightly rate-limited). */
 export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
@@ -36,7 +69,7 @@ export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
  * messages. The split is measured on each line's own length, so longer lines (a mention is 21-22 characters) simply
  * move to the next embed or message sooner.
  */
-export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: number, nowMs: number): BoardMessage[] {
+export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: number, nowMs: number, line: LineMode = 'on'): BoardMessage[] {
   const staleBefore = nowMs - staleDays * DAY_MS;
   let anyStale = false;
   const rows = lines.map((l, i) => {
@@ -81,7 +114,8 @@ export function renderSkillPost(skill: string, lines: BoardLine[], staleDays: nu
 
   messages[0][0].title = title;
   if (footer) messages.at(-1)!.at(-1)!.footer = footer;
-  return messages.map((e) => ({ embeds: e, allowed_mentions: NO_MENTIONS }));
+  // Order 22: the line on the first message only; overflow messages carry no content.
+  return messages.map((e, i) => ({ ...(i === 0 ? { content: line === 'on' ? skillLine(skill, lines) : '' } : {}), embeds: e, allowed_mentions: NO_MENTIONS }));
 }
 
 export interface IndexEntry {
@@ -109,16 +143,18 @@ export const HOW_TO_GET_LISTED = [
 /**
  * The pinned index post: a link to every tradeskill post with its count, how to get listed, and the last
  * refresh as a Discord timestamp. `hashable` is the same text without the time, so an index whose links
- * and counts are unchanged is not edited just because time passed.
+ * and counts are unchanged is not edited just because time passed. It ends with the first-message line (order 22),
+ * so a change in the line edits the index too.
  */
-export function renderIndex(entries: IndexEntry[], refreshedAtMs: number): { message: BoardMessage; hashable: string } {
+export function renderIndex(entries: IndexEntry[], refreshedAtMs: number, line: LineMode = 'on'): { message: BoardMessage; hashable: string } {
   const links = entries.map((e) => `${e.thread_id ? `<#${e.thread_id}>` : `${e.skill} *(post coming)*`} · ${plural(e.lines, 'character')}`);
   const body = [links.join('\n'), '', HOW_TO_GET_LISTED].join('\n');
   const t = Math.floor(refreshedAtMs / 1000);
   const description = truncate(`${body}\n\nLast refresh: <t:${t}:f> (<t:${t}:R>)`, EMBED_LIMITS.description);
+  const content = line === 'on' ? indexLine(entries.length) : '';
   return {
-    message: { embeds: [{ title: 'Crafting roster: index', description, color: BOARD_COLOR }], allowed_mentions: NO_MENTIONS },
-    hashable: body,
+    message: { content, embeds: [{ title: 'Crafting roster: index', description, color: BOARD_COLOR }], allowed_mentions: NO_MENTIONS },
+    hashable: `${body}\n\ncontent: ${content}`,
   };
 }
 

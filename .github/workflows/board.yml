@@ -4,7 +4,8 @@
 #            rebuild would create and guard.
 #   archive: live check; archives the post of `skill` and marks it for the next refresh (dry_run must be off).
 #   refresh: one board invocation with the Worker's own code and 40-call budget; `rebuild` asks for and
-#            continues the A→Z rebuild (dry_run must be off).
+#            continues the A→Z rebuild (dry_run must be off). Order 22: `all` re-renders every post; `line: clear`
+#            is the preview line's rollback (content "" on each first message).
 #   delete:  the rollback; deletes the bot-owned board posts and clears the board channel. dry_run (default)
 #            prints what it would delete and changes nothing.
 #   departures: order 7; the nightly departure run (src/departures.ts) invoked directly. dry_run (default) lists the
@@ -30,6 +31,15 @@ on:
         description: 'refresh only: ask for (or continue) the A→Z rebuild'
         type: boolean
         default: false
+      all:
+        description: 'refresh only (order 22): re-render every post, as the nightly run does'
+        type: boolean
+        default: false
+      line:
+        description: 'refresh only (order 22): on, or clear (the preview line rollback: content "" on every edit)'
+        type: choice
+        options: ['on', clear]
+        default: 'on'
       copy:
         description: 'Order 16: which database. production is allowed for render (read-only) only.'
         type: choice
@@ -58,6 +68,8 @@ jobs:
           DRY_RUN: ${{ (inputs.action == 'render' || inputs.action == 'inspect' || inputs.dry_run) && '1' || '0' }}
           SKILL: ${{ inputs.skill }}
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
+          ALL: ${{ inputs.all && '1' || '0' }}
+          LINE: ${{ inputs.line }}
           COPY: ${{ inputs.copy }}
           DISCORD_BOT_TOKEN: ${{ (inputs.action == 'inspect' || inputs.action == 'departures' || ((inputs.action == 'archive' || inputs.action == 'refresh' || inputs.action == 'delete') && !inputs.dry_run)) && secrets.DISCORD_BOT_TOKEN || '' }}
         run: node scripts/board/run.mjs
