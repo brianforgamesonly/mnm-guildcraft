@@ -2,7 +2,9 @@
 # (scripts/health/run.ts, rules in scripts/health/judge.ts): missed sweeps against the cron expression in wrangler.jsonc
 # (from each copy's first heartbeat row, sweep_run; a slot within 15 minutes after a deploy of that copy is reported, not
 # failed), sweeps that started but did not finish, command errors (not measurable: no exact record), and the nightly
-# import, backup and usage rows. Reads only. Expected: <1 billed minute a run per copy (public repository: free).
+# import, backup and usage rows. A heartbeat row matches the slot whose minute holds its scheduledTime; a row on no
+# expected slot fails "check broken" (order 21: the matching, the cron configuration or a manual trigger), except
+# within a deploy window. Reads only. Expected: <1 billed minute a run per copy (public repository: free).
 # Schedule: 01:17 UTC, off the hour (GitHub delays and may drop runs at the start of every hour); the judged day is over.
 #
 # The alarm (order 20's override 2 of ORDER-RULES order 8's fail-once rule, for this alarm only):
@@ -11,7 +13,8 @@
 #          problem never goes quiet. No state is kept between runs, and the first run needs no baseline;
 #   state: the day's own records only. The run also fails when it cannot run (an API error, or no heartbeat table).
 # GitHub's runs are read with this job's GITHUB_TOKEN (actions: read): no new credential.
-# Dispatch: day (default yesterday), copy, and evidence_from/evidence_to (per 15-minute slot, the bot's own timestamps).
+# Dispatch: day (default yesterday), copy, and evidence_from/evidence_to (per 15-minute slot, the bot's own timestamps);
+# sweep_rows (order 21) lists every heartbeat row with its offsets, and makes the run report-only.
 name: health
 on:
   schedule:
@@ -32,6 +35,10 @@ on:
       evidence_to:
         description: 'Evidence window end, ISO UTC'
         default: ''
+      sweep_rows:
+        description: 'Also list every sweep_run row with its offsets (timestamps only); the run is then report-only'
+        type: boolean
+        default: false
 permissions:
   contents: read
   actions: read
@@ -75,8 +82,10 @@ jobs:
           DAY: ${{ inputs.day }}
           EV_FROM: ${{ inputs.evidence_from }}
           EV_TO: ${{ inputs.evidence_to }}
+          SWEEP_ROWS: ${{ inputs.sweep_rows }}
         shell: bash
         run: |
           set -- ${DAY:+--day "$DAY"}
           if [ -n "$EV_FROM" ]; then set -- "$@" --evidence "$EV_FROM" "$EV_TO"; fi
+          if [ "$SWEEP_ROWS" = "true" ]; then set -- "$@" --sweep-rows; fi
           node scripts/health/run.ts "$@"
