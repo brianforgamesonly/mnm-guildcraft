@@ -293,7 +293,8 @@ export function pageView(rows: GearRow[], q: GearQuery, d: PageData, page: numbe
   }
   // Still over: whole entries are left off the end (the details menu still lists every row), never cut mid-markdown.
   while (entries.length > 1 && text().length > budget) entries.pop();
-  // A last entry still cut by the truncation may lose its zones from view: its zones get no button.
+  // A last entry still cut by the truncation (one entry over the whole description) may lose its zones from view: all
+  // its zones get no button, even any still visible before the cut. Safe, and no real entry is that long.
   const seen = text().length > budget ? entries.slice(0, -1) : entries;
   return { embed: { title, description: truncate(text(), budget), footer }, zones: seen.flatMap((e) => e.zones) };
 }

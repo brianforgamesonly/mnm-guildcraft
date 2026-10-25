@@ -98,7 +98,7 @@ try {
   }
   console.log(`/gear pages sampled: ${pages} (${searches.length} searches); distinct matched zones per page: normal ${dist(per.normal)}; zone mode (own zone left out) ${dist(per.zone)}`);
   console.log(`/gear pages with more zones than fit: ${over.length} of ${pages}${over.length ? ` (${over.slice(0, 10).join('; ')})` : ''}`);
-  console.log(`/gear pages with no zone button: ${[...per.normal, ...per.zone].filter((x) => x === 0).length} of ${pages}`);
+  console.log(`/gear pages naming no matched zone: normal ${per.normal.filter((x) => x === 0).length} of ${per.normal.length}, zone mode ${per.zone.filter((x) => x === 0).length} of ${per.zone.length}`);
   console.log(`examples:\n  ${examples.join('\n  ')}`);
 
   // ---------------------------------------------------------------- 3. /item cards

@@ -73,7 +73,10 @@ export interface ItemCard {
   zones: ZoneRef[];
 }
 
-/** The card for one item: 2 round trips (the item and its uses; then its sources and its recipes, together). */
+/**
+ * The card for one item: 2 round trips (the item and its uses; then its sources and its recipes, together). The reply's
+ * zone buttons (order 23, withZoneButtons) are a third, only when the card names a zone.
+ */
 export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Promise<ItemCard | null> {
   const [head, uses] = await c.db.batch([
     c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId),

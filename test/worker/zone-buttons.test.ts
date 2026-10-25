@@ -4,7 +4,10 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { runImport } from '../../scripts/import/core.ts';
+import { cardFields, cardSources, pageView } from '../../src/commands/gear.ts';
 import { ZONE_REPLY_COPY } from '../../src/commands/zone.ts';
+import { SORTS, type GearQuery } from '../../src/gear/options.ts';
+import type { GearRow } from '../../src/gear/search.ts';
 import { CUSTOM_ID_MAX, LABEL_MAX, layoutZoneButtons, MESSAGE_ROWS, OPEN_PREFIX, ROW_BUTTONS, type ZoneMatch, type ZoneRef } from '../../src/zone/buttons.ts';
 import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../../src/zone/names.ts';
 import { count, one, reset } from '../db.ts';
@@ -137,6 +140,58 @@ describe('the item cards: /item, posted /item, /gear details', () => {
     const details = await send(select(ann, results.data.components![1].components[0].custom_id, [String(id)]));
     expect(labels(details)).toEqual(['Evershade Weald', 'Rothold']);
     expect(labels(await send(press(ann, `pub:gear:${id}`)))).toEqual(['Evershade Weald', 'Rothold']);
+  });
+});
+
+describe('a zone the text cuts off gets no button', () => {
+  // Rows and page data built by hand: each case sits on one of the cuts the text makes.
+  const gearRow = (o: Partial<GearRow> & { origin: unknown }): GearRow =>
+    ({ id: 1, name: 'An item', slot: 'CHEST', stats_json: null, wiki_url: null, icon_url: null, source: null, ac: null, ratio: null, class_mask: 0, source_mask: 1, sort_value: null, total_stats: 0, ...o, origin_json: JSON.stringify(o.origin) }) as never;
+  const data = (mobs: { key: string; title: string; level: string | null; zones_json: string | null }[] = []) => ({ classes: [], mobs, recipes: [], crafters: [], version: null });
+  const names = (zones: ZoneRef[]) => zones.map((z) => z.name);
+
+  it('a mob line over 200 characters: a zone ending at character 199 is shown, one ending at 200 is not', () => {
+    // "<name> (A, Bee, C)": Bee ends at name length + 8; the line is cut to 199 characters and "…".
+    for (const [len, shown] of [[191, ['A', 'Bee']], [192, ['A']]] as const) {
+      const name = 'm'.repeat(len);
+      const d = data([{ key: name, title: name, level: null, zones_json: JSON.stringify(['A', 'Bee', 'C']) }]);
+      const [mobs] = cardSources(gearRow({ origin: { from: [name] } }), d);
+      expect(mobs.field.value.length).toBe(200);
+      expect(names(mobs.zones)).toEqual(shown);
+    }
+  });
+
+  it('Drop: zones past 600 characters: only the zones before "+N more" are shown', () => {
+    const zones = Array.from({ length: 100 }, (_, i) => `Zone ${String(i).padStart(3, '0')}`);
+    const [field] = cardSources(gearRow({ origin: { wikiZones: zones } }), data());
+    const lines = field.field.value.split('\n');
+    expect(lines.at(-1)).toMatch(/^\+\d+ more$/);
+    expect(names(field.zones)).toEqual(lines.slice(0, -1));
+    expect(field.zones.length).toBeLessThan(zones.length);
+  });
+
+  it('a source field past the 25-field limit takes its zones with it', () => {
+    const name = 'a mob';
+    const d = data([{ key: name, title: name, level: null, zones_json: JSON.stringify(['Mob Zone']) }]);
+    const r = gearRow({ origin: { from: [name], wikiZones: ['Wiki Zone'] } });
+    const stats = Array.from({ length: 24 }, (_, i) => ({ name: `s${i}`, value: 'x' }));
+    const k = cardFields(stats, r, d);
+    expect(k.fields.map((f) => f.name).at(-1)).toBe('Drop: mobs'); // Drop: zones is field 26
+    expect(names(k.zones)).toEqual(['Mob Zone']);
+    expect(names(cardFields([], r, d).zones)).toEqual(['Mob Zone', 'Wiki Zone']);
+  });
+
+  it('/gear entries left off the page take their zones with them; a lone entry cut short gives none', () => {
+    const q = { cls: 'Any', stats: [], sort: SORTS[0] } as GearQuery;
+    const long = (i: number, n: number) => gearRow({ id: i, name: `Item ${i}`, wiki_url: `https://example.invalid/${'u'.repeat(n)}`, origin: { wikiZones: [`Zone ${i}`] } });
+    const rows = Array.from({ length: 10 }, (_, i) => long(i, 600));
+    const v = pageView(rows, q, data(), 0, 25);
+    const kept = rows.filter((r) => v.embed.description!.includes(`Item ${r.id}]`));
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(rows.length);
+    expect(names(v.zones)).toEqual(kept.map((r) => `Zone ${r.id}`));
+    // One entry longer than the whole description is cut by the truncation: its zone line may be gone, so no button.
+    expect(pageView([long(0, 5000)], q, data(), 0, 25).zones).toEqual([]);
   });
 });
 
