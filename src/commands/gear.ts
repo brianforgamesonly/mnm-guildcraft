@@ -3,9 +3,10 @@
 // groups, Stat image and Post to channel. No writes per search beyond the read audit row 'gear.find' (src/interactions.ts).
 import type { Ctx } from '../context.ts';
 import { craftersSql, tierCrafters, type CrafterRow } from '../crafters.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, linkButton, md, optInt, optString, plural, row, truncate, updateMessage, type Embed, type EmbedField, type MessageData, type MessageReply, type Option } from '../discord.ts';
 import { decodeState, defaultSort, encodeState, roundRatio, sortByKey, SORTS, STAT_FILTERS, type GearQuery } from '../gear/options.ts';
-import { zoneKey } from '../zone/names.ts';
+import { withZoneButtons, zoneButtons, type ZoneButtons, type ZoneRef } from '../zone/buttons.ts';
+import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE, zoneKey } from '../zone/names.ts';
 import { unknownZone } from '../zone/suggest.ts';
 import { ZONE_STATE_MAX } from '../gear/options.ts';
 import { GEAR_COLS, PAGE_SIZE, relaxStatement, searchStatement, type GearRow } from '../gear/search.ts';
@@ -200,17 +201,20 @@ function statsText(r: GearRow, q: GearQuery, maxOthers: number): string {
   return [...head, ...strong, ...shown, ...(others.length > shown.length ? [GEAR_COPY.more(others.length - shown.length)] : [])].join(' · ');
 }
 
-function dropLine(o: Origin, d: PageData, maxMobs: number, maxZones: number): string {
+/** `shown` (order 23) collects the zone names the line shows, in its order: each shown mob's first zone, then wikiZones. */
+function dropLine(o: Origin, d: PageData, maxMobs: number, maxZones: number, shown: ZoneRef[] = []): string {
   const from = o.from ?? [];
   const zones = o.wikiZones ?? [];
   const mob = (name: string) => {
     const m = mobFor(d, name);
     const zone = m?.zones_json ? (JSON.parse(m.zones_json) as string[])[0] : null;
+    if (zone) shown.push({ source: MOB_ZONES_SOURCE, name: zone });
     const bits = [m?.level ? `L${m.level}` : null, zone].filter(Boolean);
     return `${md(name)}${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
   };
   const parts: string[] = [];
   if (from.length) parts.push(from.slice(0, maxMobs).map(mob).join(', ') + (from.length > maxMobs ? ` ${GEAR_COPY.more(from.length - maxMobs)}` : ''));
+  shown.push(...zones.slice(0, maxZones).map((name): ZoneRef => ({ source: WIKI_ZONES_SOURCE, name })));
   if (zones.length) parts.push(`zones: ${zones.slice(0, maxZones).map(md).join(', ')}${zones.length > maxZones ? ` ${GEAR_COPY.more(zones.length - maxZones)}` : ''}`);
   return `Drop: ${parts.join(' · ')}`;
 }
@@ -231,12 +235,12 @@ function vendorLine(o: Origin, maxVendors: number): string {
 }
 
 /** The source lines, one per source the item has (Drop, Crafted, Vendor, Quest), or "Unknown: source not recorded". */
-function sourceLines(r: GearRow, d: PageData, window: number, caps: { mobs: number; zones: number; vendors: number }): string[] {
+function sourceLines(r: GearRow, d: PageData, window: number, caps: { mobs: number; zones: number; vendors: number }, shown?: ZoneRef[]): string[] {
   const o = parse<Origin>(r.origin_json);
   return sourcesOf(r.source_mask).map((s) => {
     switch (s) {
       case 'Drop':
-        return dropLine(o, d, caps.mobs, caps.zones);
+        return dropLine(o, d, caps.mobs, caps.zones, shown);
       case 'Crafted':
         return craftedLine(r.id, d, window);
       case 'Vendor':
@@ -255,11 +259,11 @@ function flagsOf(r: GearRow): string[] {
 }
 export const incorrectStats = (r: GearRow) => (parse<Origin>(r.origin_json).categories ?? []).includes(INCORRECT_STATS_CATEGORY);
 
-export function resultEntry(r: GearRow, q: GearQuery, d: PageData, window: number, caps = { mobs: LINE_MOBS, zones: LINE_ZONES, vendors: 3, stats: 4 }): string {
+export function resultEntry(r: GearRow, q: GearQuery, d: PageData, window: number, caps = { mobs: LINE_MOBS, zones: LINE_ZONES, vendors: 3, stats: 4 }, shown?: ZoneRef[]): string {
   const name = r.wiki_url ? `**[${md(r.name)}](${r.wiki_url})**` : `**${md(r.name)}**`;
   const meta = [`Classes: ${classesText(r.class_mask, d.classes)}`, ...flagsOf(r), ...(incorrectStats(r) ? [`⚠ ${GEAR_COPY.incorrectStats}`] : [])].join(' · ');
   const stats = statsText(r, q, caps.stats);
-  return [`${name} · ${(r.slot ?? '').toUpperCase()}`, stats, meta, ...sourceLines(r, d, window, caps).map((l) => `-# ${l}`)].filter(Boolean).join('\n');
+  return [`${name} · ${(r.slot ?? '').toUpperCase()}`, stats, meta, ...sourceLines(r, d, window, caps, shown).map((l) => `-# ${l}`)].filter(Boolean).join('\n');
 }
 
 // ---------------------------------------------------------------- the page
@@ -271,18 +275,27 @@ const CAPS = [
   { mobs: 1, zones: 1, vendors: 1, stats: 0 },
 ];
 
-export function pageEmbed(rows: GearRow[], q: GearQuery, d: PageData, page: number, window: number): Embed {
+export const pageEmbed = (rows: GearRow[], q: GearQuery, d: PageData, page: number, window: number): Embed => pageView(rows, q, d, page, window).embed;
+
+/** The page's embed, and (order 23) the zone names its text shows after the line caps, in the order they appear. */
+export function pageView(rows: GearRow[], q: GearQuery, d: PageData, page: number, window: number): { embed: Embed; zones: ZoneRef[] } {
   const footer = { text: GEAR_COPY.footer(page + 1, q.sort.label, d.version) };
   const title = GEAR_COPY.title;
   const budget = Math.min(EMBED_LIMITS.description, EMBED_LIMITS.total - WELCOME_RESERVE - title.length - footer.text.length);
-  let entries: string[] = [];
+  let entries: { text: string; zones: ZoneRef[] }[] = [];
+  const text = () => entries.map((e) => e.text).join('\n\n');
   for (const caps of CAPS) {
-    entries = rows.map((r) => resultEntry(r, q, d, window, caps));
-    if (entries.join('\n\n').length <= budget) break;
+    entries = rows.map((r) => {
+      const zones: ZoneRef[] = [];
+      return { text: resultEntry(r, q, d, window, caps, zones), zones };
+    });
+    if (text().length <= budget) break;
   }
   // Still over: whole entries are left off the end (the details menu still lists every row), never cut mid-markdown.
-  while (entries.length > 1 && entries.join('\n\n').length > budget) entries.pop();
-  return { title, description: truncate(entries.join('\n\n'), budget), footer };
+  while (entries.length > 1 && text().length > budget) entries.pop();
+  // A last entry still cut by the truncation may lose its zones from view: its zones get no button.
+  const seen = text().length > budget ? entries.slice(0, -1) : entries;
+  return { embed: { title, description: truncate(text(), budget), footer }, zones: seen.flatMap((e) => e.zones) };
 }
 
 function pageComponents(rows: GearRow[], q: GearQuery, page: number, hasNext: boolean): unknown[] {
@@ -336,6 +349,19 @@ async function page(c: Ctx, q: GearQuery, n: number): Promise<{ rows: GearRow[];
   return { rows, hasNext: results.length > PAGE_SIZE, data: await pageData(c, rows) };
 }
 
+/**
+ * Results page n, as the member sees it (first, paged or re-sorted): the heading, the embed and the components, with
+ * (order 23) a button for each zone the text shows in the rows the page leaves, never one for the results' own zone.
+ */
+export async function resultsPage(c: Ctx, q: GearQuery, n: number): Promise<{ data: Omit<MessageData, 'flags'>; zones: ZoneButtons } | null> {
+  const p = await page(c, q, n);
+  if (!p) return null;
+  const v = pageView(p.rows, q, p.data, n, c.guild.learning_window);
+  const own = pageComponents(p.rows, q, n, p.hasNext);
+  const [heading, zones] = await Promise.all([zoneHeading(c, q), zoneButtons(c.db, v.zones, own.length, q.zone)]);
+  return { data: { content: withHeading(heading), embeds: [v.embed], components: [...own, ...zones.rows] }, zones };
+}
+
 export async function gearFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const q = parseQuery(opts);
   if (typeof q === 'string') return ephemeral(q);
@@ -352,14 +378,13 @@ export async function gearFind(c: Ctx, opts: Option[]): Promise<MessageReply> {
  * One zone's results carry "Gear from <zone>" above the help, so the zone filter stays visible.
  */
 export async function gearResults(c: Ctx, q: GearQuery, inPlace: boolean): Promise<MessageReply> {
-  const p = await page(c, q, 0);
+  const p = await resultsPage(c, q, 0);
   if (!p) {
     const zero = await zeroResults(c, q);
     return inPlace ? updateMessage({ content: zero.data.content, embeds: [], components: [] }) : zero;
   }
-  const content = withHeading(await zoneHeading(c, q));
-  const data = { embeds: [pageEmbed(p.rows, q, p.data, 0, c.guild.learning_window)], components: pageComponents(p.rows, q, 0, p.hasNext) };
-  return inPlace ? updateMessage({ content, ...data }) : ephemeral(content, data);
+  const { content, ...data } = p.data;
+  return inPlace ? updateMessage(p.data) : ephemeral(content ?? '', data);
 }
 
 /** gs:<state>: a sort picked on one zone's results; page 1 in that sort replaces the results. */
@@ -375,40 +400,72 @@ export async function gearPage(c: Ctx, customId: string): Promise<MessageReply> 
   const [, n, state] = /^gp:(\d+):(.*)$/.exec(customId) ?? [];
   const q = state === undefined ? null : decodeState(state);
   if (!q) return ephemeral(GEAR_COPY.gone);
-  const p = await page(c, q, Number(n));
+  const p = await resultsPage(c, q, Number(n));
   if (!p) return updateMessage({ content: GEAR_COPY.none, embeds: [], components: [] });
-  return updateMessage({ content: withHeading(await zoneHeading(c, q)), embeds: [pageEmbed(p.rows, q, p.data, Number(n), c.guild.learning_window)], components: pageComponents(p.rows, q, Number(n), p.hasNext) });
+  return updateMessage(p.data);
 }
 
 // ---------------------------------------------------------------- the item card
 
-/** Full sources on the card: every mob (up to the field limit), the zones, the vendors as recorded. */
-export function cardSourceFields(r: GearRow, d: PageData): EmbedField[] {
+/** A card line, with where each zone name in it ends (order 23: a zone cut off by the line's truncation is not shown). */
+interface CardLine {
+  text: string;
+  zones: { ref: ZoneRef; end: number }[];
+}
+function mobLine(d: PageData, name: string): CardLine {
+  const m = mobFor(d, name);
+  const zones = (m?.zones_json ? (JSON.parse(m.zones_json) as string[]) : []).filter(Boolean);
+  const bits = [...(m?.level ? [{ text: `L${m.level}`, zone: null }] : []), ...zones.map((z) => ({ text: z, zone: z }))];
+  let text = md(name);
+  const out: CardLine['zones'] = [];
+  bits.forEach((b, i) => {
+    text += `${i ? ', ' : ' ('}${md(b.text)}`;
+    if (b.zone) out.push({ ref: { source: MOB_ZONES_SOURCE, name: b.zone }, end: text.length });
+  });
+  return { text: bits.length ? `${text})` : text, zones: out };
+}
+
+/**
+ * Full sources on the card: every mob (up to the field limit), the zones, the vendors as recorded. Each field carries
+ * (order 23) the zone names its value shows, in order.
+ */
+export function cardSources(r: GearRow, d: PageData): { field: EmbedField; zones: ZoneRef[] }[] {
   const o = parse<Origin>(r.origin_json);
-  const f: EmbedField[] = [];
+  const f: { field: EmbedField; zones: ZoneRef[] }[] = [];
+  const push = (field: EmbedField, zones: ZoneRef[] = []) => f.push({ field, zones });
+  const fitted = (name: string, lines: CardLine[]) => {
+    const { value, shown } = fitCardLines(lines.map((l) => l.text));
+    push({ name, value }, lines.slice(0, shown).flatMap((l) => l.zones.filter((z) => z.end <= (l.text.length > CARD_LINE ? CARD_LINE - 1 : Infinity)).map((z) => z.ref)));
+  };
   for (const s of sourcesOf(r.source_mask)) {
     if (s === 'Drop') {
-      const lines = (o.from ?? []).map((name) => {
-        const m = mobFor(d, name);
-        const bits = [m?.level ? `L${m.level}` : null, ...(m?.zones_json ? (JSON.parse(m.zones_json) as string[]) : [])].filter(Boolean);
-        return `${md(name)}${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
-      });
-      if (lines.length) f.push({ name: 'Drop: mobs', value: fitLinesBy(lines) });
-      if (o.wikiZones?.length) f.push({ name: 'Drop: zones', value: fitLinesBy(o.wikiZones.map(md)) });
+      const lines = (o.from ?? []).map((name) => mobLine(d, name));
+      if (lines.length) fitted('Drop: mobs', lines);
+      if (o.wikiZones?.length) fitted('Drop: zones', o.wikiZones.map((name) => ({ text: md(name), zones: [{ ref: { source: WIKI_ZONES_SOURCE, name }, end: md(name).length }] })));
     } else if (s === 'Vendor') {
       const sb = o.soldBy ?? {};
       const price = [typeof sb.base === 'number' ? `price ${sb.base}` : null, typeof sb.shady === 'number' ? `shady price ${sb.shady}` : null].filter(Boolean).join(' · ');
-      f.push({ name: 'Vendor', value: truncate([price || 'price not recorded', ...(sb.vendors ?? []).map(md)].join('\n'), EMBED_LIMITS.fieldValue) });
-    } else if (s === 'Quest') f.push({ name: 'Quest', value: (o.categories ?? []).filter((x) => x === 'Quest Items' || x === 'Reward').join(', ') || 'Quest' });
-    else if (s === 'Unknown') f.push({ name: 'Unknown', value: GEAR_COPY.unknownSource });
+      push({ name: 'Vendor', value: truncate([price || 'price not recorded', ...(sb.vendors ?? []).map(md)].join('\n'), EMBED_LIMITS.fieldValue) });
+    } else if (s === 'Quest') push({ name: 'Quest', value: (o.categories ?? []).filter((x) => x === 'Quest Items' || x === 'Reward').join(', ') || 'Quest' });
+    else if (s === 'Unknown') push({ name: 'Unknown', value: GEAR_COPY.unknownSource });
     // Crafted: the recipe embeds below carry it, with the crafter groups.
   }
   return f;
 }
 
-/** Lines that fit one field value, then "+N more". */
-function fitLinesBy(lines: string[], maxChars = 600): string {
-  lines = lines.map((l) => truncate(l, 200)); // one very long name never leaves the field with no entries
+/** A card's fields (its stats, then its sources, to the field limit) and the zone names the fields kept show. */
+export function cardFields(stats: EmbedField[], r: GearRow, d: PageData): { fields: EmbedField[]; zones: ZoneRef[] } {
+  const sources = cardSources(r, d);
+  const kept = sources.slice(0, Math.max(0, EMBED_LIMITS.fields - stats.length));
+  return { fields: [...stats, ...kept.map((s) => s.field)].slice(0, EMBED_LIMITS.fields), zones: kept.flatMap((s) => s.zones) };
+}
+
+/** A card line's limit: one very long name never leaves the field with no entries. */
+const CARD_LINE = 200;
+
+/** Lines that fit one field value, then "+N more"; `shown` lines were kept. */
+function fitCardLines(lines: string[], maxChars = 600): { value: string; shown: number } {
+  lines = lines.map((l) => truncate(l, CARD_LINE));
   const out: string[] = [];
   let used = 0;
   for (const l of lines) {
@@ -416,22 +473,23 @@ function fitLinesBy(lines: string[], maxChars = 600): string {
     out.push(l);
     used += l.length + 1;
   }
-  return out.length < lines.length ? `${out.join('\n')}\n${GEAR_COPY.more(lines.length - out.length)}` : out.join('\n');
+  return { value: out.length < lines.length ? `${out.join('\n')}\n${GEAR_COPY.more(lines.length - out.length)}` : out.join('\n'), shown: out.length };
 }
 
 const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${itemId}`, GEAR_COPY.reportButton), button(`${IMAGE_PREFIX}${itemId}`, GEAR_COPY.imageButton), plannerLink()]);
 
-async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: unknown[] } | null> {
+async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: unknown[]; zones: ZoneRef[] } | null> {
   const r = await c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId).first<GearRow>();
   if (!r) return null;
   const d = await pageData(c, [r], Infinity);
   const item = { id: r.id, name: r.name, icon_url: r.icon_url, slot: r.slot, stats_json: r.stats_json, wiki_url: r.wiki_url, source: r.source };
+  const { fields, zones } = cardFields(statFields(item), r, d);
   const head: Embed = {
     title: truncate(r.name, EMBED_LIMITS.title),
     ...(r.wiki_url ? { url: r.wiki_url } : {}),
     ...(r.icon_url ? { thumbnail: { url: r.icon_url } } : {}),
     description: [`Classes: ${classesText(r.class_mask, d.classes)}`, ...(incorrectStats(r) ? [`⚠ ${GEAR_COPY.incorrectStats}`] : [])].join('\n'),
-    fields: [...statFields(item), ...cardSourceFields(r, d)].slice(0, EMBED_LIMITS.fields),
+    fields,
     footer: { text: footerText(d.version) },
   };
   let embeds = [head];
@@ -444,20 +502,20 @@ async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: u
       embeds = [head, ...recipes];
     }
   }
-  return { embeds, links: itemLinks(item) };
+  return { embeds, links: itemLinks(item), zones };
 }
 
-/** gd: (the details menu): the item card, privately, as a new message. */
+/** gd: (the details menu): the item card, privately, as a new message, with its zone buttons (order 23). */
 export async function gearDetails(c: Ctx, values: string[]): Promise<MessageReply> {
   const id = Number(values[0]);
   const k = Number.isInteger(id) ? await card(c, id) : null;
   if (!k) return ephemeral(GEAR_COPY.gone);
-  return searchReply({ embeds: k.embeds }, `${POST_WHAT}${id}`, k.links, [cardActions(id)]);
+  return withZoneButtons(c.db, searchReply({ embeds: k.embeds }, `${POST_WHAT}${id}`, k.links, [cardActions(id)]), k.zones);
 }
 
-/** pub:gear:<id>: the item card, posted publicly; its buttons answer each presser privately. */
+/** pub:gear:<id>: the item card, posted publicly; its buttons (zone buttons too) answer each presser privately. */
 export async function postGear(c: Ctx, itemId: number): Promise<MessageReply> {
   const k = await card(c, itemId);
   if (!k) return ephemeral(GEAR_COPY.gone);
-  return postedReply({ embeds: k.embeds }, c.userId, k.links, [cardActions(itemId)]);
+  return withZoneButtons(c.db, postedReply({ embeds: k.embeds }, c.userId, k.links, [cardActions(itemId)]), k.zones);
 }

@@ -9,6 +9,7 @@ import { unknownZone } from '../zone/suggest.ts';
 import { ANY, SORTS, ZONE_STATE_MAX, type GearQuery } from '../gear/options.ts';
 import { gameList } from '../gamedata.ts';
 import { atlasMapUrl, listEmbed, loadZone, safeUrl, ZONE_CONNECTIONS, ZONE_COPY, zoneEmbeds, zoneSites, type ZoneData } from '../zone/card.ts';
+import { OPEN_PREFIX } from '../zone/buttons.ts';
 import { WIKI_ZONES_SOURCE, zoneKey, zoneNamesSql } from '../zone/names.ts';
 import { REMOVED_BIT } from '../gear/vocab.ts';
 import { gearResults } from './gear.ts';
@@ -27,6 +28,8 @@ export const CREATURES_PAGE_PREFIX = 'zcn:';
 /** Order 17 cards already posted carry More drops ("zd:", "zdn:"); order 17b removed the list, so a press says so. */
 export const DROPS_PREFIX = 'zd:';
 export const DROPS_PAGE_PREFIX = 'zdn:';
+/** Order 23: a zone button ("zo:<key>", src/zone/buttons.ts) opens the card as /zone does. */
+export { OPEN_PREFIX };
 
 // ---------------------------------------------------------------- copy (orders 17 and 17b; listed for approval in docs/COPY.md)
 
@@ -78,11 +81,24 @@ function actionButtons(d: ZoneData): unknown[] {
   ];
 }
 
+/** The private card with Post to channel: /zone's reply, and (order 23) a zone button's, so the two cannot drift apart. */
+const zoneCard = (c: Ctx, d: ZoneData): MessageReply =>
+  searchReply({ embeds: zoneEmbeds(d, c.atlasZoneImages === true) }, `${POST_WHAT}${d.zone.key}`, zoneLinks(d), [], actionButtons(d));
+
 export async function zoneCommand(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const typed = optString(opts, 'name') ?? '';
   const d = await loadZone(c.db, zoneKey(typed));
   if (!d) return unknownZone(c.db, typed);
-  return searchReply({ embeds: zoneEmbeds(d, c.atlasZoneImages === true) }, `${POST_WHAT}${d.zone.key}`, zoneLinks(d), [], actionButtons(d));
+  return zoneCard(c, d);
+}
+
+/**
+ * zo:<key> (order 23), a zone button under /gear results or an item card, private or posted: the zone's card as /zone
+ * shows it, as a new private message; the message it was pressed on stays as it was. No audit row (a component press).
+ */
+export async function zoneOpen(c: Ctx, customId: string): Promise<MessageReply> {
+  const d = await loadZone(c.db, customId.slice(OPEN_PREFIX.length));
+  return d ? zoneCard(c, d) : ephemeral(ZONE_REPLY_COPY.gone);
 }
 
 /** pub:zone:<key>: the card, posted; its buttons answer each presser privately. */
