@@ -711,8 +711,8 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 | src/zone/card.ts:32 | Footer: Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools · Mo Betta | DRAFT |
 | src/zone/card.ts:37-41 | Pages: Creatures in \<zone> · Page \<n> of \<m> · by level, lowest first · Previous · Next | DRAFT |
 | src/zone/suggest.ts:9-12 | (`/zone`, and `/gear zone:`) No zones are loaded yet. They arrive with the nightly import. · No zone is called **\<typed>**. · Did you mean: **\<zone>**, …? · The zones: \<zone>, …. | DRAFT |
-| src/commands/zone.ts:34 | That zone is no longer in the data. Run `/zone` again. | DRAFT |
-| src/commands/zone.ts:38 | No classes are loaded yet. Try `/gear` once the nightly import has run. (changed in order 18) | DRAFT |
+| src/commands/zone.ts:37 | That zone is no longer in the data. Run `/zone` again. | DRAFT |
+| src/commands/zone.ts:41 | No classes are loaded yet. Try `/gear` once the nightly import has run. (changed in order 18) | DRAFT |
 | docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" and "Turning on MnM Atlas's zone pictures (operator)" | DRAFT |
 | README.md | Credits: mnm-tools maps.json; Mo Betta (zones.json, npcs.json, from the wiki under CC BY-SA); MnM Atlas and its original map authors | DRAFT |
 
@@ -728,9 +728,9 @@ Replaces the order 17 rows above for the drops list, More drops, the Wiki page l
 | src/zone/card.ts:18-21 | Link buttons: Wiki · MnM Wiki · Stories of MnM · Zone connections (and Open in MnM Atlas, unchanged) | DRAFT |
 | src/zone/card.ts:30-32 | Field: Not recorded yet · No \<level range, description> or \<creatures> recorded for this zone yet. [MnM Atlas](\<atlas>) may have more. (the last sentence only when the zone has an atlas map) | DRAFT |
 | src/zone/card.ts:37, 39 | Page: Creatures in \<zone> · by level, lowest first | DRAFT |
-| src/commands/zone.ts:34 | (More drops on a card posted before this order) Zone cards no longer list drops. Press **Gear here** on the card to find the zone's gear for your class. | DRAFT |
-| src/commands/zone.ts:35-36 | Gear here: Gear from **\<zone>**: pick your class (or Any). You can change the sort on the results. · Your class, or Any | DRAFT |
-| src/commands/zone.ts:38 | Gear here on a zone with no gear: The wiki lists no gear from **\<zone>** yet. | DRAFT |
+| src/commands/zone.ts:38 | (More drops on a card posted before this order) Zone cards no longer list drops. Press **Gear here** on the card to find the zone's gear for your class. | DRAFT |
+| src/commands/zone.ts:39-40 | Gear here: Gear from **\<zone>**: pick your class (or Any). You can change the sort on the results. · Your class, or Any | DRAFT |
+| src/commands/zone.ts:42 | Gear here on a zone with no gear: The wiki lists no gear from **\<zone>** yet. | DRAFT |
 | src/commands/gear.ts:50-52 | (one zone's results: Gear here, or `/gear zone:`) **Gear from \<zone>** · sort menu: Sort · Sort: \<sort> | DRAFT |
 | docs/LAUNCH-GUIDE.md | "Zones (`/zone`, order 17)" rewritten; "MnM Atlas's zone pictures (operator)" records the permission | DRAFT |
 | README.md | Credits: MnM Atlas's permission (2026-10-21); zone links to monstersandmemories.wiki and Stories of MnM | DRAFT |
@@ -923,7 +923,7 @@ Every line below is DRAFT until approved: the new commands' and options' descrip
 | src/commands/images.ts:201 | No screenshot of **\<item>** yet. Have one? Send it with `/item` and `screenshot:`: an officer approves it, then it shows here. | DRAFT |
 | src/commands/setup.ts:262 | Craft requests will open private threads in #\<channel>: one per request, holding the requester and the crafters who turned on **Notices** in `/me` and can make the item. Members need to see the channel to see their thread. | DRAFT |
 | src/commands/setup.ts:267 | Screenshots sent with `/item screenshot:` will wait in #\<channel> for an officer's **Approve** or **Reject**. Screenshots already in an earlier vault stay where they are. | DRAFT |
-| src/commands/zone.ts:38 | No classes are loaded yet. Try `/gear` once the nightly import has run. | DRAFT |
+| src/commands/zone.ts:41 | No classes are loaded yet. Try `/gear` once the nightly import has run. | DRAFT |
 | src/commands/gear.ts:55 | That item is no longer in the data. Run `/gear` again. | DRAFT |
 | src/interactions.ts:35 | Sorry, that command isn't available. Type `/help` to see every command. | DRAFT |
 | docs/LAUNCH-GUIDE.md:30-32 | "The commands (order 18)": Members: `/me` (your characters, skills, notices and requests, with buttons to change them), `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`. Officers: `/officer` (recipe-source, recipe-fix, remove-member, edit-member, requests). Admins: `/guildcraft` (setup, status, rebuild-board). `/help` shows them all, in pages. | DRAFT |
@@ -955,3 +955,12 @@ The zone map's title, "Map: MnM Atlas (mnmatlas.com) and its original map author
 | src/commands/gear.ts:69 | (link button) Character planner (Stories of MnM) | DRAFT |
 | docs/LAUNCH-GUIDE.md:10, 25-26, 32, 34-36 | The install link (permissions=361045806096), the Manage Channels and Manage Permissions rows, "Or let GuildCraft create its channels", "Servers that added GuildCraft before Create GuildCraft channels" | DRAFT |
 | docs/SELF-HOSTING.md:111, 114, 126-127 | The install link and number (361045806096), the Manage Channels and Manage Permissions rows | DRAFT |
+
+## Work order 23: zone buttons (DRAFT)
+
+No new sentence: each button's label is a zone's name from the data. What the member sees is new, so it is listed for approval.
+
+| Where | Text | Status |
+|---|---|---|
+| src/zone/buttons.ts:65 | (buttons under `/gear` results, the `/item` card, `/gear`'s item card and their posted copies) \<zone name>, one per zone the text shows, cut to 80 characters; a press opens that zone's card privately, as `/zone` shows it | DRAFT |
+| src/commands/zone.ts:37 | (a zone button for a zone no longer in the data) That zone is no longer in the data. Run `/zone` again. (order 17's line, now also reached from a zone button) | DRAFT |

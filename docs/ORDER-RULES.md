@@ -210,3 +210,8 @@ Treat the clock as authoritative over any date an order states.
 
 - Order 22's explicit override 1 of order 4's "content: '' breaks a reply": for the rollback of the roster board's first-message line only, a board message edit may send content "" (`src/board/render.ts` LineMode `'clear'`). The message keeps its embeds. Interaction replies never send it.
 - A Discord message edit keeps every field it does not send. Removing something a message carries therefore takes an edit that sends the field empty: reverting the code is never enough on its own.
+
+## Order 23
+
+- A zone button is offered only for a zone the message's text shows, and only when the derived mapping (`zone_name`) maps the name to an active zone (src/zone/buttons.ts); an unmatched name stays text. One button per zone key, since Discord refuses two components with one custom_id in a message.
+- The list of custom_id prefixes sent before order 18 (`SENT_BEFORE`, test/worker/next-commands.test.ts) is frozen history. A new prefix gets its own routing test beside the feature's tests.

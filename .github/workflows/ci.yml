@@ -32,11 +32,11 @@ jobs:
         run: node scripts/ci/action-runtimes.mjs
   # Order 8 (ITEM 0): the credentials' reach, read-only, before the merge (a same-repository pull_request run
   # receives secrets; dispatch works only from the default branch). Prints statuses, field names and counts only.
-  # Expected: <1 billed minute per pull request.
+  # Expected: about 3 billed minutes per pull request (public repo: free); order 23's zone-button bench is most of it.
   reach:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     # Order 20: the health check's dry run reads GitHub's workflow runs (deploy windows, failed nightly runs).
     permissions:
       contents: read
@@ -65,6 +65,14 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           GUILDCRAFT_COPY: dev
         run: node scripts/bench/zone-cards.ts --remote ${{ vars.ATLAS_ZONE_IMAGES == 'on' && '--atlas-images' || '' }} --show 'evershade weald'
+      # Order 23: zone names matched per source, and zone buttons per /gear page and /item card, rendered by this pull
+      # request's code from the dev copy (SELECTs only). Public game data only. About 2 minutes (one HTTP call per statement).
+      - name: Zone buttons from the dev copy (read-only)
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GUILDCRAFT_COPY: dev
+        run: node scripts/bench/zone-buttons.ts --remote
       # Order 20: this pull request's health check on both copies' real records for yesterday, report-only (SELECTs and
       # GitHub run reads only; counts and times, no guild data). A few seconds. It fails only if the check cannot run.
       - name: Health check dry run, dev (read-only)

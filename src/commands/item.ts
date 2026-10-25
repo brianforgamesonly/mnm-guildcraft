@@ -9,7 +9,8 @@ import { GEAR_COLS, type GearRow } from '../gear/search.ts';
 import { correctionJoin, CORRECTED, visibleTo } from '../recipes.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
 import { fitLines, findEmbeds, footerText, IMAGE_PREFIX, itemLinks, KNOW_PREFIX, loadFind, REPORT_PREFIX, statFields } from './find.ts';
-import { cardSourceFields, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
+import { withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
+import { cardFields, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
 import { submitImage } from './images.ts';
 import { ITEM_REPORT_PREFIX, missingId } from './reports.ts';
 import { postedReply, searchReply } from './share.ts';
@@ -68,9 +69,14 @@ export interface ItemCard {
   actions: unknown;
   note: string | null;
   craftable: boolean;
+  /** Order 23: the zone names the card's source fields show, in order (src/zone/buttons.ts). */
+  zones: ZoneRef[];
 }
 
-/** The card for one item: 2 round trips (the item and its uses; then its sources and its recipes, together). */
+/**
+ * The card for one item: 2 round trips (the item and its uses; then its sources and its recipes, together). The reply's
+ * zone buttons (order 23, withZoneButtons) are a third, only when the card names a zone.
+ */
 export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Promise<ItemCard | null> {
   const [head, uses] = await c.db.batch([
     c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId),
@@ -82,7 +88,7 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
   const [d, f] = await Promise.all([pageData(c, [r], Infinity, false), loadFind(c.db, c.guild.id, { id: itemId })]);
   const item = { id: r.id, name: r.name, icon_url: r.icon_url, slot: r.slot, stats_json: r.stats_json, wiki_url: r.wiki_url, source: r.source };
   const about = [...(r.slot ? [`Classes: ${classesText(r.class_mask, d.classes)}`] : []), ...(incorrectStats(r) ? [`⚠ ${GEAR_COPY.incorrectStats}`] : [])];
-  const fields: EmbedField[] = [...statFields(item), ...cardSourceFields(r, d)].slice(0, EMBED_LIMITS.fields);
+  const { fields, zones } = cardFields(statFields(item), r, d);
   const top: Embed = {
     title: truncate(r.name, EMBED_LIMITS.title),
     ...(r.wiki_url ? { url: r.wiki_url } : {}),
@@ -105,6 +111,7 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
     actions: actionRow(itemId, f.isResult),
     note: total > recipes.length ? ITEM_COPY.showing(recipes.length, total) : null,
     craftable: f.isResult,
+    zones,
   };
 }
 
@@ -136,12 +143,12 @@ export async function itemCommand(c: Ctx, opts: Option[]): Promise<MessageReply>
   const found = await c.db.prepare('SELECT id FROM item WHERE name_key = ?').bind(typed.toLowerCase()).first<{ id: number }>();
   const k = found ? await itemCard(c, found.id) : null;
   if (!found || !k) return ephemeral(ITEM_COPY.noItem(typed || '(nothing)'), { components: [row([button(missingId(typed), ITEM_COPY.missingButton)])] });
-  return searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${POST_WHAT}${found.id}`, k.links, [k.actions]);
+  return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${POST_WHAT}${found.id}`, k.links, [k.actions]), k.zones);
 }
 
-/** pub:item:<id>: the card, rebuilt now and posted publicly; its buttons answer each presser privately. */
+/** pub:item:<id>: the card, rebuilt now and posted publicly; its buttons (zone buttons too) answer each presser privately. */
 export async function postItem(c: Ctx, itemId: number): Promise<MessageReply> {
   const k = await itemCard(c, itemId);
   if (!k) return ephemeral(ITEM_COPY.gone);
-  return postedReply({ content: k.note ?? undefined, embeds: k.embeds }, c.userId, k.links, [k.actions]);
+  return withZoneButtons(c.db, postedReply({ content: k.note ?? undefined, embeds: k.embeds }, c.userId, k.links, [k.actions]), k.zones);
 }

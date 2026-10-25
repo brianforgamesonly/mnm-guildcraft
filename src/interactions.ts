@@ -25,7 +25,8 @@ import {
 } from './commands/requests.ts';
 import { FROM_FIND_PREFIX, ITEM_PREFIX as REQUEST_ITEM_PREFIX } from './requests.ts';
 import {
-  CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear, zoneGearClass, zoneList, zoneListPage,
+  CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, OPEN_PREFIX as ZONE_OPEN_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear,
+  zoneGearClass, zoneList, zoneListPage, zoneOpen,
 } from './commands/zone.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
@@ -234,6 +235,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(GEAR_SORT_PREFIX)) return gearSort(c, id, i.data?.values ?? []);
   if (id.startsWith(CREATURES_PREFIX) || id.startsWith(DROPS_PREFIX)) return zoneList(c, id);
   if (id.startsWith(CREATURES_PAGE_PREFIX) || id.startsWith(DROPS_PAGE_PREFIX)) return zoneListPage(c, id);
+  // Order 23: a zone button under /gear results or an item card opens the zone's card, privately, as /zone does.
+  if (id.startsWith(ZONE_OPEN_PREFIX)) return zoneOpen(c, id);
   if (id.startsWith(BUTTON_PREFIX)) return updateButton(c, id);
   if (id.startsWith(SWITCH_PREFIX)) return rosterSwitch(c, id, i.data?.values ?? []);
   if (id.startsWith(PAGE_PREFIX)) return rosterPage(c, id);
