@@ -23,10 +23,10 @@ export const EMOJI_COPY = {
   emojiSkipped: (why: EmojiOutcome) =>
     'skipped' in why
       ? why.skipped === 'permission'
-        ? "The forums keep their default reaction: GuildCraft can't add its emoji here without **Create Expressions**. Grant it to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi), then press the button again."
+        ? "The forums don't get the GuildCraft emoji as their reaction: GuildCraft can't add it here without **Create Expressions**. Grant it to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi), then press the button again."
         : why.skipped === 'slots'
-          ? 'The forums keep their default reaction: this server has no free emoji slot for the GuildCraft emoji. Free one (Server Settings → Emoji), then press the button again.'
-          : `The forums keep their default reaction: Discord refused the GuildCraft emoji (${why.status || 'no answer'}). Press the button again to retry.`
+          ? "The forums don't get the GuildCraft emoji as their reaction: this server has no free emoji slot. Free one (Server Settings → Emoji), then press the button again."
+          : `The forums don't get the GuildCraft emoji as their reaction: Discord refused it (${why.status || 'no answer'}). Press the button again to retry.`
       : '',
 };
 

@@ -45,7 +45,7 @@ export const LAYOUT: Planned[] = [
   { key: 'board_channel_id', kind: 'board', name: 'GC-Tradeskills', type: GUILD_FORUM, private: false, purpose: 'the tradeskills board: one post per tradeskill, listing who can craft it' },
   { key: 'faction_board_channel_id', kind: 'factions', name: 'GC-Factions', type: GUILD_FORUM, private: false, purpose: 'the factions board: one post per faction, listing the creatures whose wiki page names it' },
   { key: 'request_channel_id', kind: 'requests', name: 'GC-Craft Requests', type: GUILD_TEXT, private: false, purpose: 'craft requests: one private thread per request' },
-  { key: 'review_channel_id', kind: 'review', name: 'GC-Officer Review', type: GUILD_TEXT, private: true, purpose: 'officers only: member reports, departures, and screenshots to approve' },
+  { key: 'review_channel_id', kind: 'review', name: 'GC-Officer Review', type: GUILD_TEXT, private: true, purpose: 'officers only: member reports and departure notices' },
 ];
 
 /** Sort Order Types: CREATION_DATE = 1 (order 6's A→Z board reads top-down only in creation order). */
@@ -58,7 +58,8 @@ const LEASE_MS = 60_000;
  * The calls one press may make (order 24, recounted): 4 reads, the emoji's list and create, the category, 4 channels, one
  * forum update per kept forum (its sort order and reaction together, 2) and one officer overwrite (1 private channel).
  */
-export const CALL_CAP = 4 + 2 + 1 + LAYOUT.length + LAYOUT.filter((p) => p.type === GUILD_FORUM).length + LAYOUT.filter((p) => p.private).length;
+export const CALL_CAP = 4 + 2 + 1 + LAYOUT.length + LAYOUT.filter((p) => p.type === GUILD_FORUM).length + LAYOUT.filter((p) => p.private).length + 1;
+// (+1: the officer overwrite on a vault the order-19 button created, which this button no longer makes but still serves.)
 
 /**
  * Who sees what, as overwrites (docs.discord.com/developers/topics/permissions, "Permission Overwrites"): @everyone (the
@@ -117,6 +118,7 @@ export const CHANNELS_COPY = {
   officerFailed: (id: string) => `Could not add the officer role to <#${id}>: add it in the channel's settings (Permissions).`,
   sorted: (id: string) => `Set <#${id}>'s default sort order to Creation Time, so the board reads A→Z.`,
   ...EMOJI_COPY,
+  forumFailed: (id: string, status: number) => `Could not update <#${id}>'s sort order or reaction (Discord answered ${status || 'nothing'}). Press the button again to retry.`,
   nothing: 'Every GuildCraft channel already exists and is saved. Nothing was changed.',
   categoryFailed: (status: number) => `Could not create the **${CATEGORY_NAME}** category (Discord answered ${status || 'nothing'}). Nothing else was created; press the button again to retry.`,
 };
@@ -179,7 +181,8 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
     const made = await api.call<GuildChannel>('POST', `/guilds/${g}/channels`, { name: CATEGORY_NAME, type: GUILD_CATEGORY });
     if (!made.ok) {
       console.error('channel setup: category refused', JSON.stringify(api.log));
-      return ephemeral(CHANNELS_COPY.categoryFailed(made.status));
+      // Review of PR B: an emoji added before the refusal is still reported.
+      return ephemeral([...lines, CHANNELS_COPY.categoryFailed(made.status)].join('\n'));
     }
     category = made.body;
   }
@@ -205,7 +208,7 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
             if (sort) lines.push(CHANNELS_COPY.sorted(existing.id));
             if (react) lines.push(CHANNELS_COPY.reaction(existing.id));
             acted = true;
-          }
+          } else lines.push(CHANNELS_COPY.forumFailed(existing.id, s.status));
         }
       }
       // The officer role, added later to the private channels this button created (those in its category).
@@ -238,6 +241,13 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
     createdPrivate ||= p.private;
   }
   if (emoji && 'skipped' in emoji) lines.push(CHANNELS_COPY.emojiSkipped(emoji));
+  // Review of PR B: a vault the order-19 button created (private, in the category) still gets the officer role later.
+  const vault = c.guild.vault_channel_id ? all.find((ch) => ch.id === c.guild.vault_channel_id) : undefined;
+  if (vault && category && vault.parent_id === category.id && c.guild.officer_role_id && !(vault.permission_overwrites ?? []).some((o) => o.id === c.guild.officer_role_id)) {
+    const put = await api.call('PUT', `/channels/${vault.id}/permissions/${c.guild.officer_role_id}`, { type: 0, allow: String(OFFICER_ALLOW), deny: '0' });
+    lines.push(put.ok ? CHANNELS_COPY.officerAdded(vault.id) : CHANNELS_COPY.officerFailed(vault.id));
+    acted ||= put.ok;
+  }
 
   if (!changed) return ephemeral([...lines, ...(acted ? [] : [CHANNELS_COPY.nothing])].join('\n'));
   const { skills, posts, factionCount, factionPosts } = await saveSetup(c, saved);

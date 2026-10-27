@@ -273,6 +273,17 @@ describe('Create GuildCraft channels', () => {
     expect(creates()).toEqual([]);
   });
 
+  it('review of PR B: a vault the order-19 button made still gets the officer role on a later press; none is created', async () => {
+    fake.channels.push({ id: '700000000000009000', name: 'GuildCraft', type: GUILD_CATEGORY, parent_id: null, permission_overwrites: [], default_sort_order: null });
+    fake.channels.push({ id: '700000000000009007', name: 'gc-item-vault', type: GUILD_TEXT, parent_id: '700000000000009000', permission_overwrites: [], default_sort_order: null });
+    await setup({ officer_role: OFFICER });
+    await env.DB.prepare('UPDATE guild SET vault_channel_id = ?').bind('700000000000009007').run();
+    const r = await pressCreate();
+    expect(fake.calls.filter((c) => c.method === 'PUT').map((c) => c.path)).toContain(`/channels/700000000000009007/permissions/${OFFICER}`);
+    expect(r.data.content).toContain(CHANNELS_COPY.officerAdded('700000000000009007'));
+    expect(creates().map((c) => c.body.name)).not.toContain('GC-Item Vault');
+  });
+
   it('a server that installed before the button (no Manage Channels or Manage Permissions) is told how to grant them; nothing is created', async () => {
     fake.botPerms = INSTALL_PERMISSIONS & ~MANAGE_CHANNELS & ~MANAGE_ROLES;
     await setup();
