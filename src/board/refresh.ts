@@ -28,9 +28,10 @@ import type { Ctx } from '../context.ts';
 import { countD1, isolateSnapshot, type D1Call } from '../telemetry.ts';
 import { isDevCopy, type Env } from '../env.ts';
 import { BOARD_CALL_CAP, botApi, budgetLeft, THREAD_ARCHIVED, UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, type ApiLogEntry, type BoardBudget, type BotApi } from './api.ts';
-import { boardFromResults, boardStatements, type BoardData, type BoardPostRow } from './data.ts';
+import { sourceOf, type BoardPostRow } from './data.ts';
+import { FACTION_SHOWN, FACTIONS, TRADESKILLS, type BoardKind, type BoardName } from './kinds.ts';
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
-import { contentHash, INDEX_TITLE, renderIndex, renderSkillPost, type BoardMessage, type LineMode } from './render.ts';
+import { contentHash, type BoardMessage, type LineMode } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
@@ -56,6 +57,8 @@ export const CRON_RUN_MS = 60_000;
 export type Trigger = 'command' | 'sweep' | 'nightly' | 'rebuild';
 
 export interface RefreshResult {
+  /** Order 24: which board (src/board/kinds.ts). */
+  board: BoardName;
   locked?: true;
   no_board?: true;
   created: number;
@@ -81,7 +84,8 @@ export interface RefreshResult {
   errors: string[];
 }
 
-const emptyResult = (): RefreshResult => ({
+const emptyResult = (board: BoardName): RefreshResult => ({
+  board,
   created: 0, edited: 0, unarchived: 0, skipped_unchanged: 0, messages_added: 0, messages_deleted: 0, left_dirty: 0, gone: 0, index: 'none', repinned: false,
   bumped: 0, replaced: 0, deleted_old: 0, guarded: [], rebuild: 'none', in_order: true, errors: [],
 });
@@ -148,10 +152,27 @@ async function activeThreads(api: BotApi, guildId: string): Promise<Threads> {
   return r.ok ? threadMap(r.body.threads) : null;
 }
 
-/** The forum's archived posts in one call (rebuild only: their message counts and owners). null if unread or incomplete. */
+/** Pages of 100 read for a rebuild: the factions board's posts auto-archive (order 24), so more than 100 can be archived. */
+const ARCHIVED_PAGES = 3;
+
+/**
+ * The forum's archived posts (rebuild only: their message counts and owners), a page of 100 per call, newest archived first
+ * ("ordered by archive_timestamp, in descending order"; `before` pages back). null if unread or still incomplete.
+ */
 async function archivedThreads(api: BotApi, forumId: string): Promise<Threads> {
-  const r = await api.call<{ threads?: ApiThread[]; has_more?: boolean }>('GET', `/channels/${forumId}/threads/archived/public?limit=100`);
-  return r.ok && !r.body.has_more ? threadMap(r.body.threads) : null;
+  const all: ApiThread[] = [];
+  let before = '';
+  for (let page = 0; page < ARCHIVED_PAGES; page++) {
+    const r = await api.call<{ threads?: ApiThread[]; has_more?: boolean }>('GET', `/channels/${forumId}/threads/archived/public?limit=100${before}`);
+    if (!r.ok) return null;
+    const threads = r.body.threads ?? [];
+    all.push(...threads);
+    const last = threads.at(-1)?.thread_metadata?.archive_timestamp;
+    if (!r.body.has_more) return threadMap(all);
+    if (!last) return null;
+    before = `&before=${encodeURIComponent(last)}`;
+  }
+  return null;
 }
 
 /** null when unknown (the read failed); otherwise whether the thread is archived (absent from the active list). */
@@ -172,8 +193,8 @@ const body = (m: BoardMessage) => ({ ...(m.content !== undefined ? { content: m.
 
 type PostOutcome = { row: Omit<BoardPostRow, 'dirty' | 'last_rendered_at'>; complete: boolean } | { gone: true } | { failed: true };
 
-/** Creates a tradeskill's forum post: the first message with the thread, then any overflow messages. */
-async function createPost(api: BotApi, forumId: string, skill: string, tradeskillId: number, msgs: BoardMessage[], hash: string, r: RefreshResult): Promise<PostOutcome> {
+/** Creates a topic's forum post (a tradeskill's or a faction's): the first message with the thread, then any overflow messages. */
+async function createPost(api: BotApi, forumId: string, skill: string, topicId: number, msgs: BoardMessage[], hash: string, r: RefreshResult): Promise<PostOutcome> {
   const made = await api.call<{ id: string; message?: { id: string } }>('POST', `/channels/${forumId}/threads`, {
     name: skill.slice(0, 100),
     auto_archive_duration: AUTO_ARCHIVE_MINUTES,
@@ -190,12 +211,12 @@ async function createPost(api: BotApi, forumId: string, skill: string, tradeskil
     const sent = await api.call<{ id: string }>('POST', `/channels/${thread}/messages`, body(m));
     if (!sent.ok) {
       r.errors.push(`overflow ${skill}: ${sent.status} ${sent.code ?? ''}`.trim());
-      return { row: { tradeskill_id: tradeskillId, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: null }, complete: false };
+      return { row: { topic_id: topicId, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: null }, complete: false };
     }
     ids.push(sent.body.id);
     r.messages_added++;
   }
-  return { row: { tradeskill_id: tradeskillId, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: hash }, complete: true };
+  return { row: { topic_id: topicId, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: hash }, complete: true };
 }
 
 async function unarchive(api: BotApi, thread: string, r: RefreshResult): Promise<'ok' | 'gone' | 'failed'> {
@@ -219,7 +240,7 @@ async function editPost(api: BotApi, post: BoardPostRow, skill: string, msgs: Bo
     }
   })();
   if (!ids.length) ids = [thread];
-  const partial = () => ({ row: { tradeskill_id: post.tradeskill_id, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: null }, complete: false });
+  const partial = () => ({ row: { topic_id: post.topic_id, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: null }, complete: false });
 
   if (archived) {
     const u = await unarchive(api, thread, r);
@@ -272,7 +293,7 @@ async function editPost(api: BotApi, post: BoardPostRow, skill: string, msgs: Bo
   }
   ids = next;
   r.edited++;
-  return { row: { tradeskill_id: post.tradeskill_id, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: hash }, complete: true };
+  return { row: { topic_id: post.topic_id, thread_id: thread, message_ids_json: JSON.stringify(ids), content_hash: hash }, complete: true };
 }
 
 /** Calls kept back for the index (edit + pin) and the final D1 write. */
@@ -288,25 +309,28 @@ export async function refreshGuildBoard(
   db: D1Database,
   api: BotApi,
   guildId: string,
-  opts: { all?: boolean; nowMs?: number; trigger?: Trigger; line?: LineMode } = {},
+  opts: { all?: boolean; nowMs?: number; trigger?: Trigger; line?: LineMode; kind?: BoardKind; floor?: number } = {},
 ): Promise<RefreshResult> {
   const line = opts.line ?? BOARD_LINE;
-  const r = emptyResult();
+  // Order 24: which board (src/board/kinds.ts); its own columns and posts table, the same machinery.
+  const k = opts.kind ?? TRADESKILLS;
+  const r = emptyResult(k.name);
   const nowMs = opts.nowMs ?? Date.now();
   const at = new Date(nowMs).toISOString();
   const lease = `${new Date(nowMs + LEASE_MS).toISOString()}#${crypto.randomUUID().slice(0, 8)}`;
+  const src = sourceOf(k);
 
   // One round trip: take the lease, read everything, claim the dirty rows (only if the lease was taken).
   const results = await db.batch([
     db
-      .prepare('UPDATE guild SET board_lock_until = ? WHERE id = ? AND board_channel_id IS NOT NULL AND (board_lock_until IS NULL OR board_lock_until < ?)')
+      .prepare(`UPDATE guild SET ${k.lock} = ? WHERE id = ? AND ${k.channel} IS NOT NULL AND (${k.lock} IS NULL OR ${k.lock} < ?)`)
       .bind(lease, guildId, at),
-    ...boardStatements(db, guildId),
+    ...src.statements(db, guildId),
     db
-      .prepare('UPDATE board_post SET dirty = 2 WHERE guild_id = ?1 AND dirty <> 0 AND EXISTS (SELECT 1 FROM guild WHERE id = ?1 AND board_lock_until = ?2)')
+      .prepare(`UPDATE ${k.table} SET dirty = 2 WHERE guild_id = ?1 AND dirty <> 0 AND EXISTS (SELECT 1 FROM guild WHERE id = ?1 AND ${k.lock} = ?2)`)
       .bind(guildId, lease),
   ]);
-  const data = boardFromResults(results.slice(1, 5));
+  const data = src.fromResults(results.slice(1, 5));
   if (!data?.guild.board_channel_id) return { ...r, no_board: true };
   if (results[0].meta.changes !== 1) return { ...r, locked: true };
   const forum = data.guild.board_channel_id;
@@ -320,9 +344,9 @@ export async function refreshGuildBoard(
   const rebuilding = !!since && mayCreate;
   if (since) r.rebuild = mayCreate ? 'in_progress' : 'held';
 
-  const work = data.tradeskills.filter((t) => {
+  const work = data.topics.filter((t) => {
     const p = data.posts.get(t.id);
-    return opts.all || !p || p.dirty !== 0 || (rebuilding && isOld(p.thread_id));
+    return opts.all || !p || p.dirty !== 0 || data.stale(t.id) || (rebuilding && isOld(p.thread_id));
   });
   const needActive = work.some((t) => data.posts.has(t.id)) || !!data.guild.board_index_thread_id || rebuilding;
   const active = needActive ? await activeThreads(api, guildId) : null;
@@ -335,7 +359,7 @@ export async function refreshGuildBoard(
   // Posts with member messages are never replaced (ORDER-RULES, order 6).
   const guarded = new Set<number>();
   if (rebuilding)
-    for (const t of data.tradeskills) {
+    for (const t of data.topics) {
       const p = data.posts.get(t.id);
       if (p && isOld(p.thread_id) && (infoOf(p.thread_id)?.message_count ?? 0) > 0) {
         guarded.add(t.id);
@@ -347,25 +371,30 @@ export async function refreshGuildBoard(
   const upsert = (row: Omit<BoardPostRow, 'dirty' | 'last_rendered_at'>, complete: boolean) =>
     db
       .prepare(
-        `INSERT INTO board_post (guild_id, tradeskill_id, thread_id, message_ids_json, content_hash, dirty, last_rendered_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT(guild_id, tradeskill_id) DO UPDATE SET thread_id = excluded.thread_id, message_ids_json = excluded.message_ids_json,
+        `INSERT INTO ${k.table} (guild_id, ${k.key}, thread_id, message_ids_json, content_hash, dirty, last_rendered_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(guild_id, ${k.key}) DO UPDATE SET thread_id = excluded.thread_id, message_ids_json = excluded.message_ids_json,
            content_hash = excluded.content_hash, last_rendered_at = excluded.last_rendered_at,
-           dirty = CASE WHEN excluded.dirty = 1 OR board_post.dirty = 1 THEN 1 ELSE 0 END`,
+           dirty = CASE WHEN excluded.dirty = 1 OR ${k.table}.dirty = 1 THEN 1 ELSE 0 END`,
       )
-      .bind(guildId, row.tradeskill_id, row.thread_id, row.message_ids_json, row.content_hash, complete ? 0 : 1, at);
-  const leaveDirty = (tradeskillId: number) => {
+      .bind(guildId, row.topic_id, row.thread_id, row.message_ids_json, row.content_hash, complete ? 0 : 1, at);
+  const leaveDirty = (topicId: number) => {
     r.left_dirty++;
-    if (data.posts.has(tradeskillId)) writes.push(db.prepare('UPDATE board_post SET dirty = 1 WHERE guild_id = ? AND tradeskill_id = ?').bind(guildId, tradeskillId));
+    if (data.posts.has(topicId)) writes.push(db.prepare(`UPDATE ${k.table} SET dirty = 1 WHERE guild_id = ? AND ${k.key} = ?`).bind(guildId, topicId));
   };
+  const forget = (topicId: number, thread: string) =>
+    writes.push(db.prepare(`DELETE FROM ${k.table} WHERE guild_id = ? AND ${k.key} = ? AND thread_id = ?`).bind(guildId, topicId, thread));
   const threads = new Map<number, string>([...data.posts].map(([id, p]) => [id, p.thread_id]));
   const unarchivedNow = new Set<string>();
   /** Posts found deleted in Discord by the keep-active step: forgotten below, recreated by the next run. */
   const goneNow = new Set<number>();
-  const canCall = (n: number) => budgetLeft(api.budget) >= n && Date.now() < api.budget.deadline;
+  // Order 24: `floor` calls are left for the work after this board (the request sweep), whatever this board needs.
+  const floor = opts.floor ?? 0;
+  const canCall = (n: number) => budgetLeft(api.budget) - floor >= n && Date.now() < api.budget.deadline;
 
-  // Keep active (nightly): an archived post is unarchived; one close to auto-archiving gets its archive time changed.
-  if (opts.all && active && !since)
-    for (const t of data.tradeskills) {
+  // Keep active (nightly, boards that keep their posts active): an archived post is unarchived; one close to
+  // auto-archiving gets its archive time changed.
+  if (opts.all && k.nightly && active && !since)
+    for (const t of data.topics) {
       const p = data.posts.get(t.id);
       if (!p) continue;
       const info = active.get(p.thread_id);
@@ -393,11 +422,10 @@ export async function refreshGuildBoard(
     if (post && goneNow.has(t.id)) {
       r.gone++;
       threads.delete(t.id);
-      writes.push(db.prepare('DELETE FROM board_post WHERE guild_id = ? AND tradeskill_id = ? AND thread_id = ?').bind(guildId, t.id, post.thread_id));
+      forget(t.id, post.thread_id);
       continue;
     }
-    const lines = data.lines.get(t.id) ?? [];
-    const msgs = renderSkillPost(t.name, lines, data.guild.stale_days, nowMs, line);
+    const msgs = data.render(t, nowMs, line);
     const hash = await contentHash(msgs);
     const replace = !!post && rebuilding && isOld(post.thread_id) && !guarded.has(t.id);
     if (!post || replace) {
@@ -440,7 +468,7 @@ export async function refreshGuildBoard(
       // The post was deleted in Discord: forget it, and the next run creates it again.
       r.gone++;
       threads.delete(t.id);
-      writes.push(db.prepare('DELETE FROM board_post WHERE guild_id = ? AND tradeskill_id = ? AND thread_id = ?').bind(guildId, t.id, post.thread_id));
+      forget(t.id, post.thread_id);
     } else if ('failed' in out) {
       leaveDirty(t.id);
     } else {
@@ -453,7 +481,7 @@ export async function refreshGuildBoard(
   // The rebuild's second half: once every unguarded post is new, delete the old ones. An old post is a
   // bot-owned thread in this forum, older than the rebuild, that no row references, with no member messages.
   if (rebuilding && !rebuildBlind) {
-    const remaining = data.tradeskills.filter((t) => !guarded.has(t.id) && (!threads.get(t.id) || isOld(threads.get(t.id)!))).length;
+    const remaining = data.topics.filter((t) => !guarded.has(t.id) && (!threads.get(t.id) || isOld(threads.get(t.id)!))).length;
     if (remaining === 0) {
       const referenced = new Set([...threads.values(), data.guild.board_index_thread_id].filter(Boolean) as string[]);
       // The bot's own user id, read from a thread it is known to own (the index or any post).
@@ -481,19 +509,15 @@ export async function refreshGuildBoard(
       if (!botId) r.errors.push("rebuild: could not tell which threads are the bot's; old posts not deleted");
       else if (left === 0) {
         r.rebuild = 'done';
-        writes.push(db.prepare('UPDATE guild SET board_rebuild_since = NULL WHERE id = ? AND board_rebuild_since = ?').bind(guildId, since));
+        writes.push(db.prepare(`UPDATE guild SET ${k.rebuild} = NULL WHERE id = ? AND ${k.rebuild} = ?`).bind(guildId, since));
       }
     }
   }
-  r.in_order = boardInOrder(data.tradeskills, (id) => threads.get(id));
+  r.in_order = boardInOrder(data.topics, (id) => threads.get(id));
 
   // The index: created (and pinned) once, edited when its links or counts changed or any post was written.
   const wrote = r.created + r.edited + r.gone > 0;
-  const idx = renderIndex(
-    data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })),
-    nowMs,
-    line,
-  );
+  const idx = data.index((id) => threads.get(id) ?? null, nowMs, line);
   const idxHash = await contentHash(idx.hashable);
   let indexThread = data.guild.board_index_thread_id;
   let indexMessage = data.guild.board_index_message_id;
@@ -529,7 +553,7 @@ export async function refreshGuildBoard(
     if (!canCallIndex(2)) r.index = 'not_reached';
     else {
       const made = await api.call<{ id: string; message?: { id: string } }>('POST', `/channels/${forum}/threads`, {
-        name: INDEX_TITLE,
+        name: k.indexTitle,
         auto_archive_duration: AUTO_ARCHIVE_MINUTES,
         message: body(idx.message),
       });
@@ -550,7 +574,7 @@ export async function refreshGuildBoard(
   // One round trip: the rows, the index, and the lease released.
   writes.push(
     db
-      .prepare('UPDATE guild SET board_index_thread_id = ?, board_index_message_id = ?, board_index_hash = ?, board_lock_until = NULL WHERE id = ? AND board_lock_until = ?')
+      .prepare(`UPDATE guild SET ${k.indexThread} = ?, ${k.indexMessage} = ?, ${k.indexHash} = ?, ${k.lock} = NULL WHERE id = ? AND ${k.lock} = ?`)
       .bind(indexThread, indexMessage, indexHash, guildId, lease),
   );
   await db.batch(writes);
@@ -574,15 +598,26 @@ export interface BoardRunLog {
  * After a command's reply (inside the same waitUntil): rewrite this guild's dirty posts. `rebuild`: /guildcraft
  * rebuild-board's own run. `discordCalls` (order 19): Discord calls the handler already made in this invocation.
  */
-export async function refreshAfterCommand(env: Env, guildId: string, d1Calls: D1Call[], opts: { rebuild?: boolean; discordCalls?: number } = {}): Promise<BoardRunLog> {
+export async function refreshAfterCommand(
+  env: Env,
+  guildId: string,
+  d1Calls: D1Call[],
+  opts: { rebuild?: boolean; discordCalls?: number; tradeskills?: boolean; factions?: boolean } = {},
+): Promise<BoardRunLog> {
   const budget: BoardBudget = { d1: () => d1Calls.length, discord: opts.discordCalls ?? 0, cap: BOARD_CALL_CAP, deadline: Date.now() + AFTER_COMMAND_MS };
   const trigger: Trigger = opts.rebuild ? 'rebuild' : 'command';
   const log: BoardRunLog = { gc: 'board', trigger, guilds: 1, d1_calls: 0, discord_calls: 0, calls: [], results: [], err: null };
   if (!env.DISCORD_BOT_TOKEN) return { ...log, err: 'DISCORD_BOT_TOKEN not set' };
   const api = botApi(env.DISCORD_BOT_TOKEN, budget);
   const d1Before = d1Calls.length;
+  // Order 24: the boards the command asked for, the tradeskill board first (it keeps priority on the budget).
+  const kinds = [...(opts.tradeskills !== false ? [TRADESKILLS] : []), ...(opts.factions ? [FACTIONS] : [])];
   try {
-    log.results.push(await refreshGuildBoard(env.DB, api, guildId, { trigger }));
+    for (const kind of kinds) {
+      // The tradeskill board runs as it always has (its own canCall checks bound it); the factions board only on what is left.
+      if (kind === FACTIONS && budgetLeft(budget) < RESERVE + 3) break;
+      log.results.push(await refreshGuildBoard(env.DB, api, guildId, { trigger, kind }));
+    }
   } catch (e) {
     log.err = e instanceof Error ? e.message : String(e);
   }
@@ -595,10 +630,30 @@ export const isNightly = (scheduledTime: number) => {
   return d.getUTCHours() === NIGHTLY_HOUR_UTC && d.getUTCMinutes() < 15;
 };
 
-/** Guilds with a board that has something to do: dirty or missing posts, no index, a rebuild in progress (every board, nightly). */
-const SWEEP_SQL = `SELECT g.id FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
+/**
+ * Boards with something to do, one row per guild and board, in one query (order 24: an idle sweep still makes two D1
+ * calls, the heartbeat and this). The tradeskill boards come first (they keep priority on the budget):
+ * - tradeskills: dirty or missing posts, no index, a rebuild in progress (every board, nightly);
+ * - factions (order 24): dirty, stale (the import changed a faction after its post was rendered) or missing posts, no
+ *   index, a rebuild in progress. Never every board at night (FACTIONS.nightly).
+ */
+const SWEEP_SQL = `SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
   OR EXISTS (SELECT 1 FROM board_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
-  OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill)) ORDER BY g.id`;
+  OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill))
+UNION ALL
+SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT NULL AND (g.${FACTIONS.indexMessage} IS NULL OR g.${FACTIONS.rebuild} IS NOT NULL
+  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND p.dirty <> 0)
+  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND f.changed_at > coalesce(p.last_rendered_at, ''))
+  OR (SELECT count(*) FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN})
+     < (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN}))
+ORDER BY board DESC, id`;
+
+/**
+ * Order 24 (ITEM 2), the split of one invocation's 40 calls: the tradeskill boards first (every guild, as before), then
+ * the factions boards on what is left, stopping while FACTIONS_FLOOR calls remain: the request sweep's RESERVE + 3 and
+ * the dev copy's usage warning's 3, which run after the boards. Whatever a board cannot reach stays dirty or missing.
+ */
+export const FACTIONS_FLOOR = RESERVE + 3 + 3;
 
 /**
  * The scheduled handler (one 15-minute trigger): sweeps dirty and missing posts and continues a rebuild;
@@ -640,15 +695,19 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
   }
   try {
-    const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string }>();
+    const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string; board: BoardName }>();
     first = counted.calls.at(-1);
-    log.guilds = results.length;
+    log.guilds = new Set(results.map((g) => g.id)).size;
     if (results.length && !env.DISCORD_BOT_TOKEN) log.err = 'DISCORD_BOT_TOKEN not set';
     else if (results.length) {
       api ??= botApi(env.DISCORD_BOT_TOKEN!, budget);
       for (const g of results) {
-        if (budgetLeft(budget) < RESERVE + 3) break;
-        log.results.push(await refreshGuildBoard(counted.db, api, g.id, { all: nightly, trigger: log.trigger }));
+        // Order 24: the factions boards run on what the tradeskill boards left, keeping FACTIONS_FLOOR for the work after them.
+        const factions = g.board === 'factions';
+        if (budgetLeft(budget) < (factions ? FACTIONS_FLOOR : 0) + RESERVE + 3) break;
+        log.results.push(
+          await refreshGuildBoard(counted.db, api, g.id, factions ? { trigger: log.trigger, kind: FACTIONS, floor: FACTIONS_FLOOR } : { all: nightly, trigger: log.trigger }),
+        );
       }
     }
   } catch (e) {
@@ -714,8 +773,8 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
 const CLOCK_MARGIN_MS = 60_000;
 
 /** /guildcraft rebuild-board: asks for the rebuild (the refresh after the reply starts it). A rebuild already in progress keeps its start. */
-export function requestRebuild(db: D1Database, guildId: string, nowMs = Date.parse(isoNow())): D1PreparedStatement {
+export function requestRebuild(db: D1Database, guildId: string, nowMs = Date.parse(isoNow()), kind: BoardKind = TRADESKILLS): D1PreparedStatement {
   return db
-    .prepare('UPDATE guild SET board_rebuild_since = coalesce(board_rebuild_since, ?) WHERE id = ? AND board_channel_id IS NOT NULL')
+    .prepare(`UPDATE guild SET ${kind.rebuild} = coalesce(${kind.rebuild}, ?) WHERE id = ? AND ${kind.channel} IS NOT NULL`)
     .bind(new Date(nowMs - CLOCK_MARGIN_MS).toISOString(), guildId);
 }

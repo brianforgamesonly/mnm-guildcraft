@@ -35,6 +35,8 @@ function fixture(): string {
     `INSERT INTO recipe (id, source_key, tradeskill_id, result_item_id, source, imported_at) VALUES (1, 'shared', 1, 2, 'wiki', '${at}')`,
     'INSERT INTO recipe_component (recipe_id, item_id, qty) VALUES (1, 1, 3)',
     "INSERT INTO game_class (code, item_count) VALUES ('WAR', 10)",
+    // Order 24: the factions board's reference data and (below) each guild's post.
+    "INSERT INTO faction (id, name) VALUES (1, 'Steel Talons')",
     `INSERT INTO data_import (source, source_version, status, started_at) VALUES ('wiki', 'v1', 'ok', '${at}')`,
     `INSERT INTO backup_status (started_at, finished_at, result, token_expires) VALUES ('${at}', '${at}', 'ok', 'unknown')`,
     `INSERT INTO usage_daily (metric, day, value, measured_at) VALUES ('d1_rows_written', '2026-10-19', 5, '${at}')`,
@@ -53,6 +55,7 @@ function fixture(): string {
       `INSERT INTO item_image (guild_id, item_id, submitted_by, created_at) VALUES ('${g}', 2, '${u}', '${at}')`,
       `INSERT INTO recipe_report (guild_id, item_id, recipe_id, reporter, issue, created_at) VALUES ('${g}', 2, 1, '${u}', 'trivial', '${at}')`,
       `INSERT INTO board_post (guild_id, tradeskill_id, thread_id, message_ids_json) VALUES ('${g}', 1, 'thread${n}', '[]')`,
+      `INSERT INTO faction_post (guild_id, faction_id, thread_id, message_ids_json) VALUES ('${g}', 1, 'fthread${n}', '[]')`,
       `INSERT INTO audit_log (guild_id, actor, action, target, created_at) VALUES ('${g}', '${u}', 'member.left', 'member:${u}9', '${at}')`,
       `INSERT INTO recipe_correction (guild_id, recipe_id, acquisition, faction, updated_by, updated_at) VALUES ('${g}', 1, 'reputation', 'Faction${n}', '${u}', '${at}')`,
       `INSERT INTO recipe_correction_component (guild_id, recipe_id, item_id, qty) VALUES ('${g}', 1, 1, ${n})`,

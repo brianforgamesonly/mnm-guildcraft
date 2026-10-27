@@ -7,6 +7,7 @@ import { channelPermissions, PERMISSION_NAMES } from '../permissions.ts';
 import { DISCORD_API } from '../respond.ts';
 import { boardInOrder, boardOrderLine } from '../board/order.ts';
 import { requestRebuild } from '../board/refresh.ts';
+import { FACTION_SHOWN, FACTIONS } from '../board/kinds.ts';
 import { BACKUP_SQL, backupLine, failureText, tokenLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
 import { ALARM_IMPORT, FINISHED_IMPORT, REAL_IMPORT } from '../import-status.ts';
 import { operatorText, render, type Line } from '../operator-text.ts';
@@ -24,12 +25,17 @@ const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
   `Vault channel: ${g.vault_channel_id ? `<#${g.vault_channel_id}>` : 'not set (`vault:` picks a private text channel for item screenshots)'}`;
 const describeRequests = (g: Pick<Guild, 'request_channel_id'>) =>
   `Request channel: ${g.request_channel_id ? `<#${g.request_channel_id}>` : 'not set (`requests:` picks a text channel for craft requests)'}`;
+// Order 24.
+const describeFactions = (g: Pick<Guild, 'faction_board_channel_id'>) =>
+  `Factions board: ${g.faction_board_channel_id ? `<#${g.faction_board_channel_id}>` : 'not set (`factions:` picks a forum channel)'}`;
+const describeAll = (g: Settings) => [describeRoles(g), describeBoard(g), describeFactions(g), describeReview(g), describeVault(g), describeRequests(g)].join('\n');
 
 // ---------------------------------------------------------------- the board channel's permissions
 
 // Order 10: what the bot needs in each channel, by the name Discord's settings show, derived from the routes the
 // code calls there (src/permissions.ts). The install link's permissions come from the same table.
 export const BOARD_PERMISSIONS = channelPermissions('board');
+export const FACTION_PERMISSIONS = channelPermissions('factions');
 export const REVIEW_PERMISSIONS = channelPermissions('review');
 export const VAULT_PERMISSIONS = channelPermissions('vault');
 export const REQUEST_PERMISSIONS = channelPermissions('requests');
@@ -132,6 +138,12 @@ const CHANNEL_KINDS = {
     permissions: BOARD_PERMISSIONS,
     wrongType: (id: string) => `<#${id}> is not a forum channel. The roster board needs a forum channel: create one (Create Channel → Forum), then pick it here.`,
   },
+  // Order 24.
+  factions: {
+    type: GUILD_FORUM,
+    permissions: FACTION_PERMISSIONS,
+    wrongType: (id: string) => `<#${id}> is not a forum channel. The factions board needs a forum channel: create one (Create Channel → Forum), then pick it here.`,
+  },
   review: {
     type: GUILD_TEXT,
     permissions: REVIEW_PERMISSIONS,
@@ -231,18 +243,20 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const review = optString(opts, 'review');
   const vault = optString(opts, 'vault');
   const requests = optString(opts, 'requests');
-  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined && requests === undefined)
-    return ephemeral(`Current settings:\n${describeRoles(c.guild)}\n${describeBoard(c.guild)}\n${describeReview(c.guild)}\n${describeVault(c.guild)}\n${describeRequests(c.guild)}`, setupButtons(c.guild, true));
+  const factions = optString(opts, 'factions');
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined && requests === undefined && factions === undefined)
+    return ephemeral(`Current settings:\n${describeAll(c.guild)}`, setupButtons(c.guild, true));
 
-  for (const [id, kind] of [[board, 'board'], [review, 'review'], [vault, 'vault'], [requests, 'requests']] as const) {
+  for (const [id, kind] of [[board, 'board'], [factions, 'factions'], [review, 'review'], [vault, 'vault'], [requests, 'requests']] as const) {
     if (id === undefined) continue;
     const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
-  const { before, after, moved, skills, posts } = await saveSetup(c, {
+  const { before, after, moved, skills, posts, factionsMoved, factionCount, factionPosts } = await saveSetup(c, {
     member_role_id: memberRole, officer_role_id: officerRole, board_channel_id: board, review_channel_id: review, vault_channel_id: vault, request_channel_id: requests,
+    faction_board_channel_id: factions,
   });
-  const lines = [`Saved.\n${describeRoles(after)}\n${describeBoard(after)}\n${describeReview(after)}\n${describeVault(after)}\n${describeRequests(after)}`];
+  const lines = [`Saved.\n${describeAll(after)}`];
   if (requests !== undefined) {
     lines.push(
       `Craft requests will open private threads in <#${requests}>: one per request, holding the requester and the crafters who turned on **Notices** in \`/me\` and can make the item. Members need to see the channel to see their thread.`,
@@ -267,6 +281,11 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     lines.push(boardBuildLine(skills, posts));
     if (moved) lines.push(`The old board's posts in <#${before.board_channel_id}> are left as they are.`);
   }
+  if (factions !== undefined) {
+    c.effects.factions = true;
+    lines.push(factionBuildLine(factionCount, factionPosts));
+    if (factionsMoved) lines.push(`The old factions board's posts in <#${before.faction_board_channel_id}> are left as they are.`);
+  }
   // An officer role saved: the button is offered, so a press adds it to the channels it created (review of PR B).
   return ephemeral(lines.join('\n'), setupButtons(after, officerRole !== undefined));
 }
@@ -279,8 +298,19 @@ export const boardBuildLine = (skills: number, posts: number) => {
     : 'The board already has every tradeskill post; refreshing it now.';
 };
 
+/** Order 24: what the setup reply says about building the factions board (about 125 posts, ~25 per sweep). */
+export const factionBuildLine = (factions: number, posts: number) => {
+  const toCreate = Math.max(0, factions - posts);
+  return toCreate
+    ? `Building the factions board now: ${plural(toCreate, 'faction post')} plus a pinned index post. The factions board fills in over the next few hours. If nothing shows, reload Discord.`
+    : 'The factions board already has every faction post; refreshing it now.';
+};
+
 /** The settings /guildcraft setup saves. */
-export type Settings = Pick<Guild, 'member_role_id' | 'officer_role_id' | 'board_channel_id' | 'review_channel_id' | 'vault_channel_id' | 'request_channel_id'>;
+export type Settings = Pick<
+  Guild,
+  'member_role_id' | 'officer_role_id' | 'board_channel_id' | 'review_channel_id' | 'vault_channel_id' | 'request_channel_id' | 'faction_board_channel_id'
+>;
 
 /**
  * The one save of /guildcraft setup's settings, from its options and from Create GuildCraft channels (order 19): one
@@ -290,7 +320,7 @@ export type Settings = Pick<Guild, 'member_role_id' | 'officer_role_id' | 'board
 export async function saveSetup(c: Ctx, changes: { [K in keyof Settings]?: Settings[K] | undefined }) {
   const before: Settings = {
     member_role_id: c.guild.member_role_id, officer_role_id: c.guild.officer_role_id, board_channel_id: c.guild.board_channel_id, review_channel_id: c.guild.review_channel_id,
-    vault_channel_id: c.guild.vault_channel_id, request_channel_id: c.guild.request_channel_id,
+    vault_channel_id: c.guild.vault_channel_id, request_channel_id: c.guild.request_channel_id, faction_board_channel_id: c.guild.faction_board_channel_id,
   };
   const after: Settings = {
     request_channel_id: changes.request_channel_id ?? before.request_channel_id,
@@ -299,13 +329,18 @@ export async function saveSetup(c: Ctx, changes: { [K in keyof Settings]?: Setti
     board_channel_id: changes.board_channel_id ?? before.board_channel_id,
     review_channel_id: changes.review_channel_id ?? before.review_channel_id,
     vault_channel_id: changes.vault_channel_id ?? before.vault_channel_id,
+    faction_board_channel_id: changes.faction_board_channel_id ?? before.faction_board_channel_id,
   };
   const board = changes.board_channel_id;
   const moved = board !== undefined && before.board_channel_id !== null && before.board_channel_id !== board;
+  const fboard = changes.faction_board_channel_id;
+  const factionsMoved = fboard !== undefined && before.faction_board_channel_id !== null && before.faction_board_channel_id !== fboard;
   const stmts = [
     c.db
-      .prepare('UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ?, request_channel_id = ? WHERE id = ?')
-      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, after.request_channel_id, c.guild.id),
+      .prepare(
+        'UPDATE guild SET member_role_id = ?, officer_role_id = ?, board_channel_id = ?, review_channel_id = ?, vault_channel_id = ?, request_channel_id = ?, faction_board_channel_id = ? WHERE id = ?',
+      )
+      .bind(after.member_role_id, after.officer_role_id, after.board_channel_id, after.review_channel_id, after.vault_channel_id, after.request_channel_id, after.faction_board_channel_id, c.guild.id),
     audit(c.db, c.guild.id, c.userId, 'guild.setup', `guild:${c.guild.id}`, before, after),
   ];
   if (moved)
@@ -313,10 +348,22 @@ export async function saveSetup(c: Ctx, changes: { [K in keyof Settings]?: Setti
       c.db.prepare('DELETE FROM board_post WHERE guild_id = ?').bind(c.guild.id),
       c.db.prepare('UPDATE guild SET board_index_thread_id = NULL, board_index_message_id = NULL, board_index_hash = NULL WHERE id = ?').bind(c.guild.id),
     );
-  const counted = c.db.prepare('SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?) AS posts').bind(c.guild.id);
+  // Order 24: a new factions forum starts a new factions board, the same way.
+  if (factionsMoved)
+    stmts.push(
+      c.db.prepare('DELETE FROM faction_post WHERE guild_id = ?').bind(c.guild.id),
+      c.db.prepare('UPDATE guild SET faction_index_thread_id = NULL, faction_index_message_id = NULL, faction_index_hash = NULL, faction_rebuild_since = NULL WHERE id = ?').bind(c.guild.id),
+    );
+  const counted = c.db
+    .prepare(
+      `SELECT (SELECT count(*) FROM tradeskill) AS skills, (SELECT count(*) FROM board_post WHERE guild_id = ?1) AS posts,
+        (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN}) AS factions,
+        (SELECT count(*) FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = ?1 AND ${FACTION_SHOWN}) AS faction_posts`,
+    )
+    .bind(c.guild.id);
   const results = await c.db.batch([...stmts, counted]);
-  const { skills, posts } = (results.at(-1)!.results as { skills: number; posts: number }[])[0];
-  return { before, after, moved, skills, posts };
+  const { skills, posts, factions, faction_posts } = (results.at(-1)!.results as { skills: number; posts: number; factions: number; faction_posts: number }[])[0];
+  return { before, after, moved, skills, posts, factionsMoved, factionCount: factions, factionPosts: faction_posts };
 }
 
 // ---------------------------------------------------------------- /guildcraft status (PRD FR-8; usage and backup from order 8)
@@ -335,7 +382,7 @@ function warningsCount(json: string | null): number | null {
 
 export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const nowMs = Date.now();
-  const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup, queue] = await c.db.batch([
+  const [okImport, lastImport, lastDryRun, alarmRow, board, posts, departures, usage, backup, queue, fboard, fposts] = await c.db.batch([
     c.db.prepare(`SELECT source_version, finished_at FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1`),
     // Order 8: a dry run writes nothing but its own row, so it is never "the last import" (the operator's check of order 7).
     // Order 9: a positive rule (src/import-status.ts), so a refused run is not one either.
@@ -369,6 +416,15 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
           (SELECT count(*) FROM item_image WHERE guild_id = ?1 AND status = 'pending' AND gone_at IS NULL AND vault_message_id IS NOT NULL) AS images`,
       )
       .bind(c.guild.id),
+    // Order 24: the factions board, as the tradeskill board's two reads above (a stale post counts as waiting).
+    c.db
+      .prepare(
+        `SELECT count(*) AS posts, coalesce(sum(p.dirty <> 0 OR f.changed_at > coalesce(p.last_rendered_at, '')), 0) AS dirty, max(p.last_rendered_at) AS refreshed,
+          (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN}) AS skills
+         FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = ? AND ${FACTION_SHOWN}`,
+      )
+      .bind(c.guild.id),
+    c.db.prepare(`SELECT f.id, f.name, p.thread_id FROM faction f LEFT JOIN faction_post p ON p.faction_id = f.id AND p.guild_id = ? WHERE ${FACTION_SHOWN}`).bind(c.guild.id),
   ]);
   const q = (queue.results as { reports: number; images: number }[])[0];
   const d = (departures.results as { left_members: number; at: string | null; detail: string | null }[])[0];
@@ -384,6 +440,9 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
   const ok =(okImport.results as { source_version: string; finished_at: string | null }[])[0];
   const last = (lastImport.results as { status: string; started_at: string; finished_at: string | null; warnings: string | null; error: string | null }[])[0];
   const b = (board.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
+  const fb = (fboard.results as { posts: number; dirty: number; refreshed: string | null; skills: number }[])[0];
+  const fthread = new Map((fposts.results as { id: number; name: string; thread_id: string | null }[]).map((p) => [p.id, p.thread_id]));
+  const factionsInOrder = boardInOrder(fposts.results as { id: number; name: string }[], (id) => fthread.get(id));
   // Order 11: operator-only lines (the copy marker, test updates, raw errors, the backup token, platform usage) show
   // only in the dev copy. Order 12: each is OperatorText from its source (src/operator-text.ts); render() drops it
   // outside dev.
@@ -415,6 +474,10 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
       : '**Roster board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
+    // Order 24.
+    c.guild.faction_board_channel_id
+      ? `**Factions board:** <#${c.guild.faction_board_channel_id}> · ${fb.posts} of ${fb.skills} posts · last refresh ${when(fb.refreshed)} · ${fb.dirty} waiting to refresh · ${factionsInOrder ? 'A→Z' : 'out of order — run `/guildcraft rebuild-board which:Factions`'}`
+      : '**Factions board:** not set up (`/guildcraft setup factions:`)',
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
     `**Waiting for officers:** ${plural(q.reports, 'open report')} · ${plural(q.images, 'pending screenshot')}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
     `**Departures:** ${plural(d?.left_members ?? 0, 'member')} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
@@ -430,7 +493,21 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
 // in A→Z order (src/board/refresh.ts): new posts first, then the old ones deleted; posts with member
 // messages are kept as they are.
 
-export async function guildcraftRebuildBoard(c: Ctx): Promise<MessageReply> {
+export async function guildcraftRebuildBoard(c: Ctx, opts: Option[] = []): Promise<MessageReply> {
+  // Order 24: `which:` picks the board; left out, the tradeskill board, as before.
+  if (optString(opts, 'which') === 'factions') {
+    if (!c.guild.faction_board_channel_id) return ephemeral('There is no factions board yet. Set one up first with `/guildcraft setup factions:`.');
+    await c.db.batch([requestRebuild(c.db, c.guild.id, undefined, FACTIONS), audit(c.db, c.guild.id, c.userId, 'board.rebuild', `guild:${c.guild.id}`, null, { board: 'factions' })]);
+    c.effects.factions = true;
+    c.effects.rebuild = true;
+    return ephemeral(
+      [
+        `Rebuilding the factions board in <#${c.guild.faction_board_channel_id}> in A→Z order: each faction post is created again, then the old one is deleted. Posts with member replies are kept as they are.`,
+        'About 25 posts are created every 15 minutes, so a full rebuild takes a few hours. `/guildcraft status` shows the board order.',
+        "For A→Z to show at the top, the forum's Default Sort Order must be Creation Time (Edit Channel).",
+      ].join('\n'),
+    );
+  }
   if (!c.guild.board_channel_id) return ephemeral('There is no roster board yet. Set one up first with `/guildcraft setup board:`.');
   await c.db.batch([requestRebuild(c.db, c.guild.id), audit(c.db, c.guild.id, c.userId, 'board.rebuild', `guild:${c.guild.id}`, null, null)]);
   c.effects.board = true;

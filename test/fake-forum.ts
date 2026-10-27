@@ -103,8 +103,16 @@ export function fakeForum() {
     const path = fullPath.split('?')[0];
     let m: RegExpMatchArray | null;
     if (method === 'GET' && path === `/guilds/${GUILD}/threads/active`) return json(200, { threads: [...threads.values()].filter((t) => !t.archived).map(apiThread), members: [] });
-    if (method === 'GET' && (m = path.match(/^\/channels\/(\d+)\/threads\/archived\/public$/)))
-      return json(200, { threads: [...threads.values()].filter((t) => t.archived && t.parent === m![1]).map(apiThread), members: [], has_more: false });
+    if (method === 'GET' && (m = path.match(/^\/channels\/(\d+)\/threads\/archived\/public$/))) {
+      // Order 24: "ordered by archive_timestamp, in descending order", `limit` per page, `before` an ISO timestamp.
+      const q = new URLSearchParams(fullPath.split('?')[1] ?? '');
+      const limit = Number(q.get('limit') ?? 50);
+      const before = q.get('before');
+      const list = [...threads.values()]
+        .filter((t) => t.archived && t.parent === m![1] && (!before || t.archiveTimestamp < before))
+        .sort((a, b) => (a.archiveTimestamp < b.archiveTimestamp ? 1 : a.archiveTimestamp > b.archiveTimestamp ? -1 : 0));
+      return json(200, { threads: list.slice(0, limit).map(apiThread), members: [], has_more: list.length > limit });
+    }
     if (method === 'GET' && path === `/guilds/${GUILD}`) return json(200, { id: GUILD, name: 'The Test Guild' });
     if (method === 'GET' && path === `/channels/${FORUM}`) return json(200, { id: FORUM, type: 15, permission_overwrites: state.channelOverwrites });
     if (method === 'GET' && path === `/guilds/${GUILD}/roles`) return json(200, state.roles);

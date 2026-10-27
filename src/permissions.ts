@@ -10,14 +10,19 @@
 // order 5 (whether a bot's embeds need it is unverified either way).
 import { ATTACH_FILES, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_CHANNELS, MANAGE_ROLES, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
 
-/** The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). */
-export type ChannelKind = 'board' | 'review' | 'vault' | 'requests';
+/**
+ * The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). Order 24: the
+ * factions forum is served by the board's own routes (the same machinery, src/board/kinds.ts), so it has no rows of its own.
+ */
+export type ChannelKind = 'board' | 'factions' | 'review' | 'vault' | 'requests';
+type RouteChannel = Exclude<ChannelKind, 'factions'>;
+const routeChannel = (kind: ChannelKind): RouteChannel => (kind === 'factions' ? 'board' : kind);
 
 export interface Route {
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE' | 'PUT';
   /** The path with every variable part written {} (no query string). */
   path: string;
-  channel: ChannelKind | null;
+  channel: RouteChannel | null;
   needs: bigint[];
   /** Why GuildCraft calls it, and Discord's requirement. */
   why: string;
@@ -74,7 +79,7 @@ const union = (rs: Route[]) => rs.reduce((b, r) => r.needs.reduce((x, n) => x | 
 /** The install link's permissions: every route's needs together. */
 export const INSTALL_PERMISSIONS = union(ROUTES);
 /** The bits the routes acting in one channel need: what setup checks there, and (order 19) what the bot allows itself there. */
-export const channelBits = (kind: ChannelKind): bigint => union(ROUTES.filter((r) => r.channel === kind));
+export const channelBits = (kind: ChannelKind): bigint => union(ROUTES.filter((r) => r.channel === routeChannel(kind)));
 /** What /guildcraft setup checks in one channel: the needs of the routes that act in it, by name, in bit order. */
 export const channelPermissions = (kind: ChannelKind): [bigint, string][] => {
   const bits = channelBits(kind);

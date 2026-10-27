@@ -98,6 +98,18 @@ export interface NpcRow {
   location: string | null;
   loot_json: string | null;
 }
+/**
+ * Order 24: an NPC row's faction, by the wiki infobox field it came from, under the wiki's own labels: factions is
+ * "Reputation Lost" ('lost'), opposing_factions "Reputation Gained" ('gained'). Nothing else is inferred.
+ */
+export type FactionKind = 'lost' | 'gained';
+export interface FactionLinkRow {
+  zone_key: string;
+  /** The npc row's name (the first record's spelling when records fold by case). */
+  npc_name: string;
+  faction: string;
+  kind: FactionKind;
+}
 export interface MapImage {
   /** The image a card shows. */
   url: string;
@@ -154,6 +166,19 @@ export interface ZoneSummary {
     mobsWithoutNpc: string[];
   };
   maps: { withImage: string[]; placeholderFiles: string[]; unchecked: { zone: string; file: string }[] };
+  /** Order 24: the faction data, and what has no npc row to link to (an unmapped zone). */
+  factions: {
+    /** Mo Betta records naming at least one faction. */
+    npcsWithFactions: number;
+    /** Of those, records with no npc row (their zone text maps to no zone): their links are left out. */
+    npcsWithoutRow: number;
+    linksLeftOut: number;
+    /** Distinct trimmed names stored (named by at least one NPC that has a row). */
+    factions: number;
+    /** Names only NPCs without a row carry: not stored, so no post. */
+    namesWithoutRow: string[];
+    links: { lost: number; gained: number };
+  };
   versions: SourceVersion[];
 }
 
@@ -161,6 +186,9 @@ export interface ZonePlan {
   zones: ZoneRow[];
   names: ZoneNameRow[];
   npcs: NpcRow[];
+  /** Order 24: the faction names, in source order, and every NPC row's links to them. */
+  factions: string[];
+  factionLinks: FactionLinkRow[];
   versions: SourceVersion[];
   warnings: ZoneWarning[];
   summary: ZoneSummary;
@@ -258,10 +286,35 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   let noZone = 0;
   let caseDuplicates = 0;
   const caseDuplicateConflicts: ZoneSummary['npcs']['caseDuplicateConflicts'] = [];
+  // Order 24: each record's factions (trimmed, never merged), linked to every npc row the record has.
+  const links = new Map<string, FactionLinkRow>();
+  const factionNames: string[] = [];
+  const unlinkedNames = new Set<string>();
+  const fs = { withFactions: 0, withoutRow: 0, leftOut: 0 };
   for (const n of mbNpcs) {
     const keys = [...new Set(npcZoneParts(typeof n.zone === 'string' ? n.zone : '').map(keyOf).filter((k): k is string => k !== null))];
     if (!keys.length) noZone++;
     const loot = strs(n.loot);
+    const named: [string, FactionKind][] = [
+      ...[...new Set(strs(n.factions).map((f) => f.trim()))].map((f): [string, FactionKind] => [f, 'lost']),
+      ...[...new Set(strs(n.opposing_factions).map((f) => f.trim()))].map((f): [string, FactionKind] => [f, 'gained']),
+    ];
+    if (named.length) {
+      fs.withFactions++;
+      if (!keys.length) {
+        fs.withoutRow++;
+        fs.leftOut += named.length;
+        for (const [f] of named) unlinkedNames.add(f);
+      }
+    }
+    for (const zk of keys) {
+      const rowName = npcs.get(`${zk}|${(n.name as string).toLowerCase()}`)?.name ?? (n.name as string);
+      for (const [faction, kind] of named) {
+        if (!factionNames.includes(faction)) factionNames.push(faction);
+        const id = `${zk}|${rowName.toLowerCase()}|${faction}|${kind}`;
+        if (!links.has(id)) links.set(id, { zone_key: zk, npc_name: rowName, faction, kind });
+      }
+    }
     for (const zk of keys) {
       const row: NpcRow = {
         zone_key: zk,
@@ -321,10 +374,13 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
     zoneRows.map((z) => [z.name, NAME_SOURCES.filter((s) => names.some((r) => r.source === s && r.zone_key === z.key))]),
   );
   const npcRows = [...npcs.values()];
+  const linkRows = [...links.values()];
   return {
     zones: zoneRows,
     names,
     npcs: npcRows,
+    factions: factionNames,
+    factionLinks: linkRows,
     versions: input.versions,
     warnings,
     summary: {
@@ -344,6 +400,14 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
         mobsWithoutNpc: mobs.filter((m) => m.zones.length && !matchedMobs.has(m.key)).map((m) => m.key),
       },
       maps: { withImage: zoneRows.filter((z) => z.map_json).map((z) => z.name), placeholderFiles, unchecked },
+      factions: {
+        npcsWithFactions: fs.withFactions,
+        npcsWithoutRow: fs.withoutRow,
+        linksLeftOut: fs.leftOut,
+        factions: factionNames.length,
+        namesWithoutRow: [...unlinkedNames].filter((f) => !factionNames.includes(f)),
+        links: { lost: linkRows.filter((l) => l.kind === 'lost').length, gained: linkRows.filter((l) => l.kind === 'gained').length },
+      },
       versions: input.versions,
     },
   };
