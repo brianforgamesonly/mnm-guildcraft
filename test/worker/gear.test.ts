@@ -242,7 +242,9 @@ describe('the item card, and item reports', () => {
     expect(r.data.embeds![1].title).toBe('Blacksmithing · trivial 40');
     expect(JSON.stringify(r.data.embeds![1])).toContain('Smithy');
     const ids = r.data.components!.flatMap((row: any) => row.components.map((b: any) => b.custom_id ?? b.url));
-    expect(ids).toEqual(expect.arrayContaining([`pub:gear:${id}`, `${ITEM_REPORT_PREFIX}${id}`, `img:${id}`, PLANNER_URL]));
+    expect(ids).toEqual(expect.arrayContaining([`pub:gear:${id}`, `${ITEM_REPORT_PREFIX}${id}`, PLANNER_URL]));
+    // Order 24: screenshots are off, so no Stat image.
+    expect(ids).not.toContain(`img:${id}`);
     // Every row stays within Discord's five per row.
     expect(r.data.components!.every((row: any) => row.components.length <= 5)).toBe(true);
     const posted = await send(press(ann, `pub:gear:${id}`));

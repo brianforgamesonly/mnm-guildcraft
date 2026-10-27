@@ -6,6 +6,7 @@ import { CRAFTABLE_MARK, LISTS, listKey } from '../../src/commands/autocomplete.
 import { COMMANDS as NEXT_COMMANDS, DEFINED, SUBCOMMAND } from '../../src/commands/definitions.ts';
 import { ROUTES } from '../../src/interactions.ts';
 import { ITEM_COPY, USED_IN_SQL } from '../../src/commands/item.ts';
+import { SCREENSHOTS_OFF } from '../../src/commands/images.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
 import { MISSING_MODAL_PREFIX, MISSING_PREFIX } from '../../src/commands/reports.ts';
 import { SKILLS_COPY } from '../../src/commands/skills.ts';
@@ -136,23 +137,23 @@ describe('/item', () => {
     expect(reads, JSON.stringify(plan.results)).toEqual([expect.stringMatching(/^SEARCH recipe_component USING COVERING INDEX recipe_component_by_item \(item_id=\?\)/)]);
   });
 
-  it('a craftable item: its recipe, the I know / Report / Request / Stat image buttons, and Post to channel', async () => {
+  it('a craftable item: its recipe, the I know / Report / Request buttons (order 24: no Stat image), and Post to channel', async () => {
     const r = await card('Copper Sword');
     expect(r.data.flags).toBe(64);
     expect(r.data.embeds!.map((e) => e.title)).toEqual(['Copper Sword', 'Blacksmithing · trivial 20']);
-    expect(labels(r)).toEqual([['Post to channel', 'MnMdb', 'MNM Realm'], [ITEM_COPY.knowButton, ITEM_COPY.recipeReportButton, ITEM_COPY.itemReportButton, ITEM_COPY.requestButton, ITEM_COPY.imageButton]]);
-    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`know:${ids.sword}`, `rpt:${ids.sword}`, `rpi:${ids.sword}`, `rqf:${ids.sword}`, `img:${ids.sword}`]);
+    expect(labels(r)).toEqual([['Post to channel', 'MnMdb', 'MNM Realm'], [ITEM_COPY.knowButton, ITEM_COPY.recipeReportButton, ITEM_COPY.itemReportButton, ITEM_COPY.requestButton]]);
+    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`know:${ids.sword}`, `rpt:${ids.sword}`, `rpi:${ids.sword}`, `rqf:${ids.sword}`]);
     // Post to channel rebuilds it publicly, with the same buttons.
     const pub = await send(press(ann, r.data.components![0].components[0].custom_id));
     expect(pub.data.flags).toBeUndefined();
     expect(pub.data.embeds!.map((e) => e.title)).toEqual(['Copper Sword', 'Blacksmithing · trivial 20']);
   });
 
-  it('a gear item with no recipe: stats and source, Report a problem (item issues) and Stat image', async () => {
+  it('a gear item with no recipe: stats and source, Report a problem (item issues); order 24: no Stat image', async () => {
     const r = await card('plain ring');
     expect(r.data.embeds!.length).toBe(1);
     expect(r.data.embeds![0].fields!.map((f) => f.name)).toEqual(expect.arrayContaining(['Slot', 'AC']));
-    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`rpi:${ids.ring}`, `img:${ids.ring}`]);
+    expect(r.data.components![1].components.map((b: any) => b.custom_id)).toEqual([`rpi:${ids.ring}`]);
   });
 
   it('an ingredient-only item: the recipes that use it', async () => {
@@ -184,11 +185,11 @@ describe('/item', () => {
     expect(await one('SELECT item_id, issue, details FROM recipe_report')).toEqual({ item_id: null, issue: 'missing', details: 'Item: Moonsteel Ingot\nBlacksmithing, 2 Moonsteel Ore' });
   });
 
-  it('a lookup writes the craft.find audit row; a screenshot goes the /item image way (no vault: says so, no lookup row)', async () => {
+  it('a lookup writes the craft.find audit row; a stale screenshot: is told screenshots are off (order 24), with no lookup row', async () => {
     await card('Copper Sword');
     expect(await one("SELECT action, target FROM audit_log WHERE action = 'craft.find'")).toEqual({ action: 'craft.find', target: 'item' });
     const shot = await send({ ...top(ann, 'item', { name: 'Copper Sword', screenshot: 'att1' }) });
-    expect(shot.data.content).toMatch(/^Screenshots need a vault channel first/);
+    expect(shot.data.content).toBe(SCREENSHOTS_OFF);
     expect((await one<{ n: number }>("SELECT count(*) AS n FROM audit_log WHERE action = 'craft.find'")).n).toBe(1);
   });
 });

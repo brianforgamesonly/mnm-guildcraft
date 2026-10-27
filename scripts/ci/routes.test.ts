@@ -41,8 +41,9 @@ test('the install permissions are the union of the routes; Create Public Threads
   // Order 16: 292057893888 + Create Private Threads (1 << 36 = 68719476736) = 360777370624.
   // Order 19 (override 3): + Manage Channels (1 << 4 = 16) + Manage Roles (1 << 28 = 268435456) = 361045806096.
   // Order 24 (ITEM 3, approved by the owner): + Create Expressions (1 << 43 = 8796093022208) = 9157138828304.
-  assert.equal(INSTALL_PERMISSIONS, 9157138828304n);
-  assert.equal(INSTALL_PERMISSIONS - 360777370624n, (1n << 4n) | (1n << 28n) | (1n << 43n));
+  // Order 24 (screenshots off, the owner 2026-10-27): - Attach Files (1 << 15 = 32768) = 9157138795536.
+  assert.equal(INSTALL_PERMISSIONS, 9157138795536n);
+  assert.equal(INSTALL_PERMISSIONS - (360777370624n - (1n << 15n)), (1n << 4n) | (1n << 28n) | (1n << 43n));
   assert.equal(INSTALL_PERMISSIONS & (1n << 35n), 0n);
   // The bot can only allow or deny what it holds: the request channel's two thread permissions are among them.
   assert.equal(INSTALL_PERMISSIONS & (1n << 38n), 1n << 38n); // Send Messages in Threads

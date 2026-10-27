@@ -34,7 +34,6 @@ export const ROUTES: Route[] = [
   { method: 'POST', path: '/channels/{}/threads', channel: 'board', needs: [VIEW_CHANNEL, SEND_MESSAGES, EMBED_LINKS], why: 'board: create a post in the forum ("must have the SEND_MESSAGES permission (CREATE_PUBLIC_THREADS is ignored)")' },
   { method: 'POST', path: '/channels/{}/messages', channel: 'board', needs: [VIEW_CHANNEL, SEND_MESSAGES_IN_THREADS, EMBED_LINKS], why: 'board: overflow messages inside a post (threads need SEND_MESSAGES_IN_THREADS)' },
   { method: 'POST', path: '/channels/{}/messages', channel: 'review', needs: [VIEW_CHANNEL, SEND_MESSAGES, EMBED_LINKS], why: 'review: departure notices, report cards, and the dev copy\'s usage warnings (Create Message: "must have the SEND_MESSAGES permission")' },
-  { method: 'POST', path: '/channels/{}/messages', channel: 'vault', needs: [VIEW_CHANNEL, SEND_MESSAGES, ATTACH_FILES], why: 'vault: re-post a screenshot as a file (ATTACH_FILES: "uploading images and files")' },
   { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'board', needs: [VIEW_CHANNEL], why: 'board: edit its own posts ("can be edited by the original message author")' },
   { method: 'DELETE', path: '/channels/{}/messages/{}', channel: 'board', needs: [VIEW_CHANNEL], why: 'board: remove its own overflow messages (MANAGE_MESSAGES only for others\' messages)' },
   { method: 'DELETE', path: '/channels/{}/messages/{}', channel: 'vault', needs: [VIEW_CHANNEL], why: 'vault: remove its own rejected screenshot post' },

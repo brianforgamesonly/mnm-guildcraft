@@ -15,7 +15,6 @@ const BOOLEAN = 5;
 const USER = 6;
 const CHANNEL = 7;
 const ROLE = 8;
-const ATTACHMENT = 11;
 /** Channel type GUILD_FORUM (also src/discord.ts GUILD_FORUM; kept literal so the registration script reads this file alone). */
 const GUILD_FORUM_CHANNEL = 15;
 /** Channel type GUILD_TEXT (also src/discord.ts GUILD_TEXT). */
@@ -56,8 +55,8 @@ export const COMMANDS = [
     type: 1,
     contexts: GUILD_ONLY,
     options: [
+      // Order 24: no screenshot: option (member screenshots are turned off).
       { type: STRING, name: 'name', description: 'The item: pick from the list (craftable ones are marked)', required: true, autocomplete: true, max_length: 100 },
-      { type: ATTACHMENT, name: 'screenshot', description: 'Optional: a screenshot of the item window, for an officer to approve' },
     ],
   },
   {
@@ -175,14 +174,13 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'setup',
-        description: 'Set the roles, the tradeskills and factions forums, and review, vault and request channels',
+        description: 'Set the roles, the tradeskills and factions forums, and the review and request channels',
         options: [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
-          { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
+          { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports and recipe data' },
           // Order 24: the option keeps its name (a rename drops its permission overrides, order 18); it is the tradeskills forum.
           { type: CHANNEL, name: 'board', description: 'The tradeskills forum: one post per tradeskill, listing who can craft it', channel_types: [GUILD_FORUM_CHANNEL] },
           { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
-          { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
           // Order 24.
           { type: CHANNEL, name: 'factions', description: 'A forum channel for the factions board: one post per faction', channel_types: [GUILD_FORUM_CHANNEL] },

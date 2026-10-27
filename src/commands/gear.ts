@@ -13,7 +13,7 @@ import { GEAR_COLS, PAGE_SIZE, relaxStatement, searchStatement, type GearRow } f
 import { ALL_CLASSES, SLOTS, SOURCES, WEAPON_TYPES, type Source } from '../gear/vocab.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, visibleTo, type Acquisition } from '../recipes.ts';
-import { IMAGE_PREFIX, findEmbeds, footerText, itemLinks, loadFind, statFields, trivialText } from './find.ts';
+import { findEmbeds, footerText, itemLinks, loadFind, statFields, trivialText } from './find.ts';
 import { ITEM_REPORT_PREFIX } from './reports.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -65,7 +65,6 @@ export const GEAR_COPY = {
     '-# Sources come from the community wiki; Unknown means the wiki has not recorded one.',
   ].join('\n'),
   reportButton: 'Report a problem',
-  imageButton: 'Stat image',
   /** Order 19 (ITEM 5): a link button on results pages and the details card. */
   plannerButton: 'Character planner (Stories of MnM)',
 } as const;
@@ -477,7 +476,8 @@ function fitCardLines(lines: string[], maxChars = 600): { value: string; shown: 
   return { value: out.length < lines.length ? `${out.join('\n')}\n${GEAR_COPY.more(lines.length - out.length)}` : out.join('\n'), shown: out.length };
 }
 
-const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${itemId}`, GEAR_COPY.reportButton), button(`${IMAGE_PREFIX}${itemId}`, GEAR_COPY.imageButton), plannerLink()]);
+// Order 24: no Stat image (screenshots are off; an old card's button still answers).
+const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${itemId}`, GEAR_COPY.reportButton), plannerLink()]);
 
 async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: unknown[]; zones: ZoneRef[] } | null> {
   const r = await c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId).first<GearRow>();

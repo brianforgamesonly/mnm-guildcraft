@@ -108,19 +108,18 @@ No export? A brand-new copy skips this step: Step 10 fills in the game data, and
 Discord only lets the bot's commands into a server the bot has been added to, so this comes before Step 9. Open this link, with your Application ID in place of `<APP ID>`, choose your server and press **Authorize** (Discord: https://docs.discord.com/developers/topics/oauth2, bot authorization flow):
 
 ```
-https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=9157138828304
+https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=9157138795536
 ```
 
-`9157138828304` is these permissions together, each one because GuildCraft calls something that needs it:
+`9157138795536` is these permissions together, each one because GuildCraft calls something that needs it:
 
 | Permission | Why |
 |---|---|
-| View Channel | to see the roster board, review and vault channels |
-| Send Messages | to create the roster board's posts (in a forum, a post) and post in the review and vault channels |
+| View Channel | to see the tradeskills and factions forums, and the review and request channels |
+| Send Messages | to create the boards' posts (in a forum, a post) and post in the review channel |
 | Send Messages in Threads | to add messages inside board posts |
 | Embed Links | GuildCraft's posts are embeds |
-| Attach Files | to re-post item screenshots in the vault channel |
-| Read Message History | to read archived board posts and the vault's screenshots back |
+| Read Message History | to read archived board posts, and an old vault's approved screenshots back |
 | Manage Threads | to keep board posts open, pin the index post, and remove old board posts on a rebuild; to rename, close and reopen craft request threads |
 | Create Private Threads | to open one private thread per craft request |
 | Manage Channels | `/guildcraft setup`'s Create GuildCraft channels: the category, its channels, and the forums' sort order and default reaction |
