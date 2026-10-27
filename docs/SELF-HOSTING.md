@@ -108,10 +108,10 @@ No export? A brand-new copy skips this step: Step 10 fills in the game data, and
 Discord only lets the bot's commands into a server the bot has been added to, so this comes before Step 9. Open this link, with your Application ID in place of `<APP ID>`, choose your server and press **Authorize** (Discord: https://docs.discord.com/developers/topics/oauth2, bot authorization flow):
 
 ```
-https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=361045806096
+https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.commands&permissions=9157138828304
 ```
 
-`361045806096` is these permissions together, each one because GuildCraft calls something that needs it:
+`9157138828304` is these permissions together, each one because GuildCraft calls something that needs it:
 
 | Permission | Why |
 |---|---|
@@ -123,8 +123,9 @@ https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.c
 | Read Message History | to read archived board posts and the vault's screenshots back |
 | Manage Threads | to keep board posts open, pin the index post, and remove old board posts on a rebuild; to rename, close and reopen craft request threads |
 | Create Private Threads | to open one private thread per craft request |
-| Manage Channels | `/guildcraft setup`'s Create GuildCraft channels: the category, its channels and the forum's sort order |
-| Manage Permissions (Manage Roles) | Create GuildCraft channels: adding the officer role to its private channels later (no role is ever created or edited) |
+| Manage Channels | `/guildcraft setup`'s Create GuildCraft channels: the category, its channels, and the forums' sort order and default reaction |
+| Manage Permissions (Manage Roles) | Create GuildCraft channels: adding the officer role to its private channel later (no role is ever created or edited) |
+| Create Expressions | one server emoji, **guildcraft**, the default reaction on GuildCraft's forums (order 24; optional: without it the forums keep their reaction) |
 
 ## Step 9 — Register the commands
 

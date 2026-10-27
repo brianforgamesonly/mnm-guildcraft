@@ -25,6 +25,7 @@ jobs:
       - run: npm run test:routes
       - run: npm run test:operator-text
       - run: npm run test:health
+      - run: npm run test:emoji
       # Order 17b: a zone's site link held on main may not disappear (src/zone/sites.json); the base copy is fetched.
       - run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
       - run: npm run test:zone-sites

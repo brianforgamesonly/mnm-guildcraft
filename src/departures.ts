@@ -162,7 +162,7 @@ export function noticeMessage(userId: string, name: string | null, characters: C
       [
         `**Characters**\n${list}`,
         '',
-        'While they are away their characters are hidden from `/item`, `/roster` and the roster board. If they come back and use GuildCraft, they show again.',
+        'While they are away their characters are hidden from `/item`, `/roster` and the tradeskills board. If they come back and use GuildCraft, they show again.',
         '**Remove characters** removes the characters (their skills are kept; **Add character** on `/me` with the same name restores one). **Keep** leaves them as they are. Officers only.',
       ].join('\n'),
       4096,

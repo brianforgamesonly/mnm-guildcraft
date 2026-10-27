@@ -50,7 +50,7 @@ exports[`production departure notes in status, as at 2b204aa > the notice itself
       "description": "**Characters**
 **Bochar** (WIZ, level 30)
 
-While they are away their characters are hidden from \`/item\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+While they are away their characters are hidden from \`/item\`, \`/roster\` and the tradeskills board. If they come back and use GuildCraft, they show again.
 **Remove characters** removes the characters (their skills are kept; **Add character** on \`/me\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
       "title": "Bo left the server",
     },
@@ -88,7 +88,7 @@ exports[`production departure notes in status, as at 2b204aa > the notice itself
       "description": "**Characters**
 No characters registered.
 
-While they are away their characters are hidden from \`/item\`, \`/roster\` and the roster board. If they come back and use GuildCraft, they show again.
+While they are away their characters are hidden from \`/item\`, \`/roster\` and the tradeskills board. If they come back and use GuildCraft, they show again.
 **Remove characters** removes the characters (their skills are kept; **Add character** on \`/me\` with the same name restores one). **Keep** leaves them as they are. Officers only.",
       "title": "A member left the server",
     },
@@ -104,7 +104,7 @@ exports[`production status: every branch, as at 2b204aa > board set, unset revie
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** none yet
-**Roster board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
+**Tradeskills board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
@@ -117,7 +117,7 @@ exports[`production status: every branch, as at 2b204aa > board set, unset revie
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** none yet
-**Roster board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
+**Tradeskills board:** <#600000000000000020> · 1 of 5 posts · last refresh <t:1792544400:f> (<t:1792544400:R>) · 1 waiting to refresh
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
@@ -130,7 +130,7 @@ exports[`production status: every branch, as at 2b204aa > dry run newer than imp
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -142,7 +142,7 @@ exports[`production status: every branch, as at 2b204aa > dry run newer than imp
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -154,7 +154,7 @@ exports[`production status: every branch, as at 2b204aa > failed (production) 1`
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -166,7 +166,7 @@ exports[`production status: every branch, as at 2b204aa > failed (unset) 1`] = `
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -178,7 +178,7 @@ exports[`production status: every branch, as at 2b204aa > failed without detail 
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -190,7 +190,7 @@ exports[`production status: every branch, as at 2b204aa > failed without detail 
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -203,7 +203,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run (pr
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792396800:f> (<t:1792396800:R>) · 1 warning · ok
 **Latest nightly run:** <t:1792483200:f> (<t:1792483200:R>) · **refused**. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -216,7 +216,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run (un
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792396800:f> (<t:1792396800:R>) · 1 warning · ok
 **Latest nightly run:** <t:1792483200:f> (<t:1792483200:R>) · **refused**. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -228,7 +228,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run fai
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -240,7 +240,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run fai
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · failed. If this repeats, tell Joegandomi.
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -252,7 +252,7 @@ exports[`production status: every branch, as at 2b204aa > none yet (production) 
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** none yet
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -264,7 +264,7 @@ exports[`production status: every branch, as at 2b204aa > none yet (unset) 1`] =
 "## GuildCraft status
 **Data version:** no completed import yet
 **Last data update:** none yet
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -276,7 +276,7 @@ exports[`production status: every branch, as at 2b204aa > ok (production) 1`] = 
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
+**Tradeskills board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** <#600000000000000010>
@@ -289,7 +289,7 @@ exports[`production status: every branch, as at 2b204aa > ok (unset) 1`] = `
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
+**Tradeskills board:** <#600000000000000020> · 0 of 5 posts · last refresh never · 0 waiting to refresh
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** <#600000000000000010>
@@ -302,7 +302,7 @@ exports[`production status: every branch, as at 2b204aa > overdue (production) 1
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
@@ -314,7 +314,7 @@ exports[`production status: every branch, as at 2b204aa > overdue (unset) 1`] = 
 "## GuildCraft status
 **Data version:** \`v2026.10.19\`
 **Last data update:** <t:1792483200:f> (<t:1792483200:R>) · 1 warning · ok
-**Roster board:** not set up (\`/guildcraft setup board:\`)
+**Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
 **Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)

@@ -153,7 +153,7 @@ export function renderIndex(entries: IndexEntry[], refreshedAtMs: number, line: 
   const description = truncate(`${body}\n\nLast refresh: <t:${t}:f> (<t:${t}:R>)`, EMBED_LIMITS.description);
   const content = line === 'on' ? indexLine(entries.length) : '';
   return {
-    message: { content, embeds: [{ title: 'Crafting roster: index', description, color: BOARD_COLOR }], allowed_mentions: NO_MENTIONS },
+    message: { content, embeds: [{ title: 'Tradeskills: index', description, color: BOARD_COLOR }], allowed_mentions: NO_MENTIONS },
     hashable: `${body}\n\ncontent: ${content}`,
   };
 }

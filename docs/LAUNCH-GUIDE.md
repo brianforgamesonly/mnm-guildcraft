@@ -7,7 +7,7 @@ Steps a server admin follows when GuildCraft is added to a guild's server. Start
 A server admin (someone with **Manage Server**) opens this link, chooses the server and presses **Authorize**:
 
 ```
-https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=361045806096
+https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=9157138828304
 ```
 
 Discord shows the permissions GuildCraft asks for before you authorize. Each is there because GuildCraft calls something that needs it, and nothing else is asked for:
@@ -22,14 +22,19 @@ Discord shows the permissions GuildCraft asks for before you authorize. Each is 
 | Read Message History | to find archived board posts, and to read approved screenshots back |
 | Manage Threads | to keep board posts open, pin the board's index post, and remove old board posts when the board is rebuilt; to rename, close and reopen craft request threads |
 | Create Private Threads | to open one private thread per craft request in the request channel |
-| Manage Channels | for **Create GuildCraft channels** in `/guildcraft setup`: to create the GuildCraft category and its four channels, and to set the roster forum's sort order |
-| Manage Permissions (Manage Roles) | for **Create GuildCraft channels**: to add your officer role to the private channels after they exist. GuildCraft never creates, edits or assigns roles |
+| Manage Channels | for **Create GuildCraft channels** in `/guildcraft setup`: to create the GuildCraft category and its four channels, and to set the forums' sort order and default reaction |
+| Manage Permissions (Manage Roles) | for **Create GuildCraft channels**: to add your officer role to the private channel after it exists. GuildCraft never creates, edits or assigns roles |
+| Create Expressions | to add one emoji, **guildcraft** (GuildCraft's dwarf), used as the default reaction on GuildCraft's two forums. Without it the forums keep their reaction and everything else works |
 
 GuildCraft does not ask for Administrator, Manage Messages, Create Public Threads or any moderation permission. It never reads members' messages. Discord's own guide to the link: https://docs.discord.com/developers/topics/oauth2 (bot authorization flow; `permissions` is "an integer corresponding to the permission calculations for the bot").
 
 After authorizing, run `/guildcraft setup` to choose the roles and channels; it checks GuildCraft can do its job in each channel you pick and names anything missing.
 
-**Or let GuildCraft create its channels (order 19).** Run `/guildcraft setup officer_role:` with your officer role, then press **Create GuildCraft channels**. It creates whichever of these are missing, in a **GuildCraft** category, and saves them: a roster board forum (everyone can read and reply; only GuildCraft posts), an officer review channel and an item vault (officers, admins and GuildCraft only), and a craft request channel (everyone can see it; private request threads only). Pressing it again never duplicates anything. The roster forum needs **Community** turned on (Server Settings → Enable Community); without it the other three are created and setup says so.
+**Or let GuildCraft create its channels (order 19).** Run `/guildcraft setup officer_role:` with your officer role, then press **Create GuildCraft channels**. It creates whichever of these are missing, in a **GuildCraft** category, and saves them (order 24): **GC-Tradeskills** and **GC-Factions**, two forums (everyone can read and reply; only GuildCraft posts), **GC-Craft Requests** (everyone can see it; private request threads only) and **GC-Officer Review** (officers, admins and GuildCraft only). Both forums are sorted by creation date and get the **guildcraft** emoji as their default reaction, and both boards start filling in. Pressing it again never duplicates anything, and a channel your server already uses is kept as it is, never renamed. The forums need **Community** turned on (Server Settings → Enable Community); without it the two text channels are created and setup says so.
+
+## Servers that added GuildCraft before the factions board (order 24)
+
+The **guildcraft** emoji needs **Create Expressions**, which earlier install links did not ask for. Grant it to GuildCraft's role (Server Settings → Roles → MNM-Guildcraft), or open the install link above again, choose the same server and press **Authorize**. Then press **Create GuildCraft channels** (or pick a forum with `setup board:` or `factions:`): forums with no default reaction of their own get the emoji. Without it, everything else works and the forums keep their reaction.
 
 ## Servers that added GuildCraft before Create GuildCraft channels
 

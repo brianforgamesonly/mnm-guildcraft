@@ -29,7 +29,7 @@ async function removeMemberPreview(c: Ctx, userId: string | undefined): Promise<
   return ephemeral(
     [
       what,
-      `${who} is then marked as having left: hidden from \`/item\`, \`/roster\` and the roster board until they use GuildCraft again.`,
+      `${who} is then marked as having left: hidden from \`/item\`, \`/roster\` and the tradeskills board until they use GuildCraft again.`,
       'Their skills are kept, and **Add character** on `/me` with the same name restores a character. Nothing is deleted.',
     ].join('\n'),
     { components: [row([button(`${REMOVE_PREFIX}yes:${userId}`, 'Confirm', STYLE_DANGER), button(`${REMOVE_PREFIX}no:${userId}`, 'Cancel', STYLE_SECONDARY)])] },
