@@ -18,7 +18,7 @@ const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
     `Officer role: ${g.officer_role_id ? `<@&${g.officer_role_id}>` : 'none'} (Administrator and Manage Server always count as officers)`,
   ].join('\n');
 
-const describeBoard = (g: Pick<Guild, 'board_channel_id'>) => `Roster board: ${g.board_channel_id ? `<#${g.board_channel_id}>` : 'not set (`board:` picks a forum channel)'}`;
+const describeBoard = (g: Pick<Guild, 'board_channel_id'>) => `Tradeskills board: ${g.board_channel_id ? `<#${g.board_channel_id}>` : 'not set (`board:` picks a forum channel)'}`;
 const describeReview = (g: Pick<Guild, 'review_channel_id'>) =>
   `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices and reports)'}`;
 const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
@@ -136,7 +136,7 @@ const CHANNEL_KINDS = {
   board: {
     type: GUILD_FORUM,
     permissions: BOARD_PERMISSIONS,
-    wrongType: (id: string) => `<#${id}> is not a forum channel. The roster board needs a forum channel: create one (Create Channel → Forum), then pick it here.`,
+    wrongType: (id: string) => `<#${id}> is not a forum channel. The tradeskills board needs a forum channel: create one (Create Channel → Forum), then pick it here.`,
   },
   // Order 24.
   factions: {
@@ -229,8 +229,9 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
 /** Order 19: the Create GuildCraft channels button (src/commands/channels.ts), "gcc:". */
 export const CREATE_CHANNELS_PREFIX = 'gcc:';
 export const CREATE_CHANNELS_LABEL = 'Create GuildCraft channels';
-const CHANNEL_SETTINGS = ['board_channel_id', 'review_channel_id', 'vault_channel_id', 'request_channel_id'] as const;
-/** The button: on the settings reply and after an officer role is saved (`always`), and on a save that leaves any of the four channels unset. */
+/** Order 24: the channels the button creates, from its own layout (src/commands/channels.ts LAYOUT; the vault is no longer one). */
+const CHANNEL_SETTINGS = ['board_channel_id', 'faction_board_channel_id', 'review_channel_id', 'request_channel_id'] as const;
+/** The button: on the settings reply and after an officer role is saved (`always`), and on a save that leaves any of its channels unset. */
 export function setupButtons(s: Pick<Guild, (typeof CHANNEL_SETTINGS)[number]>, always = false): { components?: unknown[] } {
   if (!always && CHANNEL_SETTINGS.every((k) => s[k])) return {};
   return { components: [row([button(CREATE_CHANNELS_PREFIX, CREATE_CHANNELS_LABEL, STYLE_PRIMARY)])] };
@@ -286,6 +287,8 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
     lines.push(factionBuildLine(factionCount, factionPosts));
     if (factionsMoved) lines.push(`The old factions board's posts in <#${before.faction_board_channel_id}> are left as they are.`);
   }
+  // Order 24 (ITEM 3): a forum picked here gets the GuildCraft emoji from Create GuildCraft channels, which handles the
+  // forums already set too (src/commands/channels.ts): a press adds it where a forum has no reaction of its own.
   // An officer role saved: the button is offered, so a press adds it to the channels it created (review of PR B).
   return ephemeral(lines.join('\n'), setupButtons(after, officerRole !== undefined));
 }
@@ -471,8 +474,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
     ...alarmLine,
     ...dryLine,
     c.guild.board_channel_id
-      ? `**Roster board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
-      : '**Roster board:** not set up (`/guildcraft setup board:`)',
+      ? `**Tradeskills board:** <#${c.guild.board_channel_id}> · ${b.posts} of ${b.skills} posts · last refresh ${when(b.refreshed)} · ${b.dirty} waiting to refresh`
+      : '**Tradeskills board:** not set up (`/guildcraft setup board:`)',
     ...(c.guild.board_channel_id ? [boardOrderLine(inOrder)] : []),
     // Order 24.
     c.guild.faction_board_channel_id
@@ -508,13 +511,13 @@ export async function guildcraftRebuildBoard(c: Ctx, opts: Option[] = []): Promi
       ].join('\n'),
     );
   }
-  if (!c.guild.board_channel_id) return ephemeral('There is no roster board yet. Set one up first with `/guildcraft setup board:`.');
+  if (!c.guild.board_channel_id) return ephemeral('There is no tradeskills board yet. Set one up first with `/guildcraft setup board:`.');
   await c.db.batch([requestRebuild(c.db, c.guild.id), audit(c.db, c.guild.id, c.userId, 'board.rebuild', `guild:${c.guild.id}`, null, null)]);
   c.effects.board = true;
   c.effects.rebuild = true;
   return ephemeral(
     [
-      `Rebuilding the roster board in <#${c.guild.board_channel_id}> in A→Z order: each tradeskill post is created again, then the old one is deleted. Posts with member replies are kept as they are.`,
+      `Rebuilding the tradeskills board in <#${c.guild.board_channel_id}> in A→Z order: each tradeskill post is created again, then the old one is deleted. Posts with member replies are kept as they are.`,
       'Most of it happens within a minute, all of it within 15 minutes. `/guildcraft status` shows the board order.',
       "For A→Z to show at the top, the forum's Default Sort Order must be Creation Time (Edit Channel).",
     ].join('\n'),

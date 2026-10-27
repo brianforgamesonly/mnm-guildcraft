@@ -8,7 +8,7 @@
 // needed to see a channel or any thread in it (topics/permissions). EMBED_LINKS: Discord's table describes it only as
 // auto-embedding links; it is listed where the bot's own posts are embeds, as /guildcraft setup has required since
 // order 5 (whether a bot's embeds need it is unverified either way).
-import { ATTACH_FILES, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_CHANNELS, MANAGE_ROLES, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
+import { ATTACH_FILES, CREATE_GUILD_EXPRESSIONS, CREATE_PRIVATE_THREADS, EMBED_LINKS, MANAGE_CHANNELS, MANAGE_ROLES, MANAGE_THREADS, READ_MESSAGE_HISTORY, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL } from './discord.ts';
 
 /**
  * The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). Order 24: the
@@ -57,7 +57,10 @@ export const ROUTES: Route[] = [
   // guild can be allowed/denied" (Create Guild Channel), so every bit it sets is one the install link asks for.
   { method: 'GET', path: '/guilds/{}/channels', channel: null, needs: [], why: 'channel setup: the channels that already exist, to reuse them (Get Guild Channels: no permission stated)' },
   { method: 'POST', path: '/guilds/{}/channels', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: create the category and its channels, with their overwrites (Create Guild Channel: "Requires the MANAGE_CHANNELS permission"; it does not say whether overwrites also need MANAGE_ROLES, so the button requires both before any create)' },
-  { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
+  { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order and (order 24) default reaction (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
+  // Order 24 (ITEM 3, read 2026-10-27): the server's GuildCraft emoji, the forums' default reaction.
+  { method: 'GET', path: '/guilds/{}/emojis', channel: null, needs: [], why: 'emoji: find the server\'s guildcraft emoji (List Guild Emojis: no permission stated)' },
+  { method: 'POST', path: '/guilds/{}/emojis', channel: null, needs: [CREATE_GUILD_EXPRESSIONS], why: 'emoji: create the guildcraft emoji once (Create Guild Emoji: "Requires the CREATE_GUILD_EXPRESSIONS permission")' },
   { method: 'PUT', path: '/channels/{}/permissions/{}', channel: null, needs: [MANAGE_ROLES], why: 'channel setup: add the officer role to its private channels later (Edit Channel Permissions: "Requires the MANAGE_ROLES permission")' },
 ];
 
@@ -73,6 +76,7 @@ export const PERMISSION_NAMES = new Map<bigint, string>([
   [CREATE_PRIVATE_THREADS, 'Create Private Threads'],
   [MANAGE_CHANNELS, 'Manage Channels'],
   [MANAGE_ROLES, 'Manage Permissions (Manage Roles)'],
+  [CREATE_GUILD_EXPRESSIONS, 'Create Expressions'],
 ]);
 
 const union = (rs: Route[]) => rs.reduce((b, r) => r.needs.reduce((x, n) => x | n, b), 0n);

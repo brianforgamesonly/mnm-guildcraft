@@ -988,3 +988,23 @@ No new sentence: each button's label is a zone's name from the data. What the me
 | src/commands/setup.ts:479-480 | (status) **Factions board:** #\<channel> · \<x> of \<y> posts · last refresh \<time> · \<n> waiting to refresh · A→Z / out of order — run `/guildcraft rebuild-board which:Factions` · or: not set up (`/guildcraft setup factions:`) | DRAFT |
 | src/commands/setup.ts:499 | There is no factions board yet. Set one up first with `/guildcraft setup factions:`. | DRAFT |
 | src/commands/setup.ts:505-507 | Rebuilding the factions board in #\<channel> in A→Z order: each faction post is created again, then the old one is deleted. Posts with member replies are kept as they are. · About 25 posts are created every 15 minutes, so a full rebuild takes a few hours. `/guildcraft status` shows the board order. · For A→Z to show at the top, the forum's Default Sort Order must be Creation Time (Edit Channel). | DRAFT |
+
+## Work order 24, PR B: emoji, channel layout, "tradeskills board" (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/channels.ts:45-48 | (names) GC-Tradeskills · GC-Factions · GC-Craft Requests · GC-Officer Review (category: GuildCraft) | DRAFT |
+| src/commands/channels.ts:45-48, 111-112 | Created / Kept #\<channel>: the tradeskills board: one post per tradeskill, listing who can craft it. · …: the factions board: one post per faction, listing the creatures whose wiki page names it. · …: craft requests: one private thread per request. · …: officers only: member reports, departures, and screenshots to approve. | DRAFT |
+| src/commands/channels.ts:114 | **\<name>** was not created: forum channels need **Community**. Turn it on (Server Settings → Enable Community), then press the button again. | DRAFT |
+| src/commands/channels.ts:115 | No officer role is set, so the new officer review channel is visible only to members with Administrator (and GuildCraft). Run `/guildcraft setup officer_role:`, then press **Create GuildCraft channels** on its reply to add the role to it. | DRAFT |
+| src/emoji.ts:21 | Set #\<channel>'s default reaction to the GuildCraft emoji. | DRAFT |
+| src/emoji.ts:22 | Added the **guildcraft** emoji to this server: it is the default reaction on GuildCraft's forums. | DRAFT |
+| src/emoji.ts:26 | The forums keep their default reaction: GuildCraft can't add its emoji here without **Create Expressions**. Grant it to GuildCraft's role (Server Settings → Roles), or re-invite GuildCraft with the current install link (ask Joegandomi), then press the button again. | DRAFT |
+| src/emoji.ts:28 | The forums keep their default reaction: this server has no free emoji slot for the GuildCraft emoji. Free one (Server Settings → Emoji), then press the button again. | DRAFT |
+| src/emoji.ts:29 | The forums keep their default reaction: Discord refused the GuildCraft emoji (\<status>). Press the button again to retry. | DRAFT |
+| assets/emoji/guildcraft.png | (the server emoji **guildcraft**) the owner's bot icon, 128x128 | DRAFT |
+| src/commands/definitions.ts:178, 183, 191, 195 | (setup) Set the roles, the tradeskills and factions forums, and review, vault and request channels · (board:) The tradeskills forum: one post per tradeskill, listing who can craft it · (status) Data version, last data update, the tradeskills and factions boards, and departures · (rebuild-board) Recreate a board's posts in A→Z order (posts with replies are kept) | DRAFT |
+| src/commands/setup.ts:21, 139, 477-478, 514, 520; src/commands/members.ts:32; src/departures.ts:165 | "roster board" → "tradeskills board" (Tradeskills board: …; The tradeskills board needs a forum channel…; **Tradeskills board:** …; There is no tradeskills board yet…; Rebuilding the tradeskills board in…; hidden from `/item`, `/roster` and the tradeskills board) | DRAFT |
+| src/board/render.ts:156 | (the tradeskills index embed title) Tradeskills: index (was "Crafting roster: index") | DRAFT |
+| docs/LAUNCH-GUIDE.md:10, 25-27, 33-37 | The install link (permissions=9157138828304), the Create Expressions row, the new layout, "Servers that added GuildCraft before the factions board" | DRAFT |
+| docs/SELF-HOSTING.md:111, 114, 126-128 | The install link and number (9157138828304), the Create Expressions row | DRAFT |

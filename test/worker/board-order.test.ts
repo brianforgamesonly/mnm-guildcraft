@@ -171,7 +171,7 @@ describe('/guildcraft rebuild-board', () => {
   });
 
   it('needs a board, and is admin only', async () => {
-    expect(await rebuild()).toContain('There is no roster board yet');
+    expect(await rebuild()).toContain('There is no tradeskills board yet');
     expect(await reply(exchange(cmd(as('100000000000000002', { nick: 'Bo' }), 'guildcraft', 'rebuild-board'), TOKEN))).toMatch(/Only server admins/);
   });
 });

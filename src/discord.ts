@@ -238,6 +238,8 @@ export const MANAGE_THREADS = 1n << 34n;
 /** Order 16: the request channel's private threads ("Allows for creating private threads"). */
 export const CREATE_PRIVATE_THREADS = 1n << 36n;
 export const SEND_MESSAGES_IN_THREADS = 1n << 38n;
+/** Order 24: creating the server's GuildCraft emoji (Create Guild Emoji "Requires the CREATE_GUILD_EXPRESSIONS permission"). */
+export const CREATE_GUILD_EXPRESSIONS = 1n << 43n;
 /** Channel type GUILD_FORUM. */
 export const GUILD_FORUM = 15;
 /** Channel type GUILD_TEXT (order 7: the review channel). */

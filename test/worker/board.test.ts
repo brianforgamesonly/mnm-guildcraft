@@ -483,13 +483,13 @@ describe('/guildcraft status', () => {
       "INSERT INTO data_import (source, source_version, status, started_at, finished_at, warnings) VALUES ('test', 'abc1234 / 2026-10-19T07:00:00Z', 'ok', '2026-10-19T07:30:00Z', '2026-10-19T07:31:00Z', '[1,2,3]')",
     ).run();
     let r = await reply(exchange(cmd(admin, 'guildcraft', 'status'), TOKEN));
-    expect(r.data.content).toContain('**Roster board:** not set up');
+    expect(r.data.content).toContain('**Tradeskills board:** not set up');
     await setupBoard();
     r = await reply(exchange(cmd(admin, 'guildcraft', 'status'), TOKEN));
     expect(r.data.flags).toBe(64);
     expect(r.data.content).toContain('**Data version:** `abc1234 / 2026-10-19T07:00:00Z`');
     expect(r.data.content).toMatch(/\*\*Last data update:\*\* <t:\d+:f> \(<t:\d+:R>\) · 3 warnings · ok/);
-    expect(r.data.content).toMatch(new RegExp(`\\*\\*Roster board:\\*\\* <#${FORUM}> · 5 of 5 posts · last refresh <t:\\d+:f> \\(<t:\\d+:R>\\) · 0 waiting to refresh`));
+    expect(r.data.content).toMatch(new RegExp(`\\*\\*Tradeskills board:\\*\\* <#${FORUM}> · 5 of 5 posts · last refresh <t:\\d+:f> \\(<t:\\d+:R>\\) · 0 waiting to refresh`));
     expect(r.data.content).toContain('**Backup:** none yet');
     expect(r.data.content).toContain('**Usage against the free-tier limits:** none yet');
   });

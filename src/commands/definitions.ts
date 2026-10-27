@@ -175,11 +175,12 @@ export const COMMANDS = [
       {
         type: SUBCOMMAND,
         name: 'setup',
-        description: 'Set the roles, roster board, and review, vault and request channels (leave all out to see them)',
+        description: 'Set the roles, the tradeskills and factions forums, and review, vault and request channels',
         options: [
           { type: ROLE, name: 'member_role', description: 'Members need this role to use GuildCraft (default: anyone)' },
           { type: ROLE, name: 'officer_role', description: 'Officers: edit entries, handle departures, reports, screenshots and recipe data' },
-          { type: CHANNEL, name: 'board', description: 'A forum channel for the roster board: one post per tradeskill', channel_types: [GUILD_FORUM_CHANNEL] },
+          // Order 24: the option keeps its name (a rename drops its permission overrides, order 18); it is the tradeskills forum.
+          { type: CHANNEL, name: 'board', description: 'The tradeskills forum: one post per tradeskill, listing who can craft it', channel_types: [GUILD_FORUM_CHANNEL] },
           { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
@@ -187,11 +188,11 @@ export const COMMANDS = [
           { type: CHANNEL, name: 'factions', description: 'A forum channel for the factions board: one post per faction', channel_types: [GUILD_FORUM_CHANNEL] },
         ],
       },
-      { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },
+      { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the tradeskills and factions boards, and departures' },
       {
         type: SUBCOMMAND,
         name: 'rebuild-board',
-        description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)',
+        description: 'Recreate a board\'s posts in A→Z order (posts with replies are kept)',
         // Order 24: which board, from the boards' own list (src/board/kinds.ts); the tradeskill board when left out, as before.
         options: [{ type: STRING, name: 'which', description: 'The board to rebuild (default: tradeskills)', choices: BOARDS.map((b) => ({ name: b.label, value: b.name })) }],
       },
