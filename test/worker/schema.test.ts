@@ -31,14 +31,16 @@ describe('schema (migrations/0001_init.sql)', () => {
     ).all<{ name: string }>();
     expect(prdTables.length).toBe(14);
     // Order 16 (0012): craft_notify, craft_request, craft_request_item. Order 17 (0013): zone, zone_name, npc, import_source.
-    // Order 20 (0016): sweep_run, the heartbeat.
+    // Order 20 (0016): sweep_run, the heartbeat. Order 24 (0018): faction, npc_faction, faction_post.
     expect(departureTables).toEqual([
       'game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob', 'craft_notify', 'craft_request', 'craft_request_item',
-      'zone', 'zone_name', 'npc', 'import_source', 'sweep_run',
+      'zone', 'zone_name', 'npc', 'import_source', 'sweep_run', 'faction', 'npc_faction', 'faction_post',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
       'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live', 'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+      // Order 24 (0018): a faction's links.
+      'npc_faction_by_faction',
       // Order 19 (0014): /item's "used in" statement.
       'recipe_component_by_item',
     ]);

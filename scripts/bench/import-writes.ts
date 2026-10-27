@@ -19,16 +19,21 @@ const { values: args } = parseArgs({
     runs: { type: 'string', default: '2' },
     // Order 17: the zone sources, as scripts/import/zone-files.ts wrote them.
     'zones-dir': { type: 'string' },
+    // Order 24: apply migrations only up to this one (inclusive), to build the remote copy's state on a fresh local database.
+    until: { type: 'string' },
   },
 });
 if (!args.file) throw new Error('--file is required');
 
 const { db, dispose } = await localDb();
 try {
+  // A fresh local database has no migrations table yet: wrangler's own definition.
+  await db.run(['CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)']);
   const applied = new Set((await db.all<{ name: string }>('SELECT name FROM d1_migrations')).map((r) => r.name));
   const dir = new URL('../../migrations/', import.meta.url);
   for (const name of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
     if (applied.has(name)) continue;
+    if (args.until && name > args.until) break;
     const sql = readFileSync(new URL(name, dir), 'utf8').replace(/--.*$/gm, '');
     const statements = sql.split(';').map((s) => s.trim()).filter(Boolean);
     let total = 0;

@@ -10,7 +10,7 @@
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
 import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
-import { buildZonePlan, ZoneStructureError, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
+import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
 export const SOURCE = 'mnm-tools/wiki.json';
 
@@ -450,6 +450,12 @@ const NPC_FIELDS = ['name', 'kind', 'level', 'race', 'class', 'location', 'loot_
 export const npcDiffers = (o: StoredNpc | undefined, n: NpcRow) => !o || o.active !== 1 || NPC_FIELDS.some((f) => o[f] !== n[f]);
 export const npcId = (zoneKey: string, name: string) => `${zoneKey}|${name.toLowerCase()}`;
 export const zoneNameId = (source: string, name: string) => `${source}|${name}`;
+// Order 24 (0018): faction names and their links to npc rows, compared the same way.
+export const factionDiffers = (o: { active: number } | undefined) => !o || o.active !== 1;
+type StoredLink = FactionLinkRow & { active: number };
+export const linkId = (l: Pick<FactionLinkRow, 'zone_key' | 'npc_name' | 'faction' | 'kind'>) => `${npcId(l.zone_key, l.npc_name)}|${l.faction}|${l.kind}`;
+/** npc_name is a NOCASE column: a case change is written (as npcDiffers sees the npc row's). */
+export const linkDiffers = (o: StoredLink | undefined, l: FactionLinkRow) => !o || o.active !== 1 || o.npc_name !== l.npc_name;
 
 /** The wiki link as mnm-tools builds it (mnmdb/app.js:179-180). Checked live in order 3: 21 of 21 sampled pages 200, no redirect. */
 export const WIKI_BASE = 'https://monstersandmemories.miraheze.org/wiki/';
@@ -489,6 +495,9 @@ export interface ExistingState {
   zones: Map<string, StoredZone>;
   zoneNames: Map<string, StoredZoneName>;
   npcs: Map<string, StoredNpc>;
+  /** Order 24 (0018): factions by name, links by linkId. */
+  factions: Map<string, { active: number }>;
+  factionLinks: Map<string, StoredLink>;
   importSources: Map<string, { sha: string; changed_at: string }>;
   /** Indexes per table, from the live schema: each written row can also write one entry in each (the write bound). */
   indexes: Record<string, number>;
@@ -853,7 +862,12 @@ export interface Predicted {
   game_class: { insert: number; update: number; deactivate: number };
   mob: { insert: number; update: number; deactivate: number };
   /** Order 17: rows each zone table would write (inserts and updates together), absent without the zone sources. */
-  zones?: { zone: number; zone_name: number; npc: number; import_source: number; deactivate: { zone: number; zone_name: number; npc: number } };
+  zones?: {
+    zone: number; zone_name: number; npc: number; import_source: number; faction: number; npc_faction: number;
+    deactivate: { zone: number; zone_name: number; npc: number; faction: number; npc_faction: number };
+    /** Order 24: factions whose post would show something new (their changed_at is set). */
+    factions_changed: number;
+  };
 }
 
 export function predict(plan: Plan, ex: ExistingState): Predicted {
@@ -891,11 +905,14 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
     const z = plan.zones;
     const gone = zoneDeactivations(z, ex);
     p.zones = {
-      deactivate: { zone: gone.zones.length, zone_name: gone.names.length, npc: gone.npcs.length },
+      deactivate: { zone: gone.zones.length, zone_name: gone.names.length, npc: gone.npcs.length, faction: gone.factions.length, npc_faction: gone.links.length },
       zone: z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).length,
       zone_name: z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)).length,
       npc: z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).length,
       import_source: z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt).length,
+      faction: z.factions.filter((f) => factionDiffers(ex.factions.get(f))).length,
+      npc_faction: z.factionLinks.filter((l) => linkDiffers(ex.factionLinks.get(linkId(l)), l)).length,
+      factions_changed: factionChanges(z, ex).size,
     };
   }
   for (const r of plan.recipes) {
@@ -936,7 +953,7 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
  * The game-data tables the import writes: every Statement names one, and import.test.ts checks each statement's SQL
  * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
  */
-export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source'] as const;
+export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction'] as const;
 export type Table = (typeof IMPORT_TABLES)[number];
 /** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
 export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
@@ -1111,6 +1128,15 @@ function mobGroups(plan: Plan, ex: ExistingState | undefined, stmt: (table: Tabl
  */
 function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Table, rows: number, sql: string) => Statement): Statement[][] {
   const groups: Statement[][] = [];
+  // Order 24: a write that changes what a faction's post shows (a zone's name, an npc row, a link) carries, in its group,
+  // the faction's changed_at (the factions board re-renders posts rendered before it).
+  const linked = factionLinksOf(z, ex);
+  const touch = (group: Statement[], names: string[]): Statement[] => {
+    // A faction this run inserts or reactivates gets its changed_at from that write: only stored active ones are touched.
+    const list = [...new Set(names)].filter((f) => ex?.factions.get(f)?.active === 1);
+    if (ex && list.length) group.push(stmt('faction', list.length, `UPDATE faction SET changed_at = ${NOW_SQL} WHERE name IN (${list.map(lit).join(', ')})`));
+    return group;
+  };
   // The source versions first: a small group, so even a run stopped at the ceiling leaves every zone table holding rows
   // after its first import (the backup's must-hold-rows check reads IMPORT_TABLES).
   const versions = ex ? z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt) : z.versions;
@@ -1126,7 +1152,7 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
     ]);
   const zones = ex ? z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)) : z.zones;
   for (const rows of chunkSized(zones, utf8))
-    groups.push([
+    groups.push(touch([
       stmt(
         'zone',
         rows.length,
@@ -1140,7 +1166,7 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
           `OR zone.adjacent_json IS NOT excluded.adjacent_json OR zone.atlas_id IS NOT excluded.atlas_id OR zone.wiki_url IS NOT excluded.wiki_url ` +
           `OR zone.map_json IS NOT excluded.map_json OR zone.markers_json IS NOT excluded.markers_json OR zone.active IS NOT 1`,
       ),
-    ]);
+    ], rows.flatMap((r) => linked.ofZone(r.key))));
   const names = ex ? z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)) : z.names;
   for (const rows of chunk(names, ROWS_PER_STATEMENT))
     groups.push([
@@ -1153,7 +1179,7 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
     ]);
   const npcs = ex ? z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)) : z.npcs;
   for (const rows of chunkSized(npcs, utf8))
-    groups.push([
+    groups.push(touch([
       stmt(
         'npc',
         rows.length,
@@ -1168,21 +1194,111 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
           `OR npc.race IS NOT excluded.race OR npc.class IS NOT excluded.class OR npc.location IS NOT excluded.location ` +
           `OR npc.loot_json IS NOT excluded.loot_json OR npc.active IS NOT 1`,
       ),
-    ]);
+    ], rows.flatMap(linked.ofNpc)));
   if (ex) {
     const gone = zoneDeactivations(z, ex);
     for (const keys of chunk(gone.zones, ROWS_PER_STATEMENT))
-      groups.push([stmt('zone', keys.length, `UPDATE zone SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)]);
+      groups.push(touch([stmt('zone', keys.length, `UPDATE zone SET active = 0 WHERE active = 1 AND key IN (${keys.map(lit).join(', ')})`)], keys.flatMap(linked.ofZone)));
     for (const rows of chunk(gone.names, ROWS_PER_STATEMENT))
       groups.push([
         stmt('zone_name', rows.length, `UPDATE zone_name SET active = 0 WHERE active = 1 AND (source, name) IN (VALUES ${rows.map((n) => `(${lit(n.source)}, ${lit(n.name)})`).join(', ')})`),
       ]);
     for (const rows of chunk(gone.npcs, ROWS_PER_STATEMENT))
-      groups.push([
-        stmt('npc', rows.length, `UPDATE npc SET active = 0 WHERE active = 1 AND (zone_key, name) IN (VALUES ${rows.map((n) => `(${lit(n.zone_key)}, ${lit(n.name)})`).join(', ')})`),
-      ]);
+      groups.push(
+        touch(
+          [stmt('npc', rows.length, `UPDATE npc SET active = 0 WHERE active = 1 AND (zone_key, name) IN (VALUES ${rows.map((n) => `(${lit(n.zone_key)}, ${lit(n.name)})`).join(', ')})`)],
+          rows.flatMap(linked.ofNpc),
+        ),
+      );
+  }
+
+  // Order 24: the faction names, then their links (a link names its faction's id). A faction's changed_at is set in the
+  // same group as the write that changes what its post shows, so a run stopped at the write ceiling never leaves a
+  // written change without it (the next run's diff no longer sees that change).
+  const factions = ex ? z.factions.filter((f) => factionDiffers(ex.factions.get(f))) : z.factions;
+  for (const rows of chunk(factions, ROWS_PER_STATEMENT))
+    groups.push([
+      stmt(
+        'faction',
+        rows.length,
+        `INSERT INTO faction (name, active, changed_at) VALUES ${rows.map((f) => `(${lit(f)}, 1, ${NOW_SQL})`).join(', ')} ` +
+          `ON CONFLICT(name) DO UPDATE SET active = 1, changed_at = excluded.changed_at WHERE faction.active IS NOT 1`,
+      ),
+    ]);
+  const links = ex ? z.factionLinks.filter((l) => linkDiffers(ex.factionLinks.get(linkId(l)), l)) : z.factionLinks;
+  const linkValues = (rows: FactionLinkRow[]) => rows.map((l) => `(${lit(l.zone_key)}, ${lit(l.npc_name)}, ${lit(l.faction)}, ${lit(l.kind)})`).join(', ');
+  for (const rows of chunk(links, ROWS_PER_STATEMENT))
+    groups.push(
+      touch(
+        [
+          stmt(
+            'npc_faction',
+            rows.length,
+            `INSERT INTO npc_faction (zone_key, npc_name, faction_id, kind, active) SELECT v.column1, v.column2, f.id, v.column4, 1 ` +
+              `FROM (VALUES ${linkValues(rows)}) AS v JOIN faction f ON f.name = v.column3 WHERE true ` +
+              `ON CONFLICT(zone_key, npc_name, faction_id, kind) DO UPDATE SET npc_name = excluded.npc_name, active = 1 ` +
+              `WHERE npc_faction.npc_name IS NOT excluded.npc_name COLLATE BINARY OR npc_faction.active IS NOT 1`,
+          ),
+        ],
+        rows.map((l) => l.faction),
+      ),
+    );
+  if (ex) {
+    const gone = zoneDeactivations(z, ex);
+    for (const rows of chunk(gone.links, ROWS_PER_STATEMENT))
+      groups.push(
+        touch(
+          [
+            stmt(
+              'npc_faction',
+              rows.length,
+              `UPDATE npc_faction SET active = 0 WHERE active = 1 AND (zone_key, npc_name, faction_id, kind) IN ` +
+                `(SELECT v.column1, v.column2, f.id, v.column4 FROM (VALUES ${linkValues(rows)}) AS v JOIN faction f ON f.name = v.column3)`,
+            ),
+          ],
+          rows.map((l) => l.faction),
+        ),
+      );
+    for (const rows of chunk(gone.factions, ROWS_PER_STATEMENT))
+      groups.push([stmt('faction', rows.length, `UPDATE faction SET active = 0, changed_at = ${NOW_SQL} WHERE active = 1 AND name IN (${rows.map(lit).join(', ')})`)]);
   }
   return groups;
+}
+
+/** The time a statement runs, in the format of toISOString(), so it compares with the board's last_rendered_at. */
+const NOW_SQL = `strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
+
+/** Order 24: the factions linked to an npc row or to a zone, in the plan or (still active) in the database. */
+function factionLinksOf(z: ZonePlan, ex: ExistingState | undefined) {
+  const byNpc = new Map<string, Set<string>>();
+  const byZone = new Map<string, Set<string>>();
+  const add = (l: FactionLinkRow) => {
+    const n = npcId(l.zone_key, l.npc_name);
+    byNpc.set(n, (byNpc.get(n) ?? new Set()).add(l.faction));
+    byZone.set(l.zone_key, (byZone.get(l.zone_key) ?? new Set()).add(l.faction));
+  };
+  z.factionLinks.forEach(add);
+  for (const l of ex?.factionLinks.values() ?? []) if (l.active === 1) add(l);
+  return {
+    ofNpc: (n: Pick<NpcRow, 'zone_key' | 'name'>) => [...(byNpc.get(npcId(n.zone_key, n.name)) ?? [])],
+    ofZone: (key: string) => [...(byZone.get(key) ?? [])],
+  };
+}
+
+/** Order 24: every faction whose post would show something new after this plan (the dry run's count; buildGroups sets the same). */
+export function factionChanges(z: ZonePlan, ex: ExistingState): Set<string> {
+  const linked = factionLinksOf(z, ex);
+  const gone = zoneDeactivations(z, ex);
+  return new Set([
+    ...z.factions.filter((f) => factionDiffers(ex.factions.get(f))),
+    ...gone.factions,
+    ...z.factionLinks.filter((l) => linkDiffers(ex.factionLinks.get(linkId(l)), l)).map((l) => l.faction),
+    ...gone.links.map((l) => l.faction),
+    ...z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).flatMap(linked.ofNpc),
+    ...gone.npcs.flatMap(linked.ofNpc),
+    ...z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).flatMap((r) => linked.ofZone(r.key)),
+    ...gone.zones.flatMap(linked.ofZone),
+  ]);
 }
 
 /** Stored active zone rows the plan no longer holds: deactivated, never deleted (the dry run counts the same lists). */
@@ -1190,10 +1306,14 @@ function zoneDeactivations(z: ZonePlan, ex: ExistingState) {
   const keep = new Set(z.zones.map((r) => r.key));
   const keepNames = new Set(z.names.map((n) => zoneNameId(n.source, n.name)));
   const keepNpcs = new Set(z.npcs.map((n) => npcId(n.zone_key, n.name)));
+  const keepFactions = new Set(z.factions);
+  const keepLinks = new Set(z.factionLinks.map(linkId));
   return {
     zones: [...ex.zones.values()].filter((r) => r.active === 1 && !keep.has(r.key)).map((r) => r.key),
     names: [...ex.zoneNames.values()].filter((n) => n.active === 1 && !keepNames.has(zoneNameId(n.source, n.name))),
     npcs: [...ex.npcs.values()].filter((n) => n.active === 1 && !keepNpcs.has(npcId(n.zone_key, n.name))),
+    factions: [...ex.factions].filter(([f, o]) => o.active === 1 && !keepFactions.has(f)).map(([f]) => f),
+    links: [...ex.factionLinks.values()].filter((l) => l.active === 1 && !keepLinks.has(linkId(l))),
   };
 }
 
@@ -1245,6 +1365,8 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
   const zns = await db.all<StoredZoneName>('SELECT source, name, zone_key, active FROM zone_name');
   const ns = await db.all<StoredNpc>('SELECT zone_key, name, kind, level, race, class, location, loot_json, active FROM npc');
   const srcs = await db.all<{ name: string; sha: string; changed_at: string }>('SELECT name, sha, changed_at FROM import_source');
+  const fcs = await db.all<{ name: string; active: number }>('SELECT name, active FROM faction');
+  const fls = await db.all<StoredLink>('SELECT l.zone_key, l.npc_name, f.name AS faction, l.kind, l.active FROM npc_faction l JOIN faction f ON f.id = l.faction_id');
   const recipes = new Map<string, ExistingRecipe>();
   for (const row of rs) {
     let r = recipes.get(row.source_key);
@@ -1280,6 +1402,8 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     zoneNames: new Map(zns.map((n) => [zoneNameId(n.source, n.name), { ...n, active: Number(n.active) }])),
     npcs: new Map(ns.map((n) => [npcId(n.zone_key, n.name), { ...n, active: Number(n.active) }])),
     importSources: new Map(srcs.map((s) => [s.name, { sha: s.sha, changed_at: s.changed_at }])),
+    factions: new Map(fcs.map((f) => [f.name, { active: Number(f.active) }])),
+    factionLinks: new Map(fls.map((l) => [linkId(l), { ...l, active: Number(l.active) }])),
     indexes: Object.fromEntries(idx.map((r) => [r.t, Number(r.n)])),
   };
 }

@@ -215,3 +215,11 @@ Treat the clock as authoritative over any date an order states.
 
 - A zone button is offered only for a zone the message's text shows, and only when the derived mapping (`zone_name`) maps the name to an active zone (src/zone/buttons.ts); an unmatched name stays text. One button per zone key, since Discord refuses two components with one custom_id in a message.
 - The list of custom_id prefixes sent before order 18 (`SENT_BEFORE`, test/worker/next-commands.test.ts) is frozen history. A new prefix gets its own routing test beside the feature's tests.
+
+## Order 24
+
+- Order 24's explicit override 4 of order 19's override 2 (as the order states it): the bot may also create one guild custom emoji per server (Create Expressions), set `default_reaction_emoji` on the forums GuildCraft uses, and create and maintain the factions board's posts.
+- An NPC's wiki fields are shown under the wiki's own labels only: `factions` is "Reputation Lost", `opposing_factions` is "Reputation Gained" (scripts/import/zones.ts `FactionKind`). Faction names are trimmed, never merged or re-spelled; a name that disappears upstream is deactivated.
+- What a faction's post shows changes only through the import, which sets that faction's `changed_at` in the same statement group as the change (scripts/import/core.ts `zoneGroups`); the factions board re-renders a post rendered before it. The import never writes a guild's rows.
+- One invocation's 40 calls: the tradeskill boards first, then the factions boards down to `FACTIONS_FLOOR` (src/board/refresh.ts), which the request sweep and the dev usage warning run on after them.
+- A local bench reads this checkout's own config and state (scripts/import/db.ts `localDb`), never the working directory's.

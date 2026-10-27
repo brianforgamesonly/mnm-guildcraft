@@ -27,8 +27,11 @@
 //
 // Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID; DISCORD_BOT_TOKEN for inspect, archive, refresh
 // and a real delete. Prints counts and rendered text only, never a credential.
+//   BOARD (order 24): tradeskills (default) or factions; render, inspect, refresh and delete act on that board's own
+//                   columns and posts table (src/board/kinds.ts). archive is the tradeskill board's only.
 import { readFileSync } from 'node:fs';
-import { boardStatements, boardFromResults } from '../../src/board/data.ts';
+import { boardStatements, boardFromResults, sourceOf } from '../../src/board/data.ts';
+import { boardNamed, TRADESKILLS } from '../../src/board/kinds.ts';
 import { contentHash, renderIndex, renderSkillPost } from '../../src/board/render.ts';
 import { BOARD_CALL_CAP, botApi } from '../../src/board/api.ts';
 import { archivesAt, BOARD_LINE, CRON_RUN_MS, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
@@ -50,6 +53,10 @@ const databaseId = cfg.env[copy].d1_databases[0].database_id;
 const readOnly = action === 'render' || action === 'inspect' || dryRun;
 if (['archive', 'refresh'].includes(action) && dryRun) throw new Error(`ACTION=${action} changes live data: it runs only with DRY_RUN=0`);
 if (['inspect', 'archive', 'refresh', 'departures'].includes(action) && !bot) throw new Error(`DISCORD_BOT_TOKEN must be set for ACTION=${action}`);
+const kind = boardNamed(process.env.BOARD || 'tradeskills');
+if (!kind) throw new Error(`unknown BOARD ${process.env.BOARD}`);
+if (action === 'archive' && kind !== TRADESKILLS) throw new Error('ACTION=archive is for the tradeskill board only');
+const factions = kind !== TRADESKILLS;
 
 const redact = (s) => String(s).replace(/\d{15,}/g, '<id>');
 /** Order 22: whether a fetched first message carries the line, and its length; never its text (it holds a character name). */
@@ -97,10 +104,33 @@ async function discord(method, path, body) {
   return { ok: res.ok, status: res.status, body: json };
 }
 
-const guilds = (await db.prepare('SELECT id, board_channel_id FROM guild ORDER BY id').all()).results;
-console.log(JSON.stringify({ action, copy, dry_run: readOnly, guilds: guilds.length, with_board: guilds.filter((g) => g.board_channel_id).length }));
+const guilds = (await db.prepare(`SELECT id, ${kind.channel} AS board_channel_id FROM guild ORDER BY id`).all()).results;
+console.log(JSON.stringify({ action, board: kind.name, copy, dry_run: readOnly, guilds: guilds.length, with_board: guilds.filter((g) => g.board_channel_id).length }));
+/** Order 24: one board loaded with the Worker's own reader (src/board/data.ts). */
+const load = async (guildId) => {
+  const src = sourceOf(kind);
+  return src.fromResults(await db.batch(src.statements(db, guildId)));
+};
 
-if (action === 'render') {
+if (action === 'render' && factions) {
+  // Order 24: the factions board holds game data only (no member names), so nothing is pseudonymised but ids.
+  const now = Date.now();
+  for (const [gi, g] of guilds.entries()) {
+    const data = await load(g.id);
+    console.log(`\n=== guild ${gi + 1}: factions board ${data.guild.board_channel_id ? 'set' : 'not set'}, ${data.topics.length} factions (one post each), ${data.posts.size} posts recorded`);
+    let messages = 0;
+    for (const t of data.topics) {
+      const msgs = data.render(t, now, BOARD_LINE);
+      messages += msgs.length;
+      console.log(`\n--- post "${t.name}" · ${msgs.length} message(s) · hash ${(await contentHash(msgs)).slice(0, 12)}`);
+      console.log(`line: ${msgs[0].content ?? '(none)'}`);
+      console.log(redact(JSON.stringify(msgs.map((m) => m.embeds))));
+    }
+    const idx = data.index((id) => data.posts.get(id)?.thread_id ?? null, now, BOARD_LINE);
+    console.log(`\n--- index post "${kind.indexTitle}" (pinned)\nline: ${idx.message.content}\n${redact(JSON.stringify(idx.message.embeds))}`);
+    console.log(`\nsummary: ${data.topics.length + 1} posts would exist (${data.topics.length} factions + index), ${messages} faction messages in all.`);
+  }
+} else if (action === 'render') {
   const now = Date.now();
   for (const [gi, g] of guilds.entries()) {
     const data = boardFromResults(await db.batch(boardStatements(db, g.id)));
@@ -130,10 +160,13 @@ if (action === 'render') {
 } else if (action === 'inspect') {
   for (const [gi, g] of guilds.entries()) {
     if (!g.board_channel_id) continue;
-    const data = boardFromResults(await db.batch(boardStatements(db, g.id)));
-    const changed = new Map(
-      (await db.prepare('SELECT cs.tradeskill_id AS id, max(cs.updated_at) AS at FROM character_skill cs JOIN character c ON c.id = cs.character_id WHERE c.guild_id = ? GROUP BY cs.tradeskill_id').bind(g.id).all()).results.map((r) => [r.id, r.at]),
-    );
+    const data = await load(g.id);
+    data.tradeskills ??= data.topics;
+    const changed = factions
+      ? new Map()
+      : new Map(
+          (await db.prepare('SELECT cs.tradeskill_id AS id, max(cs.updated_at) AS at FROM character_skill cs JOIN character c ON c.id = cs.character_id WHERE c.guild_id = ? GROUP BY cs.tradeskill_id').bind(g.id).all()).results.map((r) => [r.id, r.at]),
+        );
     const active = await discord('GET', `/guilds/${g.id}/threads/active`);
     const archived = await discord('GET', `/channels/${g.board_channel_id}/threads/archived/public?limit=100`);
     const listed = new Map();
@@ -195,9 +228,9 @@ if (action === 'render') {
     const rebuild = process.env.REBUILD === '1';
     if (rebuild) {
       d1Calls = 0;
-      const s = requestRebuild(db, g.id);
+      const s = requestRebuild(db, g.id, undefined, kind);
       await query(s.sql, s.params);
-      const since = (await query('SELECT board_rebuild_since AS s FROM guild WHERE id = ?', [g.id])).results[0]?.s;
+      const since = (await query(`SELECT ${kind.rebuild} AS s FROM guild WHERE id = ?`, [g.id])).results[0]?.s;
       console.log(`rebuild asked for: board_rebuild_since ${since} (posts created before ${iso(Number(snowflakeAt(Date.parse(since)) >> 22n) + 1420070400000)} are old)`);
     }
     d1Calls = 0;
@@ -205,20 +238,22 @@ if (action === 'render') {
     const api = botApi(bot, budget);
     const started = Date.now();
     // Order 22: ALL=1 re-renders every post (as the nightly run does); LINE=clear is the preview line's rollback.
-    const r = await refreshGuildBoard(db, api, g.id, { trigger: rebuild ? 'rebuild' : 'sweep', all: process.env.ALL === '1', line: process.env.LINE === 'clear' ? 'clear' : undefined });
+    const r = await refreshGuildBoard(db, api, g.id, { trigger: rebuild ? 'rebuild' : 'sweep', all: process.env.ALL === '1', line: process.env.LINE === 'clear' ? 'clear' : undefined, kind });
     const ms = Date.now() - started;
     console.log(redact(JSON.stringify({ trigger: rebuild ? 'rebuild' : 'sweep', ms, d1_calls: d1Calls, discord_calls: budget.discord, total: d1Calls + budget.discord, cap: BOARD_CALL_CAP, rows_written: rowsWritten, result: r })));
-    console.log('calls:', JSON.stringify(api.log.map((c) => `${c.route} ${c.status}${c.code ? ` ${c.code}` : ''}${c.waited_ms ? ` waited ${c.waited_ms}ms` : ''}`)));
-    const rows = (await query('SELECT p.thread_id, t.name FROM board_post p JOIN tradeskill t ON t.id = p.tradeskill_id WHERE p.guild_id = ?', [g.id])).results;
+    console.log('calls:', JSON.stringify(api.log.map((c) => `${c.route} ${c.status}${c.code ? ` ${c.code}` : ''}${c.waited_ms ? ` waited ${c.waited_ms}ms` : ''}${c.retry_after ? ` retry_after ${c.retry_after}` : ''}`)));
+    const topicTable = factions ? 'faction' : 'tradeskill';
+    const rows = (await query(`SELECT p.thread_id, t.name FROM ${kind.table} p JOIN ${topicTable} t ON t.id = p.${kind.key} WHERE p.guild_id = ?`, [g.id])).results;
+    console.log(`posts recorded: ${rows.length}`);
     for (const x of [...rows].sort((a, b) => (BigInt(a.thread_id) < BigInt(b.thread_id) ? -1 : 1))) console.log(`  created ${iso(snowflakeMs(x.thread_id))}  ${tail(x.thread_id)}  ${x.name}`);
   }
 } else if (action === 'delete') {
   if (!dryRun && !bot) throw new Error('DISCORD_BOT_TOKEN must be set for a real delete');
   for (const [gi, g] of guilds.entries()) {
-    const posts = (await db.prepare('SELECT thread_id FROM board_post WHERE guild_id = ?').bind(g.id).all()).results;
-    const index = (await db.prepare('SELECT board_index_thread_id AS t FROM guild WHERE id = ?').bind(g.id).first())?.t ?? null;
+    const posts = (await db.prepare(`SELECT thread_id FROM ${kind.table} WHERE guild_id = ?`).bind(g.id).all()).results;
+    const index = (await db.prepare(`SELECT ${kind.indexThread} AS t FROM guild WHERE id = ?`).bind(g.id).first())?.t ?? null;
     const threads = [...posts.map((p) => p.thread_id), ...(index ? [index] : [])];
-    console.log(`guild ${gi + 1}: ${posts.length} tradeskill posts + ${index ? 1 : 0} index post are bot-owned${dryRun ? ' (dry run: nothing deleted)' : ''}`);
+    console.log(`guild ${gi + 1}: ${posts.length} ${kind.name} posts + ${index ? 1 : 0} index post are bot-owned${dryRun ? ' (dry run: nothing deleted)' : ''}`);
     if (dryRun || !threads.length) continue;
     let deleted = 0;
     const failed = [];
@@ -232,8 +267,8 @@ if (action === 'render') {
     console.log(`guild ${gi + 1}: deleted ${deleted} of ${threads.length} posts${failed.length ? `; failed: ${failed.join(', ')}` : ''}`);
     if (failed.length) process.exitCode = 1;
     else {
-      await query('DELETE FROM board_post WHERE guild_id = ?', [g.id]);
-      await query('UPDATE guild SET board_channel_id = NULL, board_index_thread_id = NULL, board_index_message_id = NULL, board_index_hash = NULL, board_lock_until = NULL WHERE id = ?', [g.id]);
+      await query(`DELETE FROM ${kind.table} WHERE guild_id = ?`, [g.id]);
+      await query(`UPDATE guild SET ${kind.channel} = NULL, ${kind.indexThread} = NULL, ${kind.indexMessage} = NULL, ${kind.indexHash} = NULL, ${kind.lock} = NULL WHERE id = ?`, [g.id]);
       console.log(`guild ${gi + 1}: board rows removed and board channel cleared`);
     }
   }

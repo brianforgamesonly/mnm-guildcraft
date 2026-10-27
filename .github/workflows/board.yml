@@ -8,6 +8,7 @@
 #            is the preview line's rollback (content "" on each first message).
 #   delete:  the rollback; deletes the bot-owned board posts and clears the board channel. dry_run (default)
 #            prints what it would delete and changes nothing.
+#   board:   order 24; tradeskills (default) or factions, for render, inspect, refresh and delete.
 #   departures: order 7; the nightly departure run (src/departures.ts) invoked directly. dry_run (default) lists the
 #            server's members and prints who would be marked (pseudonyms) and the notices owed, changing nothing.
 # Dispatch only. Expected: <1 billed minute per run.
@@ -40,6 +41,11 @@ on:
         type: choice
         options: ['on', clear]
         default: 'on'
+      board:
+        description: 'Order 24: which board render, inspect, refresh and delete act on (archive: tradeskills only)'
+        type: choice
+        options: [tradeskills, factions]
+        default: tradeskills
       copy:
         description: 'Order 16: which database. production is allowed for render (read-only) only.'
         type: choice
@@ -70,6 +76,7 @@ jobs:
           REBUILD: ${{ inputs.rebuild && '1' || '0' }}
           ALL: ${{ inputs.all && '1' || '0' }}
           LINE: ${{ inputs.line }}
+          BOARD: ${{ inputs.board }}
           COPY: ${{ inputs.copy }}
           DISCORD_BOT_TOKEN: ${{ (inputs.action == 'inspect' || inputs.action == 'departures' || ((inputs.action == 'archive' || inputs.action == 'refresh' || inputs.action == 'delete') && !inputs.dry_run)) && secrets.DISCORD_BOT_TOKEN || '' }}
         run: node scripts/board/run.mjs

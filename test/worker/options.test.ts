@@ -5,6 +5,7 @@
 // src/recipes.ts, and every other string option is free text, bounded by max_length where the handler bounds it.
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
+import { BOARDS } from '../../src/board/kinds.ts';
 import { autocomplete } from '../../src/commands/autocomplete.ts';
 import { COMMANDS } from '../../src/commands/definitions.ts';
 import { gearFindOptions } from '../../src/gear/options.ts';
@@ -25,6 +26,8 @@ const CLOSED = [
   ACQUISITIONS.map(String),
   REPORT_ISSUES.map((i) => i.value),
   ...(gearFindOptions([]).filter((o) => o.choices) as { choices: { value: string }[] }[]).map((o) => o.choices.map((c) => c.value)),
+  // Order 24: /guildcraft rebuild-board which:, the boards' own list (src/board/kinds.ts).
+  BOARDS.map((b) => b.name),
 ].map((l) => JSON.stringify([...l].sort()));
 
 describe('string options against the client-side rules', () => {

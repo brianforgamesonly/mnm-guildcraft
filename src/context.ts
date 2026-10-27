@@ -4,6 +4,8 @@ import type { GuildMember, Resolved } from './discord.ts';
 /** Work a handler asks for after its reply is delivered (order 5: the board refresh). */
 export interface Effects {
   board?: boolean;
+  /** Order 24: the factions board's refresh (src/board/kinds.ts FACTIONS), after the tradeskill board's when both are asked for. */
+  factions?: boolean;
   /** Order 6: the refresh is /guildcraft rebuild-board's own run (it may create while the rebuild is in progress). */
   rebuild?: boolean;
   /** Order 7: a read's audit row (craft.find, roster.view, guildcraft.status), written after delivery. */

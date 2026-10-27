@@ -964,3 +964,27 @@ No new sentence: each button's label is a zone's name from the data. What the me
 |---|---|---|
 | src/zone/buttons.ts:65 | (buttons under `/gear` results, the `/item` card, `/gear`'s item card and their posted copies) \<zone name>, one per zone the text shows, cut to 80 characters; a press opens that zone's card privately, as `/zone` shows it | DRAFT |
 | src/commands/zone.ts:37 | (a zone button for a zone no longer in the data) That zone is no longer in the data. Run `/zone` again. (order 17's line, now also reached from a zone button) | DRAFT |
+
+## Work order 24, PR A: the factions board (DRAFT)
+
+"Reputation Gained" and "Reputation Lost" are the wiki infobox's own labels, kept as they are. Creature, zone, level and location text is the wiki's.
+
+| Where | Text | Status |
+|---|---|---|
+| src/board/factions.ts:48 | (a faction post's preview line) \<Faction> · \<N> creatures: reputation gained from \<g>, lost from \<l> | DRAFT |
+| src/board/factions.ts:23-24, 37 | (a faction post) **Reputation Gained** · \<n> creatures, then each zone underlined and its creatures as "• \<creature> (level \<level>, \<location>)", leaving out whichever is unknown; then **Reputation Lost** the same way | DRAFT |
+| src/board/factions.ts:25 | (a section with no creature) No creature's wiki page lists it here. | DRAFT |
+| src/board/factions.ts:26 | (every faction post's footer) As listed on each creature's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded. | DRAFT |
+| src/board/kinds.ts:60 | (the index post's title) Index: how to read this board | DRAFT |
+| src/board/factions.ts:116 | (the index's preview line) Factions · \<N> posts, A→Z · from each creature's wiki page | DRAFT |
+| src/board/factions.ts:27-31 | (the index) **Factions: index** · One post per faction, A→Z below. Each lists the creatures whose wiki page names the faction under **Reputation Gained** or **Reputation Lost**, by zone. · the footer line above · then "#\<post> · \<n> creatures" per faction | DRAFT |
+| src/board/factions.ts:32 | (index, while the board fills) \<n> more posts coming: the board fills in over the next few hours. | DRAFT |
+| src/commands/definitions.ts:187 | (`/guildcraft setup` option) factions: A forum channel for the factions board: one post per faction | DRAFT |
+| src/commands/definitions.ts:196 | (`/guildcraft rebuild-board` option) which: The board to rebuild (default: tradeskills) · Tradeskills · Factions | DRAFT |
+| src/commands/setup.ts:29-30 | Factions board: #\<channel> / not set (`factions:` picks a forum channel) | DRAFT |
+| src/commands/setup.ts:145 | #\<channel> is not a forum channel. The factions board needs a forum channel: create one (Create Channel → Forum), then pick it here. | DRAFT |
+| src/commands/setup.ts:305-306 | Building the factions board now: \<n> faction posts plus a pinned index post. The factions board fills in over the next few hours. If nothing shows, reload Discord. / The factions board already has every faction post; refreshing it now. | DRAFT |
+| src/commands/setup.ts:287 | The old factions board's posts in #\<channel> are left as they are. | DRAFT |
+| src/commands/setup.ts:479-480 | (status) **Factions board:** #\<channel> · \<x> of \<y> posts · last refresh \<time> · \<n> waiting to refresh · A→Z / out of order — run `/guildcraft rebuild-board which:Factions` · or: not set up (`/guildcraft setup factions:`) | DRAFT |
+| src/commands/setup.ts:499 | There is no factions board yet. Set one up first with `/guildcraft setup factions:`. | DRAFT |
+| src/commands/setup.ts:505-507 | Rebuilding the factions board in #\<channel> in A→Z order: each faction post is created again, then the old one is deleted. Posts with member replies are kept as they are. · About 25 posts are created every 15 minutes, so a full rebuild takes a few hours. `/guildcraft status` shows the board order. · For A→Z to show at the top, the forum's Default Sort Order must be Creation Time (Edit Channel). | DRAFT |

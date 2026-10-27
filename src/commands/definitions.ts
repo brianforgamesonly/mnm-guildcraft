@@ -4,6 +4,7 @@
 // switch keep working: their custom_ids are still handled (src/interactions.ts).
 // /help's pages are built from these definitions (src/commands/help.ts), so a command cannot be missing from them.
 
+import { BOARDS } from '../board/kinds.ts';
 import { gearFindOptions } from '../gear/options.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
@@ -182,10 +183,18 @@ export const COMMANDS = [
           { type: CHANNEL, name: 'review', description: 'A private text channel for officers: departure notices and member reports', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'vault', description: 'A private text channel for officers: item screenshots waiting for approval', channel_types: [GUILD_TEXT_CHANNEL] },
           { type: CHANNEL, name: 'requests', description: 'A text channel for craft requests: one private thread per request', channel_types: [GUILD_TEXT_CHANNEL] },
+          // Order 24.
+          { type: CHANNEL, name: 'factions', description: 'A forum channel for the factions board: one post per faction', channel_types: [GUILD_FORUM_CHANNEL] },
         ],
       },
       { type: SUBCOMMAND, name: 'status', description: 'Data version, last data update, the roster board and departures' },
-      { type: SUBCOMMAND, name: 'rebuild-board', description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)' },
+      {
+        type: SUBCOMMAND,
+        name: 'rebuild-board',
+        description: 'Recreate the roster board posts in A→Z order (posts with replies are kept)',
+        // Order 24: which board, from the boards' own list (src/board/kinds.ts); the tradeskill board when left out, as before.
+        options: [{ type: STRING, name: 'which', description: 'The board to rebuild (default: tradeskills)', choices: BOARDS.map((b) => ({ name: b.label, value: b.name })) }],
+      },
     ],
   },
 ] as const;

@@ -17,7 +17,7 @@ const all = async <T>(sql: string) => (await env.DB.prepare(sql).all<T>()).resul
 
 beforeEach(async () => {
   await env.DB.batch(
-    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source'].map(
+    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'npc_faction', 'faction_post', 'faction'].map(
       (t) => env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );
@@ -131,8 +131,11 @@ describe('order 17: zone import', () => {
   it('a re-import of unchanged sources writes 0 zone rows; a vanished NPC is deactivated, never deleted', async () => {
     await load();
     const again = await load();
-    for (const t of ['zone', 'zone_name', 'npc', 'import_source'] as const) expect(again.written![t].rows_written, t).toBe(0);
-    expect(again.predicted!.zones).toEqual({ zone: 0, zone_name: 0, npc: 0, import_source: 0, deactivate: { zone: 0, zone_name: 0, npc: 0 } });
+    for (const t of ['zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction'] as const) expect(again.written![t].rows_written, t).toBe(0);
+    expect(again.predicted!.zones).toEqual({
+      zone: 0, zone_name: 0, npc: 0, import_source: 0, faction: 0, npc_faction: 0, factions_changed: 0,
+      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0 },
+    });
     const z = zoneInput();
     (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs.filter((n) => n.name !== 'Supplier Jul');
     await load(z);
@@ -156,8 +159,61 @@ describe('order 17: zone import', () => {
   it('a dry run writes no zone rows and predicts the first import', async () => {
     const res = await load(zoneInput(), true);
     expect(res.status).toBe('dry-run');
-    expect(res.predicted!.zones).toEqual({ zone: 5, zone_name: 23, npc: 6, import_source: 5, deactivate: { zone: 0, zone_name: 0, npc: 0 } });
+    expect(res.predicted!.zones).toEqual({
+      zone: 5, zone_name: 23, npc: 6, import_source: 5, faction: 3, npc_faction: 8, factions_changed: 3,
+      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0 },
+    });
     expect(await all('SELECT key FROM zone')).toEqual([]);
+  });
+
+  it('order 24: keeps each NPC row\'s factions (lost) and opposing_factions (gained), trimmed, never merged; counts what has no npc row', async () => {
+    const res = await load();
+    const factions = await all<{ name: string; active: number; changed_at: string | null }>('SELECT name, active, changed_at FROM faction ORDER BY name');
+    expect(factions.map((f) => f.name)).toEqual(['Gnoll Pack', 'Gnoll Pack Elders', 'Weald Rangers']);
+    expect(factions.every((f) => f.active === 1 && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(f.changed_at!))).toBe(true);
+    const links = await all<{ zone_key: string; npc_name: string; faction: string; kind: string }>(
+      'SELECT l.zone_key, l.npc_name, f.name AS faction, l.kind FROM npc_faction l JOIN faction f ON f.id = l.faction_id ORDER BY 1, 2, 3, 4',
+    );
+    expect(links.map((l) => `${l.zone_key}:${l.npc_name}:${l.faction}:${l.kind}`)).toEqual([
+      // The case-only duplicate record's " Gnoll Pack " is trimmed and folds into the first record's link.
+      'evershade weald:A gnoll scout:Gnoll Pack:lost',
+      'evershade weald:A gnoll scout:Weald Rangers:gained',
+      'evershade weald:Marshal Harding:Gnoll Pack:gained',
+      'evershade weald:Marshal Harding:Gnoll Pack Elders:gained',
+      'evershade weald:Marshal Harding:Weald Rangers:lost',
+      "keeper's bight:Marshal Harding:Gnoll Pack:gained",
+      "keeper's bight:Marshal Harding:Gnoll Pack Elders:gained",
+      "keeper's bight:Marshal Harding:Weald Rangers:lost",
+    ]);
+    // "Gnoll Pack" and "Gnoll Pack Elders" stay separate; "Lost Cause" is named only by an NPC without a row, so no row.
+    expect(res.zones!.factions).toEqual({ npcsWithFactions: 5, npcsWithoutRow: 2, linksLeftOut: 2, factions: 3, namesWithoutRow: ['Lost Cause'], links: { lost: 3, gained: 5 } });
+  });
+
+  it('order 24: a re-import changes only what changed; a vanished link or faction is deactivated, and changed_at marks the posts to re-render', async () => {
+    await load();
+    const at = async () => Object.fromEntries((await all<{ name: string; changed_at: string }>('SELECT name, changed_at FROM faction')).map((f) => [f.name, f.changed_at]));
+    const first = await at();
+    await new Promise((r) => setTimeout(r, 5));
+    const z = zoneInput();
+    const npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string; level?: string; opposing_factions?: string[] }[] }).npcs;
+    // Marshal Harding loses "Gnoll Pack Elders" (its only NPC); the gnoll scout's level changes.
+    npcs.find((n) => n.name === 'Marshal Harding')!.opposing_factions = ['Gnoll Pack'];
+    npcs.find((n) => n.name === 'A gnoll scout')!.level = '~9-11';
+    const res = await load(z);
+    expect(res.predicted!.zones!.deactivate).toMatchObject({ faction: 1, npc_faction: 2 });
+    expect(res.predicted!.zones!.factions_changed).toBe(3);
+    expect(await all('SELECT name, active FROM faction ORDER BY name')).toEqual([
+      { name: 'Gnoll Pack', active: 1 },
+      { name: 'Gnoll Pack Elders', active: 0 },
+      { name: 'Weald Rangers', active: 1 },
+    ]);
+    expect((await all<{ n: number }>('SELECT count(*) AS n FROM npc_faction WHERE active = 0'))[0].n).toBe(2);
+    const second = await at();
+    // The scout's level touches both its factions; the link change touches Gnoll Pack Elders.
+    for (const f of ['Gnoll Pack', 'Gnoll Pack Elders', 'Weald Rangers']) expect(second[f] > first[f], f).toBe(true);
+    // Nothing changed: nothing is touched.
+    await load(z);
+    expect(await at()).toEqual(second);
   });
 
   it('refuses a malformed zone source without writing zone rows', async () => {

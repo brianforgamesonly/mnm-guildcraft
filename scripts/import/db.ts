@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { currentCopy } from '../copies.ts';
 import { bindingDb, type D1Like } from './binding.ts';
 import type { Db, StatementMeta } from './core.ts';
@@ -5,7 +6,14 @@ import type { Db, StatementMeta } from './core.ts';
 /** The local D1 that `wrangler d1 migrations apply --local --env dev` writes to. */
 export async function localDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
   const { getPlatformProxy } = await import('wrangler');
-  const proxy = await getPlatformProxy<{ DB: D1Like }>({ environment: 'dev' });
+  // Order 24: this checkout's own config and local state, from the script's location, never the working directory's
+  // (order 23's bench run from another directory read that directory's config and left .wrangler/state there).
+  const root = new URL('../../', import.meta.url);
+  const proxy = await getPlatformProxy<{ DB: D1Like }>({
+    environment: 'dev',
+    configPath: fileURLToPath(new URL('wrangler.jsonc', root)),
+    persist: { path: fileURLToPath(new URL('.wrangler/state/v3', root)) },
+  });
   return { db: bindingDb(proxy.env.DB), dispose: () => proxy.dispose() };
 }
 
