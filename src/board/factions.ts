@@ -122,9 +122,19 @@ export const factionIndexLine = (factions: number): string => `Factions · ${plu
  * `hashable` leaves out the time, as the tradeskill index's does.
  */
 export function renderFactionIndex(entries: FactionIndexEntry[], refreshedAtMs: number, line: LineMode = 'on'): { message: BoardMessage; hashable: string } {
-  const links = entries.filter((e) => e.thread_id).map((e) => `<#${e.thread_id}> · ${plural(e.creatures, 'creature')}`);
-  const missing = entries.length - links.length;
+  const posted = entries.filter((e) => e.thread_id);
+  const missing = entries.length - posted.length;
   const t = Math.floor(refreshedAtMs / 1000);
+  // Review of PR A: the message's 6,000-character total holds about 150 links with counts. Past that the counts are left
+  // out, and past about 250 bare links the rest are counted in one line, so the index never fails to post.
+  const budget = EMBED_LIMITS.total - FACTION_COPY.indexIntro.length - FACTION_COPY.indexTitle.length - 300;
+  const withCounts = posted.map((e) => `<#${e.thread_id}> · ${plural(e.creatures, 'creature')}`);
+  const size = (xs: string[]) => xs.reduce((n, x) => n + x.length + 1, 0);
+  let links = size(withCounts) <= budget ? withCounts : posted.map((e) => `<#${e.thread_id}>`);
+  if (size(links) > budget) {
+    const fit = Math.floor((budget - 80) / (links[0].length + 1));
+    links = [...links.slice(0, fit), `…and ${plural(links.length - fit, 'more post')} below.`];
+  }
   const rows = [FACTION_COPY.indexIntro, '', ...links, ...(missing ? ['', FACTION_COPY.coming(missing)] : [])];
   const embeds: Embed[] = [];
   let desc: string[] = [];

@@ -152,10 +152,27 @@ async function activeThreads(api: BotApi, guildId: string): Promise<Threads> {
   return r.ok ? threadMap(r.body.threads) : null;
 }
 
-/** The forum's archived posts in one call (rebuild only: their message counts and owners). null if unread or incomplete. */
+/** Pages of 100 read for a rebuild: the factions board's posts auto-archive (order 24), so more than 100 can be archived. */
+const ARCHIVED_PAGES = 3;
+
+/**
+ * The forum's archived posts (rebuild only: their message counts and owners), a page of 100 per call, newest archived first
+ * ("ordered by archive_timestamp, in descending order"; `before` pages back). null if unread or still incomplete.
+ */
 async function archivedThreads(api: BotApi, forumId: string): Promise<Threads> {
-  const r = await api.call<{ threads?: ApiThread[]; has_more?: boolean }>('GET', `/channels/${forumId}/threads/archived/public?limit=100`);
-  return r.ok && !r.body.has_more ? threadMap(r.body.threads) : null;
+  const all: ApiThread[] = [];
+  let before = '';
+  for (let page = 0; page < ARCHIVED_PAGES; page++) {
+    const r = await api.call<{ threads?: ApiThread[]; has_more?: boolean }>('GET', `/channels/${forumId}/threads/archived/public?limit=100${before}`);
+    if (!r.ok) return null;
+    const threads = r.body.threads ?? [];
+    all.push(...threads);
+    const last = threads.at(-1)?.thread_metadata?.archive_timestamp;
+    if (!r.body.has_more) return threadMap(all);
+    if (!last) return null;
+    before = `&before=${encodeURIComponent(last)}`;
+  }
+  return null;
 }
 
 /** null when unknown (the read failed); otherwise whether the thread is archived (absent from the active list). */
@@ -597,7 +614,8 @@ export async function refreshAfterCommand(
   const kinds = [...(opts.tradeskills !== false ? [TRADESKILLS] : []), ...(opts.factions ? [FACTIONS] : [])];
   try {
     for (const kind of kinds) {
-      if (budgetLeft(budget) < RESERVE + 3) break;
+      // The tradeskill board runs as it always has (its own canCall checks bound it); the factions board only on what is left.
+      if (kind === FACTIONS && budgetLeft(budget) < RESERVE + 3) break;
       log.results.push(await refreshGuildBoard(env.DB, api, guildId, { trigger, kind }));
     }
   } catch (e) {
@@ -624,7 +642,7 @@ const SWEEP_SQL = `SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.boar
   OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill))
 UNION ALL
 SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT NULL AND (g.${FACTIONS.indexMessage} IS NULL OR g.${FACTIONS.rebuild} IS NOT NULL
-  OR EXISTS (SELECT 1 FROM faction_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
+  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND p.dirty <> 0)
   OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND f.changed_at > coalesce(p.last_rendered_at, ''))
   OR (SELECT count(*) FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN})
      < (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN}))

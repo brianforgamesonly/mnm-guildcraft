@@ -158,11 +158,28 @@ describe('order 24: the factions board', () => {
     expect(msgs.slice(1).every((m) => m.content === undefined)).toBe(true);
   });
 
-  it('the index of 130 factions stays one message inside Discord\'s limits', () => {
-    const entries = Array.from({ length: 130 }, (_, i) => ({ faction: `F${i}`, thread_id: String(1_300_000_000_000_000_000n + BigInt(i)), creatures: 175 }));
-    const { message } = renderFactionIndex(entries, Date.parse('2026-10-27T00:00:00Z'));
-    expect(embedChars(message.embeds)).toBeLessThanOrEqual(EMBED_LIMITS.total);
-    for (const e of message.embeds) expect(e.description!.length).toBeLessThanOrEqual(EMBED_LIMITS.description);
+  it('the index stays one message inside Discord\'s limits however many factions there are (review of PR A)', () => {
+    for (const n of [130, 160, 300, 600]) {
+      const entries = Array.from({ length: n }, (_, i) => ({ faction: `F${i}`, thread_id: String(1_300_000_000_000_000_000n + BigInt(i)), creatures: 175 }));
+      const { message } = renderFactionIndex(entries, Date.parse('2026-10-27T00:00:00Z'));
+      expect(embedChars(message.embeds), `${n}`).toBeLessThanOrEqual(EMBED_LIMITS.total);
+      expect(message.embeds.length).toBeLessThanOrEqual(EMBED_LIMITS.embeds);
+      for (const e of message.embeds) expect(e.description!.length).toBeLessThanOrEqual(EMBED_LIMITS.description);
+      if (n === 130) expect(message.embeds.map((e) => e.description).join('\n')).toContain('· 175 creatures');
+    }
+  });
+
+  it('a rebuild reads more than 100 archived posts by paging (review of PR A: faction posts auto-archive)', async () => {
+    const names = Array.from({ length: 130 }, (_, i) => `Faction ${String(i).padStart(3, '0')}`);
+    await seedFactions(names.map((f): Link => ['Night Harbor', `A creature ${f}`, f, 'gained']));
+    await setGuild();
+    for (let i = 0; i < 10 && (await one<{ n: number }>('SELECT count(*) AS n FROM faction_post')).n < 130; i++) await refresh();
+    for (const t of forum.posts(FACTION_FORUM)) if (t.name !== FACTIONS.indexTitle) t.archived = true;
+    forum.clockOffsetMs = 120_000;
+    await env.DB.prepare("UPDATE guild SET faction_rebuild_since = ?").bind(new Date(Date.now() + 60_000).toISOString()).run();
+    const r = await refresh();
+    expect(r.errors.filter((e) => /thread lists unread/.test(e))).toEqual([]);
+    expect(r.replaced).toBeGreaterThan(0);
   });
 
   it('names stay as written: plainText in the preview line, markdown escaped in the embed', () => {
