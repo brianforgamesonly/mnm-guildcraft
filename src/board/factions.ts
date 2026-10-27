@@ -91,13 +91,18 @@ function questSection(quests: FactionQuestLine[]): string[] {
   for (const q of quests) {
     if (q.quest !== quest) {
       quest = q.quest;
-      const url = safeUrl(q.url);
-      out.push(url ? `• [${md(q.quest)}](${url})` : `• ${md(q.quest)}`);
+      // Review: a wiki address recorded with raw parentheses or spaces is encoded, so the link is kept, not dropped.
+      const url = safeUrl(q.url?.replace(/[() ]/g, (c) => (c === ' ' ? '%20' : c === '(' ? '%28' : '%29')) ?? null);
+      out.push(url ? `• [${md(oneLine(q.quest))}](${url})` : `• ${md(oneLine(q.quest))}`);
     }
-    out.push(`“${md(q.line)}”`);
+    out.push(`“${md(oneLine(q.line))}”`);
   }
   return out;
 }
+
+/** Review: upstream text is unbounded; one row stays one line and well inside an embed's 4,096 characters. */
+const QUEST_TEXT_MAX = 1000;
+const oneLine = (s: string) => truncate(s.replace(/\s*\n\s*/g, ' '), QUEST_TEXT_MAX);
 
 /**
  * A faction's post: Reputation Gained, then Reputation Lost, then (order 25) Quests. Rows fill embeds of at most 4,096

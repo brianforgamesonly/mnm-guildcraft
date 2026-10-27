@@ -488,7 +488,13 @@ export async function refreshGuildBoard(
     const msgs = [t.notice];
     const hash = await contentHash(msgs);
     if (post.content_hash === hash) {
-      r.skipped_unchanged++;
+      // The notice is already there. Only a thread known to be still active gets one more archive call (review: never
+      // the edit again, so a refused archive costs one call when the post is next due, not an edit every sweep).
+      if (isArchived(active, post.thread_id) === false && !stopped && canCall(1 + RESERVE)) {
+        const a = await api.call('PATCH', `/channels/${post.thread_id}`, { archived: true });
+        if (a.ok) r.retired++;
+        else r.errors.push(`archive ${t.name}: ${a.status} ${a.code ?? ''}`.trim());
+      } else r.skipped_unchanged++;
       writes.push(upsert(post, true));
       continue;
     }
@@ -511,13 +517,17 @@ export async function refreshGuildBoard(
       continue;
     }
     // Modify Channel (thread): archived true "requires the MANAGE_THREADS permission" (src/permissions.ts, board PATCH).
-    const a = out.complete ? await api.call('PATCH', `/channels/${post.thread_id}`, { archived: true }) : null;
-    if (a?.ok) r.retired++;
-    else if (a) r.errors.push(`archive ${t.name}: ${a.status} ${a.code ?? ''}`.trim());
-    // Not archived: the hash is cleared so the next run edits and archives it again.
-    const done = !!a?.ok;
-    writes.push(upsert(done ? out.row : { ...out.row, content_hash: null }, done));
-    if (!done) r.left_dirty++;
+    // An incomplete edit stays dirty and is redone. A refused archive is logged, and the post keeps its notice
+    // (review: no retry loop; the hash-match path above retries the archive alone when the post is next due).
+    if (!out.complete) {
+      writes.push(upsert(out.row, false));
+      r.left_dirty++;
+      continue;
+    }
+    const a = await api.call('PATCH', `/channels/${post.thread_id}`, { archived: true });
+    if (a.ok) r.retired++;
+    else r.errors.push(`archive ${t.name}: ${a.status} ${a.code ?? ''}`.trim());
+    writes.push(upsert(out.row, true));
   }
 
   // The rebuild's second half: once every unguarded post is new, delete the old ones. An old post is a

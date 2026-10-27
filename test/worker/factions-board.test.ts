@@ -223,6 +223,10 @@ describe('order 25: quest lines and retired posts', () => {
   it('a quest link is offered only for an https address; the title stays text otherwise', () => {
     const [m] = renderFactionPost('X', [], 'on', [{ faction_id: 1, quest: 'Q_1', url: 'http://example.invalid/q', line: 'Faction with X' }]);
     expect(m.embeds[0].description).toContain('• Q\\_1\n“Faction with X”');
+    // Review: raw parentheses and spaces are encoded, so the link is kept; a long line with breaks stays one bounded line.
+    const [n] = renderFactionPost('X', [], 'on', [{ faction_id: 1, quest: 'Q (NH)', url: 'https://w.invalid/wiki/Q (NH)', line: `Faction with X\n${'y'.repeat(5000)}` }]);
+    expect(n.embeds[0].description).toContain('• [Q (NH)](https://w.invalid/wiki/Q%20%28NH%29)\n“Faction with X yyy');
+    expect(n.embeds[0].description!.length).toBeLessThan(EMBED_LIMITS.description);
   });
 
   it('a merged faction\'s post is edited to one line naming the approved spelling, then archived; never deleted; done once', async () => {
@@ -239,7 +243,33 @@ describe('order 25: quest lines and retired posts', () => {
     expect([...t.messages.values()].map((m) => ({ content: m.content, embeds: m.embeds }))).toEqual([{ content: 'This faction now appears as Pyrmos Mercenaries.', embeds: [] }]);
     expect(await one('SELECT count(*) AS n FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE f.name = \'Pymos Mercenaries\' AND p.dirty = 0')).toEqual({ n: 1 });
     expect(forum.text(forum.byName(FACTIONS.indexTitle))).not.toContain(`<#${t.id}>`);
-    expect(await refresh()).toMatchObject({ retired: 0, edited: 0 });
+  });
+
+  it('once retired (rendered after the change), the post leaves the work list: the next run does not touch it', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Pymos Mercenaries', true);
+    // Review: this run renders after changed_at (+1 s), as a real sweep after the import does.
+    const later = (ms: number) => refreshGuildBoard(env.DB, api(), GUILD, { kind: FACTIONS, nowMs: Date.now() + ms });
+    expect(await later(10_000)).toMatchObject({ retired: 1 });
+    expect(await later(20_000)).toMatchObject({ retired: 0, edited: 0, skipped_unchanged: 0 });
+  });
+
+  it('a refused archive is logged, the notice stays, and the edit is not repeated', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Pymos Mercenaries', true);
+    const thread = forum.byName('Pymos Mercenaries')!.id;
+    forum.failures.push({ match: (c) => c.method === 'PATCH' && c.path === `/channels/${thread}` && c.body?.archived === true, status: 403, code: 50013 });
+    const later = (ms: number) => refreshGuildBoard(env.DB, api(), GUILD, { kind: FACTIONS, nowMs: Date.now() + ms });
+    const r = await later(10_000);
+    expect(r).toMatchObject({ retired: 0, edited: 1 });
+    expect(r.errors).toEqual(['archive Pymos Mercenaries: 403 50013']);
+    expect(forum.line(forum.byName('Pymos Mercenaries'))).toBe('This faction now appears as Pyrmos Mercenaries.');
+    expect(await one("SELECT p.dirty FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE f.name = 'Pymos Mercenaries'")).toEqual({ dirty: 0 });
+    expect(await later(20_000)).toMatchObject({ edited: 0, retired: 0 });
   });
 
   it('a faction no longer listed says so; shown again, its post is edited back and unarchived', async () => {

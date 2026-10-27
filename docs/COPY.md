@@ -1029,7 +1029,7 @@ The owner's decisions of 2026-10-27: quest lines on faction posts (reward lines 
 
 | Where | Text | Status |
 |---|---|---|
-| src/board/factions.ts:38, 89, 92-97 | (a faction post with quest lines, after Reputation Lost) **Quests** · \<n> quests, then per quest (A→Z) "• \<quest title>" linked to its wiki page (https only), then each of its lines quoted exactly: “\<line>” | DRAFT |
-| src/board/factions.ts:39, 110 | (the footer, on posts with quests only) As listed on each creature's and quest's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded. | DRAFT |
+| src/board/factions.ts:38, 87-105 | (a faction post with quest lines, after Reputation Lost) **Quests** · \<n> quests, then per quest (A→Z) "• \<quest title>" linked to its wiki page (https only), then each of its lines quoted exactly: “\<line>” | DRAFT |
+| src/board/factions.ts:39, 115 | (the footer, on posts with quests only) As listed on each creature's and quest's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded. | DRAFT |
 | src/board/factions.ts:40 | (a retired post, merged) This faction now appears as \<approved name>. | DRAFT |
 | src/board/factions.ts:41 | (a retired post, no longer in the data) No longer listed in the data. | DRAFT |
