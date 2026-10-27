@@ -126,9 +126,11 @@ if (action === 'render' && factions) {
       console.log(`line: ${msgs[0].content ?? '(none)'}`);
       console.log(redact(JSON.stringify(msgs.map((m) => m.embeds))));
     }
+    // Order 25: the posts the next refresh retires (edited to one line, then archived; never deleted).
+    for (const t of data.retiring) console.log(`\n--- retire "${t.name}" · thread ${tail(data.posts.get(t.id)?.thread_id)} · notice: ${t.notice.content}`);
     const idx = data.index((id) => data.posts.get(id)?.thread_id ?? null, now, BOARD_LINE);
     console.log(`\n--- index post "${kind.indexTitle}" (pinned)\nline: ${idx.message.content}\n${redact(JSON.stringify(idx.message.embeds))}`);
-    console.log(`\nsummary: ${data.topics.length + 1} posts would exist (${data.topics.length} factions + index), ${messages} faction messages in all.`);
+    console.log(`\nsummary: ${data.topics.length + 1} posts would exist (${data.topics.length} factions + index), ${messages} faction messages in all; ${data.retiring.length} posts to retire.`);
   }
 } else if (action === 'render') {
   const now = Date.now();

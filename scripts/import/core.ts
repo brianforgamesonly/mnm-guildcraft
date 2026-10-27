@@ -10,6 +10,7 @@
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
 import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
+import type { QuestLineRow } from './quests.ts';
 import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
 export const SOURCE = 'mnm-tools/wiki.json';
@@ -456,6 +457,10 @@ type StoredLink = FactionLinkRow & { active: number };
 export const linkId = (l: Pick<FactionLinkRow, 'zone_key' | 'npc_name' | 'faction' | 'kind'>) => `${npcId(l.zone_key, l.npc_name)}|${l.faction}|${l.kind}`;
 /** npc_name is a NOCASE column: a case change is written (as npcDiffers sees the npc row's). */
 export const linkDiffers = (o: StoredLink | undefined, l: FactionLinkRow) => !o || o.active !== 1 || o.npc_name !== l.npc_name;
+// Order 25 (0019): quest reward lines by faction, compared the same way.
+type StoredQuestLine = QuestLineRow & { active: number };
+export const questLineId = (q: Pick<QuestLineRow, 'faction' | 'quest' | 'line'>) => `${q.faction}|${q.quest}|${q.line}`;
+export const questLineDiffers = (o: StoredQuestLine | undefined, q: QuestLineRow) => !o || o.active !== 1 || o.url !== q.url;
 
 /** The wiki link as mnm-tools builds it (mnmdb/app.js:179-180). Checked live in order 3: 21 of 21 sampled pages 200, no redirect. */
 export const WIKI_BASE = 'https://monstersandmemories.miraheze.org/wiki/';
@@ -498,6 +503,8 @@ export interface ExistingState {
   /** Order 24 (0018): factions by name, links by linkId. */
   factions: Map<string, { active: number }>;
   factionLinks: Map<string, StoredLink>;
+  /** Order 25 (0019): quest lines by questLineId. */
+  questLines: Map<string, StoredQuestLine>;
   importSources: Map<string, { sha: string; changed_at: string }>;
   /** Indexes per table, from the live schema: each written row can also write one entry in each (the write bound). */
   indexes: Record<string, number>;
@@ -863,8 +870,8 @@ export interface Predicted {
   mob: { insert: number; update: number; deactivate: number };
   /** Order 17: rows each zone table would write (inserts and updates together), absent without the zone sources. */
   zones?: {
-    zone: number; zone_name: number; npc: number; import_source: number; faction: number; npc_faction: number;
-    deactivate: { zone: number; zone_name: number; npc: number; faction: number; npc_faction: number };
+    zone: number; zone_name: number; npc: number; import_source: number; faction: number; npc_faction: number; faction_quest: number;
+    deactivate: { zone: number; zone_name: number; npc: number; faction: number; npc_faction: number; faction_quest: number };
     /** Order 24: factions whose post would show something new (their changed_at is set). */
     factions_changed: number;
   };
@@ -905,13 +912,17 @@ export function predict(plan: Plan, ex: ExistingState): Predicted {
     const z = plan.zones;
     const gone = zoneDeactivations(z, ex);
     p.zones = {
-      deactivate: { zone: gone.zones.length, zone_name: gone.names.length, npc: gone.npcs.length, faction: gone.factions.length, npc_faction: gone.links.length },
+      deactivate: {
+        zone: gone.zones.length, zone_name: gone.names.length, npc: gone.npcs.length, faction: gone.factions.length, npc_faction: gone.links.length,
+        faction_quest: gone.questLines.length,
+      },
       zone: z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).length,
       zone_name: z.names.filter((n) => zoneNameDiffers(ex.zoneNames.get(zoneNameId(n.source, n.name)), n)).length,
       npc: z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).length,
       import_source: z.versions.filter((v) => ex.importSources.get(v.name)?.sha !== v.sha || ex.importSources.get(v.name)?.changed_at !== v.changedAt).length,
       faction: z.factions.filter((f) => factionDiffers(ex.factions.get(f))).length,
       npc_faction: z.factionLinks.filter((l) => linkDiffers(ex.factionLinks.get(linkId(l)), l)).length,
+      faction_quest: z.questLines.filter((q) => questLineDiffers(ex.questLines.get(questLineId(q)), q)).length,
       factions_changed: factionChanges(z, ex).size,
     };
   }
@@ -953,7 +964,7 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
  * The game-data tables the import writes: every Statement names one, and import.test.ts checks each statement's SQL
  * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
  */
-export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction'] as const;
+export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction', 'faction_quest'] as const;
 export type Table = (typeof IMPORT_TABLES)[number];
 /** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
 export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
@@ -1259,6 +1270,44 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
           rows.map((l) => l.faction),
         ),
       );
+  }
+
+  // Order 25: the quest lines (a row names its faction's id), after the factions; written and deactivated as links are.
+  const quests = ex ? z.questLines.filter((q) => questLineDiffers(ex.questLines.get(questLineId(q)), q)) : z.questLines;
+  const questValues = (rows: QuestLineRow[]) => rows.map((q) => `(${lit(q.faction)}, ${lit(q.quest)}, ${lit(q.line)}, ${lit(q.url)})`).join(', ');
+  for (const rows of chunkSized(quests, utf8))
+    groups.push(
+      touch(
+        [
+          stmt(
+            'faction_quest',
+            rows.length,
+            `INSERT INTO faction_quest (faction_id, quest_title, line, wiki_url, active) SELECT f.id, v.column2, v.column3, v.column4, 1 ` +
+              `FROM (VALUES ${questValues(rows)}) AS v JOIN faction f ON f.name = v.column1 WHERE true ` +
+              `ON CONFLICT(faction_id, quest_title, line) DO UPDATE SET wiki_url = excluded.wiki_url, active = 1 ` +
+              `WHERE faction_quest.wiki_url IS NOT excluded.wiki_url OR faction_quest.active IS NOT 1`,
+          ),
+        ],
+        rows.map((q) => q.faction),
+      ),
+    );
+  if (ex) {
+    const gone = zoneDeactivations(z, ex);
+    for (const rows of chunkSized(gone.questLines, utf8))
+      groups.push(
+        touch(
+          [
+            stmt(
+              'faction_quest',
+              rows.length,
+              `UPDATE faction_quest SET active = 0 WHERE active = 1 AND (faction_id, quest_title, line) IN ` +
+                `(SELECT f.id, v.column2, v.column3 FROM (VALUES ${questValues(rows)}) AS v JOIN faction f ON f.name = v.column1)`,
+            ),
+          ],
+          rows.map((q) => q.faction),
+        ),
+      );
+    // Last: a faction is deactivated after its links and quest lines (order 25: a merged misspelling's included).
     for (const rows of chunk(gone.factions, ROWS_PER_STATEMENT))
       groups.push([stmt('faction', rows.length, `UPDATE faction SET active = 0, changed_at = ${NOW_SQL} WHERE active = 1 AND name IN (${rows.map(lit).join(', ')})`)]);
   }
@@ -1294,6 +1343,8 @@ export function factionChanges(z: ZonePlan, ex: ExistingState): Set<string> {
     ...gone.factions,
     ...z.factionLinks.filter((l) => linkDiffers(ex.factionLinks.get(linkId(l)), l)).map((l) => l.faction),
     ...gone.links.map((l) => l.faction),
+    ...z.questLines.filter((q) => questLineDiffers(ex.questLines.get(questLineId(q)), q)).map((q) => q.faction),
+    ...gone.questLines.map((q) => q.faction),
     ...z.npcs.filter((n) => npcDiffers(ex.npcs.get(npcId(n.zone_key, n.name)), n)).flatMap(linked.ofNpc),
     ...gone.npcs.flatMap(linked.ofNpc),
     ...z.zones.filter((r) => zoneDiffers(ex.zones.get(r.key), r)).flatMap((r) => linked.ofZone(r.key)),
@@ -1308,7 +1359,9 @@ function zoneDeactivations(z: ZonePlan, ex: ExistingState) {
   const keepNpcs = new Set(z.npcs.map((n) => npcId(n.zone_key, n.name)));
   const keepFactions = new Set(z.factions);
   const keepLinks = new Set(z.factionLinks.map(linkId));
+  const keepQuests = new Set(z.questLines.map(questLineId));
   return {
+    questLines: [...ex.questLines.values()].filter((q) => q.active === 1 && !keepQuests.has(questLineId(q))),
     zones: [...ex.zones.values()].filter((r) => r.active === 1 && !keep.has(r.key)).map((r) => r.key),
     names: [...ex.zoneNames.values()].filter((n) => n.active === 1 && !keepNames.has(zoneNameId(n.source, n.name))),
     npcs: [...ex.npcs.values()].filter((n) => n.active === 1 && !keepNpcs.has(npcId(n.zone_key, n.name))),
@@ -1367,6 +1420,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
   const srcs = await db.all<{ name: string; sha: string; changed_at: string }>('SELECT name, sha, changed_at FROM import_source');
   const fcs = await db.all<{ name: string; active: number }>('SELECT name, active FROM faction');
   const fls = await db.all<StoredLink>('SELECT l.zone_key, l.npc_name, f.name AS faction, l.kind, l.active FROM npc_faction l JOIN faction f ON f.id = l.faction_id');
+  const fqs = await db.all<StoredQuestLine>('SELECT f.name AS faction, q.quest_title AS quest, q.wiki_url AS url, q.line, q.active FROM faction_quest q JOIN faction f ON f.id = q.faction_id');
   const recipes = new Map<string, ExistingRecipe>();
   for (const row of rs) {
     let r = recipes.get(row.source_key);
@@ -1404,6 +1458,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     importSources: new Map(srcs.map((s) => [s.name, { sha: s.sha, changed_at: s.changed_at }])),
     factions: new Map(fcs.map((f) => [f.name, { active: Number(f.active) }])),
     factionLinks: new Map(fls.map((l) => [linkId(l), { ...l, active: Number(l.active) }])),
+    questLines: new Map(fqs.map((q) => [questLineId(q), { ...q, active: Number(q.active) }])),
     indexes: Object.fromEntries(idx.map((r) => [r.t, Number(r.n)])),
   };
 }

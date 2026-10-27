@@ -1,8 +1,10 @@
 -- Order 24 (ITEMs 1 and 2), named schema departures from docs/PRD-schema.sql (the PRD has no factions).
 --
--- faction: one row per faction name Mo Betta's npcs.json records in an NPC's factions or opposing_factions, trimmed and
---   never merged or re-spelled (near-identical names stay separate rows). A name that disappears upstream is deactivated
---   (active = 0), never deleted, so its id (and a guild's post for it) is kept.
+-- faction: one row per faction name Mo Betta's npcs.json records in an NPC's factions or opposing_factions, trimmed.
+--   Order 25: the owner's eight approved merges (2026-10-27) map ten misspellings to their correct names before this
+--   table is written (src/faction-aliases.ts); no other name is merged or re-spelled (near-identical names stay
+--   separate rows). A name that disappears upstream, a merged misspelling included, is deactivated (active = 0), never
+--   deleted, so its id (and a guild's post for it, retired by the factions board) is kept.
 --   changed_at: when the import last changed what the faction's post shows (its links, or a linked creature's row or
 --   zone). It is the one value no table holds; the factions board re-renders a post rendered before it
 --   (src/board/kinds.ts), so the import never writes a guild's rows.

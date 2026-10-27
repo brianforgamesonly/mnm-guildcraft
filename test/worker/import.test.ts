@@ -231,7 +231,7 @@ describe('game_class (classes derived at import)', () => {
   it('order 10: every statement writes exactly the table it names, and together they cover IMPORT_TABLES (the backup reads that list)', () => {
     const empty = {
       tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(),
-      zones: new Map(), zoneNames: new Map(), npcs: new Map(), importSources: new Map(), factions: new Map(), factionLinks: new Map(), indexes: {},
+      zones: new Map(), zoneNames: new Map(), npcs: new Map(), importSources: new Map(), factions: new Map(), factionLinks: new Map(), questLines: new Map(), indexes: {},
     };
     const f = withClasses();
     f.mobs['a test mob'] = { title: 'A test mob', zone: '[[Night Harbor]]' };

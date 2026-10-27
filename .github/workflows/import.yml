@@ -2,6 +2,7 @@
 # Order 17: also the zone sources (scripts/import/zones.ts ZONE_FILES: mnm-tools maps.json, MnM Atlas data/maps.json,
 # Mo Betta zones.json and npcs.json), each pinned to its last commit. A source unchanged for 30 days is a warning
 # annotation, never a failure (MnM Atlas's registry is exempt). Unchanged sources write 0 zone rows.
+# Order 25: also Mo Betta's quests.json, pinned the same way, for the faction posts' quest lines only (faction_quest).
 # Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~1 billed minute per run, ~30 min/month.
 # Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
 # Order 13: a run writes at most 40,000 D1 rows, index writes included (scripts/import/core.ts WRITE_CEILING). At that
