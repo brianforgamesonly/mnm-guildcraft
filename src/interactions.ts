@@ -56,7 +56,7 @@ type Access = 'open' | 'member' | 'officer' | 'admin';
 export const ROUTES: Record<string, { access: Access; search?: true; audit?: string | ((opts: Option[]) => string | undefined); run: (c: Ctx, opts: Option[]) => Promise<MessageReply> }> = {
   me: { access: 'member', run: meCommand },
   skills: { access: 'member', run: skillsCommand },
-  // A screenshot attached is a submission (its own audit row), not a lookup.
+  // A stale screenshot: (order 24: screenshots are off) is answered "turned off" and is not a lookup.
   item: { access: 'member', search: true, audit: (opts) => (opts.some((o) => o.name === 'screenshot') ? undefined : 'craft.find'), run: itemCommand },
   // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
   // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),

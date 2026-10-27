@@ -145,7 +145,7 @@ The roster board's posts, the screenshots waiting in the vault and the report ca
    npx wrangler d1 execute mnm-guildcraft-dev --remote --command "DELETE FROM board_post; UPDATE guild SET board_index_thread_id = NULL"
    ```
    Then delete the old bot's board posts in the forum by hand (right-click a post → **Delete Post** *(unverified: menu wording)*).
-2. Screenshots that were still waiting for approval, and open reports, cannot be answered with the old bot's buttons. Ask members to send those again; the old messages can be deleted by hand. Approved screenshots keep working.
+2. Open reports cannot be answered with the old bot's buttons. Ask members to send those again; the old messages can be deleted by hand. Screenshots still waiting for approval cannot be answered either, and are not resent: member screenshots are turned off (order 24). Approved screenshots keep working.
 
 Without an export, run `/guildcraft setup` to choose the roles and channels.
 
