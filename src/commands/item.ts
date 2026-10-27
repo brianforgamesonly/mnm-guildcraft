@@ -1,17 +1,17 @@
-// /item name: [screenshot] (work order 18, CHECKLIST A20): one card for any item, replacing /craft find, /item image,
+// /item name: (work order 18, CHECKLIST A20): one card for any item, replacing /craft find, /item image,
 // /craft know and /craft report as commands. The card: stats and where the item comes from (/gear find's card), its
 // recipes and crafters when it has any (/craft find's), and the recipes that use it as an ingredient. Private, with
-// Post to channel. A screenshot attached goes to the officers for approval (/item image's path). No writes per card
+// Post to channel. Order 24 (the owner, 2026-10-27): member screenshots are turned off; no screenshot: option. No writes per card
 // beyond the read audit row 'craft.find' (src/interactions.ts; the PRD's action name, kept so history stays comparable).
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, md, optString, plural, row, STYLE_PRIMARY, truncate, type Embed, type EmbedField, type MessageReply, type Option } from '../discord.ts';
 import { GEAR_COLS, type GearRow } from '../gear/search.ts';
 import { correctionJoin, CORRECTED, visibleTo } from '../recipes.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
-import { fitLines, findEmbeds, footerText, IMAGE_PREFIX, itemLinks, KNOW_PREFIX, loadFind, REPORT_PREFIX, statFields } from './find.ts';
+import { fitLines, findEmbeds, footerText, itemLinks, KNOW_PREFIX, loadFind, REPORT_PREFIX, statFields } from './find.ts';
 import { withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
 import { cardFields, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
-import { submitImage } from './images.ts';
+import { SCREENSHOTS_OFF } from './images.ts';
 import { ITEM_REPORT_PREFIX, missingId } from './reports.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -36,7 +36,6 @@ export const ITEM_COPY = {
   recipeReportButton: 'Report a recipe problem',
   itemReportButton: 'Report item data',
   requestButton: 'Request a craft',
-  imageButton: 'Stat image',
 } as const;
 
 // ---------------------------------------------------------------- the data
@@ -117,9 +116,9 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
 
 /**
  * The card's buttons, private or posted: each answers the presser with a new private message (order 9). Craftable: I know
- * this recipe, Report a recipe problem (recipe issues), Report item data (item issues), Request a craft, Stat image: five,
- * a row's maximum. Otherwise Report a problem (item issues) and Stat image. The custom_ids are /craft find's and /gear
- * find's, so cards posted before order 18 keep working.
+ * this recipe, Report a recipe problem (recipe issues), Report item data (item issues), Request a craft. Otherwise Report a
+ * problem (item issues). Order 24: no Stat image (screenshots are off; an old card's Stat image still answers). The
+ * custom_ids are /craft find's and /gear find's, so cards posted before order 18 keep working.
  */
 const actionRow = (itemId: number, craftable: boolean) =>
   row(
@@ -129,17 +128,16 @@ const actionRow = (itemId: number, craftable: boolean) =>
           button(`${REPORT_PREFIX}${itemId}`, ITEM_COPY.recipeReportButton),
           button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.itemReportButton),
           button(`${FROM_FIND_PREFIX}${itemId}`, ITEM_COPY.requestButton),
-          button(`${IMAGE_PREFIX}${itemId}`, ITEM_COPY.imageButton),
         ]
-      : [button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.reportButton), button(`${IMAGE_PREFIX}${itemId}`, ITEM_COPY.imageButton)],
+      : [button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.reportButton)],
   );
 
 // ---------------------------------------------------------------- the command and Post to channel
 
 export async function itemCommand(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const typed = (optString(opts, 'name') ?? '').trim();
-  const shot = optString(opts, 'screenshot');
-  if (shot !== undefined) return submitImage(c, typed, shot, 'screenshot');
+  // A client still holding the old definition may send screenshot: (order 24: turned off).
+  if (optString(opts, 'screenshot') !== undefined) return ephemeral(SCREENSHOTS_OFF);
   const found = await c.db.prepare('SELECT id FROM item WHERE name_key = ?').bind(typed.toLowerCase()).first<{ id: number }>();
   const k = found ? await itemCard(c, found.id) : null;
   if (!found || !k) return ephemeral(ITEM_COPY.noItem(typed || '(nothing)'), { components: [row([button(missingId(typed), ITEM_COPY.missingButton)])] });

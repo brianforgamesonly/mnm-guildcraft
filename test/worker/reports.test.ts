@@ -56,7 +56,7 @@ describe('/craft report', () => {
     expect(posted).toHaveLength(0);
     expect(await count('recipe_report')).toBe(1);
     const s = await send(cmd(officer, 'guildcraft', 'status'), TOKEN);
-    expect(s.data.content).toContain('**Waiting for officers:** 1 open report · 0 pending screenshots (no vault channel: `/guildcraft setup vault:`)');
+    expect(s.data.content).toContain('**Waiting for officers:** 1 open report\n');
   });
 
   it(`at most ${MAX_OPEN_REPORTS} open reports per member`, async () => {

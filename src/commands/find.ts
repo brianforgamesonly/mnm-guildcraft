@@ -287,16 +287,16 @@ export const noRecipe = (typed: string) => `No recipe found for **${md(typed)}**
 
 export const KNOW_PREFIX = 'know:';
 export const REPORT_PREFIX = 'rpt:';
+/** Stat image, on cards sent before order 24 (screenshots turned off): still answered (src/interactions.ts). */
 export const IMAGE_PREFIX = 'img:';
 /**
- * I know this recipe, Report a problem, Stat image. They work for whoever presses them, on the private reply and on a
+ * I know this recipe, Report a problem. They work for whoever presses them, on the private reply and on a
  * posted copy alike, and always answer with a new private message: one member's press never changes a public post.
  */
 export const findActions = (itemId: number) =>
   row([
     button(`${KNOW_PREFIX}${itemId}`, 'I know this recipe', STYLE_PRIMARY),
     button(`${REPORT_PREFIX}${itemId}`, 'Report a problem'),
-    button(`${IMAGE_PREFIX}${itemId}`, 'Stat image'),
     // Order 16: starts (or adds to) the presser's unsent craft request, privately.
     button(`${FROM_FIND_PREFIX}${itemId}`, 'Request a craft'),
   ]);

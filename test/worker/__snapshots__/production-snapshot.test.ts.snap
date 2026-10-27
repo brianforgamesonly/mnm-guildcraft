@@ -108,7 +108,7 @@ exports[`production status: every branch, as at 2b204aa > board set, unset revie
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -121,7 +121,7 @@ exports[`production status: every branch, as at 2b204aa > board set, unset revie
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -133,7 +133,7 @@ exports[`production status: every branch, as at 2b204aa > dry run newer than imp
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792555200:f>"
 `;
@@ -145,7 +145,7 @@ exports[`production status: every branch, as at 2b204aa > dry run newer than imp
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792555200:f>"
 `;
@@ -157,7 +157,7 @@ exports[`production status: every branch, as at 2b204aa > failed (production) 1`
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792468800:f> · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi."
 `;
@@ -169,7 +169,7 @@ exports[`production status: every branch, as at 2b204aa > failed (unset) 1`] = `
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792468800:f> · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi."
 `;
@@ -181,7 +181,7 @@ exports[`production status: every branch, as at 2b204aa > failed without detail 
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last never succeeded · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi. · **overdue**: no backup in over 36 hours"
 `;
@@ -193,7 +193,7 @@ exports[`production status: every branch, as at 2b204aa > failed without detail 
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last never succeeded · latest run <t:1792555200:f> **failed**. If this repeats, tell Joegandomi. · **overdue**: no backup in over 36 hours"
 `;
@@ -206,7 +206,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run (pr
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -219,7 +219,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run (un
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -231,7 +231,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run fai
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -243,7 +243,7 @@ exports[`production status: every branch, as at 2b204aa > latest nightly run fai
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -255,7 +255,7 @@ exports[`production status: every branch, as at 2b204aa > none yet (production) 
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -267,7 +267,7 @@ exports[`production status: every branch, as at 2b204aa > none yet (unset) 1`] =
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** none yet"
 `;
@@ -280,7 +280,7 @@ exports[`production status: every branch, as at 2b204aa > ok (production) 1`] = 
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** <#600000000000000010>
-**Waiting for officers:** 0 open reports · 0 pending screenshots in <#600000000000000030>
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check <t:1792486800:f> (<t:1792486800:R>) · 1 marked
 **Backup:** last <t:1792555200:f> · 2.5 MB"
 `;
@@ -293,7 +293,7 @@ exports[`production status: every branch, as at 2b204aa > ok (unset) 1`] = `
 **Board order:** A→Z
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** <#600000000000000010>
-**Waiting for officers:** 0 open reports · 0 pending screenshots in <#600000000000000030>
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check <t:1792486800:f> (<t:1792486800:R>) · 1 marked
 **Backup:** last <t:1792555200:f> · 2.5 MB"
 `;
@@ -305,7 +305,7 @@ exports[`production status: every branch, as at 2b204aa > overdue (production) 1
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792429200:f> · 900 B · **overdue**: no backup in over 36 hours"
 `;
@@ -317,7 +317,7 @@ exports[`production status: every branch, as at 2b204aa > overdue (unset) 1`] = 
 **Tradeskills board:** not set up (\`/guildcraft setup board:\`)
 **Factions board:** not set up (\`/guildcraft setup factions:\`)
 **Review channel:** not set (\`/guildcraft setup review:\`)
-**Waiting for officers:** 0 open reports · 0 pending screenshots (no vault channel: \`/guildcraft setup vault:\`)
+**Waiting for officers:** 0 open reports
 **Departures:** 0 members marked as left · last nightly check never
 **Backup:** last <t:1792429200:f> · 900 B · **overdue**: no backup in over 36 hours"
 `;

@@ -21,14 +21,12 @@ const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
 const describeBoard = (g: Pick<Guild, 'board_channel_id'>) => `Tradeskills board: ${g.board_channel_id ? `<#${g.board_channel_id}>` : 'not set (`board:` picks a forum channel)'}`;
 const describeReview = (g: Pick<Guild, 'review_channel_id'>) =>
   `Review channel: ${g.review_channel_id ? `<#${g.review_channel_id}>` : 'not set (`review:` picks a private text channel for departure notices and reports)'}`;
-const describeVault = (g: Pick<Guild, 'vault_channel_id'>) =>
-  `Vault channel: ${g.vault_channel_id ? `<#${g.vault_channel_id}>` : 'not set (`vault:` picks a private text channel for item screenshots)'}`;
 const describeRequests = (g: Pick<Guild, 'request_channel_id'>) =>
   `Request channel: ${g.request_channel_id ? `<#${g.request_channel_id}>` : 'not set (`requests:` picks a text channel for craft requests)'}`;
 // Order 24.
 const describeFactions = (g: Pick<Guild, 'faction_board_channel_id'>) =>
   `Factions board: ${g.faction_board_channel_id ? `<#${g.faction_board_channel_id}>` : 'not set (`factions:` picks a forum channel)'}`;
-const describeAll = (g: Settings) => [describeRoles(g), describeBoard(g), describeFactions(g), describeReview(g), describeVault(g), describeRequests(g)].join('\n');
+const describeAll = (g: Settings) => [describeRoles(g), describeBoard(g), describeFactions(g), describeReview(g), describeRequests(g)].join('\n');
 
 // ---------------------------------------------------------------- the board channel's permissions
 
@@ -37,7 +35,6 @@ const describeAll = (g: Settings) => [describeRoles(g), describeBoard(g), descri
 export const BOARD_PERMISSIONS = channelPermissions('board');
 export const FACTION_PERMISSIONS = channelPermissions('factions');
 export const REVIEW_PERMISSIONS = channelPermissions('review');
-export const VAULT_PERMISSIONS = channelPermissions('vault');
 export const REQUEST_PERMISSIONS = channelPermissions('requests');
 
 export const missingPermissions =(bits: bigint, needed: [bigint, string][] = BOARD_PERMISSIONS): string[] =>
@@ -127,9 +124,6 @@ export async function everyoneCanView(token: string, guildId: string, channelId:
 /** The setup reply's warning when the review channel is open to everyone. */
 export const reviewPublicWarning = (id: string) =>
   `**Note:** everyone in the server can see <#${id}>, so departure notices (a member's name and characters) will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
-/** The vault's warning when @everyone can view it (order 9: warn, never refuse). */
-export const vaultPublicWarning = (id: string) =>
-  `**Note:** everyone in the server can see <#${id}>, so screenshots waiting for approval will show to all members. To keep them to officers: Edit Channel → Permissions → @everyone → turn off View Channel, then add your officer role with View Channel on. The setting is saved either way.`;
 export const reviewUnreadWarning =(id: string) => `**Note:** I couldn't check who can see <#${id}>. Departure notices should go to a channel only officers can see.`;
 
 const CHANNEL_KINDS = {
@@ -147,11 +141,6 @@ const CHANNEL_KINDS = {
   review: {
     type: GUILD_TEXT,
     permissions: REVIEW_PERMISSIONS,
-    wrongType: (id: string) => `<#${id}> is not a text channel. Create a private text channel for officers, then pick it here.`,
-  },
-  vault: {
-    type: GUILD_TEXT,
-    permissions: VAULT_PERMISSIONS,
     wrongType: (id: string) => `<#${id}> is not a text channel. Create a private text channel for officers, then pick it here.`,
   },
   // Order 16: private threads can only be created in text channels.
@@ -229,7 +218,7 @@ async function checkChannel(c: Ctx, channelId: string, kind: keyof typeof CHANNE
 /** Order 19: the Create GuildCraft channels button (src/commands/channels.ts), "gcc:". */
 export const CREATE_CHANNELS_PREFIX = 'gcc:';
 export const CREATE_CHANNELS_LABEL = 'Create GuildCraft channels';
-/** Order 24: the channels the button creates, from its own layout (src/commands/channels.ts LAYOUT; the vault is no longer one). */
+/** Order 24: the channels the button creates, as its own layout (src/commands/channels.ts LAYOUT, held equal by test/worker/channels.test.ts). */
 const CHANNEL_SETTINGS = ['board_channel_id', 'faction_board_channel_id', 'review_channel_id', 'request_channel_id'] as const;
 /** The button: on the settings reply and after an officer role is saved (`always`), and on a save that leaves any of its channels unset. */
 export function setupButtons(s: Pick<Guild, (typeof CHANNEL_SETTINGS)[number]>, always = false): { components?: unknown[] } {
@@ -242,19 +231,18 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const officerRole = optString(opts, 'officer_role');
   const board = optString(opts, 'board');
   const review = optString(opts, 'review');
-  const vault = optString(opts, 'vault');
   const requests = optString(opts, 'requests');
   const factions = optString(opts, 'factions');
-  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && vault === undefined && requests === undefined && factions === undefined)
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && requests === undefined && factions === undefined)
     return ephemeral(`Current settings:\n${describeAll(c.guild)}`, setupButtons(c.guild, true));
 
-  for (const [id, kind] of [[board, 'board'], [factions, 'factions'], [review, 'review'], [vault, 'vault'], [requests, 'requests']] as const) {
+  for (const [id, kind] of [[board, 'board'], [factions, 'factions'], [review, 'review'], [requests, 'requests']] as const) {
     if (id === undefined) continue;
     const check = await checkChannel(c, id, kind);
     if ('refusal' in check) return ephemeral(check.refusal);
   }
   const { before, after, moved, skills, posts, factionsMoved, factionCount, factionPosts } = await saveSetup(c, {
-    member_role_id: memberRole, officer_role_id: officerRole, board_channel_id: board, review_channel_id: review, vault_channel_id: vault, request_channel_id: requests,
+    member_role_id: memberRole, officer_role_id: officerRole, board_channel_id: board, review_channel_id: review, request_channel_id: requests,
     faction_board_channel_id: factions,
   });
   const lines = [`Saved.\n${describeAll(after)}`];
@@ -263,12 +251,6 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
       `Craft requests will open private threads in <#${requests}>: one per request, holding the requester and the crafters who turned on **Notices** in \`/me\` and can make the item. Members need to see the channel to see their thread.`,
       threadReadersNote(requests, c.botToken ? await threadReaders(c.botToken, c.guild.id, requests) : null),
     );
-  }
-  if (vault !== undefined) {
-    lines.push(`Screenshots sent with \`/item screenshot:\` will wait in <#${vault}> for an officer's **Approve** or **Reject**. Screenshots already in an earlier vault stay where they are.`);
-    const open = c.botToken ? await everyoneCanView(c.botToken, c.guild.id, vault) : null;
-    if (open === true) lines.push(vaultPublicWarning(vault));
-    else if (open === null) lines.push(`**Note:** I couldn't check who can see <#${vault}>. The vault should be a channel only officers can see.`);
   }
   if (review !== undefined) {
     lines.push(`Departure notices will go to <#${review}>: one per member who leaves the server, checked nightly, with **Remove characters** and **Keep** buttons for officers.`);
@@ -482,7 +464,8 @@ export async function guildcraftStatus(c: Ctx): Promise<MessageReply> {
       ? `**Factions board:** <#${c.guild.faction_board_channel_id}> · ${fb.posts} of ${fb.skills} posts · last refresh ${when(fb.refreshed)} · ${fb.dirty} waiting to refresh · ${factionsInOrder ? 'A→Z' : 'out of order — run `/guildcraft rebuild-board which:Factions`'}`
       : '**Factions board:** not set up (`/guildcraft setup factions:`)',
     `**Review channel:** ${c.guild.review_channel_id ? `<#${c.guild.review_channel_id}>` : 'not set (`/guildcraft setup review:`)'}`,
-    `**Waiting for officers:** ${plural(q.reports, 'open report')} · ${plural(q.images, 'pending screenshot')}${c.guild.vault_channel_id ? ` in <#${c.guild.vault_channel_id}>` : ' (no vault channel: `/guildcraft setup vault:`)'}`,
+    // Order 24: screenshots are off; an old vault's leftovers are counted only while any wait there.
+    `**Waiting for officers:** ${plural(q.reports, 'open report')}${q.images && c.guild.vault_channel_id ? ` · ${plural(q.images, 'pending screenshot')} in <#${c.guild.vault_channel_id}>` : ''}`,
     `**Departures:** ${plural(d?.left_members ?? 0, 'member')} marked as left · last nightly check ${when(d?.at)}${run ? ` · ${run.marked ?? 0} marked${run.stopped ? ` · note: ${run.stopped.slice(0, 200)}` : ''}` : ''}`,
     backupLine(backupRow, nowMs),
     tokenLine(backupRow),

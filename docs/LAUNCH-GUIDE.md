@@ -7,19 +7,18 @@ Steps a server admin follows when GuildCraft is added to a guild's server. Start
 A server admin (someone with **Manage Server**) opens this link, chooses the server and presses **Authorize**:
 
 ```
-https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=9157138828304
+https://discord.com/oauth2/authorize?client_id=1562084361057345636&scope=bot+applications.commands&permissions=9157138795536
 ```
 
 Discord shows the permissions GuildCraft asks for before you authorize. Each is there because GuildCraft calls something that needs it, and nothing else is asked for:
 
 | Permission | Why GuildCraft needs it |
 |---|---|
-| View Channel | to see the roster board, review and vault channels you choose |
-| Send Messages | to create the roster board's posts (in a forum channel, a post) and to post in the review and vault channels |
-| Send Messages in Threads | to add further messages inside a board post when a tradeskill's list is long |
+| View Channel | to see the tradeskills and factions forums, and the review and request channels you choose |
+| Send Messages | to create the boards' posts (in a forum channel, a post) and to post in the review channel |
+| Send Messages in Threads | to add further messages inside a board post when its list is long |
 | Embed Links | GuildCraft's board posts, report cards and departure notices are embeds |
-| Attach Files | to re-post item screenshots in the vault channel for officers to approve |
-| Read Message History | to find archived board posts, and to read approved screenshots back |
+| Read Message History | to find archived board posts, and to read an old vault's approved screenshots back |
 | Manage Threads | to keep board posts open, pin the board's index post, and remove old board posts when the board is rebuilt; to rename, close and reopen craft request threads |
 | Create Private Threads | to open one private thread per craft request in the request channel |
 | Manage Channels | for **Create GuildCraft channels** in `/guildcraft setup`: to create the GuildCraft category and its four channels, and to set the forums' sort order and default reaction |
@@ -72,12 +71,9 @@ GuildCraft re-checks the officer role on every `/officer` call and on every butt
 
 **Keep the grant.** Discord's documentation warns: "Deleting or renaming a command will permanently delete all permissions for the command". Order 18 renamed the commands before any guild installed, so no grant was lost; a grant on `/officer` survives re-registration under the same name (**unverified** against a live grant). If `/officer` is ever renamed, repeat the steps above.
 
-## The vault channel for item screenshots (order 9)
+## Item screenshots are off (order 24)
 
-Screenshots sent with `/item screenshot:` wait in a private channel until an officer presses Approve or Reject there.
-
-1. Create a private text channel (for example `guildcraft-vault`) that only officers and MNM-Guildcraft can see.
-2. Run `/guildcraft setup vault:#guildcraft-vault`. GuildCraft checks it can View Channel, Send Messages, Attach Files and Read Message History there, and names any permission it is missing. It warns (and still saves) if @everyone can see the channel.
+Members no longer send item screenshots, so there is no vault channel to set up; item cards show the wiki's own icon. A server that set a vault before keeps it as it is: screenshots already approved there still show from an old card's **Stat image**, and Approve and Reject on messages still waiting there still work. Don't delete that channel while you want those screenshots.
 
 ## Zones (`/zone`, order 17)
 

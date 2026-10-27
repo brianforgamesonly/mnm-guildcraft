@@ -1009,3 +1009,16 @@ No new sentence: each button's label is a zone's name from the data. What the me
 | src/board/render.ts:156 | (the tradeskills index embed title) Tradeskills: index (was "Crafting roster: index") | DRAFT |
 | docs/LAUNCH-GUIDE.md:10, 25-27, 33-37 | The install link (permissions=9157138828304), the Create Expressions row, the new layout, "Servers that added GuildCraft before the factions board" | DRAFT |
 | docs/SELF-HOSTING.md:111, 114, 126-128 | The install link and number (9157138828304), the Create Expressions row | DRAFT |
+
+## Work order 24, PR C: item screenshots turned off (DRAFT)
+
+The owner's decision of 2026-10-27 (option B). Removed: `/item`'s `screenshot:` option, the **Stat image** button on new cards, `/guildcraft setup`'s `vault:` option and its replies, the vault section of the launch guide.
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/images.ts:25 | (a stale `screenshot:`, or Stat image on an old card with no approved screenshot) Item screenshots are turned off on GuildCraft. Item cards show the wiki's own icon. | DRAFT |
+| src/commands/setup.ts:468 | (status) **Waiting for officers:** \<n> open reports, plus " · \<n> pending screenshots in #\<vault>" only while an old vault has any | DRAFT |
+| src/commands/help.ts:51 | On an `/item` card: **I know this recipe**, **Report a problem**, **Request a craft**. | DRAFT |
+| src/commands/definitions.ts:177, 180 | (setup) Set the roles, the tradeskills and factions forums, and the review and request channels · (officer_role:) Officers: edit entries, handle departures, reports and recipe data | DRAFT |
+| docs/LAUNCH-GUIDE.md:10, 17-21, "Item screenshots are off (order 24)" | The install link (permissions=9157138795536, Attach Files no longer asked for), the permission rows, the section replacing the vault's | DRAFT |
+| docs/SELF-HOSTING.md:111-123 | The install link and number (9157138795536), the permission rows | DRAFT |
