@@ -189,6 +189,118 @@ describe('order 24: the factions board', () => {
   });
 });
 
+describe('order 25: quest lines and retired posts', () => {
+  const quest = (faction: string, title: string, url: string | null, line: string) =>
+    env.DB.prepare('INSERT INTO faction_quest (faction_id, quest_title, line, wiki_url) SELECT id, ?, ?, ? FROM faction WHERE name = ?').bind(title, line, url, faction).run();
+  /** What the import writes when a faction stops being shown: its links (and, merged or vanished, the faction) deactivated, changed_at later. */
+  const unshow = (faction: string, deactivate: boolean) =>
+    env.DB.batch([
+      env.DB.prepare('UPDATE npc_faction SET active = 0 WHERE faction_id = (SELECT id FROM faction WHERE name = ?)').bind(faction),
+      env.DB.prepare(`UPDATE faction SET ${deactivate ? 'active = 0, ' : ''}changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+1 second') WHERE name = ?`).bind(faction),
+    ]);
+  const SCHOOL: Link[] = [...STEEL, ['Night Harbor', 'Tenebrim Tam', 'School of the Fourfold Path', 'gained', null, null], ['Night Harbor', 'A thug', 'Pymos Mercenaries', 'lost', null, null]];
+
+  it('a faction with quest lines gets a Quests section (title linked to its wiki page, the line quoted exactly) and the quest footer', async () => {
+    await seedFactions(SCHOOL);
+    await quest('School of the Fourfold Path', 'Elementalist Starter Quest (Night Harbor)', 'https://monstersandmemories.miraheze.org/wiki/Elementalist_Starter_Quest_%28Night_Harbor%29', 'Faction standing with School of the Fourfold Path');
+    await setGuild();
+    await refresh();
+    const school = forum.text(forum.byName('School of the Fourfold Path'));
+    expect(school).toContain(
+      [
+        '**Quests** · 1 quest',
+        '• [Elementalist Starter Quest (Night Harbor)](https://monstersandmemories.miraheze.org/wiki/Elementalist_Starter_Quest_%28Night_Harbor%29)',
+        '“Faction standing with School of the Fourfold Path”',
+        FACTION_COPY.footerQuests,
+      ].join('\n'),
+    );
+    // A post without quests keeps the creature-only footer and no Quests section.
+    const steel = forum.text(forum.byName('Steel Talons'));
+    expect(steel).not.toContain('**Quests**');
+    expect(steel.endsWith(FACTION_COPY.footer)).toBe(true);
+  });
+
+  it('a quest link is offered only for an https address; the title stays text otherwise', () => {
+    const [m] = renderFactionPost('X', [], 'on', [{ faction_id: 1, quest: 'Q_1', url: 'http://example.invalid/q', line: 'Faction with X' }]);
+    expect(m.embeds[0].description).toContain('• Q\\_1\n“Faction with X”');
+    // Review: raw parentheses and spaces are encoded, so the link is kept; a long line with breaks stays one bounded line.
+    const [n] = renderFactionPost('X', [], 'on', [{ faction_id: 1, quest: 'Q (NH)', url: 'https://w.invalid/wiki/Q (NH)', line: `Faction with X\n${'y'.repeat(5000)}` }]);
+    expect(n.embeds[0].description).toContain('• [Q (NH)](https://w.invalid/wiki/Q%20%28NH%29)\n“Faction with X yyy');
+    expect(n.embeds[0].description!.length).toBeLessThan(EMBED_LIMITS.description);
+  });
+
+  it('a merged faction\'s post is edited to one line naming the approved spelling, then archived; never deleted; done once', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    const old = forum.byName('Pymos Mercenaries')!;
+    await unshow('Pymos Mercenaries', true);
+    const r = await refresh();
+    expect(r).toMatchObject({ retired: 1, created: 0, errors: [] });
+    const t = forum.byName('Pymos Mercenaries')!;
+    expect(t.id).toBe(old.id);
+    expect(t.archived).toBe(true);
+    expect([...t.messages.values()].map((m) => ({ content: m.content, embeds: m.embeds }))).toEqual([{ content: 'This faction now appears as Pyrmos Mercenaries.', embeds: [] }]);
+    expect(await one('SELECT count(*) AS n FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE f.name = \'Pymos Mercenaries\' AND p.dirty = 0')).toEqual({ n: 1 });
+    expect(forum.text(forum.byName(FACTIONS.indexTitle))).not.toContain(`<#${t.id}>`);
+  });
+
+  it('once retired (rendered after the change), the post leaves the work list: the next run does not touch it', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Pymos Mercenaries', true);
+    // Review: this run renders after changed_at (+1 s), as a real sweep after the import does.
+    const later = (ms: number) => refreshGuildBoard(env.DB, api(), GUILD, { kind: FACTIONS, nowMs: Date.now() + ms });
+    expect(await later(10_000)).toMatchObject({ retired: 1 });
+    expect(await later(20_000)).toMatchObject({ retired: 0, edited: 0, skipped_unchanged: 0 });
+  });
+
+  it('a refused archive is logged, the notice stays, and the edit is not repeated', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Pymos Mercenaries', true);
+    const thread = forum.byName('Pymos Mercenaries')!.id;
+    forum.failures.push({ match: (c) => c.method === 'PATCH' && c.path === `/channels/${thread}` && c.body?.archived === true, status: 403, code: 50013 });
+    const later = (ms: number) => refreshGuildBoard(env.DB, api(), GUILD, { kind: FACTIONS, nowMs: Date.now() + ms });
+    const r = await later(10_000);
+    expect(r).toMatchObject({ retired: 0, edited: 1 });
+    expect(r.errors).toEqual(['archive Pymos Mercenaries: 403 50013']);
+    expect(forum.line(forum.byName('Pymos Mercenaries'))).toBe('This faction now appears as Pyrmos Mercenaries.');
+    expect(await one("SELECT p.dirty FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE f.name = 'Pymos Mercenaries'")).toEqual({ dirty: 0 });
+    expect(await later(20_000)).toMatchObject({ edited: 0, retired: 0 });
+  });
+
+  it('a faction no longer listed says so; shown again, its post is edited back and unarchived', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Steel Talons', false);
+    expect(await refresh()).toMatchObject({ retired: 1 });
+    expect(forum.line(forum.byName('Steel Talons'))).toBe('No longer listed in the data.');
+    await env.DB.batch([
+      env.DB.prepare("UPDATE npc_faction SET active = 1 WHERE faction_id = (SELECT id FROM faction WHERE name = 'Steel Talons')"),
+      env.DB.prepare("UPDATE faction SET changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+2 seconds') WHERE name = 'Steel Talons'"),
+    ]);
+    expect(await refresh()).toMatchObject({ edited: 1, unarchived: 1 });
+    const t = forum.byName('Steel Talons')!;
+    expect(t.archived).toBe(false);
+    expect(forum.text(t)).toContain('**Reputation Gained** · 2 creatures');
+  });
+
+  it('the sweep picks up a guild whose only work is a post to retire', async () => {
+    await seedFactions(SCHOOL);
+    await setGuild();
+    await refresh();
+    await unshow('Pymos Mercenaries', true);
+    const ctx = createExecutionContext();
+    await worker.scheduled(createScheduledController({ scheduledTime: Date.parse('2026-10-27T12:15:00Z'), cron: '*/15 * * * *' }), { ...env, ...TOKEN.env } as any, ctx);
+    await waitOnExecutionContext(ctx);
+    expect(forum.byName('Pymos Mercenaries')!.archived).toBe(true);
+  });
+});
+
 describe('order 24: setup, status, rebuild and the shared sweep', () => {
   const setupFactions = (channel = FACTION_FORUM) => {
     const i = cmd(admin, 'guildcraft', 'setup', { factions: channel }) as any;

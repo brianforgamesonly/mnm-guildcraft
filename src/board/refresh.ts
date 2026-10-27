@@ -76,6 +76,8 @@ export interface RefreshResult {
   /** Order 6, rebuild: old posts replaced by a new post, and old posts deleted. */
   replaced: number;
   deleted_old: number;
+  /** Order 25: posts whose topic is no longer shown, edited to their one-line notice and archived (never deleted). */
+  retired: number;
   /** Tradeskills whose post has member messages: never replaced or deleted (names are game data). */
   guarded: string[];
   rebuild: 'none' | 'in_progress' | 'done' | 'held';
@@ -87,7 +89,7 @@ export interface RefreshResult {
 const emptyResult = (board: BoardName): RefreshResult => ({
   board,
   created: 0, edited: 0, unarchived: 0, skipped_unchanged: 0, messages_added: 0, messages_deleted: 0, left_dirty: 0, gone: 0, index: 'none', repinned: false,
-  bumped: 0, replaced: 0, deleted_old: 0, guarded: [], rebuild: 'none', in_order: true, errors: [],
+  bumped: 0, replaced: 0, deleted_old: 0, retired: 0, guarded: [], rebuild: 'none', in_order: true, errors: [],
 });
 
 // ---------------------------------------------------------------- marking dirty (inside a command's write batch)
@@ -330,7 +332,7 @@ export async function refreshGuildBoard(
       .prepare(`UPDATE ${k.table} SET dirty = 2 WHERE guild_id = ?1 AND dirty <> 0 AND EXISTS (SELECT 1 FROM guild WHERE id = ?1 AND ${k.lock} = ?2)`)
       .bind(guildId, lease),
   ]);
-  const data = src.fromResults(results.slice(1, 5));
+  const data = src.fromResults(results.slice(1, -1));
   if (!data?.guild.board_channel_id) return { ...r, no_board: true };
   if (results[0].meta.changes !== 1) return { ...r, locked: true };
   const forum = data.guild.board_channel_id;
@@ -348,7 +350,7 @@ export async function refreshGuildBoard(
     const p = data.posts.get(t.id);
     return opts.all || !p || p.dirty !== 0 || data.stale(t.id) || (rebuilding && isOld(p.thread_id));
   });
-  const needActive = work.some((t) => data.posts.has(t.id)) || !!data.guild.board_index_thread_id || rebuilding;
+  const needActive = work.some((t) => data.posts.has(t.id)) || data.retiring.length > 0 || !!data.guild.board_index_thread_id || rebuilding;
   const active = needActive ? await activeThreads(api, guildId) : null;
   const archivedList = rebuilding ? await archivedThreads(api, forum) : null;
   // Without both lists the rebuild cannot tell member messages apart, so this run replaces and deletes nothing.
@@ -478,6 +480,56 @@ export async function refreshGuildBoard(
     }
   }
 
+  // Order 25: retire the posts of topics no longer shown: edit to the one-line notice (unarchiving first when archived),
+  // then archive. The row and the thread are kept, so a rebuild never deletes them (they stay referenced) and a topic
+  // shown again is edited back by the loop above (its hash differs from the notice's).
+  for (const t of data.retiring) {
+    const post = data.posts.get(t.id)!;
+    const msgs = [t.notice];
+    const hash = await contentHash(msgs);
+    if (post.content_hash === hash) {
+      // The notice is already there. Only a thread known to be still active gets one more archive call (review: never
+      // the edit again, so a refused archive costs one call when the post is next due, not an edit every sweep).
+      if (isArchived(active, post.thread_id) === false && !stopped && canCall(1 + RESERVE)) {
+        const a = await api.call('PATCH', `/channels/${post.thread_id}`, { archived: true });
+        if (a.ok) r.retired++;
+        else r.errors.push(`archive ${t.name}: ${a.status} ${a.code ?? ''}`.trim());
+      } else r.skipped_unchanged++;
+      writes.push(upsert(post, true));
+      continue;
+    }
+    const archived = isArchived(active, post.thread_id);
+    const need = 2 + (archived ? 1 : 0) + Math.max(0, JSON.parse(post.message_ids_json).length - 1);
+    if (stopped || !canCall(need + RESERVE)) {
+      stopped = true;
+      leaveDirty(t.id);
+      continue;
+    }
+    const out = await editPost(api, post, t.name, msgs, hash, archived, r);
+    if ('gone' in out) {
+      r.gone++;
+      threads.delete(t.id);
+      forget(t.id, post.thread_id);
+      continue;
+    }
+    if ('failed' in out) {
+      leaveDirty(t.id);
+      continue;
+    }
+    // Modify Channel (thread): archived true "requires the MANAGE_THREADS permission" (src/permissions.ts, board PATCH).
+    // An incomplete edit stays dirty and is redone. A refused archive is logged, and the post keeps its notice
+    // (review: no retry loop; the hash-match path above retries the archive alone when the post is next due).
+    if (!out.complete) {
+      writes.push(upsert(out.row, false));
+      r.left_dirty++;
+      continue;
+    }
+    const a = await api.call('PATCH', `/channels/${post.thread_id}`, { archived: true });
+    if (a.ok) r.retired++;
+    else r.errors.push(`archive ${t.name}: ${a.status} ${a.code ?? ''}`.trim());
+    writes.push(upsert(out.row, true));
+  }
+
   // The rebuild's second half: once every unguarded post is new, delete the old ones. An old post is a
   // bot-owned thread in this forum, older than the rebuild, that no row references, with no member messages.
   if (rebuilding && !rebuildBlind) {
@@ -516,7 +568,7 @@ export async function refreshGuildBoard(
   r.in_order = boardInOrder(data.topics, (id) => threads.get(id));
 
   // The index: created (and pinned) once, edited when its links or counts changed or any post was written.
-  const wrote = r.created + r.edited + r.gone > 0;
+  const wrote = r.created + r.edited + r.gone + r.retired > 0;
   const idx = data.index((id) => threads.get(id) ?? null, nowMs, line);
   const idxHash = await contentHash(idx.hashable);
   let indexThread = data.guild.board_index_thread_id;
@@ -635,7 +687,8 @@ export const isNightly = (scheduledTime: number) => {
  * calls, the heartbeat and this). The tradeskill boards come first (they keep priority on the budget):
  * - tradeskills: dirty or missing posts, no index, a rebuild in progress (every board, nightly);
  * - factions (order 24): dirty, stale (the import changed a faction after its post was rendered) or missing posts, no
- *   index, a rebuild in progress. Never every board at night (FACTIONS.nightly).
+ *   index, a rebuild in progress, or (order 25) a post to retire: its faction no longer shown, and changed or dirty
+ *   since its last render. Never every board at night (FACTIONS.nightly).
  */
 const SWEEP_SQL = `SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
   OR EXISTS (SELECT 1 FROM board_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
@@ -645,7 +698,9 @@ SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT
   OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND p.dirty <> 0)
   OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND f.changed_at > coalesce(p.last_rendered_at, ''))
   OR (SELECT count(*) FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN})
-     < (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN}))
+     < (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN})
+  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND NOT (${FACTION_SHOWN})
+     AND (p.dirty <> 0 OR f.changed_at > coalesce(p.last_rendered_at, ''))))
 ORDER BY board DESC, id`;
 
 /**

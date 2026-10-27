@@ -1,7 +1,7 @@
 // What the boards are rendered from (order 5, PRD FR-5; order 24: the factions board). Read-only SELECTs, in one D1
 // batch, so the read-only dry run (scripts/board/run.mjs) can load exactly what the Worker loads.
 import { NAME_ORDER } from '../collation.ts';
-import { renderFactionIndex, renderFactionPost, type FactionLine } from './factions.ts';
+import { renderFactionIndex, renderFactionPost, retiredNotice, type FactionLine, type FactionQuestLine } from './factions.ts';
 import { FACTION_SHOWN, FACTIONS, TRADESKILLS, type BoardKind } from './kinds.ts';
 import { renderIndex, renderSkillPost, type BoardLine, type BoardMessage, type LineMode } from './render.ts';
 
@@ -40,6 +40,11 @@ export interface BoardSource {
   stale: (topicId: number) => boolean;
   render: (t: Topic, nowMs: number, line: LineMode) => BoardMessage[];
   index: (threadOf: (topicId: number) => string | null, nowMs: number, line: LineMode) => { message: BoardMessage; hashable: string };
+  /**
+   * Order 25: posts whose topic is no longer shown and that have not been retired since it changed (dirty, or rendered
+   * before the topic's changed_at). Each is edited to its one-line notice and archived, never deleted.
+   */
+  retiring: (Topic & { notice: BoardMessage })[];
 }
 
 /** The tradeskill board, with its ranked lines (the dry run prints them pseudonymised). */
@@ -88,6 +93,7 @@ export function boardFromResults(results: D1Result[]): BoardData | null {
     posts: postMap(posts.results),
     lines: byskill,
     stale: () => false,
+    retiring: [],
     render: (t, nowMs, line) => renderSkillPost(t.name, byskill.get(t.id) ?? [], guild.stale_days, nowMs, line),
     index: (threadOf, nowMs, line) =>
       renderIndex(tradeskills.map((t) => ({ skill: t.name, thread_id: threadOf(t.id), lines: (byskill.get(t.id) ?? []).length })), nowMs, line),
@@ -100,11 +106,19 @@ export async function loadBoard(db: D1Database, guildId: string): Promise<BoardD
 
 // ---------------------------------------------------------------- order 24: the factions board
 
-/** The factions board's statements, in order: the guild, the shown factions, the posts, every creature line. */
+/**
+ * The factions board's statements, in order: the guild, the shown factions (and, order 25, those no longer shown that
+ * still have a post here, to retire), the posts, every creature line, every quest line.
+ */
 export function factionStatements(db: D1Database, guildId: string): D1PreparedStatement[] {
   return [
     db.prepare(`SELECT ${guildColumns(FACTIONS)} FROM guild WHERE id = ?`).bind(guildId),
-    db.prepare(`SELECT f.id, f.name, f.changed_at FROM faction f WHERE ${FACTION_SHOWN} ORDER BY ${NAME_ORDER}`),
+    db
+      .prepare(
+        `SELECT f.id, f.name, f.changed_at, (${FACTION_SHOWN}) AS shown FROM faction f
+         WHERE ${FACTION_SHOWN} OR EXISTS (SELECT 1 FROM faction_post p WHERE p.faction_id = f.id AND p.guild_id = ?) ORDER BY ${NAME_ORDER}`,
+      )
+      .bind(guildId),
     db.prepare(postsSql(FACTIONS)).bind(guildId),
     // Zones A→Z, then creatures A→Z, within each faction and section (src/board/factions.ts groups them in this order).
     db.prepare(
@@ -112,6 +126,11 @@ export function factionStatements(db: D1Database, guildId: string): D1PreparedSt
        FROM npc_faction l JOIN npc n ON n.zone_key = l.zone_key AND n.name = l.npc_name JOIN zone z ON z.key = l.zone_key
        WHERE l.active = 1 AND n.active = 1 AND z.active = 1
        ORDER BY l.faction_id, l.kind, z.name COLLATE NOCASE, n.name COLLATE NOCASE`,
+    ),
+    // Order 25: quests A→Z, then their lines, within each faction.
+    db.prepare(
+      `SELECT faction_id, quest_title AS quest, wiki_url AS url, line FROM faction_quest WHERE active = 1
+       ORDER BY faction_id, quest_title COLLATE NOCASE, line`,
     ),
   ];
 }
@@ -121,28 +140,35 @@ export interface FactionData extends BoardSource {
 }
 
 export function factionsFromResults(results: D1Result[]): FactionData | null {
-  const [g, fs, posts, lines] = results;
+  const [g, fs, posts, lines, quests] = results;
   const guild = (g.results as BoardGuild[])[0];
   if (!guild) return null;
   const byFaction = new Map<number, FactionLine[]>();
   for (const l of lines.results as FactionLine[]) byFaction.set(l.faction_id, [...(byFaction.get(l.faction_id) ?? []), l]);
-  const factions = fs.results as (Topic & { changed_at: string | null })[];
-  const changed = new Map(factions.map((f) => [f.id, f.changed_at]));
+  const questsBy = new Map<number, FactionQuestLine[]>();
+  for (const q of (quests?.results ?? []) as FactionQuestLine[]) questsBy.set(q.faction_id, [...(questsBy.get(q.faction_id) ?? []), q]);
+  const all = fs.results as (Topic & { changed_at: string | null; shown: number })[];
+  const factions = all.filter((f) => Number(f.shown) === 1);
+  const changed = new Map(all.map((f) => [f.id, f.changed_at]));
   const postsBy = postMap(posts.results);
   const creatures = (id: number) => new Set((byFaction.get(id) ?? []).map((l) => `${l.zone}\n${l.creature.toLowerCase()}`)).size;
+  // ISO strings in one format (toISOString and the import's strftime) compare in time order.
+  const stale = (id: number) => {
+    const at = changed.get(id);
+    const p = postsBy.get(id);
+    return !!at && !!p && (p.last_rendered_at === null || p.last_rendered_at < at);
+  };
   return {
     kind: FACTIONS,
     guild,
     topics: factions.map(({ id, name }) => ({ id, name })),
     posts: postsBy,
     lines: byFaction,
-    // ISO strings in one format (toISOString and the import's strftime) compare in time order.
-    stale: (id) => {
-      const at = changed.get(id);
-      const p = postsBy.get(id);
-      return !!at && !!p && (p.last_rendered_at === null || p.last_rendered_at < at);
-    },
-    render: (t, _nowMs, line: LineMode) => renderFactionPost(t.name, byFaction.get(t.id) ?? [], line),
+    stale,
+    retiring: all
+      .filter((f) => Number(f.shown) !== 1 && postsBy.has(f.id) && (postsBy.get(f.id)!.dirty !== 0 || stale(f.id)))
+      .map(({ id, name }) => ({ id, name, notice: retiredNotice(name) })),
+    render: (t, _nowMs, line: LineMode) => renderFactionPost(t.name, byFaction.get(t.id) ?? [], line, questsBy.get(t.id) ?? []),
     index: (threadOf, nowMs, line) => renderFactionIndex(factions.map((f) => ({ faction: f.name, thread_id: threadOf(f.id), creatures: creatures(f.id) })), nowMs, line),
   };
 }

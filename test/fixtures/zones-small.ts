@@ -66,6 +66,18 @@ export function zoneInput(changedAt = '2026-10-20T00:00:00Z'): ZoneInput {
           { name: 'A nobody', kind: 'npc', level: '', zone: '', race: '', class: '', location: '', loot: [], factions: ['Lost Cause'], opposing_factions: [] },
         ],
       },
+      // Order 25: reward lines starting "Faction" (any case, leading spaces), one naming two factions where a shorter
+      // name overlaps a longer one, one naming no stored faction, and rewards that are not faction lines.
+      'mo-betta/quests.json': {
+        source: 'https://example.invalid',
+        fetched: '2026-10-20',
+        quests: [
+          { title: 'Ranger Trial', url: 'https://monstersandmemories.miraheze.org/wiki/Ranger_Trial', zone: 'Evershade Weald', rewards: ['  Faction standing with Weald Rangers', 'Experience'] },
+          { title: 'Elder Words', url: 'https://monstersandmemories.miraheze.org/wiki/Elder_Words', zone: 'Evershade Weald', rewards: ['faction with Gnoll Pack Elders and Weald Rangers'] },
+          { title: 'Fight Night', url: 'https://monstersandmemories.miraheze.org/wiki/Fight_Night', zone: 'Rothold', rewards: ['Faction with The Fight Club'] },
+          { title: 'Tooth Collector', url: 'https://monstersandmemories.miraheze.org/wiki/Tooth_Collector', zone: 'Evershade Weald', rewards: ['Gnoll Pack Tooth', 'Weald Rangers faction'] },
+        ],
+      },
     },
     versions: [
       { name: 'mnm-tools/wiki.json', sha: 'b'.repeat(40), changedAt: '2026-10-20T00:00:00Z' },
@@ -73,6 +85,7 @@ export function zoneInput(changedAt = '2026-10-20T00:00:00Z'): ZoneInput {
       { name: 'mnmatlas/maps.json', sha: 'd'.repeat(40), changedAt: '2025-01-01T00:00:00Z' },
       { name: 'mo-betta/zones.json', sha: 'e'.repeat(40), changedAt: '2026-10-20T00:00:00Z' },
       { name: 'mo-betta/npcs.json', sha: 'e'.repeat(40), changedAt: '2026-10-20T00:00:00Z' },
+      { name: 'mo-betta/quests.json', sha: 'e'.repeat(40), changedAt: '2026-10-20T00:00:00Z' },
     ],
   };
 }

@@ -5,6 +5,8 @@
 // "Reputation Lost", its "opposing_factions" as "Reputation Gained". Nothing else is inferred: no amounts (the source
 // records none), and no mechanic the wiki does not state.
 import { EMBED_LIMITS, md, NO_PINGS, plural, truncate, type Embed } from '../discord.ts';
+import { FACTION_ALIASES } from '../faction-aliases.ts';
+import { safeUrl } from '../zone/card.ts';
 import { BOARD_COLOR, plainText, type BoardMessage, type LineMode } from './render.ts';
 
 /** One creature row on a faction's post: an active link to an active npc row in an active zone. */
@@ -18,12 +20,25 @@ export interface FactionLine {
   location: string | null;
 }
 
+/** Order 25: one quest reward line that mentions the faction (faction_quest), quoted exactly. */
+export interface FactionQuestLine {
+  faction_id: number;
+  quest: string;
+  url: string | null;
+  line: string;
+}
+
 // Order 24: member-facing copy, listed in docs/COPY.md.
 export const FACTION_COPY = {
   gained: 'Reputation Gained',
   lost: 'Reputation Lost',
   none: "No creature's wiki page lists it here.",
   footer: "As listed on each creature's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded.",
+  // Order 25 (docs/COPY.md): the Quests section, the footer on a post that has quests, and a retired post's notice.
+  quests: 'Quests',
+  footerQuests: "As listed on each creature's and quest's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded.",
+  merged: (name: string) => `This faction now appears as ${name}.`,
+  unlisted: 'No longer listed in the data.',
   indexTitle: 'Factions: index',
   indexIntro: [
     'One post per faction, A→Z below. Each lists the creatures whose wiki page names the faction under **Reputation Gained** or **Reputation Lost**, by zone.',
@@ -66,14 +81,38 @@ function section(kind: FactionLine['kind'], lines: FactionLine[]): string[] {
 }
 
 /**
- * A faction's post: Reputation Gained, then Reputation Lost. Rows fill embeds of at most 4,096 description characters,
- * and messages of at most 6,000 characters and 10 embeds (EMBED_LIMITS); what does not fit goes to further bot-owned
- * messages, as the tradeskill post's do. The title is on the first embed, the source footer on the last.
+ * Order 25: the Quests section, only when the faction has quest lines: each quest (A→Z) linked to its wiki page when
+ * that is an https address, then each of its lines quoted exactly. Nothing about direction or amount is inferred.
  */
-export function renderFactionPost(faction: string, lines: FactionLine[], line: LineMode = 'on'): BoardMessage[] {
-  const rows = [...section('gained', lines), '', ...section('lost', lines)];
+function questSection(quests: FactionQuestLine[]): string[] {
+  if (!quests.length) return [];
+  const out = ['', `**${FACTION_COPY.quests}** · ${plural(new Set(quests.map((q) => q.quest)).size, 'quest')}`];
+  let quest: string | null = null;
+  for (const q of quests) {
+    if (q.quest !== quest) {
+      quest = q.quest;
+      // Review: a wiki address recorded with raw parentheses or spaces is encoded, so the link is kept, not dropped.
+      const url = safeUrl(q.url?.replace(/[() ]/g, (c) => (c === ' ' ? '%20' : c === '(' ? '%28' : '%29')) ?? null);
+      out.push(url ? `• [${md(oneLine(q.quest))}](${url})` : `• ${md(oneLine(q.quest))}`);
+    }
+    out.push(`“${md(oneLine(q.line))}”`);
+  }
+  return out;
+}
+
+/** Review: upstream text is unbounded; one row stays one line and well inside an embed's 4,096 characters. */
+const QUEST_TEXT_MAX = 1000;
+const oneLine = (s: string) => truncate(s.replace(/\s*\n\s*/g, ' '), QUEST_TEXT_MAX);
+
+/**
+ * A faction's post: Reputation Gained, then Reputation Lost, then (order 25) Quests. Rows fill embeds of at most 4,096
+ * description characters, and messages of at most 6,000 characters and 10 embeds (EMBED_LIMITS); what does not fit goes
+ * to further bot-owned messages, as the tradeskill post's do. The title is on the first embed, the source footer on the last.
+ */
+export function renderFactionPost(faction: string, lines: FactionLine[], line: LineMode = 'on', quests: FactionQuestLine[] = []): BoardMessage[] {
+  const rows = [...section('gained', lines), '', ...section('lost', lines), ...questSection(quests)];
   const title = truncate(faction, EMBED_LIMITS.title);
-  const footer = { text: FACTION_COPY.footer };
+  const footer = { text: quests.length ? FACTION_COPY.footerQuests : FACTION_COPY.footer };
   const reserve = title.length + footer.text.length;
   const messages: Embed[][] = [];
   let embeds: Embed[] = [];
@@ -104,6 +143,16 @@ export function renderFactionPost(faction: string, lines: FactionLine[], line: L
   messages[0][0].title = title;
   messages.at(-1)!.at(-1)!.footer = footer;
   return messages.map((e, i) => ({ ...(i === 0 ? { content: line === 'on' ? factionPreview(faction, lines) : '' } : {}), embeds: e, allowed_mentions: NO_PINGS }));
+}
+
+/**
+ * Order 25: a post whose faction is no longer shown becomes one line (its embeds sent empty, so they are removed:
+ * an edit keeps every field it does not send, order 22), then is archived; never deleted (order 6). A merged
+ * misspelling names its approved spelling (src/faction-aliases.ts).
+ */
+export function retiredNotice(faction: string): BoardMessage {
+  const to = FACTION_ALIASES.get(faction);
+  return { content: to ? FACTION_COPY.merged(md(to)) : FACTION_COPY.unlisted, embeds: [], allowed_mentions: NO_PINGS };
 }
 
 export interface FactionIndexEntry {

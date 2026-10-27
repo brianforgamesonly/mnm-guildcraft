@@ -13,7 +13,9 @@
 import { mergeCreature, type CreatureFields } from '../../src/zone/creatures.ts';
 import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE, zoneKey } from '../../src/zone/names.ts';
 export { levelSort, zoneKey } from '../../src/zone/names.ts';
+import { factionName } from '../../src/faction-aliases.ts';
 import { MAP_LICENCES, type MapLicence } from './map-licences.ts';
+import { factionQuestLines, type QuestLineRow, type QuestSummary } from './quests.ts';
 
 // ---------------------------------------------------------------- sources
 
@@ -24,6 +26,8 @@ export const ZONE_FILES = [
   { name: 'mnmatlas/maps.json', repo: 'ocombe/mnmatlas', path: 'data/maps.json', stale: false },
   { name: 'mo-betta/zones.json', repo: 'amyklindley/mo-betta-quests', path: 'zones.json', stale: true },
   { name: 'mo-betta/npcs.json', repo: 'amyklindley/mo-betta-quests', path: 'npcs.json', stale: true },
+  // Order 25's override 1: quests.json, for the faction posts' quest lines only (scripts/import/quests.ts).
+  { name: 'mo-betta/quests.json', repo: 'amyklindley/mo-betta-quests', path: 'quests.json', stale: true },
 ] as const;
 export type ZoneFileName = (typeof ZONE_FILES)[number]['name'];
 export const STALE_DAYS = 30;
@@ -178,7 +182,11 @@ export interface ZoneSummary {
     /** Names only NPCs without a row carry: not stored, so no post. */
     namesWithoutRow: string[];
     links: { lost: number; gained: number };
+    /** Order 25: approved misspellings in the source (src/faction-aliases.ts), each with the npc-row mentions mapped. */
+    merged: { from: string; to: string; rows: number }[];
   };
+  /** Order 25: quests.json's "Faction…" reward lines, and the faction names each mentions. */
+  quests: QuestSummary;
   versions: SourceVersion[];
 }
 
@@ -189,6 +197,8 @@ export interface ZonePlan {
   /** Order 24: the faction names, in source order, and every NPC row's links to them. */
   factions: string[];
   factionLinks: FactionLinkRow[];
+  /** Order 25: one row per quest reward line and faction it mentions (scripts/import/quests.ts). */
+  questLines: QuestLineRow[];
   versions: SourceVersion[];
   warnings: ZoneWarning[];
   summary: ZoneSummary;
@@ -286,18 +296,26 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   let noZone = 0;
   let caseDuplicates = 0;
   const caseDuplicateConflicts: ZoneSummary['npcs']['caseDuplicateConflicts'] = [];
-  // Order 24: each record's factions (trimmed, never merged), linked to every npc row the record has.
+  // Order 24: each record's factions (trimmed), linked to every npc row the record has. Order 25: only the owner's four
+  // approved merges re-spell a name (src/faction-aliases.ts), before the names are de-duplicated.
   const links = new Map<string, FactionLinkRow>();
   const factionNames: string[] = [];
   const unlinkedNames = new Set<string>();
   const fs = { withFactions: 0, withoutRow: 0, leftOut: 0 };
+  /** Order 25: each approved misspelling the source still uses, and the npc rows it names (links written under the approved name). */
+  const merged = new Map<string, number>();
   for (const n of mbNpcs) {
     const keys = [...new Set(npcZoneParts(typeof n.zone === 'string' ? n.zone : '').map(keyOf).filter((k): k is string => k !== null))];
     if (!keys.length) noZone++;
     const loot = strs(n.loot);
+    const names = (v: unknown) =>
+      [...new Set(strs(v).map((f) => f.trim()))].map((f) => {
+        if (factionName(f) !== f && keys.length) merged.set(f, (merged.get(f) ?? 0) + keys.length);
+        return factionName(f);
+      }).filter((f, i, all) => all.indexOf(f) === i);
     const named: [string, FactionKind][] = [
-      ...[...new Set(strs(n.factions).map((f) => f.trim()))].map((f): [string, FactionKind] => [f, 'lost']),
-      ...[...new Set(strs(n.opposing_factions).map((f) => f.trim()))].map((f): [string, FactionKind] => [f, 'gained']),
+      ...names(n.factions).map((f): [string, FactionKind] => [f, 'lost']),
+      ...names(n.opposing_factions).map((f): [string, FactionKind] => [f, 'gained']),
     ];
     if (named.length) {
       fs.withFactions++;
@@ -360,6 +378,9 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
     for (const c of conflicts) mobConflicts.push({ zone: zones.get(row.zone_key)!.name, name: row.name, ...c });
   }
 
+  // Order 25, ITEM 1: quest reward lines, matched against the faction names above (after the approved merges).
+  const quests = factionQuestLines(input.files['mo-betta/quests.json'], factionNames);
+
   // 6. Staleness: a warning, never a failure.
   const nowMs = Date.parse(now);
   for (const v of input.versions) {
@@ -381,6 +402,7 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
     npcs: npcRows,
     factions: factionNames,
     factionLinks: linkRows,
+    questLines: quests.rows,
     versions: input.versions,
     warnings,
     summary: {
@@ -407,7 +429,9 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
         factions: factionNames.length,
         namesWithoutRow: [...unlinkedNames].filter((f) => !factionNames.includes(f)),
         links: { lost: linkRows.filter((l) => l.kind === 'lost').length, gained: linkRows.filter((l) => l.kind === 'gained').length },
+        merged: [...merged].map(([from, rows]) => ({ from, to: factionName(from), rows })),
       },
+      quests: quests.summary,
       versions: input.versions,
     },
   };

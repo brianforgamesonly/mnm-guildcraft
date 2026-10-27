@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { buildPlan, buildStatements, loadExisting, runImport } from '../../scripts/import/core.ts';
 import { buildZonePlan, levelSort, npcZoneParts, zoneKey } from '../../scripts/import/zones.ts';
+import { mentions } from '../../scripts/import/quests.ts';
+import { FACTION_ALIASES, factionName } from '../../src/faction-aliases.ts';
 import { mergeCreature } from '../../src/zone/creatures.ts';
 import small from '../fixtures/wiki-small.json';
 import { withZoneWiki, zoneInput } from '../fixtures/zones-small.ts';
@@ -17,7 +19,7 @@ const all = async <T>(sql: string) => (await env.DB.prepare(sql).all<T>()).resul
 
 beforeEach(async () => {
   await env.DB.batch(
-    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'npc_faction', 'faction_post', 'faction'].map(
+    ['recipe_component', 'character_recipe', 'recipe', 'item_image', 'recipe_report', 'item', 'character_skill', 'board_post', 'tradeskill', 'data_import', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'npc_faction', 'faction_quest', 'faction_post', 'faction'].map(
       (t) => env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );
@@ -125,16 +127,16 @@ describe('order 17: zone import', () => {
     expect(res.status).toBe('ok');
     expect(res.warnings!.filter((w) => w.kind === 'stale_source')).toEqual([{ kind: 'stale_source', source: 'mnm-tools/maps.json', changedAt: '2026-09-01T00:00:00Z', days: 50 }]);
     const versions = await all<{ name: string; sha: string }>('SELECT name, sha FROM import_source ORDER BY name');
-    expect(versions.map((v) => v.name)).toEqual(['mnm-tools/maps.json', 'mnm-tools/wiki.json', 'mnmatlas/maps.json', 'mo-betta/npcs.json', 'mo-betta/zones.json']);
+    expect(versions.map((v) => v.name)).toEqual(['mnm-tools/maps.json', 'mnm-tools/wiki.json', 'mnmatlas/maps.json', 'mo-betta/npcs.json', 'mo-betta/quests.json', 'mo-betta/zones.json']);
   });
 
   it('a re-import of unchanged sources writes 0 zone rows; a vanished NPC is deactivated, never deleted', async () => {
     await load();
     const again = await load();
-    for (const t of ['zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction'] as const) expect(again.written![t].rows_written, t).toBe(0);
+    for (const t of ['zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction', 'faction_quest'] as const) expect(again.written![t].rows_written, t).toBe(0);
     expect(again.predicted!.zones).toEqual({
-      zone: 0, zone_name: 0, npc: 0, import_source: 0, faction: 0, npc_faction: 0, factions_changed: 0,
-      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0 },
+      zone: 0, zone_name: 0, npc: 0, import_source: 0, faction: 0, npc_faction: 0, faction_quest: 0, factions_changed: 0,
+      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0, faction_quest: 0 },
     });
     const z = zoneInput();
     (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs.filter((n) => n.name !== 'Supplier Jul');
@@ -160,8 +162,8 @@ describe('order 17: zone import', () => {
     const res = await load(zoneInput(), true);
     expect(res.status).toBe('dry-run');
     expect(res.predicted!.zones).toEqual({
-      zone: 5, zone_name: 23, npc: 6, import_source: 5, faction: 3, npc_faction: 8, factions_changed: 3,
-      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0 },
+      zone: 5, zone_name: 23, npc: 6, import_source: 6, faction: 3, npc_faction: 8, faction_quest: 3, factions_changed: 3,
+      deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0, faction_quest: 0 },
     });
     expect(await all('SELECT key FROM zone')).toEqual([]);
   });
@@ -186,7 +188,7 @@ describe('order 17: zone import', () => {
       "keeper's bight:Marshal Harding:Weald Rangers:lost",
     ]);
     // "Gnoll Pack" and "Gnoll Pack Elders" stay separate; "Lost Cause" is named only by an NPC without a row, so no row.
-    expect(res.zones!.factions).toEqual({ npcsWithFactions: 5, npcsWithoutRow: 2, linksLeftOut: 2, factions: 3, namesWithoutRow: ['Lost Cause'], links: { lost: 3, gained: 5 } });
+    expect(res.zones!.factions).toEqual({ npcsWithFactions: 5, npcsWithoutRow: 2, linksLeftOut: 2, factions: 3, namesWithoutRow: ['Lost Cause'], links: { lost: 3, gained: 5 }, merged: [] });
   });
 
   it('order 24: a re-import changes only what changed; a vanished link or faction is deactivated, and changed_at marks the posts to re-render', async () => {
@@ -223,5 +225,86 @@ describe('order 17: zone import', () => {
     expect(res.status).toBe('failed');
     expect(res.error).toMatch(/zone sources: mo-betta\/zones.json: zones is not a list/);
     expect(await all('SELECT key FROM zone')).toEqual([]);
+  });
+});
+
+describe('order 25: quest lines and the approved faction merges', () => {
+  const names = ['Gnoll Pack', 'Gnoll Pack Elders', 'Weald Rangers', 'The Underwatch', 'Citizens of Underdocks'];
+
+  it('a line mentions a faction by its whole name, any case; where names overlap the longest wins', () => {
+    expect(mentions('Faction with Gnoll Pack Elders and Weald Rangers', names)).toEqual(['Gnoll Pack Elders', 'Weald Rangers']);
+    expect(mentions('faction with GNOLL PACK.', names)).toEqual(['Gnoll Pack']);
+    expect(mentions('Faction with Gnoll Packs', names)).toEqual([]);
+    expect(mentions('Faction with Delvestone Mining Company, The Underwatch, Citizens of Underdocks', names)).toEqual(['The Underwatch', 'Citizens of Underdocks']);
+  });
+
+  it('takes only reward lines starting "Faction" (any case, leading spaces), stores one row per line and faction, and reports the unmatched', async () => {
+    const res = await load();
+    expect(await all('SELECT f.name AS faction, q.quest_title, q.line, q.wiki_url, q.active FROM faction_quest q JOIN faction f ON f.id = q.faction_id ORDER BY 2, 1')).toEqual([
+      { faction: 'Gnoll Pack Elders', quest_title: 'Elder Words', line: 'faction with Gnoll Pack Elders and Weald Rangers', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Elder_Words', active: 1 },
+      { faction: 'Weald Rangers', quest_title: 'Elder Words', line: 'faction with Gnoll Pack Elders and Weald Rangers', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Elder_Words', active: 1 },
+      { faction: 'Weald Rangers', quest_title: 'Ranger Trial', line: 'Faction standing with Weald Rangers', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Ranger_Trial', active: 1 },
+    ]);
+    expect(res.zones!.quests).toMatchObject({ quests: 4, questsWithLines: 3, lines: 3, unmatched: [{ quest: 'Fight Night', line: 'Faction with The Fight Club' }], untitled: 0 });
+  });
+
+  it('a re-import writes 0 quest rows; a changed line is written, the old one deactivated, and the factions marked to re-render', async () => {
+    await load();
+    expect((await load()).written!.faction_quest.rows_written).toBe(0);
+    const before = (await all<{ changed_at: string }>("SELECT changed_at FROM faction WHERE name = 'Weald Rangers'"))[0].changed_at;
+    await new Promise((r) => setTimeout(r, 5));
+    const z = zoneInput();
+    (z.files['mo-betta/quests.json'] as { quests: { title: string; rewards: string[] }[] }).quests.find((q) => q.title === 'Ranger Trial')!.rewards = ['Faction with Weald Rangers'];
+    const res = await load(z);
+    expect(res.predicted!.zones).toMatchObject({ faction_quest: 1, deactivate: { faction_quest: 1 } });
+    expect(await all("SELECT line, active FROM faction_quest WHERE quest_title = 'Ranger Trial' ORDER BY line")).toEqual([
+      { line: 'Faction standing with Weald Rangers', active: 0 },
+      { line: 'Faction with Weald Rangers', active: 1 },
+    ]);
+    expect((await all<{ changed_at: string }>("SELECT changed_at FROM faction WHERE name = 'Weald Rangers'"))[0].changed_at > before).toBe(true);
+  });
+
+  it('the alias file holds exactly the eight approved groups (the owner, 2026-10-27)', () => {
+    expect([...FACTION_ALIASES]).toEqual([
+      ['Nigh Harbor Garrison', 'Night Harbor Garrison'],
+      ['Pymos Mercenaries', 'Pyrmos Mercenaries'],
+      ['Pyrmos Mercanaries', 'Pyrmos Mercenaries'],
+      ["Vermahan's Brood", "Vermahn's Brood"],
+      ["Vehrman's Brood", "Vermahn's Brood"],
+      ['House Malrethren', 'House Malrathen'],
+      ['Red Mantle', 'Red Mantles'],
+      ['Slaves of the Pasha', 'Slaves of Pasha'],
+      ['Denizens of Wyrmsbane Tomb', 'Denizens of Wyrmsbane'],
+      ['City of Night Harbor', 'Citizens of Night Harbor'],
+    ]);
+    expect(factionName('City Watch of Night Harbor')).toBe('City Watch of Night Harbor');
+    expect(factionName('constructor')).toBe('constructor');
+  });
+
+  it('a stored misspelling is deactivated (row kept), its links move to the approved name, and both are marked to re-render', async () => {
+    const z = zoneInput();
+    const npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string; factions?: string[] }[] }).npcs;
+    npcs.find((n) => n.name === 'A gnoll scout')!.factions = ['Gnoll Pack', 'Red Mantles'];
+    await load(z);
+    // As an import before order 25 stored it: the misspelling as its own faction, with a link.
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO faction (name, active, changed_at) VALUES ('Red Mantle', 1, '2026-10-01T00:00:00.000Z')"),
+      env.DB.prepare("INSERT INTO npc_faction (zone_key, npc_name, faction_id, kind, active) SELECT 'evershade weald', 'Marshal Harding', id, 'lost', 1 FROM faction WHERE name = 'Red Mantle'"),
+    ]);
+    npcs.find((n) => n.name === 'Marshal Harding')!.factions = ['Weald Rangers', ' Red Mantle '];
+    const res = await load(z);
+    expect(res.zones!.factions.merged).toEqual([{ from: 'Red Mantle', to: 'Red Mantles', rows: 2 }]);
+    expect(await all("SELECT name, active FROM faction WHERE name LIKE 'Red Mantle%' ORDER BY name")).toEqual([
+      { name: 'Red Mantle', active: 0 },
+      { name: 'Red Mantles', active: 1 },
+    ]);
+    expect(await all("SELECT l.zone_key, l.npc_name, f.name AS faction, l.active FROM npc_faction l JOIN faction f ON f.id = l.faction_id WHERE f.name LIKE 'Red Mantle%' ORDER BY 3, 1, 2")).toEqual([
+      { zone_key: 'evershade weald', npc_name: 'Marshal Harding', faction: 'Red Mantle', active: 0 },
+      { zone_key: 'evershade weald', npc_name: 'A gnoll scout', faction: 'Red Mantles', active: 1 },
+      { zone_key: 'evershade weald', npc_name: 'Marshal Harding', faction: 'Red Mantles', active: 1 },
+      { zone_key: "keeper's bight", npc_name: 'Marshal Harding', faction: 'Red Mantles', active: 1 },
+    ]);
+    const at = await all<{ name: string; changed_at: string }>("SELECT name, changed_at FROM faction WHERE name LIKE 'Red Mantle%'");
+    expect(at.every((f) => f.changed_at > '2026-10-21')).toBe(true);
   });
 });
