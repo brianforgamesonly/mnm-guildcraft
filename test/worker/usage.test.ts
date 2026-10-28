@@ -10,6 +10,7 @@ import { FREE_LIMITS, METRICS } from '../../src/limits.ts';
 import { render } from '../../src/operator-text.ts';
 import { alertText, ofLimit, tokenExpiryText, usageAlerts, usageLines } from '../../src/usage.ts';
 import { judgesLevel, levelChanges, levelSummary, type DayFigure } from '../../scripts/usage/level-alarm.ts';
+import { byShape, dbLabel, figureLine, queryShape, topBy } from '../../scripts/usage/queries.ts';
 import { all, reset } from '../db.ts';
 import { ADMIN, as, botApi, cmd, GUILD, send, spyOnFetch, webhook } from '../discord.ts';
 
@@ -320,5 +321,25 @@ describe('the usage-level alarm (the production run of the usage job)', () => {
     );
     expect(r.failed).toBe(true);
     expect(r.line).toBe('usage level: over the 10% target: Commands and lookups 20.0% on 2026-10-20; still over (already reported): Records read 12.0% on 2026-10-20');
+  });
+});
+
+// ---------------------------------------------------------------- order 26: what read the rows (public log safe)
+
+describe('order 26: D1 statements as a public log may show them', () => {
+  it('every literal becomes ?, so statements differing only in values share a shape', () => {
+    expect(queryShape("SELECT * FROM item WHERE name = 'Rusty ''Sword''' AND id = 42 AND x > -1.5e3")).toBe('SELECT * FROM item WHERE name = ? AND id = ? AND x > ?');
+    expect(queryShape("INSERT INTO t (a, b) VALUES ('x', 1), ('y', 2),\n ('z', 3)")).toBe('INSERT INTO t (a, b) VALUES (?, …), …');
+    expect(queryShape('SELECT a FROM t WHERE id IN (?1, ?2, ?3) AND b = ?')).toBe('SELECT a FROM t WHERE id IN (?, …) AND b = ?');
+    expect(queryShape("SELECT x'00ff', t1.c2 FROM t1 LIMIT 10")).toBe('SELECT ?, t1.c2 FROM t1 LIMIT ?');
+  });
+  it('a database is named only dev, production or other', () => {
+    const copies = [{ name: 'dev', databaseId: 'd' }, { name: 'production', databaseId: 'p' }, { name: 'staging', databaseId: 's' }];
+    expect(['d', 'p', 's', 'x'].map((id) => dbLabel(id, copies))).toEqual(['dev', 'production', 'other', 'other']);
+  });
+  it('merges by shape, then ranks by the metric with runs and rows per run', () => {
+    const f = (shape: string, rowsRead: number, count: number) => ({ day: '2026-10-27', db: 'production' as const, shape: queryShape(shape), rowsRead, rowsWritten: 0, count });
+    const top = topBy(byShape([f('SELECT a FROM t WHERE id = 1', 100, 1), f('SELECT a FROM t WHERE id = 2', 300, 3), f('SELECT b FROM u', 50, 1)]), 'rowsRead', 1);
+    expect(top.map((r) => figureLine(r, 'rowsRead'))).toEqual(['400 rows read · 4 runs · 100/run · SELECT a FROM t WHERE id = ?']);
   });
 });
