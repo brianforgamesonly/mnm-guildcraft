@@ -134,18 +134,20 @@ https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.c
 
 **Actions → import → Run workflow** with *dry run* on: it prints what it would write. Run it again with *dry run* off. After that it runs every morning by itself (07:30 UTC). Expect about 1,200 recipes and 5,500 items (the numbers grow with the community data).
 
-## Step 11 — Settings and the roster board
+## Step 11 — Settings and the boards
 
 Run `/guildcraft status` in your server. If you loaded an export, your roles and channels are already set.
 
-The roster board's posts, the screenshots waiting in the vault and the report cards were posted by the old bot, and your bot cannot edit another bot's messages. So, if you loaded an export, do this once, best before Step 8:
+The posts in the tradeskills and factions forums (the two boards) and the report cards in the review channel were posted by the old bot, and your bot cannot edit another bot's messages. So, if you loaded an export, do this once, best before Step 8:
 
-1. Make the bot forget the old board posts, so it creates its own on its next 15-minute run:
+1. Make the bot forget both boards' old posts, so it creates its own on its next 15-minute run:
    ```
-   npx wrangler d1 execute mnm-guildcraft-dev --remote --command "DELETE FROM board_post; UPDATE guild SET board_index_thread_id = NULL"
+   npx wrangler d1 execute mnm-guildcraft-dev --remote --command "DELETE FROM board_post; DELETE FROM faction_post; UPDATE guild SET board_index_thread_id = NULL, board_index_message_id = NULL, faction_index_thread_id = NULL, faction_index_message_id = NULL"
    ```
-   Then delete the old bot's board posts in the forum by hand (right-click a post → **Delete Post** *(unverified: menu wording)*).
-2. Open reports cannot be answered with the old bot's buttons. Ask members to send those again; the old messages can be deleted by hand. Screenshots still waiting for approval cannot be answered either, and are not resent: member screenshots are turned off (order 24). Approved screenshots keep working.
+   Then delete the old bot's posts in both forums by hand (right-click a post → **Delete Post** *(unverified: menu wording)*).
+2. Open reports cannot be answered with the old bot's buttons. Ask members to send those again; the old messages can be deleted by hand.
+
+Member screenshots are turned off (order 24), so there is no vault channel to set up.
 
 Without an export, run `/guildcraft setup` to choose the roles and channels.
 

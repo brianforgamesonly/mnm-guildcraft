@@ -5,6 +5,7 @@
 //   node scripts/bench/zone-cards.ts [--remote] [--atlas-images] [--show <zone key> ...]   (--show prints that card's embeds)
 // The local run reads no credential. The output names zones, creatures and links only: public game data.
 /// <reference types="@cloudflare/workers-types" />
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
 import { zoneLinks } from '../../src/commands/zone.ts';
@@ -23,7 +24,14 @@ if (args.remote) {
   console.log(`copy: ${process.env.GUILDCRAFT_COPY || 'dev'} (remote, read-only) · atlas pictures ${args['atlas-images'] ? 'on' : 'off'}`);
 } else {
   const { getPlatformProxy } = await import('wrangler');
-  const proxy = await getPlatformProxy<{ DB: D1Database }>({ environment: 'dev' });
+  // Order 24's rule: this checkout's config and local state, whatever the shell's directory (order 26 found this bench
+  // still reading the working directory's).
+  const root = new URL('../../', import.meta.url);
+  const proxy = await getPlatformProxy<{ DB: D1Database }>({
+    environment: 'dev',
+    configPath: fileURLToPath(new URL('wrangler.jsonc', root)),
+    persist: { path: fileURLToPath(new URL('.wrangler/state/v3', root)) },
+  });
   db = proxy.env.DB;
   dispose = () => proxy.dispose();
 }

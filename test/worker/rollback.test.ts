@@ -20,6 +20,8 @@ import down18 from '../../scripts/rollback/0018_factions.down.sql?raw';
 import up18 from '../../migrations/0018_factions.sql?raw';
 import down19 from '../../scripts/rollback/0019_faction_quest.down.sql?raw';
 import up19 from '../../migrations/0019_faction_quest.sql?raw';
+import down20 from '../../scripts/rollback/0020_sweep_indexes.down.sql?raw';
+import up20 from '../../migrations/0020_sweep_indexes.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -34,6 +36,14 @@ const run = async (sql: string) => {
   for (const s of statements(sql)) await env.DB.prepare(s).run();
 };
 
+it('order 26: 0020 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down20);
+  expect((await schema()).some((r) => ['faction_changed', 'faction_post_dirty', 'faction_post_rendered'].includes(r.name))).toBe(false);
+  await run(up20);
+  expect(await schema()).toEqual(before);
+});
+
 it('order 25: 0019 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();
   await run(down19);
@@ -43,7 +53,8 @@ it('order 25: 0019 down, then up again, restores the schema; down leaves no trac
 });
 
 it('order 24: 0018 down, then up again, restores the schema; down leaves no trace of it', async () => {
-  // Order 25: 0019 names faction, so it comes off first and goes back last.
+  // Order 25: 0019 names faction, so it comes off first and goes back last; order 26: 0020's indexes too.
+  await run(down20);
   await run(down19);
   const before = await schema();
   await run(down18);
@@ -54,6 +65,7 @@ it('order 24: 0018 down, then up again, restores the schema; down leaves no trac
   const cols = (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('guild') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
   expect(cols.slice(-6)).toEqual(['faction_board_channel_id', 'faction_index_thread_id', 'faction_index_message_id', 'faction_index_hash', 'faction_lock_until', 'faction_rebuild_since']);
   await run(up19);
+  await run(up20);
 });
 
 it('order 20: 0016 down, then up again, restores the schema; down leaves no trace of it', async () => {

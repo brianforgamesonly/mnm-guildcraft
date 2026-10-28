@@ -31,9 +31,43 @@ jobs:
       - run: npm run test:zone-sites
       - name: Every action runs on the allowed Node runtime
         run: node scripts/ci/action-runtimes.mjs
+  # Order 26: the zone benches (orders 17b and 23) read a local D1 that this job fills with the real import, never a
+  # Cloudflare database. Read from the dev copy, they read about 450,000 rows per run (order 26, ITEM 1: 2026-10-25 and
+  # 10-27's spikes), against D1 Free's 5,000,000 a day for the whole account. No Cloudflare secret. Order 13's "measured on
+  # a local database first" import, so the source is fetched pinned from GitHub as the nightly import fetches it.
+  # Expected: about 3 billed minutes per pull request (public repo: free).
+  local-data:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run db:migrate:local
+      # A fresh import fits one run under the write ceiling today (35,948 of 40,000 rows, order 26); the second run
+      # finishes a partial one, and writes next to nothing otherwise.
+      - name: The real import, into the local D1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/import/run.ts --local > "$RUNNER_TEMP/import-1.json"
+          node scripts/import/run.ts --local > "$RUNNER_TEMP/import-2.json"
+          tail -n 3 "$RUNNER_TEMP/import-1.json" "$RUNNER_TEMP/import-2.json"
+      # Order 17b: every zone card, rendered by this pull request's code: the atlas ids, the link buttons and rows_read
+      # per card, before the merge. Public game data only.
+      - name: Zone cards (local D1)
+        run: node scripts/bench/zone-cards.ts ${{ vars.ATLAS_ZONE_IMAGES == 'on' && '--atlas-images' || '' }} --show 'evershade weald'
+      # Order 23: zone names matched per source, and zone buttons per /gear page and /item card. Public game data only.
+      - name: Zone buttons (local D1)
+        run: node scripts/bench/zone-buttons.ts
+      # Order 26: no workflow that runs on a pull request reads a Cloudflare database through a --remote script.
+      - run: npm run test:ci-reads
   # Order 8 (ITEM 0): the credentials' reach, read-only, before the merge (a same-repository pull_request run
   # receives secrets; dispatch works only from the default branch). Prints statuses, field names and counts only.
-  # Expected: about 3 billed minutes per pull request (public repo: free); order 23's zone-button bench is most of it.
+  # Expected: under 1 billed minute per pull request (public repo: free); order 26 moved the zone benches to local-data.
   reach:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-26.04
@@ -58,22 +92,6 @@ jobs:
         env:
           BACKUP_REPO_TOKEN: ${{ secrets.BACKUP_REPO_TOKEN }}
         run: node scripts/backup/reach.ts
-      # Order 17b: every zone card, rendered by this pull request's code from the dev copy (SELECTs only): the atlas ids,
-      # the link buttons and rows_read per card, before the merge. Public game data only. A few seconds.
-      - name: Zone cards from the dev copy (read-only)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GUILDCRAFT_COPY: dev
-        run: node scripts/bench/zone-cards.ts --remote ${{ vars.ATLAS_ZONE_IMAGES == 'on' && '--atlas-images' || '' }} --show 'evershade weald'
-      # Order 23: zone names matched per source, and zone buttons per /gear page and /item card, rendered by this pull
-      # request's code from the dev copy (SELECTs only). Public game data only. About 2 minutes (one HTTP call per statement).
-      - name: Zone buttons from the dev copy (read-only)
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          GUILDCRAFT_COPY: dev
-        run: node scripts/bench/zone-buttons.ts --remote
       # Order 20: this pull request's health check on both copies' real records for yesterday, report-only (SELECTs and
       # GitHub run reads only; counts and times, no guild data). A few seconds. It fails only if the check cannot run.
       - name: Health check dry run, dev (read-only)

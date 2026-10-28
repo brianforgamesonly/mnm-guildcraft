@@ -14,9 +14,12 @@
 // The first run (usage_daily empty) backfills 7 days; later runs re-measure the last 2 (late data settles).
 import { parseArgs } from 'node:util';
 import { alarm, summary } from '../ci/alarm.ts';
-import { currentCopy } from '../copies.ts';
+import { copies, currentCopy } from '../copies.ts';
 import { copyDatabaseId, remoteDb } from '../import/db.ts';
-import { judgesLevel, levelChanges, levelSummary, type DayFigure } from './level-alarm.ts';
+import { causeLines, D1_FIELD, errorAnnotation, type RunInfo } from './cause.ts';
+import { datasets, heaviest, perDatabase } from './insights.ts';
+import { judgesLevel, levelChanges, levelSummary, type DayFigure, type LevelChange } from './level-alarm.ts';
+import { redact, timed, topBy } from './queries.ts';
 import { FREE_LIMITS, STALE_MS, type Metric } from '../../src/limits.ts';
 
 const { values: args } = parseArgs({
@@ -31,9 +34,11 @@ const cf = async (path: string, body: unknown) => {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    // Order 26: a hung API must never outlast the job's 5 minutes (the alarm below would not run).
+    ...timed(60_000),
   });
   const json = (await res.json().catch(() => ({}))) as { data?: any; errors?: { message?: string }[] | null; result?: any; success?: boolean };
-  const errors = (json.errors ?? []).map((e) => String(e.message ?? e).replace(/\d{15,}/g, '<id>')).slice(0, 3);
+  const errors = (json.errors ?? []).map((e) => redact(String(e.message ?? e))).slice(0, 3);
   if (!res.ok || errors.length || json.success === false) throw new Error(`${path} HTTP ${res.status}: ${errors.join('; ') || 'no detail'}`);
   return json;
 };
@@ -106,6 +111,49 @@ let previousFailing: boolean | null = null;
 const DAY = 86_400_000;
 let summaryLine = '';
 let level: { failed: boolean; line: string } | null = null;
+/** Order 26 (override 1): each crossing's cause, read only when the level alarm fails. */
+let causes: string[][] = [];
+
+/** That UTC day's workflow runs (override 2: actions: read), or why they could not be read. */
+async function runsOn(day: string): Promise<RunInfo[] | string> {
+  const repo = process.env.GITHUB_REPOSITORY;
+  const gh = process.env.GITHUB_TOKEN;
+  if (!repo || !gh) return 'GITHUB_TOKEN or GITHUB_REPOSITORY not set';
+  const out: RunInfo[] = [];
+  for (let page = 1; page <= 5; page++) {
+    const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs?created=${day}&per_page=100&page=${page}`, {
+      headers: { Authorization: `Bearer ${gh}`, Accept: 'application/vnd.github+json', 'User-Agent': 'guildcraft-usage' },
+      ...timed(20_000),
+    });
+    if (!res.ok) return `GitHub HTTP ${res.status}`;
+    const runs = ((await res.json()) as { workflow_runs?: { name: string; event: string; created_at: string }[] }).workflow_runs ?? [];
+    out.push(...runs.map((r) => ({ name: r.name, event: r.event, createdAt: r.created_at })));
+    if (runs.length < 100) break;
+  }
+  return out;
+}
+
+/** Per crossing: the database, the top 3 statements and the day's runs. A read that fails is named, never fatal. */
+async function levelCauses(up: LevelChange[]): Promise<string[][]> {
+  const why = (e: unknown) => redact(e instanceof Error ? e.message : String(e)).slice(0, 200);
+  const dbs = copies().map((c) => ({ name: c.name, databaseId: c.databaseId() }));
+  const found = await datasets(gql, ['d1AnalyticsAdaptiveGroups', 'd1QueriesAdaptiveGroups']).catch((e) => why(e));
+  const out: string[][] = [];
+  for (const c of up) {
+    const field = D1_FIELD[c.metric];
+    let perDb: Awaited<ReturnType<typeof perDatabase>> | string = 'not a D1 metric';
+    let top: Awaited<ReturnType<typeof heaviest>>['figures'] | string = 'not a D1 metric';
+    if (field && typeof found === 'string') perDb = top = found;
+    else if (field && typeof found !== 'string') {
+      const a = found.d1AnalyticsAdaptiveGroups;
+      const q = found.d1QueriesAdaptiveGroups;
+      perDb = a ? await perDatabase(gql, account!, a, c.day, c.day, dbs).catch(why) : 'd1AnalyticsAdaptiveGroups not readable';
+      top = q ? await heaviest(gql, account!, q, { from: c.day, to: c.day }, field, 2000, dbs).then((h) => topBy(h.figures, field, 3)).catch(why) : 'd1QueriesAdaptiveGroups not readable';
+    }
+    out.push(causeLines(c, perDb, top, await runsOn(c.day).catch(why)));
+  }
+  return out;
+}
 try {
 /**
  * How a dataset is filtered and grouped by UTC day, from its introspected filter and dimension names: date_geq/date_leq
@@ -293,7 +341,10 @@ if (judgesLevel(currentCopy().name) && !problems.length) {
   const held = await db.all<DayFigure>(`SELECT metric, day, value FROM usage_daily WHERE day >= ${lit(new Date(today - 10 * DAY).toISOString().slice(0, 10))}`);
   const merged = new Map(held.map((r) => [`${r.metric}|${r.day}`, r]));
   for (const r of rows) merged.set(`${r.metric}|${r.day}`, r);
-  level = levelSummary(levelChanges([...merged.values()], heldBefore));
+  const changes = levelChanges([...merged.values()], heldBefore);
+  level = levelSummary(changes);
+  if (level.failed)
+    causes = await levelCauses(changes.filter((c) => c.outcome === 'notify')).catch((e) => [[`The cause could not be read: ${redact(e instanceof Error ? e.message : String(e))}`]]);
 } else console.log(`usage level: not judged (${problems.length ? 'the measurement failed' : `the ${currentCopy().name} run; the production run alarms for the account`})`);
 // Order 9 (read only): the dev review channel's usage warnings as the Worker recorded them, posted or refused. The log
 // is public, so no guild id: metric, state, day and outcome only.
@@ -316,5 +367,10 @@ if (!problems.length) summary(summaryLine);
 // Its own state, so one alarm never silences the other: this sets the exit code only on a crossing up.
 if (level) {
   summary(level.failed ? `**${level.line}**` : level.line);
+  // Order 26 (override 1): the cause, as an annotation (shown on the run's page and in its mail) and in the summary.
+  for (const lines of causes) {
+    console.log(errorAnnotation('Usage level: what caused it', lines));
+    summary(lines.join('  \n')); // Markdown line breaks
+  }
   if (level.failed) process.exitCode = 1;
 }

@@ -11,6 +11,8 @@
 # is the health job's, on the bot's own records (.github/workflows/health.yml).
 # The drop history (dates and counts only; this repository is public) passes from one scheduled run to the next as
 # the artifact drop-history (14 days' retention).
+# Order 26: the dispatch input `insights` also prints D1 rows read and written per database (dev, production, other)
+# and the heaviest statements, literals as ? (scripts/usage/insights-cli.ts). GraphQL only; no D1 rows; no schedule.
 name: timings
 on:
   schedule:
@@ -34,6 +36,9 @@ on:
         description: 'Also print read-only D1 facts (scripts/bench/d1-facts.mjs; fixed SELECTs; dev only)'
         type: boolean
         default: false
+      insights:
+        description: 'Order 26: also print D1 rows per database and the heaviest statements (scripts/usage/insights-cli.ts arguments; once, on the production leg; GraphQL only)'
+        default: ''
       copy:
         description: 'Which copy to read'
         type: choice
@@ -102,6 +107,12 @@ jobs:
           path: ${{ runner.temp }}/drop-history.json
           retention-days: 14
           if-no-files-found: ignore
+      # Order 26: the figures are account-wide, so one leg prints them. Reads GraphQL only; costs no D1 rows.
+      - name: D1 rows per database and per statement
+        if: inputs.insights != '' && matrix.copy == 'production'
+        env:
+          INSIGHTS: ${{ inputs.insights }}
+        run: node scripts/usage/insights-cli.ts $INSIGHTS
       - if: inputs.facts && matrix.copy == 'dev'
         run: npm ci
       - name: Read-only D1 facts
