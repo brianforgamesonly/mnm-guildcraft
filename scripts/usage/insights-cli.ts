@@ -7,7 +7,7 @@
 import { parseArgs } from 'node:util';
 import { copies } from '../copies.ts';
 import { datasets, heaviest, perDatabase, settingsOf, type Gql } from './insights.ts';
-import { figureLine, topBy } from './queries.ts';
+import { figureLine, redact, timed, topBy } from './queries.ts';
 
 const { values: args } = parseArgs({
   options: {
@@ -34,9 +34,10 @@ const gql: Gql = async (query, variables = {}) => {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ query, variables }),
+    ...timed(60_000),
   });
   const json = (await res.json().catch(() => ({}))) as { data?: any; errors?: { message?: string }[] | null };
-  const errors = (json.errors ?? []).map((e) => String(e.message ?? e).replace(/\d{15,}|[0-9a-f]{32}/g, '<id>')).slice(0, 3);
+  const errors = (json.errors ?? []).map((e) => redact(String(e.message ?? e))).slice(0, 3);
   if (!res.ok || errors.length) throw new Error(`graphql HTTP ${res.status}: ${errors.join('; ') || 'no detail'}`);
   return json.data;
 };
@@ -84,6 +85,7 @@ for (const d of list(args['top-days'])) await tops({ from: d, to: d }, d, 'rowsR
 for (const d of list(args['written-days'])) await tops({ from: d, to: d }, d, 'rowsWritten', Number(args['top-written']));
 for (const w of list(args.windows)) {
   const [from, to] = w.split('/');
+  if (!from || !to) throw new Error(`--windows: ${JSON.stringify(w)} is not FROM/TO`);
   await tops({ from, to }, `window ${from}..${to}`, 'rowsRead', Number(args.top));
   await tops({ from, to }, `window ${from}..${to}`, 'rowsWritten', Number(args['top-written']));
 }

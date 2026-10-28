@@ -10,7 +10,7 @@ import { FREE_LIMITS, METRICS } from '../../src/limits.ts';
 import { render } from '../../src/operator-text.ts';
 import { alertText, ofLimit, tokenExpiryText, usageAlerts, usageLines } from '../../src/usage.ts';
 import { judgesLevel, levelChanges, levelSummary, type DayFigure } from '../../scripts/usage/level-alarm.ts';
-import { byShape, dbLabel, figureLine, queryShape, topBy } from '../../scripts/usage/queries.ts';
+import { byShape, dbLabel, figureLine, queryShape, redact, topBy } from '../../scripts/usage/queries.ts';
 import { causeLines, errorAnnotation } from '../../scripts/usage/cause.ts';
 import { all, reset } from '../db.ts';
 import { ADMIN, as, botApi, cmd, GUILD, send, spyOnFetch, webhook } from '../discord.ts';
@@ -335,6 +335,12 @@ describe('order 26: D1 statements as a public log may show them', () => {
     expect(queryShape("SELECT x'00ff', t1.c2 FROM t1 LIMIT 10")).toBe('SELECT ?, t1.c2 FROM t1 LIMIT ?');
     // The dataset's cut-off statements: an unterminated literal, and NULLs inside the VALUES tuples.
     expect(queryShape("INSERT INTO item (a, b, c) VALUES (?, NULL, ?), (?, ?, NULL), (?, ?, 'https://example.org/wi")).toBe('INSERT INTO item (a, b, c) VALUES (?, …), …, (?, ?, ?…');
+    // The review's cases: hex and leading-dot numbers, and comments (ad-hoc SQL lands in the same dataset).
+    expect(queryShape('SELECT a FROM t WHERE id = 0x1F AND r > .5 /* Joe secret */ -- note 7\n LIMIT 1')).toBe('SELECT a FROM t WHERE id = ? AND r > ? LIMIT ?');
+    expect(queryShape('SELECT count(*) FROM "audit_log"')).toBe('SELECT count(*) FROM "audit_log"');
+  });
+  it('an error text loses account ids, database ids and long numeric ids', () => {
+    expect(redact('D1 b37d930b-5137-4cdc-9dca-65abe10e327d in 0123456789abcdef0123456789abcdef, guild 123456789012345678')).toBe('D1 <id> in <id>, guild <id>');
   });
   it('a database is named only dev, production or other', () => {
     const copies = [{ name: 'dev', databaseId: 'd' }, { name: 'production', databaseId: 'p' }, { name: 'staging', databaseId: 's' }];

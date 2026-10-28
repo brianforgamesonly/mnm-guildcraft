@@ -6,6 +6,12 @@
 
 export type DbLabel = 'dev' | 'production' | 'other';
 
+/** An error text made safe for a public log: account ids, database ids (dashed UUIDs) and long numeric ids become <id>. */
+export const redact = (s: string) => s.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32}|\d{15,}/gi, '<id>');
+
+/** A fetch that gives up after `ms`, so a hung API can never outlast the job's own timeout. */
+export const timed = (ms: number): RequestInit => ({ signal: AbortSignal.timeout(ms) });
+
 /** dev / production by the copies' database ids (wrangler.jsonc, scripts/copies.ts); anything else is other. */
 export function dbLabel(databaseId: string, copies: { name: string; databaseId: string }[]): DbLabel {
   const c = copies.find((x) => x.databaseId === databaseId);
@@ -19,7 +25,12 @@ export function dbLabel(databaseId: string, copies: { name: string; databaseId: 
  */
 export function queryShape(sql: string): string {
   return sql
+    // Comments can carry anything; double-quoted names are SQLite identifiers (schema), so they stay.
+    .replace(/\/\*[\s\S]*?(\*\/|$)/g, ' ')
+    .replace(/--[^\n]*/g, ' ')
     .replace(/[xX]'[0-9a-fA-F]*'/g, '?')
+    .replace(/\b0[xX][0-9a-fA-F]+\b/g, '?')
+    .replace(/(?<![\w$])\.\d+(?:[eE][+-]?\d+)?/g, '?')
     .replace(/'(?:[^']|'')*'/g, '?')
     // The dataset cuts long statements, which can leave a literal unterminated (order 26's first reading showed one).
     .replace(/'[^']*$/, '?…')

@@ -19,7 +19,7 @@ import { copyDatabaseId, remoteDb } from '../import/db.ts';
 import { causeLines, D1_FIELD, errorAnnotation, type RunInfo } from './cause.ts';
 import { datasets, heaviest, perDatabase } from './insights.ts';
 import { judgesLevel, levelChanges, levelSummary, type DayFigure, type LevelChange } from './level-alarm.ts';
-import { topBy } from './queries.ts';
+import { redact, timed, topBy } from './queries.ts';
 import { FREE_LIMITS, STALE_MS, type Metric } from '../../src/limits.ts';
 
 const { values: args } = parseArgs({
@@ -34,9 +34,11 @@ const cf = async (path: string, body: unknown) => {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    // Order 26: a hung API must never outlast the job's 5 minutes (the alarm below would not run).
+    ...timed(60_000),
   });
   const json = (await res.json().catch(() => ({}))) as { data?: any; errors?: { message?: string }[] | null; result?: any; success?: boolean };
-  const errors = (json.errors ?? []).map((e) => String(e.message ?? e).replace(/\d{15,}/g, '<id>')).slice(0, 3);
+  const errors = (json.errors ?? []).map((e) => redact(String(e.message ?? e))).slice(0, 3);
   if (!res.ok || errors.length || json.success === false) throw new Error(`${path} HTTP ${res.status}: ${errors.join('; ') || 'no detail'}`);
   return json;
 };
@@ -121,6 +123,7 @@ async function runsOn(day: string): Promise<RunInfo[] | string> {
   for (let page = 1; page <= 5; page++) {
     const res = await fetch(`https://api.github.com/repos/${repo}/actions/runs?created=${day}&per_page=100&page=${page}`, {
       headers: { Authorization: `Bearer ${gh}`, Accept: 'application/vnd.github+json', 'User-Agent': 'guildcraft-usage' },
+      ...timed(20_000),
     });
     if (!res.ok) return `GitHub HTTP ${res.status}`;
     const runs = ((await res.json()) as { workflow_runs?: { name: string; event: string; created_at: string }[] }).workflow_runs ?? [];
@@ -132,7 +135,7 @@ async function runsOn(day: string): Promise<RunInfo[] | string> {
 
 /** Per crossing: the database, the top 3 statements and the day's runs. A read that fails is named, never fatal. */
 async function levelCauses(up: LevelChange[]): Promise<string[][]> {
-  const why = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 200);
+  const why = (e: unknown) => redact(e instanceof Error ? e.message : String(e)).slice(0, 200);
   const dbs = copies().map((c) => ({ name: c.name, databaseId: c.databaseId() }));
   const found = await datasets(gql, ['d1AnalyticsAdaptiveGroups', 'd1QueriesAdaptiveGroups']).catch((e) => why(e));
   const out: string[][] = [];
@@ -341,7 +344,7 @@ if (judgesLevel(currentCopy().name) && !problems.length) {
   const changes = levelChanges([...merged.values()], heldBefore);
   level = levelSummary(changes);
   if (level.failed)
-    causes = await levelCauses(changes.filter((c) => c.outcome === 'notify')).catch((e) => [[`The cause could not be read: ${e instanceof Error ? e.message : String(e)}`]]);
+    causes = await levelCauses(changes.filter((c) => c.outcome === 'notify')).catch((e) => [[`The cause could not be read: ${redact(e instanceof Error ? e.message : String(e))}`]]);
 } else console.log(`usage level: not judged (${problems.length ? 'the measurement failed' : `the ${currentCopy().name} run; the production run alarms for the account`})`);
 // Order 9 (read only): the dev review channel's usage warnings as the Worker recorded them, posted or refused. The log
 // is public, so no guild id: metric, state, day and outcome only.
