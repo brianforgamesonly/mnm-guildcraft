@@ -689,18 +689,23 @@ export const isNightly = (scheduledTime: number) => {
  * - factions (order 24): dirty, stale (the import changed a faction after its post was rendered) or missing posts, no
  *   index, a rebuild in progress, or (order 25) a post to retire: its faction no longer shown, and changed or dirty
  *   since its last render. Never every board at night (FACTIONS.nightly).
+ * Order 26: it runs 96 times a day per copy, so it answers from indexes (migrations/0020). Shown-and-dirty, shown-and-stale
+ * and to-retire (not shown, and dirty or stale) together are "any post dirty or stale", whether its faction is shown or
+ * not: one probe of faction_post_dirty, and the factions changed since the guild's oldest render (faction_changed) joined
+ * to their posts. Missing posts stay an exact count against the shown factions, built once per run (`shown`). Idle, with
+ * one guild's two boards live on the real data: 1,202 rows read per run before, 629 after (scripts/bench/sweep-reads.ts).
  */
-const SWEEP_SQL = `SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
+export const SWEEP_SQL = `WITH shown(id) AS MATERIALIZED (SELECT f.id FROM faction f WHERE ${FACTION_SHOWN})
+SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
   OR EXISTS (SELECT 1 FROM board_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
   OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill))
 UNION ALL
 SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT NULL AND (g.${FACTIONS.indexMessage} IS NULL OR g.${FACTIONS.rebuild} IS NOT NULL
-  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND p.dirty <> 0)
-  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN} AND f.changed_at > coalesce(p.last_rendered_at, ''))
-  OR (SELECT count(*) FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND ${FACTION_SHOWN})
-     < (SELECT count(*) FROM faction f WHERE ${FACTION_SHOWN})
-  OR EXISTS (SELECT 1 FROM faction_post p JOIN faction f ON f.id = p.faction_id WHERE p.guild_id = g.id AND NOT (${FACTION_SHOWN})
-     AND (p.dirty <> 0 OR f.changed_at > coalesce(p.last_rendered_at, ''))))
+  OR EXISTS (SELECT 1 FROM faction_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
+  OR EXISTS (SELECT 1 FROM faction f CROSS JOIN faction_post p ON p.guild_id = g.id AND p.faction_id = f.id
+     WHERE f.changed_at > coalesce((SELECT q.last_rendered_at FROM faction_post q WHERE q.guild_id = g.id ORDER BY q.last_rendered_at LIMIT 1), '')
+       AND f.changed_at > coalesce(p.last_rendered_at, ''))
+  OR (SELECT count(*) FROM faction_post p WHERE p.guild_id = g.id AND +p.faction_id IN (SELECT id FROM shown)) < (SELECT count(*) FROM shown))
 ORDER BY board DESC, id`;
 
 /**

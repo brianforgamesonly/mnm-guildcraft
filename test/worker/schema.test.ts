@@ -38,7 +38,10 @@ describe('schema (migrations/0001_init.sql)', () => {
     ]);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
-      'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live', 'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+      'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live',
+      // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.
+      'faction_changed', 'faction_post_dirty', 'faction_post_rendered',
+      'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
       // Order 24 (0018): a faction's links.
       'npc_faction_by_faction',
       // Order 19 (0014): /item's "used in" statement.
