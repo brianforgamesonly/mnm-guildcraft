@@ -12,6 +12,9 @@
 #   the usage level (order 11, override 1; production's run only, the figures being account-wide): fails once when a
 #          metric crosses up to 10% of its Free limit, yesterday against the day before in usage_daily; staying over
 #          passes; dropping back under is reported in the summary and passes (scripts/usage/level-alarm.ts).
+#          Order 26 (override 1): a failing level alarm also carries its cause, as an ::error annotation and in the
+#          summary, per day judged: the day, the database (dev / production / other), the top 3 statements (literals as
+#          ?) and that UTC day's workflow runs (scripts/usage/cause.ts). Reading the cause never changes the outcome.
 #
 # Dispatch: dry_run (default true) prints the rows it would write and writes nothing.
 name: usage
@@ -34,6 +37,8 @@ on:
         default: both
 permissions:
   contents: read
+  # Order 26 (override 2): used only to list the judged UTC day's workflow runs for the level alarm's cause.
+  actions: read
 # Order 10: one job per copy (scripts/copies.ts). The figures are account-wide, so both databases get the same rows and
 # both apps' /guildcraft status shows the whole account. Each job alarms for its own copy: a GraphQL outage mails twice.
 jobs:
@@ -76,4 +81,5 @@ jobs:
       - name: Usage (dry run = ${{ inputs.dry_run == true }})
         env:
           DAYS: ${{ inputs.days }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/usage/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }} ${{ inputs.days && '--days "$DAYS"' || '' }}

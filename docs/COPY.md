@@ -785,7 +785,6 @@ Every line below is DRAFT until approved: the new commands' and options' descrip
 | src/commands/help.ts:43 | Replies are private to you unless you press **Post to channel**. | DRAFT |
 | src/commands/help.ts:45 | (after the commands) the contact line, src/commands/help.ts:10 | DRAFT (approved words, new place) |
 | src/commands/help.ts:49 | Page label: Finding things (lists `/item`, `/gear`, `/roster skill`, `/roster member`, `/roster top`, `/roster recipes`, `/zone`) | DRAFT |
-| src/commands/help.ts:51 | On an `/item` card: **I know this recipe**, **Report a problem**, **Request a craft**, **Stat image**. Attach `screenshot:` to send an item window for the officers to approve. | DRAFT |
 | src/commands/help.ts:55 | Page label: Your profile (lists `/me`, `/skills`) | DRAFT |
 | src/commands/help.ts:57 | `/me` has buttons to add, edit or remove a character, update skills, turn on request notices, forget a recipe and cancel a request. | DRAFT |
 | src/commands/help.ts:61 | Page label: Requests (lists `/request`) | DRAFT |
@@ -1018,7 +1017,6 @@ The owner's decision of 2026-10-27 (option B). Removed: `/item`'s `screenshot:` 
 |---|---|---|
 | src/commands/images.ts:25 | (a stale `screenshot:`, or Stat image on an old card with no approved screenshot) Item screenshots are turned off on GuildCraft. Item cards show the wiki's own icon. | DRAFT |
 | src/commands/setup.ts:468 | (status) **Waiting for officers:** \<n> open reports, plus " · \<n> pending screenshots in #\<vault>" only while an old vault has any | DRAFT |
-| src/commands/help.ts:51 | On an `/item` card: **I know this recipe**, **Report a problem**, **Request a craft**. | DRAFT |
 | src/commands/definitions.ts:177, 180 | (setup) Set the roles, the tradeskills and factions forums, and the review and request channels · (officer_role:) Officers: edit entries, handle departures, reports and recipe data | DRAFT |
 | docs/LAUNCH-GUIDE.md:10, 17-21, "Item screenshots are off (order 24)" | The install link (permissions=9157138795536, Attach Files no longer asked for), the permission rows, the section replacing the vault's | DRAFT |
 | docs/SELF-HOSTING.md:111-123 | The install link and number (9157138795536), the permission rows | DRAFT |
@@ -1033,3 +1031,12 @@ The owner's decisions of 2026-10-27: quest lines on faction posts (reward lines 
 | src/board/factions.ts:39, 115 | (the footer, on posts with quests only) As listed on each creature's and quest's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded. | DRAFT |
 | src/board/factions.ts:40 | (a retired post, merged) This faction now appears as \<approved name>. | DRAFT |
 | src/board/factions.ts:41 | (a retired post, no longer in the data) No longer listed in the data. | DRAFT |
+
+## Work order 26: /help names the item card's report buttons (DRAFT)
+
+Craftable items' cards show Report a recipe problem and Report item data; other cards show Report a problem (src/commands/item.ts `actionRow`). Approved by exception on the owner's check of the test server.
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/help.ts:52 | (Finding things) On an `/item` card for a craftable item: **I know this recipe**, **Report a recipe problem**, **Report item data**, **Request a craft**. On any other item card: **Report a problem**. | DRAFT |
+| docs/SELF-HOSTING.md, Step 11 | "Settings and the boards": the tradeskills and factions boards' posts and the report cards were posted by the old bot …; no vault | DRAFT |

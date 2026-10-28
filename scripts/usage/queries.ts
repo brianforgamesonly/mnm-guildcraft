@@ -21,10 +21,12 @@ export function queryShape(sql: string): string {
   return sql
     .replace(/[xX]'[0-9a-fA-F]*'/g, '?')
     .replace(/'(?:[^']|'')*'/g, '?')
+    // The dataset cuts long statements, which can leave a literal unterminated (order 26's first reading showed one).
+    .replace(/'[^']*$/, '?…')
     .replace(/(?<![\w$.?:@"])-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?(?![\w"])/g, '?')
     .replace(/\?\d+/g, '?')
     .replace(/\s+/g, ' ')
-    .replace(/\(\s*\?(?:\s*,\s*\?)+\s*\)/g, '(?, …)')
+    .replace(/\(\s*(?:\?|NULL)(?:\s*,\s*(?:\?|NULL))+\s*\)/gi, '(?, …)')
     .replace(/(\((?:\?|\?, …)\))(?:\s*,\s*\((?:\?|\?, …)\))+/g, '$1, …')
     .trim();
 }

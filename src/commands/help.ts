@@ -48,7 +48,9 @@ export const PAGES: { key: PageKey; label: string; before: string[]; after: stri
     key: 'find',
     label: 'Finding things',
     before: [],
-    after: ['On an `/item` card: **I know this recipe**, **Report a problem**, **Request a craft**.'],
+    after: [
+      'On an `/item` card for a craftable item: **I know this recipe**, **Report a recipe problem**, **Report item data**, **Request a craft**. On any other item card: **Report a problem**.',
+    ],
   },
   {
     key: 'profile',
