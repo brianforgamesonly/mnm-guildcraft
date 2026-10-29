@@ -142,7 +142,7 @@ test('client: the request cap stops the run; the network retry is refused when i
   const last = new Relay('https://r', 't', async (_u, o) => ((asked = o.mayRetry?.()), { attempts: 1, error: 'TypeError: fetch failed' }), async () => {}, 1);
   await assert.rejects(last.call('siteinfo', {}), /no answer/);
   assert.equal(asked, false);
-  assert.equal(REQUEST_CAP, 150);
+  assert.equal(REQUEST_CAP, 200);
 });
 
 // ---------------------------------------------------------------- the snapshot walk, on a stand-in wiki

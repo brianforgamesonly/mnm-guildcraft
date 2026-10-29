@@ -21,8 +21,11 @@ import { politeGet, wait, type Got } from '../probe/wiki.ts';
 import { BUCKETS, MAXLAG, SCHEMA_PAGES } from './allowed.ts';
 import { MEMBERSHIP, TREES, type SnapshotCategory, type SnapshotPage, type WikiSnapshot } from './types.ts';
 
-/** Override 1: at most 150 requests per workflow run (about 60 expected). */
-export const REQUEST_CAP = 150;
+/**
+ * Override 1: at most 200 requests per workflow run (the owner, 2026-10-29, raised it from 150 after the plan-only run
+ * 40957526471 measured about 151 needed: 89 listing, 58 content, 4 for buckets and recent changes).
+ */
+export const REQUEST_CAP = 200;
 export const MAXLAG_WAITS = 3;
 /** A Retry-After above this is not waited out: the run stops (the job has a time limit). */
 const MAX_RETRY_AFTER_S = 60;
