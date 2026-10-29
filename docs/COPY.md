@@ -1040,3 +1040,32 @@ Craftable items' cards show Report a recipe problem and Report item data; other 
 |---|---|---|
 | src/commands/help.ts:52 | (Finding things) On an `/item` card for a craftable item: **I know this recipe**, **Report a recipe problem**, **Report item data**, **Request a craft**. On any other item card: **Report a problem**. | DRAFT |
 | docs/SELF-HOSTING.md, Step 11 | "Settings and the boards": the tradeskills and factions boards' posts and the report cards were posted by the old bot …; no vault | DRAFT |
+
+## Work order 27, PR A: DKP switch, ledger, settings, adjustments (DRAFT)
+
+Every string is in src/dkp/copy.ts (`DKP_COPY`), except the command and option descriptions (src/dkp/definition.ts) and the setting labels (src/dkp/settings.ts `SETTINGS`). Member mentions are `<@id> (saved name)` and ping nobody. Approved by exception when the owner's check passes.
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:9, 10 | (setup buttons) Add DKP · Remove DKP | DRAFT |
+| src/dkp/copy.ts:11 | DKP is on. Standings and raid cards go in #GC-DKP. `/dkp` is now in this server's command list (reload Discord if you don't see it yet). | DRAFT |
+| src/dkp/copy.ts:12, 13 | Kept #GC-DKP. · Created #GC-DKP: DKP standings, raid cards and changes. Only GuildCraft posts there. | DRAFT |
+| src/dkp/copy.ts:14 | Discord refused to change `/dkp` on this server (it answered \<status>). DKP is unchanged; press the button again to retry. | DRAFT |
+| src/dkp/copy.ts:15 | Could not create **GC-DKP** (Discord answered \<status>). DKP is still off; press **Add DKP** again to retry. | DRAFT |
+| src/dkp/copy.ts:16-17 | DKP is off. `/dkp` is removed from this server; every point and raid is kept, and **Add DKP** later resumes the same history. #GC-DKP is left as it is: keep it or delete it. | DRAFT |
+| src/dkp/copy.ts:18, 19 | The open raid was closed. · DKP is already off on this server. | DRAFT |
+| src/dkp/copy.ts:5 | DKP is off on this server. | DRAFT |
+| src/dkp/copy.ts:6 | Only officers (or the role an admin named in `/dkp settings`) can run DKP. | DRAFT |
+| src/dkp/copy.ts:7, 8 | Nobody can change their own points. · You asked for this change, so another officer has to approve it. | DRAFT |
+| src/dkp/copy.ts:21-27 | (standings) \<Pool> standings · Guild pool · No points yet. · (frozen) · Full standings · …and \<n> more members. Press **Full standings**. · Page \<n> of \<m> | DRAFT |
+| src/dkp/commands.ts:229 | (Full standings paging) Previous · Next | DRAFT |
+| src/dkp/copy.ts:29-31 | A reason is required. · Points must not be 0. · There is no pool called **\<typed>**. Pick one from the list. | DRAFT |
+| src/dkp/copy.ts:32 | Done. The change is posted in GC-DKP. · Done, but I could not post the change in GC-DKP. | DRAFT |
+| src/dkp/copy.ts:33-34 | (GC-DKP) \<member>: +\<n> in **\<pool>** (now \<balance>); \<cut> over the cap was not added. By \<officer>. Reason: \<reason> | DRAFT |
+| src/dkp/copy.ts:35 | That is over \<n> points, so it needs a second officer: it is posted in GC-DKP for approval. | DRAFT |
+| src/dkp/copy.ts:36-37 | (approval card) **Needs a second officer:** \<member>: +\<n> in **\<pool>**. Asked by \<officer>. Reason: \<reason> / Another officer presses **Approve** before \<time>, or it lapses. | DRAFT |
+| src/dkp/copy.ts:38-42 | Approve · Approved by \<officer>. · Lapsed: nobody approved it in time. · This change was already approved or has lapsed. · Approved. The change is applied. | DRAFT |
+| src/dkp/copy.ts:44-50 | DKP settings (changes apply from now on): · **DKP setting changed:** \<setting> is now \<value>. By \<admin>. · \<setting> must be between \<min> and \<max>. · Saved. The change is posted in GC-DKP. · the officer role (and admins) · \<role> (and admins) · Who runs DKP | DRAFT |
+| src/dkp/copy.ts:51, 52 | **Named value:** \<named> in \<zone> now pays \<n> raid points. By \<officer>. · No zone is called **\<typed>**. | DRAFT |
+| src/dkp/settings.ts:15-22 | (setting labels) Raid points per named kill · Flat raid value · Guild points per kill or flat payout · Pool cap · Check-again window · Second officer needed over · Approval lapses after · Raid auto-closes after | DRAFT |
+| src/dkp/definition.ts:20-57 | `/dkp` DKP: points for raid attendance, kept per raid zone; `adjust` Officers: change a member's points, with a reason (posted publicly); `settings` Admins: DKP settings; leave the options out to see them; `named-value` Officers: the raid points one named pays, from now on (posted publicly); and each option's description | DRAFT |

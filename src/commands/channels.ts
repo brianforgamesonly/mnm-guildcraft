@@ -53,7 +53,7 @@ export const FORUM_SORT_CREATION = 1;
 /** Officers in a private channel: read it, answer in it. */
 export const OFFICER_ALLOW = VIEW_CHANNEL | SEND_MESSAGES | READ_MESSAGE_HISTORY;
 /** How long a press holds the server's lease: past the deferred work's 30 seconds, so it never lapses mid-run. */
-const LEASE_MS = 60_000;
+export const LEASE_MS = 60_000;
 /**
  * The calls one press may make (order 24, recounted): 4 reads, the emoji's list and create, the category, 4 channels, one
  * forum update per kept forum (its sort order and reaction together, 2) and one officer overwrite (1 private channel).
@@ -66,7 +66,7 @@ export const CALL_CAP = 4 + 2 + 1 + LAYOUT.length + LAYOUT.filter((p) => p.type 
  * guild id), the officer role when set, and the bot's own member last, so a deny for @everyone never locks the bot out.
  * The bot's allows are what its routes need in that channel (src/permissions.ts channelBits), as setup checks.
  */
-export function overwritesFor(p: Planned, guildId: string, botId: string, officerRoleId: string | null): Overwrite[] {
+export function overwritesFor(p: Pick<Planned, 'kind' | 'type' | 'private'>, guildId: string, botId: string, officerRoleId: string | null): Overwrite[] {
   const everyone: Overwrite = p.private
     ? { id: guildId, type: 0, allow: '0', deny: String(VIEW_CHANNEL) }
     : // Everyone reads it and replies in threads; nobody but the bot starts a post or sends in the channel itself. In the
@@ -90,10 +90,10 @@ export const BUTTON_NEEDS = MANAGE_CHANNELS | MANAGE_ROLES | BITS_SET;
 /** The name Discord is expected to store for a text or forum channel (lower-cased, spaces as hyphens; unverified). */
 export const storedName = (name: string) => name.toLowerCase().replace(/\s+/g, '-');
 /** A channel matches a planned one by type and by name, as typed or as Discord stores it. */
-const sameChannel = (ch: GuildChannel, p: { name: string; type: number }) =>
+export const sameChannel = (ch: GuildChannel, p: { name: string; type: number }) =>
   ch.type === p.type && [p.name.toLowerCase(), storedName(p.name)].includes(ch.name.toLowerCase());
 
-interface GuildChannel {
+export interface GuildChannel {
   id: string;
   type: number;
   name: string;

@@ -11,6 +11,10 @@ import { SQL_IS_OFFICER, SQL_PASSES_MEMBER_GATE, sqlAccessParams } from '../acce
 import { focused, matchChoices, optString, subcommand, truncate, type Choice, type Interaction, type Option } from '../discord.ts';
 import { gameList, type GameList } from '../gamedata.ts';
 import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
+import { DKP_COPY } from '../dkp/copy.ts';
+import { zoneCreatures } from '../dkp/creatures.ts';
+import { POOL_GUILD } from '../dkp/ledger.ts';
+import { zoneKey } from '../zone/names.ts';
 
 const CHOICE_MAX = 100;
 
@@ -84,6 +88,13 @@ const characters: Lister = async ({ db, i, options, typed }) => {
   return asChoices(matchChoices(results.map((r) => r.name), typed));
 };
 const allItems: Lister = async (a) => itemChoices(await gameList(a.db, 'allItems'), a.typed);
+/** Order 27: a DKP pool: the guild pool first, then the zones (one statement: the cached zone list). */
+const dkpPools: Lister = async (a) => [{ name: DKP_COPY.guildPool, value: POOL_GUILD }, ...asChoices(matchChoices(await gameList(a.db, 'zones'), a.typed, 24))];
+/** Order 27: the zone's creatures (src/dkp/creatures.ts), for the zone already filled in; one statement. */
+const dkpCreatures: Lister = async ({ db, options, typed }) => {
+  const zone = optString(options, 'zone');
+  return zone ? asChoices(matchChoices(await zoneCreatures(db, zoneKey(zone)), typed)) : [];
+};
 
 /**
  * Order 18: each list is chosen by command and option ("/command [subcommand] option"), never by the option's name alone,
@@ -104,6 +115,10 @@ export const LISTS: Record<string, Lister> = {
   '/officer recipe-source item': allRecipes,
   '/officer recipe-source faction': factions,
   '/officer recipe-fix item': allRecipes,
+  // Order 27: /dkp (a per-server definition, src/dkp/definition.ts).
+  '/dkp adjust pool': dkpPools,
+  '/dkp named-value zone': game('zones'),
+  '/dkp named-value named': dkpCreatures,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

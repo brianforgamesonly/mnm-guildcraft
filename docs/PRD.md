@@ -609,3 +609,94 @@ Sources: [interactions](https://docs.discord.com/developers/interactions/receivi
 4.  **Quality and images:** reports, overrides, known recipes, recipe sources (FR-3.1), guild-private recipes, screenshot vault with approval.
 
 5.  **Launch:** announce the bot, pin the help guide, and run a sign-up push so the board fills in during the first week.
+
+## DKP add-on (orders 27–28)
+
+Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's admin adds or removes with **Add DKP** and **Remove DKP** in `/guildcraft setup`. Points are paid for each named kill a member is present for (ticks). Points are kept per raid zone. The rules guard against leadership bias and against banking points before leaving.
+
+**Principles.** The bot decides, and officers correct in public with a reason. Points are earned for being present when it matters. Points are spent only where they were earned (order 28). Every rule is a setting with a default.
+
+**Pools.**
+
+- Each raid zone, picked from GuildCraft's zone list, is its own raid pool.
+- The guild pool is earned at a smaller rate, and order 28's shop spends it.
+- Points belong to the member (the Discord user), not to a character. Everyone starts at zero.
+
+**Who earns: members and frozen members.**
+
+- Tapping a raid button refreshes the member's row, as a slash command does. The member-role gate applies, and a member without that role is refused privately.
+- A member whose status is 'left' is frozen. They earn nothing, and the standings show them as frozen.
+- A frozen member thaws on their own next command or raid-button press.
+- An officer's Remove freezes a member the same way, until they come back by themselves.
+- "Leaving the server" means the nightly run's mark. A member who left today keeps the state they had until that run.
+
+**Raid night.** One raid is open per server at a time.
+
+- *Opening.* An officer runs `/dkp raid zone: mode:` (per named kill, or flat), and the bot posts a raid card in GC-DKP. If a raid is already open, the command is refused with a link to it.
+- *Checking in.*
+  - Members tap Present, or Standby if they are held outside a full raid.
+  - Their state carries over to every later kill until they tap Leaving or an officer changes it.
+  - Tapping Present after a kill does not earn that kill, only later ones.
+- *Named killed.*
+  - The button offers the zone's creatures in a select menu: the first 25 in display order. Names that don't start with "a " or "an " come first, then the rest, each part A→Z. This order is for display only: nothing is stored or labelled "named".
+  - `/dkp kill named:` covers every creature, with autocomplete. It also accepts a typed name, stored as typed, for creatures the data doesn't list.
+  - The creature list is the union of the zone's mobs and NPCs, deduplicated by case-insensitive name, without merchants.
+  - A zone with no creatures shows no select menu; the card says to use `/dkp kill`.
+  - The same named recorded twice within 2 minutes asks the officer to confirm it was a respawn. Otherwise each record is a kill.
+- *Payout.*
+  - Everyone Present or Standby at that moment earns the named's raid points and the guild points.
+  - The kill line on the card shows the named, the points, how many earned, and the changes against the previous kill (for example +Kestrel −Pip).
+  - Who earned answers privately with the full list.
+- *Check again* (officer, per kill).
+  - For the window (default 300 seconds), members credited on that kill tap Present again to keep it.
+  - Those who don't are removed from that kill when the window closes. They are then absent for later kills until they tap Present.
+  - A member who first taps Present inside the window doesn't gain that kill; an officer correction can add them.
+- *Corrections.*
+  - An officer adds or removes a member on a kill, or on the whole raid. The reason is required and shown.
+  - A correction whose total is over 20 points needs a second officer, as adjustments do.
+- *Flat mode.* There is no Named killed. Pay attendance pays the flat value once, to everyone Present or Standby at that moment.
+- *Closing.*
+  - Close raid posts the night's summary and refreshes the standings.
+  - A raid nobody closes closes itself after 8 hours.
+  - If DKP is removed mid-raid, the raid closes at once, its timers are cancelled, and its buttons answer "DKP is off on this server".
+
+**Card size.**
+
+- The raid card shows names only up to a limit. Beyond it, the card shows counts, plus Who's here and Who earned buttons that answer privately.
+- Standings are one message per pool, showing the top members, with Full standings answering privately and paged.
+
+**Adjustments.**
+
+- `/dkp adjust member: pool: points: reason:` takes a reason, which is required, and the change is posted publicly in GC-DKP.
+- A change over 20 points (either sign) posts an approval card instead. Another officer presses Approve within 24 hours, or it lapses.
+- Nobody changes, or approves a change to, their own points.
+
+**Settings.**
+
+- `/dkp settings` is admin only. Each change is posted publicly and applies from then on.
+- `/dkp named-value zone: named: points:` is for officers. It is posted publicly and applies from then on.
+
+| Setting | Default |
+|---|---|
+| Raid points per named kill | 10 |
+| Flat raid value | 30 |
+| Guild points per kill or flat payout | 2 |
+| Pool cap | 100 |
+| Check-again window | 300 seconds |
+| Second officer needed | over 20 points |
+| Approval lapses after | 24 hours |
+| Raid auto-closes after | 8 hours |
+| Who runs DKP | the officer role (and admins) |
+
+**Seeing points.** Points are public within the server.
+
+- Standings messages sit at the top of GC-DKP, one per pool. They are edited after each raid closes and after each adjustment.
+- 30-day attendance is the kills (and flat payouts) a member earned in a pool, divided by those the pool held, over the last 30 days.
+- `/dkp history member: pool:` answers privately: ledger rows, newest first, paged.
+- `/me` shows balances per pool and 30-day attendance, where DKP is on.
+
+**Order 28.** Auctions (sealed bids, present-to-bid, win limits, the new-member wait), wishlists, the item queue, the shop, decay, the voice check, the Discord-event link, and deleting history with an export.
+
+**Departures from this section, named (order 27).**
+
+- A raid zone's standings message is posted when that pool is first used, so it sits below GC-DKP's earlier messages rather than at the top. Only the guild pool's message, posted by Add DKP, is at the top. The bot cannot pin the others there: Pin Message requires PIN_MESSAGES, which the install link does not ask for.

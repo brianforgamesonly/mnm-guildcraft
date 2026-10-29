@@ -22,6 +22,11 @@
       "triggers": { "crons": ["*/15 * * * *"] },
       // Order 10: which copy answered (/guildcraft status shows it).
       "vars": { "GUILDCRAFT_COPY": "dev" },
+      // Order 27 (override 5 of order 10): the DKP add-on's timers, one object per guild, SQLite-backed (the Free plan's
+      // only kind). durable_objects is a non-inheritable key ("must be specified for each environment"), and each copy
+      // carries its own migration. Never used by the cron, sweep_run or the health check.
+      "durable_objects": { "bindings": [{ "name": "DKP_TIMERS", "class_name": "DkpTimers" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DkpTimers"] }],
       "d1_databases": [
         {
           "binding": "DB",
@@ -39,6 +44,8 @@
       // The same */15 trigger: the account then has two cron triggers of the Free plan's 5.
       "triggers": { "crons": ["*/15 * * * *"] },
       "vars": { "GUILDCRAFT_COPY": "production" },
+      "durable_objects": { "bindings": [{ "name": "DKP_TIMERS", "class_name": "DkpTimers" }] },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DkpTimers"] }],
       "d1_databases": [
         {
           "binding": "DB",

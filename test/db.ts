@@ -1,4 +1,5 @@
 import { env } from 'cloudflare:test';
+import dkpMigration from '../migrations/0021_dkp.sql?raw';
 
 export const one = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).first<T>())!;
 export const all = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).all<T>()).results;
@@ -12,8 +13,21 @@ export const markImported = () =>
     .bind(`test${String(++imports).padStart(7, '0')} / 2026-10-19T17:35:56.514Z`)
     .run();
 
+/** Order 27: the ledger's append-only triggers, read from the migration itself (never retyped here). */
+const DKP_TRIGGERS = [...dkpMigration.matchAll(/CREATE TRIGGER (\w+)[^;]*;[^;]*END;/g)].map((m) => ({ name: m[1], sql: m[0] }));
+/** Empties the DKP tables (they reference guild): the ledger's triggers come off for the delete and go back on after. */
+export async function clearDkp() {
+  await env.DB.batch([
+    ...DKP_TRIGGERS.map((t) => env.DB.prepare(`DROP TRIGGER IF EXISTS ${t.name}`)),
+    ...['dkp_ledger', 'dkp_pending', 'dkp_recheck', 'dkp_kill', 'dkp_attendance', 'dkp_raid', 'dkp_pool', 'dkp_named_value', 'dkp_setting', 'dkp_guild'].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ...DKP_TRIGGERS.map((t) => env.DB.prepare(t.sql)),
+  ]);
+}
+export const dkpTriggerNames = () => DKP_TRIGGERS.map((t) => t.name);
+
 /** Empties guild and reference data, then seeds tradeskills and classes (as an import would). */
 export async function reset(tradeskills: string[] = ['Alchemy', 'Blacksmithing', 'Brewing', 'Fletching', 'Tailoring'], classes: [string, number][] = [['CLR', 1140], ['SHD', 1498], ['WIZ', 342], ['OLD', 0]]) {
+  await clearDkp();
   await env.DB.batch(
     ['faction_post', 'npc_faction', 'faction_quest', 'faction', 'craft_request_item', 'craft_request', 'craft_notify', 'audit_log', 'recipe_correction_component', 'recipe_correction', 'recipe_report', 'item_image', 'character_recipe', 'character_skill', 'character', 'member', 'guild', 'board_post', 'recipe_component', 'recipe', 'tradeskill', 'game_class', 'sweep_run'].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),

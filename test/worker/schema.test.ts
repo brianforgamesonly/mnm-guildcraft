@@ -35,10 +35,15 @@ describe('schema (migrations/0001_init.sql)', () => {
     expect(departureTables).toEqual([
       'game_class', 'backup_status', 'usage_daily', 'recipe_correction', 'recipe_correction_component', 'mob', 'craft_notify', 'craft_request', 'craft_request_item',
       'zone', 'zone_name', 'npc', 'import_source', 'sweep_run', 'faction', 'npc_faction', 'faction_post', 'faction_quest',
+      // Order 27 (0021): the DKP add-on (the migration's header names each one's reason).
+      'dkp_guild', 'dkp_setting', 'dkp_named_value', 'dkp_pool', 'dkp_raid', 'dkp_attendance', 'dkp_kill', 'dkp_recheck', 'dkp_pending', 'dkp_ledger',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...prdTables, ...departureTables].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
       'audit_by_action', 'audit_by_target', 'craft_request_by_requester', 'craft_request_live',
+      // Order 27 (0021): one open raid per server; raids by pool and time (30-day attendance); kills by raid; the ledger's
+      // balance (one indexed row) and its rows per kill.
+      'dkp_kill_by_raid', 'dkp_ledger_balance', 'dkp_ledger_kill', 'dkp_raid_by_pool', 'dkp_raid_by_time', 'dkp_raid_open',
       // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.
       'faction_changed', 'faction_post_dirty', 'faction_post_rendered',
       'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',

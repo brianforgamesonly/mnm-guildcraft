@@ -22,6 +22,8 @@ import down19 from '../../scripts/rollback/0019_faction_quest.down.sql?raw';
 import up19 from '../../migrations/0019_faction_quest.sql?raw';
 import down20 from '../../scripts/rollback/0020_sweep_indexes.down.sql?raw';
 import up20 from '../../migrations/0020_sweep_indexes.sql?raw';
+import down21 from '../../scripts/rollback/0021_dkp.down.sql?raw';
+import up21 from '../../migrations/0021_dkp.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -35,6 +37,21 @@ const statements = (sql: string) =>
 const run = async (sql: string) => {
   for (const s of statements(sql)) await env.DB.prepare(s).run();
 };
+
+/** Order 27: statements with a trigger's BEGIN … END body kept whole. */
+const withTriggers = (sql: string) => sql.replace(/--.*$/gm, '').match(/\s*CREATE TRIGGER[\s\S]*?END;|[^;]+;?/g)!.map((s) => s.trim().replace(/;$/, '')).filter(Boolean);
+const runWhole = async (sql: string) => {
+  for (const s of withTriggers(sql)) await env.DB.prepare(s).run();
+};
+
+it('order 27: 0021 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await runWhole(down21);
+  expect((await schema()).some((r) => /dkp/.test(r.name))).toBe(false);
+  await runWhole(up21);
+  expect(await schema()).toEqual(before);
+  expect(withTriggers(up21).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
+});
 
 it('order 26: 0020 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();

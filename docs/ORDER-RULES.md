@@ -241,3 +241,54 @@ Treat the clock as authoritative over any date an order states.
 - A workflow that runs on a pull request never runs a script with `--remote` (scripts/ci/ci-reads.test.ts, over every workflow file; it checks that switch, not every read: the health dry runs' few hundred rows remain, named in ci.yml). CI's zone benches read a local D1 filled by the real import (ci.yml `local-data`). From the dev copy they read about 450,000 rows per CI run, and eight runs on 2026-10-27 took the account to 79.4% of D1 Free's daily reads.
 - Who read D1's rows is measured per database and per statement from GraphQL (`d1QueriesAdaptiveGroups`, read back 90 days; `notOlderThan` 7,776,000 s on 2026-10-28), never guessed: `timings.yml`'s `insights` input (scripts/usage/insights-cli.ts). It costs no D1 rows.
 - A query the cron runs on every 15-minute run (96 a day per copy) has its rows read benched on the real data before it ships, idle, for 1 and 10 guilds (scripts/bench/sweep-reads.ts on the local D1 after `npm run import:local`).
+
+## Order 27
+
+Order 27 is the DKP add-on, part 1 (docs/PRD.md, "DKP add-on (orders 27–28)"). Its explicit overrides each quote the earlier rule in full.
+
+- Order 27's explicit override 1 of order 5's "The session never creates channels or posts on the owner's server. Live board posts start from the owner's own `/guildcraft setup board:`; before that, board code is verified in workerd against a mocked Discord API, and the dry run is a read-only render from live D1 (`.github/workflows/board.yml`, action `render`), with `delete` as the rollback.", as extended by orders 7, 9, 16, 19 and 24.
+  - When an admin presses **Add DKP** in `/guildcraft setup`, the bot creates one text channel, GC-DKP, with its overwrites (src/dkp/setup.ts). If a GuildCraft category exists, the channel goes in it; otherwise the bot creates the category first, as Create GuildCraft channels does.
+  - In GC-DKP the bot posts and edits only its own messages: raid cards, approval cards, setting notices and standings messages. It pins nothing.
+  - The session posts nothing live. Tests use a mocked Discord.
+- Order 27's explicit override 2 of order 9's "A button on a posted (public) message answers the presser with a new private message (type 4, private), never UPDATE_MESSAGE (type 7): one member's press never changes a public post. Only officer cards and vault messages are edited in place."
+  - In GC-DKP, the bot may edit in place every message it posted, whatever caused the edit: a member's press, an officer's action or a timer.
+  - The presser's own answer is always a new private message.
+  - Outside GC-DKP, order 9 stands.
+- Order 27's explicit override 3 of order 2's "A member's command never reveals another member's private data. Replies about the caller are ephemeral. A name that resolves to another member's character returns the same "not found" a missing name would, unless the caller is an officer."
+  - DKP balances, attendance and history are guild-public by design: every member of a server may read every member's.
+  - This covers DKP data only.
+- Order 27's explicit override 4 of order 18's "Order 18's explicit override 1 of the earlier orders' and the PRD's command names: the commands are `/me`, `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`, `/officer` and `/guildcraft` (docs/PRD.md, "Work order 18" table). The old names are not registered and answer "not available"." and of order 10's registration scopes in "Order 10's explicit override of the rule against remote writes beyond the named ones (orders 5–9): one production D1 database and one production Worker in the same Cloudflare account, with the production Worker's secrets set from Actions secrets; the production database's migrations and every write the existing jobs and the Worker make to it (imports, cron sweeps, departures, `backup_status`, `usage_daily`); per-guild exports to `guild-exports/` in the private backup repository; the production app's interactions endpoint URL and icon (PATCH `/applications/@me`); global command registration for the production app. No posts on any server, and no change to the Dev app. Order 5's "no posts on the owner's server" rule and its extensions (orders 7–9) stand, for both apps."
+  - `/dkp` is a separate, per-server definition (src/dkp/definition.ts), kept outside COMMANDS, with its own routing, autocomplete (LISTS) and help tests.
+  - It is never registered globally and never sent in a bulk PUT.
+  - The Worker creates it with the single-command upsert on Add DKP, and deletes it on Remove DKP.
+  - After each deploy, register-commands.yml upserts `/dkp` on every server whose DKP is on (dkp_guild, derived from that copy's D1; scripts/discord/dkp.ts).
+  - scripts/discord/dkp.test.ts proves that dev's bulk PUT leaves `/dkp` registered.
+  - `/help`'s DKP page appears only in a server with DKP on (order 27, PR B).
+- Order 27's explicit override 5 of order 10's list of production resources (quoted in full in override 4):
+  - one Durable Object class (SQLite-backed), DkpTimers, bound as DKP_TIMERS to each copy's Worker and used only for DKP timers;
+  - its `new_sqlite_classes` migration in each environment (wrangler.jsonc).
+  - It is a new schedule; its expected usage is in order 27's FINAL REPORT. It never writes sweep_run, and never touches the cron or the health check.
+- Order 27's explicit override 6 of order 4's "Game meaning is never inferred from item names. Items with different names are distinct, and are never merged, aliased or described as a category, unless the source data or the owner says so (the owner, 2026-10-19: Corroded and Rusty items are not the same).", approved by the owner on 2026-10-29, as a display order only.
+  - Named killed lists a zone's creatures with names that don't start with "a " or "an " (case-insensitive) first, then the rest, each part A→Z (src/dkp/creatures.ts).
+  - Nothing is stored or labelled "named". Every creature stays selectable.
+- Order 27's explicit override 7 of PRD FR-8's tiering ("`/officer` and `/guildcraft` are shown to Manage Server by default; a server admin grants `/officer` to the officer role once (Server Settings → Integrations → the app → `/officer`)." and "the Worker re-checks the caller's roles on every request").
+  - By default, DKP is run by the officer role, plus admins as isOfficer already allows.
+  - An admin may name another role in `/dkp settings`.
+  - That decision lives in src/access.ts (`isDkpRunner`).
+- Order 27's explicit override 8 of "Never add a column for a value the table already holds.": `dkp_ledger.balance_after`.
+  - It is the member's balance in that pool once the row applies, written in the same statement as the row.
+  - test/worker/dkp.test.ts recomputes every balance_after from the amounts.
+  - It exists so that reading a balance costs one indexed row, not the whole history.
+- Order 27's explicit override 9, a restatement (not a widening) of order 16's "Order 16's explicit override 2: members are shown as Discord user mentions (`<@id>`, src/discord.ts `memberTag`), always sent with `allowed_mentions` that pings nobody. Every create and every edit sends `allowed_mentions` explicitly (Discord re-parses an edit without it with default allowances). The only pings permitted: a request thread's first message pings the crafters it adds; a claim message pings the requester; a Done or Cancel message pings the other party."
+  - DKP messages ping nobody. Every create and every edit uses memberTag, with allowed_mentions set to ping no one.
+- The DKP ledger is append-only. The database refuses an UPDATE or DELETE of a row (migrations/0021's triggers).
+  - A correction is a new row that names the row it corrects.
+  - A reversal returns the amount actually paid. A re-add is capped against the pool's cap at that moment.
+- One function reads balances and attendance (src/dkp/ledger.ts `dkpRead`), and every surface uses it.
+- Nobody changes, or approves a change to, their own DKP. One function decides this (src/access.ts `dkpSelfConflict`), and every route calls it. It covers adjustments, approvals and corrections.
+  - Bot-made rows are not "self": kill and flat payouts, and removals by Check again.
+  - Per-named values and settings are public, forward-only and not about one member, so they are outside this rule.
+- Removing DKP never deletes DKP data. Deleting a server's DKP history is not built in order 27.
+- A DKP button keeps working after DKP is removed, answering privately "DKP is off on this server" (order 18: every sent custom_id stays handled).
+- Public logs show pseudonyms only (order 5). No balance, member name or reason appears in an Actions log.
+- Budget for order 27 (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges.

@@ -7,6 +7,7 @@ import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
 import { NOT_YET } from '../../src/interactions.ts';
+import { DKP_COMING, DKP_DEFINED } from '../../src/dkp/definition.ts';
 import { APP_ID, as, exchange, post, press, rawCmd, send, top } from '../discord.ts';
 
 const helpCommand = top(as('100000000000000001'), 'help');
@@ -78,8 +79,12 @@ describe('/help pages (order 18: derived from the definitions)', () => {
   const prdCommands = [...new Set([...current.matchAll(/`(\/[a-z]+(?: [a-z][a-z-]*)?)[` ]/g)].map((m) => m[1]))];
 
   it('"coming soon" is exactly the PRD\'s commands that are not built (/recipe add), derived', () => {
-    const unbuilt = prdCommands.filter((c) => !DEFINED.has(c) && !COMMANDS.some((k) => `/${k.name}` === c));
+    // Order 27: /dkp is a per-server definition; its PRD commands are built (DKP_DEFINED) or due in PR B (DKP_COMING).
+    const isDkp = (c: string) => c.startsWith('/dkp ');
+    const unbuilt = prdCommands.filter((c) => !isDkp(c) && !DEFINED.has(c) && !COMMANDS.some((k) => `/${k.name}` === c));
     expect(COMING.map((c) => c.cmd).sort()).toEqual(unbuilt.sort());
+    expect(prdCommands.filter((c) => isDkp(c) && !DKP_DEFINED.has(c)).sort()).toEqual([...DKP_COMING].sort());
+    expect([...DKP_DEFINED].filter((c) => !prdCommands.includes(c))).toEqual([]);
     expect(all.split('\n').filter((l) => l.endsWith(COMING_SOON))).toEqual([expect.stringMatching(/^`\/recipe add`/)]);
   });
 

@@ -49,7 +49,7 @@ test('the install permissions are the union of the routes; Create Public Threads
   assert.equal(INSTALL_PERMISSIONS & (1n << 38n), 1n << 38n); // Send Messages in Threads
   assert.equal(INSTALL_PERMISSIONS & (1n << 36n), 1n << 36n); // Create Private Threads
   // Each channel's check is a subset of the install permissions, so a fresh install passes setup.
-  for (const k of ['board', 'review', 'vault', 'requests'] as const) for (const [b] of channelPermissions(k)) assert.equal(INSTALL_PERMISSIONS & b, b, k);
+  for (const k of ['board', 'review', 'vault', 'requests', 'dkp'] as const) for (const [b] of channelPermissions(k)) assert.equal(INSTALL_PERMISSIONS & b, b, k);
 });
 
 test('docs/LAUNCH-GUIDE.md carries the same permissions number as the code', () => {

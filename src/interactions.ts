@@ -28,6 +28,11 @@ import {
   CREATURES_PAGE_PREFIX, CREATURES_PREFIX, DROPS_PAGE_PREFIX, DROPS_PREFIX, GEAR_CLASS_PREFIX, GEAR_PREFIX as ZONE_GEAR_PREFIX, OPEN_PREFIX as ZONE_OPEN_PREFIX, POST_WHAT as ZONE_POST, postZone, zoneCommand, zoneGear,
   zoneGearClass, zoneList, zoneListPage, zoneOpen,
 } from './commands/zone.ts';
+import { APPROVE_PREFIX as DKP_APPROVE_PREFIX, approveButton, DKP_ROUTES, FULL_PAGE_PREFIX, fullStandings, mayRun } from './dkp/commands.ts';
+import { DKP_COPY } from './dkp/copy.ts';
+import { FULL_STANDINGS_PREFIX } from './dkp/messages.ts';
+import { ADD_DKP_PREFIX, addDkpButton, REMOVE_DKP_PREFIX, removeDkpButton } from './dkp/setup.ts';
+import { loadDkp } from './dkp/state.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -86,7 +91,14 @@ const routeKey = (i: Interaction) => {
   const sub = subcommand(i).name;
   return sub === undefined ? `${i.data?.name}` : `${i.data?.name} ${sub}`;
 };
-const routeOf = (i: Interaction) => ROUTES[routeKey(i)];
+/** Order 27: /dkp's routes (src/dkp/commands.ts), kept apart from ROUTES as /dkp is kept apart from COMMANDS. */
+const routeOf = (i: Interaction): { search?: true } | undefined => ROUTES[routeKey(i)] ?? DKP_ROUTES[routeKey(i)];
+
+/**
+ * Order 27: every DKP button and select starts with this. Each keeps working after DKP is removed, answering "DKP is off
+ * on this server" (order 18: every sent custom_id stays handled); Add DKP and Remove DKP are routed before it.
+ */
+export const DKP_PREFIX = 'dkp';
 
 const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: Interaction): Ctx => ({
   db: env.DB,
@@ -151,9 +163,38 @@ export function planFor(i: Interaction): Plan {
 
 // ---------------------------------------------------------------- deferred work (runs inside ctx.waitUntil)
 
-async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
+/** Order 27: /dkp's commands. DKP must be on; the member gate, then the route's own access, from this call's rights. */
+async function dkpCommand(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
   const { options } = subcommand(i);
-  const route = routeOf(i)!;
+  const route = DKP_ROUTES[routeKey(i)];
+  const guild = await ensureGuild(env.DB, env.DISCORD_BOT_TOKEN, i.guild_id!, ctx);
+  const m = i.member!;
+  const d = await loadDkp(env.DB, guild.id);
+  if (!d.enabled) return ephemeral(DKP_COPY.off);
+  const passesGate = passesMemberGate(guild, m);
+  const c = ctxFor(env, guild, m, effects, i);
+  if (!mayRun(c, route.access, d)) return ephemeral(route.access === 'admin' ? ADMIN_ONLY : DKP_COPY.notRunner);
+  if (route.access === 'member' && !passesGate) return ephemeral(roleRequired(guild));
+  const isNew = passesGate ? (await touchMember(env.DB, guild.id, m)).isNew : false;
+  const reply = await route.run(c, options, d);
+  return isNew ? withWelcome(reply) : reply;
+}
+
+/** Order 27: a DKP button or select (prefix dkp, after Add DKP and Remove DKP). */
+async function dkpComponent(c: Ctx, id: string): Promise<MessageReply> {
+  const d = await loadDkp(c.db, c.guild.id);
+  if (!d.enabled) return ephemeral(DKP_COPY.off);
+  if (id.startsWith(DKP_APPROVE_PREFIX)) return approveButton(c, id, d);
+  // Standings are guild-public (order 27's override 3 of order 2), behind the member gate like every member tool.
+  if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
+  if (id.startsWith(FULL_STANDINGS_PREFIX) || id.startsWith(FULL_PAGE_PREFIX)) return fullStandings(c, id);
+  return ephemeral(STALE_FORM);
+}
+
+async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
+  if (DKP_ROUTES[routeKey(i)]) return dkpCommand(i, env, ctx, effects);
+  const { options } = subcommand(i);
+  const route = ROUTES[routeKey(i)]!;
   // Rights are re-read from this request (member.roles, member.permissions) every time.
   const guild = await ensureGuild(env.DB, env.DISCORD_BOT_TOKEN, i.guild_id!, ctx);
   const m = i.member!;
@@ -187,6 +228,10 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (id.startsWith(HELP_PREFIX)) return helpButton(id);
   // Order 19: Create GuildCraft channels, admins only, as /guildcraft setup is (rights from this press).
   if (id.startsWith(CREATE_CHANNELS_PREFIX)) return isAdmin(i.member!) ? createChannelsButton(c) : ephemeral(ADMIN_ONLY);
+  // Order 27: Add DKP and Remove DKP, admins only, as Create GuildCraft channels; then every other DKP control.
+  if (id.startsWith(ADD_DKP_PREFIX)) return isAdmin(i.member!) ? addDkpButton(c) : ephemeral(ADMIN_ONLY);
+  if (id.startsWith(REMOVE_DKP_PREFIX)) return isAdmin(i.member!) ? removeDkpButton(c) : ephemeral(ADMIN_ONLY);
+  if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

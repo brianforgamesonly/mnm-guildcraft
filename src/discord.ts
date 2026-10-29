@@ -53,6 +53,9 @@ export interface ResolvedAttachment {
 }
 
 export interface Resolved {
+  /** Order 27: a user option's user and (in a server) their member, without user and roles. */
+  users?: Record<string, User>;
+  members?: Record<string, { nick?: string | null }>;
   channels?: Record<string, ResolvedChannel>;
   attachments?: Record<string, ResolvedAttachment>;
 }
@@ -109,6 +112,7 @@ export const embedChars = (embeds: Embed[]): number =>
 export const BUTTON = 2;
 export const STYLE_PRIMARY = 1;
 export const STYLE_SECONDARY = 2;
+export const STYLE_SUCCESS = 3;
 export const STYLE_DANGER = 4;
 export const STYLE_LINK = 5;
 export const button = (custom_id: string, label: string, style = STYLE_SECONDARY, disabled = false) => ({ type: BUTTON, style, label, custom_id, ...(disabled ? { disabled } : {}) });
