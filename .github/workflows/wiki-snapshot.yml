@@ -7,6 +7,9 @@
 # worked around (override 7).
 # ITEM 3 (input `compare`, default on): the snapshot against Mo Betta (scripts/wiki/compare.ts, writes nothing), and the
 # first import's writes measured on a local D1 in this runner (no Cloudflare database is read or written).
+# Plan first (the owner, 2026-10-29, after run 40955580245 met the cap): the category trees are listed (titles only), the
+# content fetches are planned from them, and a plan that would pass the cap stops the run before any content is read;
+# input `plan_only` stops there on purpose and prints the plan. Every stop prints the requests by category.
 # Dispatch only, never scheduled: PR B moves the snapshot into import.yml. No alarm: a failed run is read by the person
 # who dispatched it (order 12: every failed run is listed in the order's report).
 # Expected: about 6 billed minutes per run with the comparison (public repository: free); Cloudflare: one Worker
@@ -19,6 +22,10 @@ on:
         description: 'Also compare with Mo Betta and measure the first import on a local D1 (ITEM 3)'
         type: boolean
         default: true
+      plan_only:
+        description: 'List the categories (titles only), print the content plan, and stop before reading any page content'
+        type: boolean
+        default: false
 permissions:
   contents: read
 # One relay at a time: its name is fixed.
@@ -81,7 +88,13 @@ jobs:
         shell: bash
         env:
           URL: ${{ steps.deploy.outputs.url }}
-        run: node scripts/wiki/snapshot.ts --relay "$URL" --token-file "$RUNNER_TEMP/relay-token" --out "$RUNNER_TEMP/wiki-snapshot"
+          PLAN_ONLY: ${{ inputs.plan_only && '--plan-only' || '' }}
+        run: |
+          # The plan is read from the title listings before any content; a plan over the cap stops here (titles only read).
+          rc=0
+          node scripts/wiki/snapshot.ts --relay "$URL" --token-file "$RUNNER_TEMP/relay-token" --out "$RUNNER_TEMP/wiki-snapshot" $PLAN_ONLY || rc=$?
+          if [ -f "$RUNNER_TEMP/wiki-snapshot/plan.md" ]; then cat "$RUNNER_TEMP/wiki-snapshot/plan.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$rc"
       - name: Delete the relay, even if a step failed, and confirm it is gone
         if: always()
         shell: bash
@@ -93,7 +106,7 @@ jobs:
           echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
           test "$code" = 404
       - name: Upload the snapshot (CC BY-SA 4.0, credit in CREDIT.md)
-        if: steps.snapshot.outcome == 'success'
+        if: ${{ !inputs.plan_only && steps.snapshot.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: wiki-snapshot
@@ -102,7 +115,7 @@ jobs:
           retention-days: 30
       # ITEM 3. The other sources are fetched pinned from GitHub, as the nightly import fetches them.
       - name: Compare with Mo Betta (writes nothing)
-        if: inputs.compare && steps.snapshot.outcome == 'success'
+        if: inputs.compare && !inputs.plan_only && steps.snapshot.outcome == 'success'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -111,7 +124,7 @@ jobs:
           node scripts/import/zone-files.ts --out "$RUNNER_TEMP/zones"
           node scripts/wiki/compare.ts --snapshot "$RUNNER_TEMP/wiki-snapshot" --zones-dir "$RUNNER_TEMP/zones" --json "$RUNNER_TEMP/compare/compare.json" | tee "$RUNNER_TEMP/compare/compare.md" >> "$GITHUB_STEP_SUMMARY"
       - name: Measure the first import's writes on a local D1 (gate line 5)
-        if: inputs.compare && steps.snapshot.outcome == 'success'
+        if: inputs.compare && !inputs.plan_only && steps.snapshot.outcome == 'success'
         shell: bash
         run: |
           npm run db:migrate:local
@@ -132,7 +145,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
           exit "$rc"
       - name: Upload the comparison
-        if: always() && inputs.compare && steps.snapshot.outcome == 'success'
+        if: always() && inputs.compare && !inputs.plan_only && steps.snapshot.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: wiki-compare
