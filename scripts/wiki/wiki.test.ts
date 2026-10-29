@@ -295,10 +295,10 @@ test('plan first: the content plan comes from the titles; plan-only and a plan o
     ],
     'each root first, then the most new pages (ties A→Z); Named Mobs (whose only page A bandit is fetched already) and Class Quests are never fetched',
   );
-  for (const [opts, cap] of [[{ planOnly: true }, 150], [{}, 25]] as const) {
+  for (const [opts, cap, why] of [[{ planOnly: true }, 150, /^plan only/], [{}, 40, /does not fit the cap/]] as const) {
     const { get, urls } = fakeWiki();
     const relay = new Relay('https://relay.example', 't'.repeat(40), get, async () => {}, cap);
-    await assert.rejects(takeSnapshot(relay, new Date('2026-10-29T12:00:00Z'), opts), (e: Error) => e instanceof PlanStop && e.plan.length === plan.length);
+    await assert.rejects(takeSnapshot(relay, new Date('2026-10-29T12:00:00Z'), opts), (e: Error) => e instanceof PlanStop && e.plan.length === plan.length && why.test(e.message));
     assert.ok(urls.every((u) => !new URL(u).searchParams.has('generator')), 'no content request');
   }
 });

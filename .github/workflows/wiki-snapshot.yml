@@ -106,7 +106,7 @@ jobs:
           echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
           test "$code" = 404
       - name: Upload the snapshot (CC BY-SA 4.0, credit in CREDIT.md)
-        if: !inputs.plan_only && steps.snapshot.outcome == 'success'
+        if: ${{ !inputs.plan_only && steps.snapshot.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: wiki-snapshot

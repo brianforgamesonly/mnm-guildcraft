@@ -1,6 +1,6 @@
 // Order 28, ITEM 1: the wiki snapshot, fetched serially through the relay (scripts/wiki/relay.ts). Only this job
 // contacts the wiki (order 28's added rule); everything else reads the snapshot it writes.
-//   node scripts/wiki/snapshot.ts --relay <https://…workers.dev> --token-file <file> --out <dir>
+//   node scripts/wiki/snapshot.ts --relay <https://…workers.dev> --token-file <file> --out <dir> [--plan-only]
 // Writes <dir>/snapshot.json and <dir>/CREDIT.md. Prints counts only.
 //
 // The polite guest (overrides 1 and 7): one request at a time; at most REQUEST_CAP per run, every attempt counted; maxlag=5
@@ -170,6 +170,11 @@ export interface PlannedFetch {
 }
 /** The requests after the content: the schema pages (1), one per bucket, and the recent changes (1). */
 export const TAIL_REQUESTS = 1 + BUCKETS.length + 1;
+/**
+ * Kept free under the cap for what a plan cannot see: maxlag waits and the network retry (each a counted attempt),
+ * content continuations, a category grown since its listing, more than one page of bucket rows or recent changes.
+ */
+export const PLAN_MARGIN = 15;
 
 /**
  * Order 28 (the owner, 2026-10-29: plan first): the content fetches, decided from the title listings before any content
@@ -221,13 +226,17 @@ export async function takeSnapshot(relay: Relay, now: Date, opts: { planOnly?: b
   const plan = planContent(categories);
   const planned = plan.reduce((n, p) => n + p.requests, 0) + TAIL_REQUESTS;
   if (opts.planOnly) throw new PlanStop(`plan only: ${relay.count} listing requests made, ${planned} more planned`, plan, relay.count);
-  if (relay.count + planned > relay.cap)
-    throw new PlanStop(`the plan does not fit the cap: ${relay.count} listing requests made, ${planned} more planned, cap ${relay.cap}`, plan, relay.count);
+  if (relay.count + planned + PLAN_MARGIN > relay.cap)
+    throw new PlanStop(`the plan does not fit the cap: ${relay.count} listing requests made, ${planned} more planned, ${PLAN_MARGIN} kept free, cap ${relay.cap}`, plan, relay.count);
 
   // Content, a category at a time, for the trees only (the membership categories are read as titles), in the plan's
-  // order. A page listed but not returned (moved or deleted between the two requests) stays out, and the parser counts it.
+  // order. A page listed but not returned (moved or deleted between the two requests) stays out: counted here, and by
+  // the parser (a tree page without content).
   const pages: Record<string, SnapshotPage> = {};
   for (const p of plan) await categoryContent(relay, p.category, pages);
+  const listed = new Set(plan.flatMap((p) => categories[p.category].pages));
+  const uncovered = [...listed].filter((t) => !pages[t]);
+  if (uncovered.length) console.log(`::warning::${uncovered.length} listed page(s) came back without content: ${uncovered.slice(0, 20).join(', ')}`);
 
   // The buckets, after their schema pages (select('*') is refused, so the fields come from the schema).
   const schemas: Record<string, SnapshotPage> = {};
@@ -310,7 +319,7 @@ if (import.meta.main) {
   };
   const planTable = (s: PlanStop) =>
     ['| Tree | Category | Pages | New pages | Requests |', '|---|---|---|---|---|', ...s.plan.map((p) => `| ${p.root} | ${p.category} | ${p.pages} | ${p.newPages} | ${p.requests} |`)].join('\n') +
-    `\n\nListing requests: ${s.listed}. Content requests planned: ${s.plan.reduce((n, p) => n + p.requests, 0)}, then ${TAIL_REQUESTS} for the schema pages, buckets and recent changes. Cap: ${REQUEST_CAP}.`;
+    `\n\nListing requests: ${s.listed}. Content requests planned: ${s.plan.reduce((n, p) => n + p.requests, 0)}, then ${TAIL_REQUESTS} for the schema pages, buckets and recent changes, with ${PLAN_MARGIN} kept free. Cap: ${REQUEST_CAP}.`;
   try {
     const snap = await takeSnapshot(relay, new Date(), { planOnly: args['plan-only'] });
     mkdirSync(args.out, { recursive: true });
