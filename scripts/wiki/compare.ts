@@ -232,6 +232,8 @@ export function markdown(c: Comparison): string {
     `Requests: ${c.requests.count} (maxlag waits ${c.requests.maxlagWaits}), ${c.requests.bytes} bytes.`,
     `NPC tree: ${p.npcTree.categories} categories, ${p.npcTree.depth} level(s) of subcategories, ${p.npcTree.pages} pages (${p.npcTree.pagesWithContent} with content). Blocks: ${Object.entries(p.npcBlocks).map(([t, n]) => `${t} ${n}`).join(', ')}. Pages with none: ${p.npcPagesWithoutTemplate.length}. Blocks with no zone: ${p.blocksWithoutZone.map((b) => b.page).join(', ') || 'none'}. Loot fields with text but no bullets: ${p.lootWithoutBullets.length}. Values holding a template (not read): ${p.templateValues.length} (${[...new Set(p.templateValues.map((v) => v.field))].join(', ') || 'none'}).`,
     `Named Mobs: ${p.named.pages} pages (outside the NPC tree: ${p.named.outsideTree.join(', ') || 'none'}). Raid Encounters: ${p.raid.pages} (outside: ${p.raid.outsideTree.join(', ') || 'none'}). Merchant: ${p.merchantPages}. Zone pages: ${p.zonePages} (no {{ZoneDetails}}: ${p.zonePagesWithoutTemplate.join(', ') || 'none'}). Quest pages: ${p.questPages}, ${p.questsWithRewards} with reward lines.`,
+    // Order 28b: the name field is kept as written (the title only when there is none); these are for fixing on the wiki.
+    `Names that differ from their page title by more than the first letter's case (${p.nameMismatches.length}; fix on the wiki):\n${list(p.nameMismatches.map((m) => `"${m.name}" on page "${m.page}"`), 60)}`,
     '### Zones',
     `Registry zones: Mo Betta ${c.zones.moBetta}, wiki ${c.zones.wiki}.`,
     `Only Mo Betta:\n${list(c.zones.onlyMoBetta)}`,

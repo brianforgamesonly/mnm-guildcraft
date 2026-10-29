@@ -10,6 +10,8 @@
 # Plan first (the owner, 2026-10-29, after run 40955580245 met the cap): the category trees are listed (titles only), the
 # content fetches are planned from them, and a plan that would pass the cap stops the run before any content is read;
 # input `plan_only` stops there on purpose and prints the plan. Every stop prints the requests by category.
+# Order 28b, ITEM 1: it starts only when no deploy.yml run is queued or running (waits up to 10 minutes, then fails "a
+# deploy was still running"), records each readiness call's time and answer, and lists overlapping deploys at the end.
 # Dispatch only, never scheduled: PR B moves the snapshot into import.yml. No alarm: a failed run is read by the person
 # who dispatched it (order 12: every failed run is listed in the order's report).
 # Expected: about 6 billed minutes per run with the comparison (public repository: free); Cloudflare: one Worker
@@ -26,9 +28,13 @@ on:
         description: 'List the categories (titles only), print the content plan, and stop before reading any page content'
         type: boolean
         default: false
+# Order 28b, ITEM 1: the snapshot waits until no deploy.yml run is queued or in progress (every 15 s, at most 10 minutes,
+# scripts/wiki/deploys.ts), and its summary lists the deploy runs that overlapped it. actions: read lists those runs.
 permissions:
   contents: read
-# One relay at a time: its name is fixed.
+  actions: read
+# One relay at a time: its name is fixed. (Deploys are waited for, never put in this group: a newer arrival cancels a
+# pending job in a group, which would cancel deploys or snapshots.)
 concurrency: wiki-relay
 jobs:
   wiki:
@@ -45,10 +51,15 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: Wait until no deploy of either copy is queued or running (order 28b)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/wiki/deploys.ts wait
       - name: Deploy the relay, with this run's one-time token compiled in
         id: deploy
         shell: bash
         run: |
+          echo "since=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
           token=$(openssl rand -hex 24)
           echo "::add-mask::$token"
           printf '%s' "$token" > "$RUNNER_TEMP/relay-token"
@@ -66,9 +77,15 @@ jobs:
           # waits for it with requests the relay refuses before any wiki contact (no token): at most 12, 5 s apart.
           token=$(cat "$RUNNER_TEMP/relay-token")
           live=0
+          # Order 28b: every readiness call's time, answer and duration is recorded, in the log and the job summary.
+          echo '### Relay readiness (UTC, answer, relay header, seconds)' >> "$GITHUB_STEP_SUMMARY"
           for i in $(seq 1 12); do
             sleep 5
-            if curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" "$URL/api?action=query&meta=siteinfo" && grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h"; then live=$((live + 1)); else live=0; fi
+            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code} %{time_total}' "$URL/api?action=query&meta=siteinfo" || echo "curl-exit-$? -")
+            hdr=no; grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h" 2>/dev/null && hdr=yes
+            echo "$(date -u +%H:%M:%S.%3N) call $i: HTTP ${code% *}, relay header $hdr, ${code#* } s" | tee -a "$GITHUB_STEP_SUMMARY"
+            : > "$RUNNER_TEMP/h"
+            if [ "${code% *}" = 403 ] && [ "$hdr" = yes ]; then live=$((live + 1)); else live=0; fi
             # Three relay answers in a row before the checks.
             if [ "$live" -ge 3 ]; then break; fi
           done
@@ -105,6 +122,11 @@ jobs:
           code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-relay")
           echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
           test "$code" = 404
+      - name: List the deploys that overlapped the snapshot (order 28b)
+        if: always() && steps.deploy.outputs.since != ''
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/wiki/deploys.ts overlap --since "${{ steps.deploy.outputs.since }}"
       - name: Upload the snapshot (CC BY-SA 4.0, credit in CREDIT.md)
         if: ${{ !inputs.plan_only && steps.snapshot.outcome == 'success' }}
         uses: actions/upload-artifact@v7

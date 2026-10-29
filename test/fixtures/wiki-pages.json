@@ -1,0 +1,325 @@
+{
+  "credit": "Page text from the Monsters and Memories Wiki (https://monstersandmemories.miraheze.org), written by its contributors and licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Each page's history on the wiki lists its authors; each page here keeps the revision it was taken from.",
+  "from": "wiki-snapshot run 40959117101",
+  "site": "Monsters and Memories Wiki · MediaWiki 1.46.2",
+  "fetchedAt": "2026-10-29T21:36:19.572Z",
+  "version": {
+    "revid": 80863,
+    "timestamp": "2026-10-13T01:24:08Z"
+  },
+  "categories": {
+    "Category:NPCs": {
+      "pages": [
+        "A bag merchant",
+        "A bandit",
+        "A blacksmith",
+        "A golbin shore reaver",
+        "A myconid prince",
+        "A stablemaster",
+        "Weakened Red Dragon"
+      ],
+      "subcats": [
+        "Category:Beasts",
+        "Category:Blacktide Bay NPCs",
+        "Category:Caves of Irem NPCs",
+        "Category:Deep Dunes NPCs",
+        "Category:Elementals",
+        "Category:Evershade Weald NPCs",
+        "Category:Faelindral NPCs",
+        "Category:Fallen Pass NPCs",
+        "Category:Fallen Watch NPCs",
+        "Category:Giants",
+        "Category:Glass Flats NPCs",
+        "Category:Glinting Hollow NPCs",
+        "Category:Grain Cellar NPCs",
+        "Category:Grimtide Sanctum NPCs",
+        "Category:Humanoids",
+        "Category:Infested Crypt NPCs",
+        "Category:Keeper's Bight NPCs",
+        "Category:Merchant",
+        "Category:Named Mobs",
+        "Category:Night Harbor NPCs",
+        "Category:Night Harbor Sewers NPCs",
+        "Category:Raid Encounters",
+        "Category:Scarwood NPCs",
+        "Category:Shaded Dunes NPCs",
+        "Category:Shallow Shoals NPCs",
+        "Category:Sungreet Strand NPCs",
+        "Category:Sunken Resort NPCs",
+        "Category:Tel Ekir NPCs",
+        "Category:Tomb of the Last Wyrmsbane NPCs",
+        "Category:Trainer",
+        "Category:Undead",
+        "Category:Vale of Zintar NPCs"
+      ],
+      "depth": 0,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Faelindral NPCs": {
+      "pages": [
+        "A bag merchant"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Glinting Hollow NPCs": {
+      "pages": [
+        "A myconid prince"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Humanoids": {
+      "pages": [
+        "A bag merchant",
+        "A blacksmith",
+        "A stablemaster"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Merchant": {
+      "pages": [
+        "A bag merchant",
+        "A blacksmith",
+        "A stablemaster"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs",
+        "Category:Merchant"
+      ]
+    },
+    "Category:Named Mobs": {
+      "pages": [
+        "A myconid prince"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs",
+        "Category:Named Mobs"
+      ]
+    },
+    "Category:Night Harbor NPCs": {
+      "pages": [
+        "A bag merchant",
+        "A blacksmith"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Raid Encounters": {
+      "pages": [
+        "Weakened Red Dragon"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs",
+        "Category:Raid Encounters"
+      ]
+    },
+    "Category:Scarwood NPCs": {
+      "pages": [
+        "A bandit"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Shaded Dunes NPCs": {
+      "pages": [
+        "A bandit"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Shallow Shoals NPCs": {
+      "pages": [
+        "A golbin shore reaver"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Sungreet Strand NPCs": {
+      "pages": [
+        "A bandit"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:NPCs"
+      ]
+    },
+    "Category:Quests": {
+      "pages": [
+        "Mining Picks for Hull"
+      ],
+      "subcats": [
+        "Category:All Class Quests",
+        "Category:Archer Quests",
+        "Category:Bard Quests",
+        "Category:Beastmaster Quests",
+        "Category:Cleric Quests",
+        "Category:Druid Quests",
+        "Category:Elementalist Quests",
+        "Category:Enchanter Quests",
+        "Category:Fighter Quests",
+        "Category:Inquisitor Quests",
+        "Category:Monk Quests",
+        "Category:Necromancer Quests",
+        "Category:Paladin Quests",
+        "Category:Quests by Zone",
+        "Category:Ranger Quests",
+        "Category:Rogue Quests",
+        "Category:Shadow Knight Quests",
+        "Category:Shaman Quests",
+        "Category:Spellblade Quests",
+        "Category:Wizard Quests"
+      ],
+      "depth": 0,
+      "roots": [
+        "Category:Quests"
+      ]
+    },
+    "Category:All Class Quests": {
+      "pages": [
+        "Mining Picks for Hull"
+      ],
+      "subcats": [],
+      "depth": 1,
+      "roots": [
+        "Category:Quests"
+      ]
+    },
+    "Category:Underdocks Quests": {
+      "pages": [
+        "Mining Picks for Hull"
+      ],
+      "subcats": [],
+      "depth": 2,
+      "roots": [
+        "Category:Quests"
+      ]
+    },
+    "Category:Zones": {
+      "pages": [
+        "Rothold"
+      ],
+      "subcats": [],
+      "depth": 0,
+      "roots": [
+        "Category:Zones"
+      ]
+    }
+  },
+  "pages": {
+    "A bandit": {
+      "pageid": 3855,
+      "title": "A bandit",
+      "ns": 0,
+      "revid": 80863,
+      "timestamp": "2026-10-13T01:24:08Z",
+      "content": "{{Namedmobpage\n| imagefilename = A bandit.jpg\n| width = 300px\n| caption = \n| race = Human, Ogre\n| class = \n| level = 10\n| agro_radius = \n| run_speed = \n| zone = [[Shaded Dunes]]\n| respawn_time = \n| AC = \n| HP = \n| HP_regen = \n| mana_regen = \n| attacks_per_round = \n| attack_speed = \n| damage_per_hit = \n| special = \n| location = \n| description = \n| known_loot = * [[Antique Ceramic Fragment]]\n* [[Antique Billon Coin]]\n* [[Decanter of Aged Ambergris]]\n| common_loot = * [[Raw Human Meat]]\n* [[Raw Ogre Meat]]\n| factions = * [[Vermahn's Brood]]\n| opposing_factions = * [[Gilded Claw]]\n* [[City of Night Harbor]]\n* [[Night Harbor Garrison]]\n* [[Pyrmos Mercenaries]]\n* [[Steel Talons]]\n| related_quests = \n| name = a bandit\n}}\n\n{{Namedmobpage\n| imagefilename = A bandit.jpg\n| width = 300px\n| caption = \n| race = Human, Ogre\n| class = \n| level = 10\n| agro_radius = \n| run_speed = \n| zone = [[Sungreet Strand]]\n| respawn_time = \n| AC = \n| HP = \n| HP_regen = \n| mana_regen = \n| attacks_per_round = \n| attack_speed = \n| damage_per_hit = \n| special = \n| location = \n| description = \n| known_loot = * [[Antique Ceramic Fragment]]\n* [[Antique Billon Coin]]\n* [[Decanter of Aged Ambergris]]\n| common_loot = * [[Raw Human Meat]]\n* [[Raw Ogre Meat]]\n| factions = * [[Vermahn's Brood]]\n| opposing_factions = * [[Gilded Claw]]\n* [[City of Night Harbor]]\n* [[Night Harbor Garrison]]\n* [[Pyrmos Mercenaries]]\n* [[Steel Talons]]\n| related_quests = \n| name = a bandit\n}}\n\n{{Namedmobpage\n| imagefilename = A bandit.jpg\n| width = 300px\n| caption = \n| race = Human, Ogre\n| class = \n| level = 10\n| agro_radius = \n| run_speed = \n| zone = [[Scarwood]]\n| respawn_time = \n| AC = \n| HP = \n| HP_regen = \n| mana_regen = \n| attacks_per_round = \n| attack_speed = \n| damage_per_hit = \n| special = \n| location = \n| description = \n| known_loot = * [[Antique Ceramic Fragment]]\n* [[Antique Billon Coin]]\n* [[Decanter of Aged Ambergris]]\n| common_loot = * [[Raw Human Meat]]\n* [[Raw Ogre Meat]]\n| factions = * [[Vermahn's Brood]]\n| opposing_factions = * [[Gilded Claw]]\n* [[City of Night Harbor]]\n* [[Night Harbor Garrison]]\n* [[Pyrmos Mercenaries]]\n* [[Steel Talons]]\n| related_quests = \n| name = a bandit\n}}"
+    },
+    "A myconid prince": {
+      "pageid": 8177,
+      "title": "A myconid prince",
+      "ns": 0,
+      "revid": 49236,
+      "timestamp": "2026-07-04T20:04:39Z",
+      "content": "{{Namedmobpage\n\n| imagefilename     = \n| width             = \n| caption           = \n\n| race              = [[Myconid]]\n| class             = Shaman\n| level             = 46\n| agro_radius       = \n| run_speed         = \n\n| zone              = Glinting Hollow\n| respawn_time      = 11 minutes\n| respawn_window    =\n| spawn_time_of_day = \n| spawn_date        = \n| spawn_weather     = \n\n| HP                = \n| damage_per_hit    = \n| attacks_per_round = \n| attack_speed      = \n| special           = \n\n| location          = South east of the central platform\n| description       = \n\n| known_loot =\n* [[Fungal Robe]]\n* [[Black Mushroom]]\n\n| common_loot =\n\n\n| factions = \n\n\n| opposing_factions = \n\n\n| related_quests = \n[[Potions for Veylith Frosttongue]]\n\n}}\n\n\n[[Category:Named Mobs]]"
+    },
+    "Rothold": {
+      "pageid": 3412,
+      "title": "Rothold",
+      "ns": 0,
+      "revid": 78686,
+      "timestamp": "2026-10-08T01:03:31Z",
+      "content": "__NOTOC__\n[[File:phicon.png|400px|right]]\n<br>\nLittle is known of Rothold at this time.\n{{ZoneDetails\n|QuickLinks      = [[Rothold#Quests|Quests]] • [[Rothold#Items|Items]] • [[Rothold#NPCs|NPCs]]\n|Level           = -30-45\n|MonsterTypes    = -\n|NotableNPC      = -[[Duke Mygdrath]], [[Lord Dorian]], [[Lady Isolde]], [[Prince Ademaar Reims]], [[Thalric Torxid]], [[Watcher Terial]], [[Thrallmaker Syllis]]\n|Items           = -[[Beguiler's Charm]], [[Helm of Contempt]], [[Slayer's Rune Pendant]], [[Reinforced Champion's Gloves]], [[Polished Slayer's Girdle]]\n|RelatedQuests   = -\n|AdjacentZones   = [[Great Cavern Sea]]\n}}\n<br>\n{|cellspacing=\"0\" cellpadding=\"0\" style=\"border: 1px solid gray; max-width: 1000px;\" width=\"100%\"\n|-\n|style=\"background:#F5F0E8;padding:10px;\"|\n[[File:Rothold map by skoop.png|right|border|600px]]<br>\n====Rothold====\n\n\n|}\n<br>\n\n== Traveling To and From ==\n-\nThis zone is accessible from the western edge of the Great Cavern Sea.\n\n==What's in this zone?==\n===Quests===\n{| class=\"wikitable sortable\" cellpadding=5 style=\"border:1px solid #BBB; width:1100px;\"\n! style=\"background-color: #faead3; text-align: left;\"|Quest Name !! style=\"background-color: #faead3; text-align: left;\"|Reward !! style=\"background-color: #faead3; text-align: left;\"|Quest Giver !! style=\"background-color: #faead3; text-align: left;\"|Minimum Level\n|-\n| Example Quest Name || Example Reward || Example Quest Giver || -\n|-\n| Example Quest Name || Example Reward || Example Quest Giver || -\n|}\n\n===NPCs===\n{| class=\"wikitable sortable\" cellpadding=5 style=\"border:1px solid #BBB; width:1100px;\"\n! style=\"background-color: #faead3; text-align: left;\"|Named NPCs !! style=\"background-color: #faead3; text-align: left;\"|Race !! style=\"background-color: #faead3; text-align: left;\"|Class !! style=\"background-color: #faead3; text-align: left;\"|Level !! style=\"background-color: #faead3; text-align: left;\" |Location !! style=\"background-color: #faead3; text-align: left;\"|Known Loot !! style=\"background-color: #faead3; text-align: left;\"|Description\n|-\n| | [[a bloodied roper]] || - || - || - || - || [[Plated Champion's Gauntlets]] || - \n| Named Mob\n|-\n| [[a destitute chaplain]] || - || - || - || - || [[Chaplain Pantaloons]], [[Templar Chestplate]], [[Shield of the Destitute]]\n| Named Mob\n|-\n| [[a conscript liason]] || - || - || - || - || [[Beguiler's Charm]] || -\n|-\n| [[a conscript overseer]] || - || - || - || - || [[Conduit Gloves]], [[Beguiling Minstrel Staff]], [[Seeker's Silk Mantle]] || -\n|-\n| [[a Valtheris andrapodist]] || Human || cleric || - || - || [[Slaver's Band]] || -\n|-\n| [[a Valtheris mixologist]] ||  ||  || - || - || [[Large Bloodied Pestle]], [[Runed Ward]] || -\n|-\n| [[Watcher Terial]] || Skeleton || - || - || - || [[Well-Tempered Arcane Shiv]], [[Reinforced Champion's Gloves]], [[Gloves of Vigilance]] || Named Mob\n|-\n| [[Duke Mygdrath]] || - || - || - || - || [[Dark Elegant Leggings]], [[Helm of Contempt]], [[Loop of Control]]\n| Named Mob\n|-\n| [[Rootmind]] || Myconid || - || - || - || [[Fungal Mail Cap]]\n| Named Mob\n|-\n| [[Thalric Torxid]] || Deep Elf || NEC/SK || < 44 || Ail'trist Cave || [[Shadowed Mask]]\n| Named Mob\n|-\n| [[Thrallmaker Syllis]] || - || - || - || - || [[Seeker's Byrnie]], [[Thrallmaker Shroud]]\n| Named Mob\n|-\n| [[Lord Dorian]] || - || - || - || - || [[Charm of Nobility]], [[Shadowforged Breastplate]], [[Golden Shroud]]\n| Named Mob\n|-\n| [[Lady Isolde]] || - || - || - || - || [[Noble Staff]], [[Forged War Pauldrons]]\n| Named Mob\n|-\n| [[charcutier]] || - || - || - || - || [[Sturdy Cooking Boots]]\n| Named Mob\n|-\n| [[an ancient sanguisuge]] || - || - || - || - || [[Slayer's Rune Pendant]]\n| Named Mob\n|-\n| [[Prince Ademaar Reims]] || - || - || - || - || [[Polished Slayer's Girdle]], [[Desperate Royal Greaves]]\n| Named Mob\n|-\n! style=\"background-color: #faead3; text-align: left;\"|Common NPCs !! style=\"background-color: #faead3; text-align: left;\"|Race !! style=\"background-color: #faead3; text-align: left;\"|Class !! style=\"background-color: #faead3; text-align: left;\"|Level !! style=\"background-color: #faead3; text-align: left;\" |Location !! style=\"background-color: #faead3; text-align: left;\"|Known Loot !! style=\"background-color: #faead3; text-align: left;\"|Description\n|-\n\n|-\n| [[a trusted oathkeeper]] || - || - || - || - || - || -\n|-\n| [[a fledgling seer]] || - || - || - || - || - || -\n|-\n| [[a favored vanguard]] || - || - || - || - || - || -\n|-\n| [[a favored pugilist]] || - || - || - || - || - || -\n|-\n| [[a favored templar]] || - || - || - || - || - || -\n|-\n| [[a favored aspirant]] || - || - || - || - || - || -\n|-\n| [[a Valtheris bloodmage]] || Human || - || - || - || - || -\n|-\n| [[a Valtheris illusionist]] || Human || Enchanter || - || - || - || -\n|-\n| [[a Valtheris rake]] || Human || - || - || - || - || -\n|-\n| [[a Valtheris bloodknight]] || - || - || - || - || - || -\n|-\n| [[a Valtheris devout]] || - || Cleric || - || - || - || -\n|-\n| [[a Valtheris champion]] || - || - || - || - || - || -\n|-\n| [[a Valtheris priest]] || - || - || - || - || - || -\n|-\n| [[a Valtheris penitent]] || Human || - || - || - || - || -\n|-\n| [[a Valtheris phantasmist]] || Human || - || - || - || - || -\n|-\n| [[a Valtheris night-watch]] || Human || - || - || - || - || -\n|-\n| [[a Valtheris elder]] || - || - || - || - || - || -\n|-\n| [[a bloodbound defender]] || Deep Elf || - || - || - || - || -\n|-\n| [[a bloodbound brawler]] || Deep Elf || - || - || - || - || -\n|-\n| [[a fungal thrall]] || Vary || - || - || - || - || -\n|-\n| [[a mutated thrall]] || Vary || - || - || - || - || -\n|-\n| [[a mycothane]] || - || - || - || - || - || -\n|-\n| [[a loyal pledge]] || - || - || - || - || - || -\n|-\n| [[a blood scribe]] || Deep Elf || Necro || - || - || - || -\n|-\n| [[a roper]] || - || - || - || - || - || -\n|-\n| [[a shrewd spellsayer]] || - || - || - || - || - || -\n|-\n| [[a novice hemomancer]] || - || - || - || - || - || -\n|-\n| [[a trusted oathkeeper]] || - || - || - || - || - || -\n|-\n| [[a loyal champion]] || - || - || - || - || - || -\n|-\n| [[an engorged feeder]] || - || - || - || - || - || -\n|-\n| [[an unworthy pledge]] || - || - || - || - || - || -\n|-\n| [[a downy spoutling]] || - || - || - || - || - || -\n|-\n| [[a discarded corpse]] || - || - || - || - || - || -\n|-\n| [[a withered corpse]] || - || - || - || - || - || -\n|-\n| [[a broken acolyte]] || - || - || - || - || - || -\n|-\n| [[a root-entangled cube]] || - || - || - || - || - || -\n|-\n| [[a thirsting feeder]] || - || - || - || - || - || -\n|-\n| [[a gelatinous cube]] || - || - || - || - || - || -\n|-\n| [[a flamekeeper]] || - || - || - || - || - || -\n|-\n|}\n\n===Items===\n{| class=\"wikitable sortable\" cellpadding=5 style=\"border:1px solid #BBB; width:1100px;\"\n! style=\"background-color: #faead3; text-align: left;\"|Item Name !! style=\"background-color: #faead3; text-align: left;\"|Drops From !! style=\"background-color: #faead3; text-align: left;\"|Slot\n|-\n| Example Item || Example NPC || Example Slot\n|-\n| Example Item || Example NPC || Example Slot\n|}\n<br>\n<br>\n<br>\n<br>\n<br>\n\n[[Category:Dungeons]]\n[[Category:Zones]]"
+    },
+    "A blacksmith": {
+      "pageid": 8477,
+      "title": "A blacksmith",
+      "ns": 0,
+      "revid": 54931,
+      "timestamp": "2026-08-21T11:31:45Z",
+      "content": "{{Merchantpage\n\n| imagefilename     = a blacksmith.png\n| width             = 300px\n| caption           = \n| race              = [[Human]]\n| zone              = [[Night Harbor]]\n| location          = Night Market, at the forge, next to [[Blacksmith Musafar]]\n| description       = [[Skill Blacksmithing|Blacksmithing]] Merchant\n\n| sells =\n* [[Rivet Cutters]]\n* [[Smithing Hammer]]\n* [[Smithing Pliers]]\n\n| buys = \n* Carapaces\n* Gems\n* Ores\n* Stones\n* Metal Scraps\n\n}}\n\n[[Category:Merchant]]\n[[Category:Night Harbor NPCs]]\n[[Category:Humanoids]]"
+    },
+    "Weakened Red Dragon": {
+      "pageid": 1291,
+      "title": "Weakened Red Dragon",
+      "ns": 0,
+      "revid": 41182,
+      "timestamp": "2026-06-17T18:03:38Z",
+      "content": "{{Namedmobpage\n\n| imagefilename     = Weakened Red Dragon.png\n| width             = 300px\n| caption           = Photo taken by Deej\n| race              = Dragon\n| class             = \n| level             = \n| agro_radius       = \n| run_speed         = \n\n| zone              = \n| respawn_time      = Event\n\n| AC                = \n| HP                = \n| HP_regen          = \n| mana_regen        = \n\n| attacks_per_round = \n| attack_speed      = \n| damage_per_hit    = \n| special           = \n\n| location          = \n| description       = Spawned by GM's during end of testing events\n\n| known_loot =\n* [[Kukri of Blazing Flames]]</li>\n* [[Boots of Speed]]</li>\n* [[Red Dragon Kite Shield]]\n\n| common_loot =\n\n| factions = \n\n| opposing_factions = \n\n| related_quests = \n\n}}\n\n[[Category:Raid Encounters]]"
+    },
+    "Mining Picks for Hull": {
+      "pageid": 13041,
+      "title": "Mining Picks for Hull",
+      "ns": 0,
+      "revid": 76278,
+      "timestamp": "2026-10-04T20:07:24Z",
+      "content": "{{Quest\n| imagefilename = \n| width         = \n| caption       = \n| Start Zone    = [[Underdocks]]\n| Quest Giver   = [[Hull Orbel]]\n| Minimum Level = \n| Classes       = ALL\n| Related NPCs  = \n}}\n\n== Notes ==\n\nThis quest is repeatable.\n\n== Rewards ==\n* Experience\n* 2 Silver, 18 Copper\n* Random piece of [[Patched Rawhide]] armor or [[Patched Cloth]]\n* Faction with [[Delvestone Mining Company]], [[The Underwatch]], [[Citizens of Underdocks]]\n\n== Walkthrough ==\n\n'''This quest begins in the [[Underdocks]] upper city district by talking with [[Hull Orbel]]. Hull is located near the Delvestone miners on the northeast side of the upper city.'''\n\nYou say, \"Hail, Hull Orbel.\"\n\n: Hull Orbel says, \"Bandits! Blaggards! Mold-eating malefactors!\"\n\nYou say, \"What bandits?\"\n\n: Hull Orbel says, \"Aye! The Deepcut are murderers and thieves. Indeed!\"\n\nYou say, \"Who are the deepcut?\"\n\n: Hull Orbel says, \"Reptiles! Ruffians! Every last one of 'em. Darrowdwell is ours to mine by right.\" \n\n: <span style=\"font-weight:bold;color:#ff7933;\">Hull Orbel shakes his head.</span>\n\n: Hull Orbel says, \"Say, whip the rascals and I'll pay you handsomely for four reclaimed mining picks!\"\n\nYou say, \"Where is Darrowdwell?\"\n\n: Hull Orbel says, \"Aye, the mine is just beneath yer feet. Full of precious gems and ores, if it weren't for those profiteers. Parasites!\"\n\n'''[[Hull Orbel]] is looking for [[Delvestone Mining Pick]] from the Deepcut miners, which can be found in the mines on the rafters level. Take the elevator directly across from Hull Orbel on the southeast side of the wooden bridge.'''\n\n'''Note that [[Broken Mining Pick]] will NOT work for this quest.'''\n\n'''Upon handing in 4 [[Delvestone Mining Pick]] to Hull Orbel...'''\n\n{{exp}}\n\n: <span style=\"font-weight:bold;color:#ff7933;\">Hull Orbel laughs heartily.</span>\n\n: Hull Orbel says, \"Ye've done it! Curse the assassins! Earthworms! Take this as a token of our appreciation.\"\n\n<span style=\"font-weight:bold;color:#D6A100;\">Your faction standing with [[Delvestone Mining Company]] got better.</span> \n\n<span style=\"font-weight:bold;color:#D6A100;\">Your faction standing with [[The Underwatch]] got better.</span> \n\n<span style=\"font-weight:bold;color:#D6A100;\">Your faction standing with [[Citizens of Underdocks]] got better.</span> \n\n<span style=\"font-weight:bold;color:#D6A100;\">Your faction standing with [[Deepcut Bandits]] got worse.</span> \n\n<span style=\"font-weight:bold;color:#D6A100;\">You receive [[Patched Rawhide]] or [[Patched Cloth]] from Hull Orbel.</span> \n\n<span style=\"font-weight:bold;color:#D6A100;\">You receive 3 silver, 18 copper from Hull Orbel.</span>"
+    },
+    "A bag merchant": {
+      "pageid": 3761,
+      "title": "A bag merchant",
+      "ns": 0,
+      "revid": 52009,
+      "timestamp": "2026-07-23T16:17:18Z",
+      "content": "[[File:A bag vendor.png|thumb]]\n{{Merchantpage\n\n| imagefilename     = phicon.png\n| width             = 300px\n| caption           = \n| race              = Elf, Human, Gnome\n| zone              = [[Faelindral]], [[Night Harbor]]\n| location          = In Faelindral: Traders Terrace<br>\nIn Night Harbor:  Night Market / North Gate / Shortfolk Area\n| description       = \n\n| sells =\n* [[Backpack]]\n* [[Pouch]]\n* [[Satchel]]\n* [[Small Field Pack]]\n\n| buys =\n* Bags and packs\n* Hides\n\n}}\n\n[[Category:Merchant]]\n[[Category:Faelindral NPCs]]\n[[Category:Night Harbor NPCs]]\n[[Category:Humanoids]]"
+    },
+    "A stablemaster": {
+      "pageid": 9784,
+      "title": "A stablemaster",
+      "ns": 0,
+      "revid": 52023,
+      "timestamp": "2026-07-23T21:13:01Z",
+      "content": "{{Merchantpage\n\n| imagefilename     = A stablemaster.png\n| width             = 400px\n| race              = [[Human]]\n| zone              = [[Keeper's Bight]] or [[Night Harbor]]\n| location          = Treehouse or Sojourner's Camp\n| description       = Stablemaster to stable mounts with.\n<br>\n\n| dialog =\n'''You say, \"Hail, A stablemaster.\"'''\n\n| sells =\n\n| related_quests = \n\n}}\n\n[[Category:Humanoids]]"
+    },
+    "A golbin shore reaver": {
+      "pageid": 9127,
+      "title": "A golbin shore reaver",
+      "ns": 0,
+      "revid": 43972,
+      "timestamp": "2026-06-22T11:31:25Z",
+      "content": "{{Namedmobpage\n\n| imagefilename     = \n| width             = \n| caption           = \n\n| name              = a goblin shore reaver\n| race              = Goblin\n| class             = \n| level             = \n| agro_radius       = \n| run_speed         = \n\n| zone              = Shallow Shoals\n| respawn_time      = \n| respawn_window    =\n| spawn_time_of_day = \n| spawn_date        = \n| spawn_weather     = \n\n| HP                = \n| damage_per_hit    = \n| attacks_per_round = \n| attack_speed      = \n| special           = \n\n| location          = Goblin Island\n| description       = \n\n| known_loot =\n\n| common_loot =\n\n| factions = \n\n| opposing_factions = \n\n| related_quests = \n\n}}"
+    }
+  },
+  "buckets": {},
+  "recentChanges": {
+    "since": "2026-10-28T21:36:19Z",
+    "changes": []
+  },
+  "requests": {
+    "count": 0,
+    "bytes": 0,
+    "maxlagWaits": 0,
+    "log": []
+  }
+}
