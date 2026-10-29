@@ -24,6 +24,8 @@ import down20 from '../../scripts/rollback/0020_sweep_indexes.down.sql?raw';
 import up20 from '../../migrations/0020_sweep_indexes.sql?raw';
 import down21 from '../../scripts/rollback/0021_dkp.down.sql?raw';
 import up21 from '../../migrations/0021_dkp.sql?raw';
+import down22 from '../../scripts/rollback/0022_npc_tags.down.sql?raw';
+import up22 from '../../migrations/0022_npc_tags.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -43,6 +45,17 @@ const withTriggers = (sql: string) => sql.replace(/--.*$/gm, '').match(/\s*CREAT
 const runWhole = async (sql: string) => {
   for (const s of withTriggers(sql)) await env.DB.prepare(s).run();
 };
+
+it('order 28: 0022 down, then up again, restores the npc columns; down leaves no trace of them', async () => {
+  const before = await schema();
+  const cols = async () => (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('npc') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
+  await run(down22);
+  expect((await cols()).some((c) => c === 'named' || c === 'raid')).toBe(false);
+  await run(up22);
+  // ALTER TABLE rewrites the CREATE TABLE text, so compare names and kinds, then the columns.
+  expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
+  expect((await cols()).slice(-2)).toEqual(['named', 'raid']);
+});
 
 it('order 27: 0021 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();
@@ -113,11 +126,14 @@ it('order 19: 0014 down, then up again, restores the schema; down leaves no trac
 });
 
 it('order 17: 0013 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  // Order 28: 0022 adds npc's columns, so it comes off first and goes back last.
+  await run(down22);
   const before = await schema();
   await run(down13);
   expect((await schema()).some((r) => ['zone', 'zone_name', 'npc', 'import_source'].includes(r.name))).toBe(false);
   await run(up13);
   expect(await schema()).toEqual(before);
+  await run(up22);
 });
 
 it('order 16: 0012 down, then up again, restores the schema; down leaves no trace of it', async () => {

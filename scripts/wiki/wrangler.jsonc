@@ -1,0 +1,11 @@
+{
+  // Work order 28 (override 3): the temporary wiki relay, its own minimal config. No bindings, routes, cron or vars: the
+  // one-time token is compiled in (wrangler deploy --define). .github/workflows/wiki-snapshot.yml deploys it, calls it
+  // once per wiki request and deletes it in the same job, checking the 404.
+  "name": "guildcraft-wiki-relay",
+  "main": "relay.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  // One hostname only: no version-specific preview URL.
+  "preview_urls": false
+}

@@ -21,6 +21,7 @@
     "test:health": "node --test scripts/health/judge.test.ts",
     "test:ci-reads": "node --test scripts/ci/ci-reads.test.ts",
     "test:emoji": "node scripts/emoji/build.ts --check",
+    "test:wiki": "node --test scripts/wiki/wiki.test.ts",
     "dev": "wrangler dev --env dev",
     "db:migrate:local": "wrangler d1 migrations apply mnm-guildcraft-dev --local --env dev",
     "import:local": "node scripts/import/run.ts --local",
