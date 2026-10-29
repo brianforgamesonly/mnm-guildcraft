@@ -2,7 +2,7 @@
 # https://monstersandmemories.miraheze.org/w/api.php, through a temporary relay Worker (override 3) because Miraheze
 # challenges GitHub's runners (order 14's probe, run 40933712788). The relay is deployed with a one-time token compiled
 # in, called once per wiki request, one request at a time, then deleted; the delete is verified by a 404 from the
-# Cloudflare API. At most 150 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP, every attempt counted; ~60 expected),
+# Cloudflare API. At most 200 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP, every attempt counted; ~151 measured),
 # maxlag=5, order 14's named User-Agent. A 403, a 429 or a challenge stops the run and is reported, never retried or
 # worked around (override 7).
 # ITEM 3 (input `compare`, default on): the snapshot against Mo Betta (scripts/wiki/compare.ts, writes nothing), and the
@@ -13,7 +13,7 @@
 # Dispatch only, never scheduled: PR B moves the snapshot into import.yml. No alarm: a failed run is read by the person
 # who dispatched it (order 12: every failed run is listed in the order's report).
 # Expected: about 6 billed minutes per run with the comparison (public repository: free); Cloudflare: one Worker
-# deployed and deleted, about 70 Worker requests (3-12 readiness calls + 4 refusal checks + 1 per wiki request), 0 D1 rows.
+# deployed and deleted, about 160 Worker requests (3-12 readiness calls + 4 refusal checks + 1 per wiki request, ~151 measured), 0 D1 rows.
 name: wiki-snapshot
 on:
   workflow_dispatch:
