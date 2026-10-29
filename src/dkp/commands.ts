@@ -11,6 +11,7 @@ import { payStatement, POOL_GUILD, registerPool, dkpRead } from './ledger.ts';
 import { FULL_PAGE, FULL_STANDINGS_PREFIX, poolNames, postIn, refreshStandings, standingLine } from './messages.ts';
 import { RUNNER_ROLE, settingOf, SETTINGS } from './settings.ts';
 import type { DkpState } from './state.ts';
+import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand } from './raid.ts';
 
 export const APPROVE_PREFIX = 'dkpap:';
 /** Full standings' paging, in the presser's own private message (edited in place). */
@@ -24,6 +25,11 @@ export const DKP_ROUTES: Record<string, { access: 'runner' | 'admin' | 'member';
   'dkp adjust': { access: 'runner', run: adjust },
   'dkp settings': { access: 'admin', run: settings },
   'dkp named-value': { access: 'runner', run: namedValue },
+  // Order 27, PR B: raid nights and history.
+  'dkp raid': { access: 'runner', run: (c, o, d) => raidCommand(c, o, d) },
+  'dkp kill': { access: 'runner', run: (c, o, d) => killCommand(c, o, d) },
+  'dkp correct': { access: 'runner', run: (c, o, d) => correctCommand(c, o, d) },
+  'dkp history': { access: 'member', run: (c, o, d) => historyCommand(c, o, d) },
 };
 
 const apiFor = (c: Ctx, cap = DKP_COMMAND_CAP): BotApi | null => (c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap, deadline: Date.now() + 10_000 }) : null);
@@ -90,20 +96,24 @@ async function announce(c: Ctx, d: DkpState, api: BotApi | null, member: string,
   return !!posted;
 }
 
-async function askApproval(
+/** A change over the second-officer threshold: an adjustment, or (order 27, PR B) a correction of a kill or a raid. */
+export async function askApproval(
   c: Ctx,
   d: DkpState,
   api: BotApi | null,
-  a: { member: string; name: string; pool: { key: string; name: string }; points: number; reason: string; at: string },
+  a: { member: string; name: string; pool: { key: string; name: string }; points: number; reason: string; at: string; correction?: { action: 'add' | 'remove'; raidId: number; killId: number | null } },
 ): Promise<MessageReply> {
   // No card, no approval: nobody could press Approve (review of PR A).
   if (!api || !d.channel_id) return ephemeral(DKP_COPY.noChannel);
   const due = Date.parse(a.at) + d.settings.approval_hours * 3_600_000;
   const p = await c.db
     .prepare(
-      "INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, reason, asked_by, asked_at, due_at) VALUES (?, 'adjust', ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+      'INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, action, raid_id, kill_id, reason, asked_by, asked_at, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
     )
-    .bind(c.guild.id, a.member, a.pool.key, a.points, a.reason, c.userId, a.at, new Date(due).toISOString())
+    .bind(
+      c.guild.id, a.correction ? 'correction' : 'adjust', a.member, a.pool.key, a.points, a.correction?.action ?? null, a.correction?.raidId ?? null, a.correction?.killId ?? null, a.reason,
+      c.userId, a.at, new Date(due).toISOString(),
+    )
     .first<{ id: number }>();
   c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `lapse:${p!.id}`, due }] };
   {
@@ -120,19 +130,27 @@ async function askApproval(
 export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<MessageReply> {
   if (!isDkpRunner(c.guild, d.settings.runner_role, c.member)) return ephemeral(DKP_COPY.notRunner);
   const pid = Number(id.slice(APPROVE_PREFIX.length));
-  const p = await c.db.prepare("SELECT member_id, pool, amount, reason, asked_by, kind, message_id, status, due_at FROM dkp_pending WHERE id = ? AND guild_id = ?").bind(pid, c.guild.id).first<{
-    member_id: string; pool: string; amount: number; reason: string; asked_by: string; kind: string; message_id: string | null; status: string; due_at: string;
+  const p = await c.db.prepare('SELECT member_id, pool, amount, reason, asked_by, kind, action, raid_id, kill_id, message_id, status, due_at FROM dkp_pending WHERE id = ? AND guild_id = ?').bind(pid, c.guild.id).first<{
+    member_id: string; pool: string; amount: number; reason: string; asked_by: string; kind: string; action: 'add' | 'remove' | null; raid_id: number | null; kill_id: number | null; message_id: string | null; status: string; due_at: string;
   }>();
   if (!p) return ephemeral(DKP_COPY.notOpen);
   const conflict = dkpSelfConflict(c.userId, { member: p.member_id, askedBy: p.asked_by });
   if (conflict) return ephemeral(conflict === 'own' ? DKP_COPY.own : DKP_COPY.asked);
   const at = now();
   // One approval wins, and it pays in the same batch (review of PR A): the status changes once, and the payment is
-  // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing.
+  // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing. A
+  // correction's statements need no gate: a reversal acts only where the member is credited on the kill, a re-add only
+  // where they are not, so a second run of either writes nothing.
+  const pays =
+    p.kind === 'correction' && p.raid_id !== null && p.action
+      ? await correctionStatements(c.db, c.guild.id, d.settings.cap, { member: p.member_id, action: p.action, raidId: p.raid_id, killId: p.kill_id, reason: p.reason, actor: c.userId, at })
+      : [
+          registerPool(c.db, c.guild.id, p.pool, at),
+          payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
+        ];
   const [took] = await c.db.batch([
     c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2").bind(c.userId, at, pid),
-    registerPool(c.db, c.guild.id, p.pool, at),
-    payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
+    ...pays,
   ]);
   if (took.meta.changes !== 1) return ephemeral(DKP_COPY.notOpen);
   await audit(c.db, c.guild.id, c.userId, 'dkp.approve', `pending:${pid}`, { status: 'open' }, { status: 'approved' }).run();
@@ -141,7 +159,7 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   try {
     if (api && d.channel_id) {
       if (p.message_id) await api.call('PATCH', `/channels/${d.channel_id}/messages/${p.message_id}`, { content: DKP_COPY.approved(by(c)), components: [], allowed_mentions: { parse: [] } });
-      await refreshStandings(c.db, api, c.guild.id, d.channel_id, [p.pool]);
+      await refreshStandings(c.db, api, c.guild.id, d.channel_id, p.kind === 'correction' ? [p.pool, POOL_GUILD] : [p.pool]);
     }
   } finally {
     spent(c, api);

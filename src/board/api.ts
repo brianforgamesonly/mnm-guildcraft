@@ -38,7 +38,8 @@ export interface ApiLogEntry {
   scope?: string;
 }
 
-const isModifyChannel = (route: string) => /^PATCH \/channels\/\d+$/.test(route);
+/** Order 27: a message edit's headers too, so a DKP raid card's edits are paced from Discord's own answers. */
+const isModifyChannel = (route: string) => /^PATCH \/channels\/\d+(\/messages\/\{id\})?$/.test(route);
 
 export interface BoardBudget {
   /** D1 calls made so far in this invocation (the counted binding's call list, src/telemetry.ts). */

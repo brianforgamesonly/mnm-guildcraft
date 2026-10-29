@@ -23,6 +23,7 @@ import { modalValues } from './reports.ts';
 import { logAction, notifyLine, requestList, written } from './requests.ts';
 import { allTradeskills, characterEmbeds, EMBED_MAX, skillGroups, updatePicker } from './skills.ts';
 import { WELCOME } from './welcome.ts';
+import { dkpMeLine } from '../dkp/me.ts';
 
 export const ADD_PREFIX = 'mea:';
 export const ADD_MODAL_PREFIX = 'meam:';
@@ -164,9 +165,13 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
   } else chars = await liveCharacters(c.db, c.guild.id, ownerId);
   const reqs = await openRequests(c, ownerId);
   const who = own ? '' : await whoIs(c, ownerId);
+  // Order 27: DKP balances and attendance, only where DKP is on.
+  const dkp = await dkpMeLine(c.db, c.guild.id, ownerId);
   if (!chars.length) {
     const rows = panelRows(ownerId, own, false, reqs.length > 0);
-    return own ? ephemeral(ME_COPY.noCharacters, { embeds: [WELCOME], components: rows }) : ephemeral(ME_COPY.othersNone(who), { components: rows });
+    const head = own ? ME_COPY.noCharacters : ME_COPY.othersNone(who);
+    const content = dkp ? `${head}\n${dkp}` : head;
+    return own ? ephemeral(content, { embeds: [WELCOME], components: rows }) : ephemeral(content, { components: rows });
   }
   const { embeds, anyStale } = await characterEmbeds(c, chars.slice(0, EMBED_MAX));
   // Inside the message's 6,000 characters, less the one-time welcome's reserve: whole characters off the end, noted.
@@ -178,6 +183,7 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
     await notifyLine(c.db, c.guild.id, ownerId),
     listed ? [own ? ME_COPY.requestsHead : ME_COPY.othersRequestsHead, ...listed.lines].join('\n') : ME_COPY.noRequests,
     anyStale ? ME_COPY.stale(c.guild.stale_days) : null,
+    dkp,
   ].filter(Boolean);
   return ephemeral(truncate(notes.join('\n'), 2000), { embeds, components: panelRows(ownerId, own, true, reqs.length > 0) });
 }

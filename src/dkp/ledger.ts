@@ -163,4 +163,5 @@ export interface LedgerRow {
   at: string;
 }
 /** /dkp history: one member's rows in one pool, newest first (dkp_ledger_balance, read backwards). */
-export const historySql = 'SELECT id, pool, amount, cut, balance_after, kind, kill_id, corrects, reason, actor, at FROM dkp_ledger WHERE guild_id = ?1 AND pool = ?2 AND member_id = ?3 ORDER BY id DESC LIMIT ?4 OFFSET ?5';
+export const historySql = `SELECT l.id, l.pool, l.amount, l.cut, l.balance_after, l.kind, l.kill_id, l.corrects, l.reason, l.actor, l.at, k.name AS kill_name
+  FROM dkp_ledger l LEFT JOIN dkp_kill k ON k.id = l.kill_id WHERE l.guild_id = ?1 AND l.pool = ?2 AND l.member_id = ?3 ORDER BY l.id DESC LIMIT ?4 OFFSET ?5`;

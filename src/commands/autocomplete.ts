@@ -12,7 +12,7 @@ import { focused, matchChoices, optString, subcommand, truncate, type Choice, ty
 import { gameList, type GameList } from '../gamedata.ts';
 import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
 import { DKP_COPY } from '../dkp/copy.ts';
-import { zoneCreatures } from '../dkp/creatures.ts';
+import { OPEN_RAID_CREATURES_SQL, zoneCreatures } from '../dkp/creatures.ts';
 import { POOL_GUILD } from '../dkp/ledger.ts';
 import { zoneKey } from '../zone/names.ts';
 
@@ -95,6 +95,28 @@ const dkpCreatures: Lister = async ({ db, options, typed }) => {
   const zone = optString(options, 'zone');
   return zone ? asChoices(matchChoices(await zoneCreatures(db, zoneKey(zone)), typed)) : [];
 };
+/**
+ * Order 27: /dkp kill named: the open raid's creatures, and first what was typed, as typed (a creature the data doesn't
+ * list is accepted and stored as typed). One statement.
+ */
+const dkpOpenRaidCreatures: Lister = async ({ db, i, typed }) => {
+  const names = (await db.prepare(OPEN_RAID_CREATURES_SQL).bind(i.guild_id).all<{ name: string }>()).results.map((r) => r.name);
+  return factionChoices(names, typed.slice(0, 100));
+};
+/** Order 27: /dkp correct kill: the latest raid's kills, newest first, by id. One statement. */
+const dkpKills: Lister = async ({ db, i, typed }) => {
+  const { results } = await db
+    .prepare(
+      `SELECT k.id, coalesce(k.name, 'Flat payout') AS name, k.at FROM dkp_kill k WHERE k.raid_id = (SELECT id FROM dkp_raid WHERE guild_id = ?1 ORDER BY closed_at IS NULL DESC, id DESC LIMIT 1) ORDER BY k.id DESC LIMIT 100`,
+    )
+    .bind(i.guild_id)
+    .all<{ id: number; name: string; at: string }>();
+  const q = typed.trim().toLowerCase();
+  return results
+    .filter((r) => !q || r.name.toLowerCase().includes(q) || String(r.id) === q)
+    .slice(0, 25)
+    .map((r) => ({ name: truncate(`${r.name} · ${r.at.slice(11, 19)} UTC · #${r.id}`, CHOICE_MAX), value: String(r.id) }));
+};
 
 /**
  * Order 18: each list is chosen by command and option ("/command [subcommand] option"), never by the option's name alone,
@@ -119,6 +141,10 @@ export const LISTS: Record<string, Lister> = {
   '/dkp adjust pool': dkpPools,
   '/dkp named-value zone': game('zones'),
   '/dkp named-value named': dkpCreatures,
+  '/dkp raid zone': game('zones'),
+  '/dkp kill named': dkpOpenRaidCreatures,
+  '/dkp correct kill': dkpKills,
+  '/dkp history pool': dkpPools,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

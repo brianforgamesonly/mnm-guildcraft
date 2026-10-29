@@ -33,6 +33,7 @@ import { DKP_COPY } from './dkp/copy.ts';
 import { FULL_STANDINGS_PREFIX } from './dkp/messages.ts';
 import { ADD_DKP_PREFIX, addDkpButton, REMOVE_DKP_PREFIX, removeDkpButton } from './dkp/setup.ts';
 import { loadDkp } from './dkp/state.ts';
+import { raidComponent } from './dkp/raid.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -75,7 +76,8 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
   zone: { access: 'member', search: true, audit: 'zone.view', run: zoneCommand },
   // Order 16: craft requests. Each answers clearly where no request channel is set (src/requests.ts NO_REQUEST_CHANNEL).
   request: { access: 'member', run: craftRequest },
-  help: { access: 'open', run: async () => helpReply() },
+  // Order 27: the DKP page where DKP is on.
+  help: { access: 'open', run: async (c) => helpReply((await loadDkp(c.db, c.guild.id)).enabled) },
   'officer recipe-source': { access: 'officer', run: recipeSource },
   'officer recipe-fix': { access: 'officer', run: recipeOverride },
   'officer remove-member': { access: 'officer', run: officerRemoveMember },
@@ -181,14 +183,15 @@ async function dkpCommand(i: Interaction, env: Env, ctx: WaitUntil, effects: Eff
 }
 
 /** Order 27: a DKP button or select (prefix dkp, after Add DKP and Remove DKP). */
-async function dkpComponent(c: Ctx, id: string): Promise<MessageReply> {
+async function dkpComponent(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
   const d = await loadDkp(c.db, c.guild.id);
   if (!d.enabled) return ephemeral(DKP_COPY.off);
   if (id.startsWith(DKP_APPROVE_PREFIX)) return approveButton(c, id, d);
-  // Standings are guild-public (order 27's override 3 of order 2), behind the member gate like every member tool.
+  // Standings are guild-public (order 27's override 3 of order 2), behind the member gate like every member tool; a raid
+  // button's presser without the member role is refused privately (officers' controls re-check the runner role).
   if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
   if (id.startsWith(FULL_STANDINGS_PREFIX) || id.startsWith(FULL_PAGE_PREFIX)) return fullStandings(c, id);
-  return ephemeral(STALE_FORM);
+  return (await raidComponent(c, id, values, d)) ?? ephemeral(STALE_FORM);
 }
 
 async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
@@ -225,13 +228,13 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   const c = ctxFor(env, guild, i.member!, effects, i);
   const id = i.data?.custom_id ?? '';
   // Order 18: /help's page buttons, open to anyone (as /help is).
-  if (id.startsWith(HELP_PREFIX)) return helpButton(id);
+  if (id.startsWith(HELP_PREFIX)) return helpButton(id, (await loadDkp(env.DB, guild.id)).enabled);
   // Order 19: Create GuildCraft channels, admins only, as /guildcraft setup is (rights from this press).
   if (id.startsWith(CREATE_CHANNELS_PREFIX)) return isAdmin(i.member!) ? createChannelsButton(c) : ephemeral(ADMIN_ONLY);
   // Order 27: Add DKP and Remove DKP, admins only, as Create GuildCraft channels; then every other DKP control.
   if (id.startsWith(ADD_DKP_PREFIX)) return isAdmin(i.member!) ? addDkpButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(REMOVE_DKP_PREFIX)) return isAdmin(i.member!) ? removeDkpButton(c) : ephemeral(ADMIN_ONLY);
-  if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id);
+  if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id, i.data?.values ?? []);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

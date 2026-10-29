@@ -699,4 +699,6 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 
 **Departures from this section, named (order 27).**
 
+- Corrections are made with `/dkp correct member: action: reason: kill:`, on the latest raid (the open one, or the last closed). Leaving out kill: corrects the whole raid. The specification names no command for corrections.
+- The card's Who earned and Check again act on the raid's latest kill.
 - A raid zone's standings message is posted when that pool is first used, so it sits below GC-DKP's earlier messages rather than at the top. Only the guild pool's message, posted by Add DKP, is at the top. The bot cannot pin the others there: Pin Message requires PIN_MESSAGES, which the install link does not ask for.
