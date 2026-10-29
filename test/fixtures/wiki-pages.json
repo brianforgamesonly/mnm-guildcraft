@@ -1,8 +1,8 @@
 {
   "credit": "Page text from the Monsters and Memories Wiki (https://monstersandmemories.miraheze.org), written by its contributors and licensed under CC BY-SA 4.0 (https://creativecommons.org/licenses/by-sa/4.0/). Each page's history on the wiki lists its authors; each page here keeps the revision it was taken from.",
-  "from": "wiki-snapshot run 40959117101",
+  "from": "wiki-snapshot run 40962576790",
   "site": "Monsters and Memories Wiki · MediaWiki 1.46.2",
-  "fetchedAt": "2026-10-29T21:36:19.572Z",
+  "fetchedAt": "2026-10-29T22:02:12.008Z",
   "version": {
     "revid": 80863,
     "timestamp": "2026-10-13T01:24:08Z"
@@ -313,7 +313,7 @@
   },
   "buckets": {},
   "recentChanges": {
-    "since": "2026-10-28T21:36:19Z",
+    "since": "2026-10-28T22:02:12Z",
     "changes": []
   },
   "requests": {
