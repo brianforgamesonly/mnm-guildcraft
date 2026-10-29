@@ -12,8 +12,7 @@ import { CATEGORIES, type WikiSnapshot } from './types.ts';
 import { USER_AGENT } from '../probe/wiki.ts';
 import { buildZonePlan, wikiVersion } from '../import/zones.ts';
 import { zoneInput } from '../../test/fixtures/zones-small.ts';
-import { compare, markdown } from './compare.ts';
-import { checkStructure } from '../import/core.ts';
+import { report } from './report.ts';
 import { readFileSync } from 'node:fs';
 import { npcZoneParts } from '../import/zones.ts';
 import { sameButFirstCase } from './parse.ts';
@@ -389,21 +388,10 @@ test('zone plan from the snapshot: wiki:zones names the zones, one npc row per b
   assert.deepEqual(plan.questLines.map((l) => [l.faction, l.quest]), [['Guards of Rothold', 'Guard Duty']]);
 });
 
-test('compare: both plans from the import code; the gate lists what is missing, and line 6 waits for the owner', async () => {
-  const { snap } = await snapshot();
-  const wiki = checkStructure(JSON.parse(readFileSync(new URL('../../test/fixtures/wiki-small.json', import.meta.url), 'utf8')));
-  const c = compare(snap, zoneInput(), wiki, '2026-10-29T12:00:00Z');
-  assert.deepEqual(c.gate.map((g) => g.line), [1, 2, 3, 4, 6]);
-  assert.equal(c.gate.find((g) => g.line === 6)!.pass, false);
-  // The stand-in wiki has none of Mo Betta's fixture NPCs: each missing one is listed with a reason.
-  assert.ok(c.npcs.missing.length > 0);
-  assert.ok(c.npcs.missing.every((m) => m.why.length > 0));
-  assert.equal(c.npcs.multiZone.names, 1, 'a bandit');
-  assert.ok(c.tags.some((t) => t.zone === 'Glinting Hollow' && t.named === 1));
-  assert.equal(c.recentChanges.zoneData, 1);
-  assert.match(markdown(c), /### The gate/);
-  // Order 28b: each miss says whether wiki content explains it (a renamed page); the stand-in's misses are not renamed.
-  assert.ok(c.gate.find((g) => g.line === 2)!.detail.every((d) => d.endsWith('NOT explained by wiki content')));
+test('report: what the parser read, and the names to fix on the wiki (order 28b, replacing the Mo Betta comparison)', () => {
+  const r = report(fixture());
+  assert.match(r, /Names that differ from their page title by more than the first letter's case \(1; fix on the wiki\):\n- "a goblin shore reaver" on page "A golbin shore reaver"/);
+  assert.match(r, /Blocks with no zone \(no row\): Weakened Red Dragon\./);
 });
 
 // ---------------------------------------------------------------- order 28b

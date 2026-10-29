@@ -1,9 +1,13 @@
 # Loads mnm-tools wiki.json into each copy's remote D1 (order 10: dev and production).
-# Order 17: also the zone sources (scripts/import/zones.ts ZONE_FILES: mnm-tools maps.json, MnM Atlas data/maps.json,
-# Mo Betta zones.json and npcs.json), each pinned to its last commit. A source unchanged for 30 days is a warning
-# annotation, never a failure (MnM Atlas's registry is exempt). Unchanged sources write 0 zone rows.
-# Order 25: also Mo Betta's quests.json, pinned the same way, for the faction posts' quest lines only (faction_quest).
-# Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~1 billed minute per run, ~30 min/month.
+# Order 17: also the zone sources (scripts/import/zones.ts ZONE_FILES: mnm-tools maps.json, MnM Atlas data/maps.json),
+# each pinned to its last commit. A source unchanged for 30 days is a warning annotation, never a failure (MnM Atlas's
+# registry is exempt). Unchanged sources write 0 zone rows.
+# Order 28b, PR D (order 28's override 2): the zones, NPCs and quests come from the wiki, through the `wiki` job
+# (.github/workflows/wiki-job.yml: it waits for deploys, then one relay, at most 200 requests); Mo Betta is no longer
+# read. Override 9: the copy jobs run whatever the wiki job's result. Without its snapshot they import mnm-tools, keep
+# yesterday's zone data, and record 'zones-kept' (src/import-status.ts), which the alarm below counts as failing.
+# Schedule: daily 07:30 UTC (the source commits around 07:00 UTC). Expected: ~3 billed minutes per run (the wiki job
+# about 2), ~90 min/month (public repository: free); Cloudflare: one relay Worker deployed and deleted, ~160 requests.
 # Dispatch defaults to a dry run: prints the counts it would write and writes nothing.
 # Order 13: a run writes at most 40,000 D1 rows, index writes included (scripts/import/core.ts WRITE_CEILING). At that
 # point it stops between whole groups with status 'partial' and a warning annotation, and the next run resumes.
@@ -11,9 +15,11 @@
 # The alarm (ORDER-RULES order 8; scripts/ci/alarm.ts):
 #   who:   GitHub's failed-run mail to the user who last modified the cron syntax (the repository owner);
 #   how often: at most once a day;
-#   state: the newest data_import row in the alarm state (src/import-status.ts: ok, failed, running, refused); failed
-#          and refused count as failing. Order 9: a refused run writes its own 'refused' row, so a refusal after a
-#          refusal is not re-notified, and the next ok run reports a recovery. Dry-run rows are not part of the state.
+#   state: the newest data_import row in the alarm state (src/import-status.ts: ok, partial, zones-kept, failed,
+#          running, refused); zones-kept, failed, running and refused count as failing. Order 9: a refused run writes
+#          its own 'refused' row, so a refusal after a refusal is not re-notified, and the next ok run reports a
+#          recovery. Dry-run rows are not part of the state. Order 28's override 9: the wiki job is never the alarm;
+#          its failure reaches the owner only through the copies' 'zones-kept' rows.
 name: import
 on:
   schedule:
@@ -31,8 +37,16 @@ on:
         default: both
 permissions:
   contents: read
+  # Order 28b: the wiki job lists deploy.yml's runs, to wait for them (scripts/wiki/deploys.ts).
+  actions: read
 # Order 10: one job per copy (scripts/copies.ts), each importing the same source into its own database, with its own alarm.
 jobs:
+  # Order 28b, PR D: the wiki snapshot, once for both copies. Its failure never stops the copies (override 9).
+  wiki:
+    uses: ./.github/workflows/wiki-job.yml
+    secrets: inherit
+    with:
+      retention_days: 7
   # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
   copies:
     runs-on: ubuntu-26.04
@@ -50,7 +64,9 @@ jobs:
           WANT: ${{ inputs.copy || 'both' }}
         run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"
   import:
-    needs: copies
+    # Override 9: always(), so a failed wiki job still imports mnm-tools (and keeps yesterday's zone data).
+    needs: [copies, wiki]
+    if: always() && needs.copies.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -70,5 +86,24 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - name: The wiki snapshot (from the wiki job)
+        id: snap
+        if: needs.wiki.result == 'success'
+        # A failed download is the same as no snapshot: the import still runs, keeping yesterday's zone data.
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: wiki-snapshot
+          path: ${{ runner.temp }}/wiki-snapshot
       - name: Import (dry run = ${{ inputs.dry_run == true }})
-        run: node scripts/import/run.ts --remote ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        shell: bash
+        env:
+          DRY: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+          WIKI_RESULT: ${{ needs.wiki.result }}
+          SNAP: ${{ steps.snap.outcome }}
+        run: |
+          if [ "$SNAP" = success ]; then
+            node scripts/import/run.ts --remote $DRY --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot"
+          else
+            node scripts/import/run.ts --remote $DRY --zones-kept "the wiki snapshot job ended: $WIKI_RESULT (run $GITHUB_RUN_ID)"
+          fi

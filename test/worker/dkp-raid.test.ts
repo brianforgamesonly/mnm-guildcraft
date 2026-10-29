@@ -42,7 +42,11 @@ beforeEach(async () => {
     env.DB.prepare('DELETE FROM npc'),
     env.DB.prepare('DELETE FROM mob'),
     env.DB.prepare('DELETE FROM zone_name'),
-    env.DB.prepare("INSERT INTO zone (key, name) VALUES ('the ruins', 'The Ruins'), ('empty vale', 'Empty Vale')"),
+    env.DB.prepare("INSERT INTO zone (key, name) VALUES ('the ruins', 'The Ruins'), ('empty vale', 'Empty Vale'), ('glinting hollow', 'Glinting Hollow')"),
+    // Order 28b: the wiki's tags (Category:Raid Encounters, Category:Named Mobs). The Ruins' rows carry none (NULL).
+    env.DB.prepare(
+      "INSERT INTO npc (zone_key, name, kind, named, raid) VALUES ('glinting hollow', 'a myconid', 'npc', 0, 0), ('glinting hollow', 'A myconid prince', 'npc', 1, 0), ('glinting hollow', 'Zymora the Sporequeen', 'npc', 1, 1), ('glinting hollow', 'A cave bat', 'npc', 0, 0), ('glinting hollow', 'A spore merchant', 'merchant', 1, 0)",
+    ),
     env.DB.prepare(
       "INSERT INTO npc (zone_key, name, kind) VALUES ('the ruins', 'Kestrel the Old', 'named'), ('the ruins', 'a rat', NULL), ('the ruins', 'Bob', 'merchant'), ('the ruins', 'An Ogre', NULL)",
     ),
@@ -121,12 +125,27 @@ describe('raid nights (ITEM 4)', () => {
     expect((await timersOf(env, GUILD).list())[`close:${id}`]).toBe(closes);
   });
 
-  it('Named killed offers the zone\'s creatures (mobs and NPCs, no merchants, deduplicated), names not starting "a "/"an " first', async () => {
+  it('Named killed offers the zone\'s creatures (mobs and NPCs, no merchants, deduplicated); an untagged zone shows only "Other creatures", A→Z', async () => {
     await open();
     const sel = (await card()).components.flatMap((r: any) => r.components).find((c: any) => c.custom_id?.startsWith(NAMED_PREFIX));
-    // "An Ogre" (NPC) and "an ogre" (mob) are one creature: either spelling is kept, once.
-    expect(sel.options.map((o: any) => o.label.toLowerCase())).toEqual(['goblin king', 'kestrel the old', 'a rat', 'an ogre']);
+    // "An Ogre" (NPC) and "an ogre" (mob) are one creature: either spelling is kept, once. Order 28b: nothing is inferred
+    // from a name (the "a "/"an " order is gone); with no tags, every creature is in "Other creatures".
+    expect(sel.options.map((o: any) => o.label.toLowerCase())).toEqual(['a rat', 'an ogre', 'goblin king', 'kestrel the old']);
+    expect(new Set(sel.options.map((o: any) => o.description))).toEqual(new Set([RAID_COPY.creaturePart.other]));
     expect((await env.DB.prepare(CREATURES_SQL).bind('empty vale').all()).results).toEqual([]);
+  });
+
+  it('order 28b: Named killed in Glinting Hollow lists raid encounters, then named mobs (A myconid prince), then other creatures, each A→Z', async () => {
+    await open('Glinting Hollow');
+    const sel = (await card()).components.flatMap((r: any) => r.components).find((c: any) => c.custom_id?.startsWith(NAMED_PREFIX));
+    expect(sel.options.map((o: any) => [o.label, o.description])).toEqual([
+      ['Zymora the Sporequeen', RAID_COPY.creaturePart.raid],
+      ['A myconid prince', RAID_COPY.creaturePart.named],
+      ['A cave bat', RAID_COPY.creaturePart.other],
+      ['a myconid', RAID_COPY.creaturePart.other],
+    ]);
+    // The same order for /dkp kill's autocomplete (one statement, the open raid's zone).
+    expect((await env.DB.prepare(CREATURES_SQL).bind('glinting hollow').all<{ name: string }>()).results.map((r) => r.name)).toEqual(sel.options.map((o: any) => o.label));
   });
 
   it('a zone with no creatures shows no select, and the card says to use /dkp kill', async () => {

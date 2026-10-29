@@ -638,7 +638,7 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
   - Their state carries over to every later kill until they tap Leaving or an officer changes it.
   - Tapping Present after a kill does not earn that kill, only later ones.
 - *Named killed.*
-  - The button offers the zone's creatures in a select menu: the first 25 in display order. Names that don't start with "a " or "an " come first, then the rest, each part A→Z. This order is for display only: nothing is stored or labelled "named".
+  - The button offers the zone's creatures in a select menu: the first 25 in display order. Order 28's override 4 (shipped in order 28b): raid encounters first, then named mobs, then "Other creatures", each part A→Z, from the wiki's own tags (Category:Raid Encounters, Category:Named Mobs; `npc.raid`, `npc.named`). Each option names its part under its label. Nothing is inferred from a name.
   - `/dkp kill named:` covers every creature, with autocomplete. It also accepts a typed name, stored as typed, for creatures the data doesn't list.
   - The creature list is the union of the zone's mobs and NPCs, deduplicated by case-insensitive name, without merchants.
   - A zone with no creatures shows no select menu; the card says to use `/dkp kill`.

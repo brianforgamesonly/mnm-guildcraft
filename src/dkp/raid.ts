@@ -17,7 +17,7 @@ import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, STYLE_SUCCESS, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { zoneKey } from '../zone/names.ts';
 import { RAID_COPY } from './copy.ts';
-import { zoneCreatures } from './creatures.ts';
+import { zoneCreatures, type Creature } from './creatures.ts';
 import { askApproval, type DkpRun } from './commands.ts';
 import { historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, type LedgerRow } from './ledger.ts';
 import { editIn, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
@@ -78,7 +78,7 @@ interface CardData {
   people: { member_id: string; name: string; state: string; status: string }[];
   kills: { id: number; name: string | null; points: number; at: string; check_due: string | null; check_closed_at: string | null }[];
   earned: Map<number, { member_id: string; name: string }[]>;
-  creatures: string[];
+  creatures: Creature[];
 }
 
 async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
@@ -167,7 +167,7 @@ export function cardMessage(d: CardData, guildId: string): Message {
     ]),
   ];
   if (d.creatures.length)
-    rows.push(row([{ type: 3, custom_id: `${NAMED_PREFIX}${id}`, placeholder: RAID_COPY.namedKilled, options: d.creatures.map((n) => ({ label: truncate(n, 100), value: truncate(n, 100) })) }]));
+    rows.push(row([{ type: 3, custom_id: `${NAMED_PREFIX}${id}`, placeholder: RAID_COPY.namedKilled, options: d.creatures.map((c) => ({ label: truncate(c.name, 100), value: truncate(c.name, 100), description: RAID_COPY.creaturePart[c.part] })) }]));
   void guildId;
   return { embeds: [embed], components: rows };
 }

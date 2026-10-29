@@ -1481,6 +1481,11 @@ export interface ImportOptions {
   writeCeiling?: number;
   /** Order 17: the zone sources (scripts/import/source.ts fetchZoneSources). Without them the zone tables are untouched. */
   zones?: ZoneInput;
+  /**
+   * Order 28's override 9: why the zone part was not read (the wiki snapshot job failed). The zone tables keep yesterday's
+   * data, and a completed run is recorded as 'zones-kept' with this reason (src/import-status.ts), so the alarm notifies.
+   */
+  zonesKept?: string;
 }
 
 export interface ImportResult {
@@ -1704,14 +1709,17 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     }
     warnings.push({ kind: 'write_ceiling', ceiling, written: spent, deferredStatements: deferred.length, deferredBound });
   }
-  const status = deferred.length ? 'partial' : 'ok';
+  // Order 28's override 9: a kept zone part outranks 'partial', which is not failing; the next run resumes either way.
+  const status = opts.zonesKept ? 'zones-kept' : deferred.length ? 'partial' : 'ok';
+  const error = opts.zonesKept ? lit(`zone data kept: ${opts.zonesKept}`.slice(0, 2000)) : 'NULL';
   const [closed] = await db.run([
-    `UPDATE data_import SET status = '${status}', items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, warnings = ${warningsJson()}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
+    `UPDATE data_import SET status = '${status}', error = ${error}, items = ${counts.items + counts.stubItems}, recipes = ${counts.recipes}, warnings = ${warningsJson()}, finished_at = ${lit(opts.now())} WHERE id = ${runRow}`,
   ]);
   spent += closed.rows_written;
   return {
     status,
     sourceVersion,
+    ...(opts.zonesKept ? { error: `zone data kept: ${opts.zonesKept}` } : {}),
     counts,
     warnings,
     classes: plan.classes,

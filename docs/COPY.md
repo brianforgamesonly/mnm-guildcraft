@@ -1073,3 +1073,16 @@ Every string is in src/dkp/copy.ts (`DKP_COPY`), except the command and option d
 | src/commands/help.ts:77-82 | (the DKP page, only where DKP is on) Points for raid attendance, kept per raid zone. Standings and raid cards are in GC-DKP; everyone in the server can see them. · On a raid card: **Present**, **Standby** (held outside a full raid) and **Leaving**. Your state carries over to every later kill. `/me` shows your points and 30-day attendance. | DRAFT |
 | src/dkp/definition.ts | (PR B) `raid` Officers: open a raid night in GC-DKP (one open raid at a time); `kill` Officers: record a named kill in the open raid (pick, or type a name the data lacks); `correct` Officers: add or remove a member on a kill, or on the whole raid, with a reason; `history` A member's DKP history in one pool, newest first (answers privately); and their options | DRAFT |
 | src/dkp/definition.ts:20-57 | `/dkp` DKP: points for raid attendance, kept per raid zone; `adjust` Officers: change a member's points, with a reason (posted publicly); `settings` Admins: DKP settings; leave the options out to see them; `named-value` Officers: the raid points one named pays, from now on (posted publicly); and each option's description | DRAFT |
+
+## Work order 28b: the wiki switch-over and the DKP tags (DRAFT)
+
+Replaces the order 17 rows above for the zone card's footer, its "Not recorded yet" parts and the README credits.
+
+| Where | Text | Status |
+|---|---|---|
+| src/zone/card.ts:37 | Footer: Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools (Mo Betta removed) | DRAFT |
+| src/zone/card.ts:32 | "Not recorded yet" names only the level range and creatures (no source records a zone description since Mo Betta left) | DRAFT |
+| src/dkp/copy.ts:84 | Named killed, each option's line under its name: Raid encounter · Named · Other creatures | DRAFT |
+| README.md, Credits | Zone, NPC and quest data … read nightly from the Monsters and Memories Wiki itself … CC BY-SA 4.0 … Each page's history on the wiki lists its authors. (Mo Betta's line removed) | DRAFT |
+| docs/SELF-HOSTING.md, Step 10 | The zones, NPCs and quests come from the Monsters and Memories Wiki (CC BY-SA 4.0), read by the import's first job … | DRAFT |
+| docs/LAUNCH-GUIDE.md:82 | The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas and mnm-tools … | DRAFT |

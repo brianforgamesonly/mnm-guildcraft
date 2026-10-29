@@ -61,34 +61,41 @@ describe('order 17: zone import', () => {
     ]);
     const n = res.zones!.names;
     expect(n['atlas:maps']).toEqual({ names: 4, matched: 3, unmatched: ['World map'] });
-    expect(n['mo-betta:adjacent'].unmatched).toEqual(['Fields of the Lost']);
-    expect(n['mo-betta:npcs'].unmatched).toEqual(['Evershade Weald Rothold']);
-    expect(n['mo-betta:npcs'].matched).toBe(4); // Evershade Weald, Keeper's Bight, Ail'vorith (case), Rothold
+    // Order 28b, PR D: the wiki snapshot is the zone source (wiki:*), Mo Betta is not read.
+    expect(n['wiki:adjacent'].unmatched).toEqual(['Fields of the Lost']);
+    expect(n['wiki:npcs'].unmatched).toEqual(['Evershade Weald Rothold']);
+    expect(n['wiki:npcs'].matched).toBe(4); // Evershade Weald, Keeper's Bight, Ail'vorith (case), Rothold
+    expect(Object.entries(n).filter(([s, v]) => s.startsWith('mo-betta:') && v.names > 0)).toEqual([]);
     const unmatched = await all<{ source: string; name: string }>('SELECT source, name FROM zone_name WHERE zone_key IS NULL ORDER BY source, name');
-    expect(unmatched.map((r) => `${r.source}:${r.name}`)).toEqual(['atlas:maps:World map', 'mo-betta:adjacent:Fields of the Lost', 'mo-betta:npcs:Evershade Weald Rothold']);
-    expect(res.warnings!.filter((w) => w.kind === 'zone_names_unmatched').map((w) => (w as { source: string }).source)).toEqual(['atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs']);
+    expect(unmatched.map((r) => `${r.source}:${r.name}`)).toEqual(['atlas:maps:World map', 'wiki:adjacent:Fields of the Lost', 'wiki:npcs:Evershade Weald Rothold']);
+    expect(res.warnings!.filter((w) => w.kind === 'zone_names_unmatched').map((w) => (w as { source: string }).source)).toEqual(['atlas:maps', 'wiki:adjacent', 'wiki:npcs']);
   });
 
-  it('stores Mo Betta NPCs per zone; folds records equal but for case; merchants kept with their kind; reports the merge', async () => {
+  it('stores the wiki\'s NPCs per zone; folds records equal but for case; merchants kept with their kind; reports the merge', async () => {
     const res = await load();
-    const npcs = await all<{ zone_key: string; name: string; kind: string; class: string | null; location: string | null }>('SELECT zone_key, name, kind, class, location FROM npc ORDER BY zone_key, name');
+    const npcs = await all<{ zone_key: string; name: string; kind: string; class: string | null; location: string | null; level: string | null; named: number | null }>(
+      'SELECT zone_key, name, kind, class, location, level, named FROM npc ORDER BY zone_key, name',
+    );
     expect(npcs.map((r) => `${r.zone_key}:${r.name}:${r.kind}`)).toEqual([
       "ail'vorith:Supplier Jul:merchant",
-      'evershade weald:A gnoll scout:npc',
+      'evershade weald:A Gnoll scout:npc',
       'evershade weald:Marshal Harding:npc',
       "keeper's bight:A wanderer:npc",
       "keeper's bight:Marshal Harding:npc",
       'rothold:A wanderer:npc',
     ]);
-    // The first record wins a conflict; an empty field is filled from the second.
-    const scout = npcs.find((r) => r.name === 'A gnoll scout')!;
-    expect([scout.class, scout.location]).toEqual(['Warrior', 'North']);
+    // The first record wins a conflict; an empty field is filled from the second. The parser reads pages A→Z by title,
+    // so "A Gnoll scout" (South, Warrior, no level) comes first and "A gnoll scout" fills its level.
+    const scout = npcs.find((r) => r.name === 'A Gnoll scout')!;
+    expect([scout.class, scout.location, scout.level]).toEqual(['Warrior', 'South', '~8-11']);
+    // Order 28: the wiki's tags are stored (Marshal Harding is in Category:Named Mobs).
+    expect(npcs.filter((r) => r.named === 1).map((r) => `${r.zone_key}:${r.name}`)).toEqual(['evershade weald:Marshal Harding', "keeper's bight:Marshal Harding"]);
     const s = res.zones!.npcs;
     expect([s.source, s.merchants, s.rows, s.noZone, s.caseDuplicates]).toEqual([7, 1, 6, 2, 1]);
     expect(s.caseDuplicateConflicts).toEqual([
-      { zone: 'Evershade Weald', name: 'A gnoll scout', field: 'location', kept: 'North', dropped: 'South' },
+      { zone: 'Evershade Weald', name: 'A Gnoll scout', field: 'location', kept: 'South', dropped: 'North' },
     ]);
-    // mnm-tools' mob keeps its fields; Mo Betta fills only the class it lacks.
+    // mnm-tools' mob keeps its fields; the wiki fills only the class it lacks.
     expect(s.mobMatches).toBe(1);
     expect(s.mobFills).toEqual({ class: 1 });
     expect(s.mobConflicts.map((c) => c.field)).toEqual(['level', 'loot']);
@@ -102,10 +109,10 @@ describe('order 17: zone import', () => {
     expect(r.conflicts.map((c) => c.field)).toEqual(['level', 'class']);
   });
 
-  it('keeps a map image only where the licence record names it; a map file shared by several zones is a placeholder', async () => {
+  it('keeps a map image only where the licence record names it (the wiki snapshot carries no map file)', async () => {
     const res = await load();
     expect(res.zones!.maps.withImage).toEqual([]);
-    expect(res.zones!.maps.placeholderFiles).toEqual(['File:Phformaps.png']);
+    expect(res.zones!.maps.placeholderFiles).toEqual([]);
     expect(res.zones!.maps.unchecked).toEqual([{ zone: 'Rothold', file: 'wiki: Rothold map by skoop.png' }]);
     const licences = {
       'wiki: Rothold map by skoop.png': {
@@ -122,12 +129,12 @@ describe('order 17: zone import', () => {
     });
   });
 
-  it('warns (never fails) when a mnm-tools or Mo Betta file has not changed for 30 days; the atlas registry is exempt', async () => {
+  it('warns (never fails) when a mnm-tools file has not changed for 30 days; the atlas registry is exempt; the snapshot is recorded', async () => {
     const res = await load(zoneInput('2026-09-01T00:00:00Z'));
     expect(res.status).toBe('ok');
     expect(res.warnings!.filter((w) => w.kind === 'stale_source')).toEqual([{ kind: 'stale_source', source: 'mnm-tools/maps.json', changedAt: '2026-09-01T00:00:00Z', days: 50 }]);
     const versions = await all<{ name: string; sha: string }>('SELECT name, sha FROM import_source ORDER BY name');
-    expect(versions.map((v) => v.name)).toEqual(['mnm-tools/maps.json', 'mnm-tools/wiki.json', 'mnmatlas/maps.json', 'mo-betta/npcs.json', 'mo-betta/quests.json', 'mo-betta/zones.json']);
+    expect(versions.map((v) => v.name)).toEqual(['mnm-tools/maps.json', 'mnm-tools/wiki.json', 'mnmatlas/maps.json', 'wiki/snapshot']);
   });
 
   it('a re-import of unchanged sources writes 0 zone rows; a vanished NPC is deactivated, never deleted', async () => {
@@ -138,9 +145,7 @@ describe('order 17: zone import', () => {
       zone: 0, zone_name: 0, npc: 0, import_source: 0, faction: 0, npc_faction: 0, faction_quest: 0, factions_changed: 0,
       deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0, faction_quest: 0 },
     });
-    const z = zoneInput();
-    (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string }[] }).npcs.filter((n) => n.name !== 'Supplier Jul');
-    await load(z);
+    await load(zoneInput(undefined, (r) => void (r.npcs = r.npcs.filter((n) => n.name !== 'Supplier Jul'))));
     expect(await all('SELECT name, active FROM npc WHERE name = \'Supplier Jul\'')).toEqual([{ name: 'Supplier Jul', active: 0 }]);
   });
 
@@ -162,7 +167,7 @@ describe('order 17: zone import', () => {
     const res = await load(zoneInput(), true);
     expect(res.status).toBe('dry-run');
     expect(res.predicted!.zones).toEqual({
-      zone: 5, zone_name: 23, npc: 6, import_source: 6, faction: 3, npc_faction: 8, faction_quest: 3, factions_changed: 3,
+      zone: 5, zone_name: 23, npc: 6, import_source: 4, faction: 3, npc_faction: 8, faction_quest: 3, factions_changed: 3,
       deactivate: { zone: 0, zone_name: 0, npc: 0, faction: 0, npc_faction: 0, faction_quest: 0 },
     });
     expect(await all('SELECT key FROM zone')).toEqual([]);
@@ -177,9 +182,10 @@ describe('order 17: zone import', () => {
       'SELECT l.zone_key, l.npc_name, f.name AS faction, l.kind FROM npc_faction l JOIN faction f ON f.id = l.faction_id ORDER BY 1, 2, 3, 4',
     );
     expect(links.map((l) => `${l.zone_key}:${l.npc_name}:${l.faction}:${l.kind}`)).toEqual([
-      // The case-only duplicate record's " Gnoll Pack " is trimmed and folds into the first record's link.
-      'evershade weald:A gnoll scout:Gnoll Pack:lost',
-      'evershade weald:A gnoll scout:Weald Rangers:gained',
+      // The case-only duplicate record's " Gnoll Pack " is trimmed and folds into the first record's link (pages A→Z:
+      // "A Gnoll scout" first).
+      'evershade weald:A Gnoll scout:Gnoll Pack:lost',
+      'evershade weald:A Gnoll scout:Weald Rangers:gained',
       'evershade weald:Marshal Harding:Gnoll Pack:gained',
       'evershade weald:Marshal Harding:Gnoll Pack Elders:gained',
       'evershade weald:Marshal Harding:Weald Rangers:lost',
@@ -196,11 +202,11 @@ describe('order 17: zone import', () => {
     const at = async () => Object.fromEntries((await all<{ name: string; changed_at: string }>('SELECT name, changed_at FROM faction')).map((f) => [f.name, f.changed_at]));
     const first = await at();
     await new Promise((r) => setTimeout(r, 5));
-    const z = zoneInput();
-    const npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string; level?: string; opposing_factions?: string[] }[] }).npcs;
     // Marshal Harding loses "Gnoll Pack Elders" (its only NPC); the gnoll scout's level changes.
-    npcs.find((n) => n.name === 'Marshal Harding')!.opposing_factions = ['Gnoll Pack'];
-    npcs.find((n) => n.name === 'A gnoll scout')!.level = '~9-11';
+    const z = zoneInput(undefined, (r) => {
+      r.npcs.find((n) => n.name === 'Marshal Harding')!.opposing_factions = ['Gnoll Pack'];
+      r.npcs.find((n) => n.name === 'A gnoll scout')!.level = '~9-11';
+    });
     const res = await load(z);
     expect(res.predicted!.zones!.deactivate).toMatchObject({ faction: 1, npc_faction: 2 });
     expect(res.predicted!.zones!.factions_changed).toBe(3);
@@ -220,10 +226,16 @@ describe('order 17: zone import', () => {
 
   it('refuses a malformed zone source without writing zone rows', async () => {
     const z = zoneInput();
-    z.files['mo-betta/zones.json'] = { zones: 'nope' };
+    z.files['mnm-tools/maps.json'] = { zones: 'nope' };
     const res = await load(z);
     expect(res.status).toBe('failed');
-    expect(res.error).toMatch(/zone sources: mo-betta\/zones.json: zones is not a list/);
+    expect(res.error).toMatch(/zone sources: mnm-tools\/maps.json: zones is not a list/);
+    expect(await all('SELECT key FROM zone')).toEqual([]);
+    // A snapshot whose zone pages use no {{ZoneDetails}} is refused the same way.
+    const bare = zoneInput(undefined, (r) => void (r.zones = []));
+    const res2 = await load(bare);
+    expect(res2.status).toBe('failed');
+    expect(res2.error).toMatch(/zone sources: wiki snapshot: no zone page uses \{\{ZoneDetails\}\}/);
     expect(await all('SELECT key FROM zone')).toEqual([]);
   });
 });
@@ -253,8 +265,7 @@ describe('order 25: quest lines and the approved faction merges', () => {
     expect((await load()).written!.faction_quest.rows_written).toBe(0);
     const before = (await all<{ changed_at: string }>("SELECT changed_at FROM faction WHERE name = 'Weald Rangers'"))[0].changed_at;
     await new Promise((r) => setTimeout(r, 5));
-    const z = zoneInput();
-    (z.files['mo-betta/quests.json'] as { quests: { title: string; rewards: string[] }[] }).quests.find((q) => q.title === 'Ranger Trial')!.rewards = ['Faction with Weald Rangers'];
+    const z = zoneInput(undefined, (r) => void (r.quests.find((q) => q.title === 'Ranger Trial')!.rewards = ['Faction with Weald Rangers']));
     const res = await load(z);
     expect(res.predicted!.zones).toMatchObject({ faction_quest: 1, deactivate: { faction_quest: 1 } });
     expect(await all("SELECT line, active FROM faction_quest WHERE quest_title = 'Ranger Trial' ORDER BY line")).toEqual([
@@ -282,17 +293,18 @@ describe('order 25: quest lines and the approved faction merges', () => {
   });
 
   it('a stored misspelling is deactivated (row kept), its links move to the approved name, and both are marked to re-render', async () => {
-    const z = zoneInput();
-    const npcs = (z.files['mo-betta/npcs.json'] as { npcs: { name: string; factions?: string[] }[] }).npcs;
-    npcs.find((n) => n.name === 'A gnoll scout')!.factions = ['Gnoll Pack', 'Red Mantles'];
-    await load(z);
+    await load(zoneInput(undefined, (r) => void (r.npcs.find((n) => n.name === 'A gnoll scout')!.factions = ['Gnoll Pack', 'Red Mantles'])));
     // As an import before order 25 stored it: the misspelling as its own faction, with a link.
     await env.DB.batch([
       env.DB.prepare("INSERT INTO faction (name, active, changed_at) VALUES ('Red Mantle', 1, '2026-10-01T00:00:00.000Z')"),
       env.DB.prepare("INSERT INTO npc_faction (zone_key, npc_name, faction_id, kind, active) SELECT 'evershade weald', 'Marshal Harding', id, 'lost', 1 FROM faction WHERE name = 'Red Mantle'"),
     ]);
-    npcs.find((n) => n.name === 'Marshal Harding')!.factions = ['Weald Rangers', ' Red Mantle '];
-    const res = await load(z);
+    const res = await load(
+      zoneInput(undefined, (r) => {
+        r.npcs.find((n) => n.name === 'A gnoll scout')!.factions = ['Gnoll Pack', 'Red Mantles'];
+        r.npcs.find((n) => n.name === 'Marshal Harding')!.factions = ['Weald Rangers', ' Red Mantle '];
+      }),
+    );
     expect(res.zones!.factions.merged).toEqual([{ from: 'Red Mantle', to: 'Red Mantles', rows: 2 }]);
     expect(await all("SELECT name, active FROM faction WHERE name LIKE 'Red Mantle%' ORDER BY name")).toEqual([
       { name: 'Red Mantle', active: 0 },
@@ -300,7 +312,7 @@ describe('order 25: quest lines and the approved faction merges', () => {
     ]);
     expect(await all("SELECT l.zone_key, l.npc_name, f.name AS faction, l.active FROM npc_faction l JOIN faction f ON f.id = l.faction_id WHERE f.name LIKE 'Red Mantle%' ORDER BY 3, 1, 2")).toEqual([
       { zone_key: 'evershade weald', npc_name: 'Marshal Harding', faction: 'Red Mantle', active: 0 },
-      { zone_key: 'evershade weald', npc_name: 'A gnoll scout', faction: 'Red Mantles', active: 1 },
+      { zone_key: 'evershade weald', npc_name: 'A Gnoll scout', faction: 'Red Mantles', active: 1 },
       { zone_key: 'evershade weald', npc_name: 'Marshal Harding', faction: 'Red Mantles', active: 1 },
       { zone_key: "keeper's bight", npc_name: 'Marshal Harding', faction: 'Red Mantles', active: 1 },
     ]);

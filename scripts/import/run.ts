@@ -1,6 +1,7 @@
 // Import CLI — the same code locally and in the nightly Action.
-//   node scripts/import/run.ts --local  [--dry-run] [--file wiki.json --sha <sha> [--zones-dir <dir>]]
-//   node scripts/import/run.ts --remote [--dry-run]   (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID from the environment)
+//   node scripts/import/run.ts --local  [--dry-run] [--file wiki.json --sha <sha> [--zones-dir <dir>]] [--wiki-snapshot <dir>]
+//   node scripts/import/run.ts --remote [--dry-run] (--wiki-snapshot <dir> | --zones-kept <reason>)
+//     (CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID from the environment)
 // Prints counts and IDs only, never a credential.
 
 import { readFileSync } from 'node:fs';
@@ -10,10 +11,8 @@ import { isFailing } from '../../src/import-status.ts';
 import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, localDb, remoteDb } from './db.ts';
 import { fetchSource, fetchZoneSources, SOURCE_NAME } from './source.ts';
-import { readZoneDir } from './zone-files.ts';
-import { wikiVersion, type ZoneInput } from './zones.ts';
-import type { WikiSnapshot } from '../wiki/types.ts';
-import { join } from 'node:path';
+import { COMMITTED_SNAPSHOT, readSnapshot, readZoneDir } from './zone-files.ts';
+import { withWiki, type ZoneSources } from './zones.ts';
 import { alarm } from '../ci/alarm.ts';
 
 const { values: args } = parseArgs({
@@ -24,14 +23,18 @@ const { values: args } = parseArgs({
     file: { type: 'string' },
     sha: { type: 'string' },
     'zones-dir': { type: 'string' },
-    // Order 28, ITEM 3: the zone data from a wiki snapshot instead of Mo Betta, on the local D1 only (gate line 5's
-    // measurement). The nightly import is unchanged until PR B.
+    // Order 28b, PR D: the zone data's wiki snapshot directory (import.yml's wiki job's artifact). Locally it defaults to
+    // the committed snapshot (data/wiki-snapshot, order 28's override 8).
     'wiki-snapshot': { type: 'string' },
+    // Order 28's override 9: the wiki job failed (its reason here): the game data imports, the zone tables keep
+    // yesterday's data, and the run is recorded as zones-kept (failing, so the alarm notifies).
+    'zones-kept': { type: 'string' },
   },
 });
 
 if (args.local === args.remote) throw new Error('pass exactly one of --local or --remote');
-if (args['wiki-snapshot'] && !args.local) throw new Error('--wiki-snapshot is for the local D1 only (order 28, PR A)');
+if (args['wiki-snapshot'] && args['zones-kept']) throw new Error('pass --wiki-snapshot or --zones-kept, not both');
+if (args.remote && !args['wiki-snapshot'] && !args['zones-kept']) throw new Error('--remote needs --wiki-snapshot <dir>, or --zones-kept <reason> when the wiki job failed');
 
 let db: Db;
 let dispose = async () => {};
@@ -47,27 +50,29 @@ if (args.local) {
 
 try {
   // Order 17: the zone sources come with wiki.json (fetched pinned), or from a directory zone-files.ts wrote (--zones-dir).
-  let sha: string, raw: unknown, zones: ZoneInput | undefined;
+  let sha: string, raw: unknown, sources: ZoneSources | undefined;
   if (args.file) {
     sha = args.sha ?? 'local-file';
     raw = JSON.parse(readFileSync(args.file, 'utf8')) as unknown;
-    zones = args['zones-dir'] ? readZoneDir(args['zones-dir']) : undefined;
+    sources = args['zones-dir'] ? readZoneDir(args['zones-dir']) : undefined;
   } else {
     const wiki = await fetchSource(process.env.GITHUB_TOKEN);
     ({ sha, raw } = wiki);
-    zones = await fetchZoneSources({ name: SOURCE_NAME, sha, changedAt: wiki.changedAt }, process.env.GITHUB_TOKEN);
+    sources = await fetchZoneSources({ name: SOURCE_NAME, sha, changedAt: wiki.changedAt }, process.env.GITHUB_TOKEN);
   }
-  if (args['wiki-snapshot'] && !zones) throw new Error('--wiki-snapshot needs the zone sources: pass --zones-dir with --file');
-  if (args['wiki-snapshot'] && zones) {
-    const snap = JSON.parse(readFileSync(join(args['wiki-snapshot'], 'snapshot.json'), 'utf8')) as WikiSnapshot;
-    zones = { ...zones, wiki: snap, versions: [...zones.versions, wikiVersion(snap)] };
-  }
+  if (args['wiki-snapshot'] && !sources) throw new Error('--wiki-snapshot needs the zone sources: pass --zones-dir with --file');
+  // Order 28b, PR D: the zone part reads the wiki snapshot, unless the wiki job failed (zones-kept: the tables stay).
+  const zonesKept = args['zones-kept'];
+  const zones = sources && !zonesKept ? withWiki(sources, readSnapshot(args['wiki-snapshot'] ?? COMMITTED_SNAPSHOT)) : undefined;
+  if (zones) console.log(`wiki snapshot: revid ${zones.wiki.version.revid} (${zones.wiki.version.timestamp}), fetched ${zones.wiki.fetchedAt}`);
+  if (zonesKept) console.log(`::warning::zone data kept (yesterday's): ${zonesKept}`);
   const result = await runImport(db, raw, {
     sourceSha: sha,
     now: () => new Date().toISOString(),
     dryRun: args['dry-run'],
     requireDryRun: args.remote,
     zones,
+    zonesKept,
   });
   console.log(JSON.stringify({ target: args.local ? 'local' : 'remote', ...result }, null, 2));
   // Order 13: a new value for a /gear find choice list, or a stop at the write ceiling, shows in the run's summary as a
