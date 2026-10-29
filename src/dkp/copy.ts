@@ -88,6 +88,8 @@ export const RAID_COPY = {
   noName: 'Pick or type the named.',
   respawnAsk: (name: string) => `**${md(name)}** was recorded less than 2 minutes ago. Was it a respawn?`,
   respawnYes: 'Yes, record it again',
+  respawnDone: 'Already recorded again.',
+  flatPaid: 'This raid has already paid its flat value.',
   killed: (name: string, points: number, n: number) => `Recorded **${md(name)}**: ${points} raid points to ${plural(n, 'member')}.`,
   paid: (points: number, n: number) => `Paid ${points} raid points to ${plural(n, 'member')}.`,
   raidClosed: 'This raid is closed.',

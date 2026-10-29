@@ -139,11 +139,10 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   const at = now();
   // One approval wins, and it pays in the same batch (review of PR A): the status changes once, and the payment is
   // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing. A
-  // correction's statements need no gate: a reversal acts only where the member is credited on the kill, a re-add only
-  // where they are not, so a second run of either writes nothing.
+  // correction is gated the same way (review of PR B: a refused press must change nothing).
   const pays =
     p.kind === 'correction' && p.raid_id !== null && p.action
-      ? await correctionStatements(c.db, c.guild.id, d.settings.cap, { member: p.member_id, action: p.action, raidId: p.raid_id, killId: p.kill_id, reason: p.reason, actor: c.userId, at })
+      ? await correctionStatements(c.db, c.guild.id, d.settings.cap, { member: p.member_id, action: p.action, raidId: p.raid_id, killId: p.kill_id, reason: p.reason, actor: c.userId, at, approvedPending: pid })
       : [
           registerPool(c.db, c.guild.id, p.pool, at),
           payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),

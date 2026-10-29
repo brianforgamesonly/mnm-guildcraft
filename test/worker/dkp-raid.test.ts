@@ -186,6 +186,43 @@ describe('raid nights (ITEM 4)', () => {
     expect(await balance(kestrel, 'the ruins')).toBe(20);
   });
 
+  it('review of PR B: the respawn confirm records once, however often it is pressed; flat mode pays once; a refused approval changes nothing', async () => {
+    await open();
+    const { id } = await raid();
+    await pressAs(kestrel, `${PRESENT_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Kestrel the Old' });
+    const confirm = (await dkp(officer, 'kill', { named: 'Kestrel the Old' })).data.components![0].components[0].custom_id;
+    const first = await pressAs(officer, confirm);
+    expect(first.type).toBe(7);
+    expect(first.data.components).toEqual([]);
+    expect((await pressAs(officer, confirm)).data.content).toBe(RAID_COPY.respawnDone);
+    expect(await count('dkp_kill')).toBe(2);
+    // A correction over 20 points, lapsed (Remove DKP lapses open ones; here its time passes): Approve changes nothing.
+    await pressAs(officer, `${PRESENT_PREFIX}${id}`);
+    await dkp(officer, 'correct', { member: kestrel.user.id, action: 'remove', reason: 'afk all night' });
+    const p = await one<{ id: number }>("SELECT id FROM dkp_pending WHERE kind = 'correction'");
+    await env.DB.prepare("UPDATE dkp_pending SET due_at = '2000-01-01T00:00:00Z'").run();
+    const before = await count('dkp_ledger');
+    expect((await pressAs(officerB, `${APPROVE_PREFIX}${p.id}`)).data.content).toBe(DKP_COPY.notOpen);
+    expect(await count('dkp_ledger')).toBe(before);
+    expect(await balance(kestrel, 'the ruins')).toBe(20);
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    await open('The Ruins', 'flat');
+    const flat = await raid();
+    await pressAs(kestrel, `${PRESENT_PREFIX}${flat.id}`);
+    await pressAs(officer, `${PAY_PREFIX}${flat.id}`);
+    expect((await pressAs(officer, `${PAY_PREFIX}${flat.id}`)).data.content).toBe(RAID_COPY.flatPaid);
+    expect(await balance(kestrel, 'the ruins')).toBe(50);
+  });
+
+  it('a raid whose card Discord refuses is closed at once, so the next /dkp raid is not refused', async () => {
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'POST' && /\/messages$/.test(p) && b?.embeds?.[0]?.title?.startsWith('Raid') ? json({ code: 50013, message: 'Missing Permissions' }, 403) : handle(m, p, b));
+    expect((await open()).data.content).toBe(RAID_COPY.cannotPost);
+    botApi.handle = handle;
+    expect((await open()).data.content).toMatch(/^Raid open/);
+  });
+
   it('a typed name the data lacks is accepted and stored as typed', async () => {
     await open();
     await dkp(officer, 'kill', { named: 'Sir Unlisted' });

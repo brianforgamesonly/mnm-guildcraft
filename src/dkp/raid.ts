@@ -5,7 +5,8 @@
 // Costs per press (D1 statements; Discord calls), besides the interaction's own reply:
 //   Present / Standby / Leaving: guild, DKP state, the member row (touchMember), the raid, one write batch: 5 D1; 0 Discord
 //     (the card edit is a timer item: 1 Durable Object request).
-//   Named killed / /dkp kill / Pay attendance: guild, state, raid, respawn check, earners, the kill, one pay batch: 7 D1; 0
+//   Named killed / /dkp kill / Pay attendance: guild, state, raid, respawn (or flat) check, named value, earners, the kill,
+//     one pay batch: 8 D1; 0
 //     Discord (card edit: a timer item).
 //   Check again: guild, state, raid, latest kill, one write: 5 D1; 0 Discord. Who's here / Who earned: 3-4 D1; 0 Discord.
 //   Close raid: guild, state, close, card render (1 batch), summary, standings (2 + 1 per pool): about 8 D1; 3 Discord.
@@ -190,6 +191,9 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
   const mode = optString(opts, 'mode') === 'flat' ? 'flat' : 'named';
   const open = await openRaid(c.db, c.guild.id);
   if (open) return ephemeral(RAID_COPY.alreadyOpen(link(c.guild.id, d.channel_id, open.message_id)));
+  // No card, no raid (review of PR B): a raid that cannot be posted could never be closed.
+  const api = apiFor(c);
+  if (!api || !d.channel_id) return ephemeral(RAID_COPY.cannotPost);
   const at = now();
   const closes = new Date(Date.parse(at) + d.settings.auto_close_hours * 3_600_000).toISOString();
   let raid: Raid | null;
@@ -204,17 +208,20 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
     return ephemeral(RAID_COPY.alreadyOpen(link(c.guild.id, d.channel_id, won?.message_id ?? null)));
   }
   await c.db.batch([registerPool(c.db, c.guild.id, zone.key, at), registerPool(c.db, c.guild.id, POOL_GUILD, at), audit(c.db, c.guild.id, c.userId, 'dkp.raid.open', `raid:${raid!.id}`, null, { pool: zone.key, mode })]);
-  const api = apiFor(c);
   try {
-    if (!api || !d.channel_id) return ephemeral(RAID_COPY.cannotPost);
     // A pool's first raid: its standings message first, so it sits above the card.
     await refreshStandings(c.db, api, c.guild.id, d.channel_id, [zone.key]);
     const id = await postIn(api, d.channel_id, cardMessage(await cardData(c.db, raid!), c.guild.id));
-    if (id) await c.db.prepare('UPDATE dkp_raid SET message_id = ? WHERE id = ?').bind(id, raid!.id).run();
+    if (!id) {
+      // The card was refused: the raid closes at once, so the next /dkp raid is not refused as "already open".
+      await c.db.prepare("UPDATE dkp_raid SET closed_at = ?1, closed_by = 'bot', close_reason = 'officer' WHERE id = ?2 AND closed_at IS NULL").bind(now(), raid!.id).run();
+      return ephemeral(RAID_COPY.cannotPost);
+    }
+    await c.db.prepare('UPDATE dkp_raid SET message_id = ? WHERE id = ?').bind(id, raid!.id).run();
     c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `close:${raid!.id}`, due: Date.parse(closes) }] };
     return ephemeral(RAID_COPY.opened(zone.name, link(c.guild.id, d.channel_id, id)));
   } finally {
-    if (api) c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
+    c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
   }
 };
 
@@ -228,6 +235,8 @@ async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, 
       .first<{ id: number }>();
     if (prev) return ephemeral(RAID_COPY.respawnAsk(name), { components: [row([button(`${RESPAWN_PREFIX}${prev.id}`, RAID_COPY.respawnYes, STYLE_PRIMARY)])] });
   }
+  // Flat mode pays once (review of PR B): Pay attendance pressed again pays nothing.
+  if (name === null && (await c.db.prepare('SELECT 1 FROM dkp_kill WHERE raid_id = ? AND name IS NULL').bind(raid.id).first())) return ephemeral(RAID_COPY.flatPaid);
   const s = d.settings;
   const points =
     name === null
@@ -241,10 +250,12 @@ async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, 
     .bind(c.guild.id, raid.id)
     .all<{ member_id: string }>();
   const earners = results.map((r) => r.member_id);
+  // Only into a raid still open (review of PR B: a press racing Close records nothing).
   const kill = await c.db
-    .prepare('INSERT INTO dkp_kill (raid_id, name, points, guild_points, at, by) VALUES (?, ?, ?, ?, ?, ?) RETURNING id')
+    .prepare('INSERT INTO dkp_kill (raid_id, name, points, guild_points, at, by) SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM dkp_raid WHERE id = ?1 AND closed_at IS NULL) RETURNING id')
     .bind(raid.id, name, points, s.guild_points, at, c.userId)
     .first<{ id: number }>();
+  if (!kill) return ephemeral(RAID_COPY.raidClosed);
   const kind = name === null ? 'flat' : 'kill';
   if (earners.length)
     await c.db.batch([
@@ -280,7 +291,7 @@ async function correctionScope(c: Ctx, killId: number | undefined) {
  * Once-only by their own conditions (a reversal needs the member credited, a re-add needs them not), so an approval batches
  * them with its status change.
  */
-export async function correctionStatements(db: D1Database, guildId: string, cap: number, k: { member: string; action: 'add' | 'remove'; raidId: number; killId: number | null; reason: string; actor: string; at: string }) {
+export async function correctionStatements(db: D1Database, guildId: string, cap: number, k: { member: string; action: 'add' | 'remove'; raidId: number; killId: number | null; reason: string; actor: string; at: string; approvedPending?: number }) {
   const { results: kills } = await db
     .prepare('SELECT id, points, guild_points FROM dkp_kill WHERE raid_id = ? AND (?2 IS NULL OR id = ?2) ORDER BY id')
     .bind(k.raidId, k.killId)
@@ -293,8 +304,8 @@ export async function correctionStatements(db: D1Database, guildId: string, cap:
       [POOL_GUILD, kill.guild_points],
     ].map(([pool, asked]) =>
       k.action === 'remove'
-        ? reverseStatement(db, { guildId, pool: pool as string, killId: kill.id, members: [k.member], reason: k.reason, actor: k.actor, at })
-        : readdStatement(db, { guildId, pool: pool as string, killId: kill.id, asked: asked as number, cap, members: [k.member], reason: k.reason, actor: k.actor, at }),
+        ? reverseStatement(db, { guildId, pool: pool as string, killId: kill.id, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending })
+        : readdStatement(db, { guildId, pool: pool as string, killId: kill.id, asked: asked as number, cap, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending }),
     ),
   );
 }
@@ -369,7 +380,12 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
     const prev = await c.db.prepare('SELECT k.name, k.raid_id FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ?').bind(Number(rest), c.guild.id).first<{ name: string; raid_id: number }>();
     const raid = prev ? await raidById(c.db, c.guild.id, prev.raid_id) : null;
     if (!raid || raid.closed_at) return ephemeral(RAID_COPY.raidClosed);
-    return recordKill(c, d, raid, prev!.name, true);
+    // Once per question (review of PR B): a later kill of the same named means this confirm was already used; the answer
+    // replaces the question, so its button is gone.
+    const again = await c.db.prepare('SELECT 1 FROM dkp_kill WHERE raid_id = ? AND lower(name) = lower(?) AND id > ?').bind(raid.id, prev!.name, Number(rest)).first();
+    if (again) return updateMessage({ content: RAID_COPY.respawnDone, components: [] });
+    const r = await recordKill(c, d, raid, prev!.name, true);
+    return updateMessage({ content: r.data.content, components: [] });
   }
   const raid = await raidById(c.db, c.guild.id, Number(rest));
   if (!raid) return null;
@@ -450,13 +466,13 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
 // ---------------------------------------------------------------- timers (src/dkp/due.ts)
 
 /** check:<kill id>: members credited on the kill who did not tap again lose it, and are absent from now on. Idempotent. */
-export async function closeCheck(db: D1Database, guildId: string, killId: number, nowMs: number): Promise<number | null> {
+export async function closeCheck(db: D1Database, guildId: string, killId: number, nowMs: number): Promise<{ again: number } | { raidId: number } | null> {
   const k = await db
     .prepare('SELECT k.raid_id, r.pool, k.check_due FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ? AND k.check_closed_at IS NULL AND k.check_due IS NOT NULL')
     .bind(killId, guildId)
     .first<{ raid_id: number; pool: string; check_due: string }>();
   if (!k) return null;
-  if (Date.parse(k.check_due) > nowMs) return Date.parse(k.check_due);
+  if (Date.parse(k.check_due) > nowMs) return { again: Date.parse(k.check_due) };
   const { results } = await db
     .prepare(
       `SELECT l.member_id FROM dkp_ledger l WHERE l.kill_id = ?1 AND l.pool = ?2 GROUP BY l.member_id HAVING sum(l.amount + l.cut) > 0
@@ -478,7 +494,7 @@ export async function closeCheck(db: D1Database, guildId: string, killId: number
         ]
       : []),
   ]);
-  return k.raid_id;
+  return { raidId: k.raid_id };
 }
 
 /** Closes a raid (Close raid, or close:<raid id> at closes_at): the card, the night's summary, the standings. Idempotent. */

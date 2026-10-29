@@ -52,7 +52,11 @@ export function payStatement(db: D1Database, p: Payment): D1PreparedStatement {
  * Removes members from one kill in one pool: for each member whose asked amounts on that kill sum above zero, a correction
  * row returning what was actually paid (corrects: their latest row for the kill). Members not credited get no row.
  */
-export function reverseStatement(db: D1Database, r: { guildId: string; pool: string; killId: number; members: string[]; reason: string; actor: string; at: string }): D1PreparedStatement {
+/** An approval's gate (review of PR B): writes only while pending row ?id stands approved by this actor at this time. */
+const APPROVED_GATE = (id: string, actor: string, at: string) =>
+  `(${id} IS NULL OR EXISTS (SELECT 1 FROM dkp_pending q WHERE q.id = ${id} AND q.status = 'approved' AND q.decided_by = ${actor} AND q.decided_at = ${at}))`;
+
+export function reverseStatement(db: D1Database, r: { guildId: string; pool: string; killId: number; members: string[]; reason: string; actor: string; at: string; approvedPending?: number }): D1PreparedStatement {
   return db
     .prepare(
       `WITH t AS (SELECT j.value AS member_id, ${PREV('j.value')} AS prev,
@@ -62,27 +66,27 @@ export function reverseStatement(db: D1Database, r: { guildId: string; pool: str
                   FROM json_each(?4) j)
        INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at)
        SELECT ?1, member_id, ?2, -paid, paid - asked, prev - paid, 'correction', (SELECT raid_id FROM dkp_kill WHERE id = ?3), ?3, last, ?5, ?6, ?7
-       FROM t WHERE asked > 0`,
+       FROM t WHERE asked > 0 AND ${APPROVED_GATE('?8', '?6', '?7')}`,
     )
-    .bind(r.guildId, r.pool, r.killId, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at);
+    .bind(r.guildId, r.pool, r.killId, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at, r.approvedPending ?? null);
 }
 
 /**
  * Adds members to one kill in one pool (an officer's correction): for each member whose asked amounts on that kill are not
  * above zero, a correction row asking `asked`, capped against the cap now (corrects: their latest row for the kill, if any).
  */
-export function readdStatement(db: D1Database, r: { guildId: string; pool: string; killId: number; asked: number; cap: number; members: string[]; reason: string; actor: string; at: string }): D1PreparedStatement {
+export function readdStatement(db: D1Database, r: { guildId: string; pool: string; killId: number; asked: number; cap: number; members: string[]; reason: string; actor: string; at: string; approvedPending?: number }): D1PreparedStatement {
   return db
     .prepare(
       `WITH t AS (SELECT j.value AS member_id, ${PREV('j.value')} AS prev,
                     (SELECT coalesce(sum(k.amount + k.cut), 0) FROM dkp_ledger k WHERE k.kill_id = ?3 AND k.member_id = j.value AND k.pool = ?2) AS asked,
                     (SELECT max(k.id) FROM dkp_ledger k WHERE k.kill_id = ?3 AND k.member_id = j.value AND k.pool = ?2) AS last
                   FROM json_each(?6) j),
-            a AS (SELECT member_id, prev, last, min(?4, max(0, ?5 - prev)) AS applied FROM t WHERE asked <= 0)
+            a AS (SELECT member_id, prev, last, min(?4, max(0, ?5 - prev)) AS applied FROM t WHERE asked <= 0 AND ${APPROVED_GATE('?10', '?8', '?9')})
        INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at)
        SELECT ?1, member_id, ?2, applied, ?4 - applied, prev + applied, 'correction', (SELECT raid_id FROM dkp_kill WHERE id = ?3), ?3, last, ?7, ?8, ?9 FROM a`,
     )
-    .bind(r.guildId, r.pool, r.killId, r.asked, r.cap, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at);
+    .bind(r.guildId, r.pool, r.killId, r.asked, r.cap, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at, r.approvedPending ?? null);
 }
 
 // ---------------------------------------------------------------- the one reader

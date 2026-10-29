@@ -40,8 +40,8 @@ const lapse: Handler = async (env, guildId, id, _due, now, api) => {
 const check: Handler = async (env, guildId, id, _due, now) => {
   const r = await closeCheck(env.DB, guildId, Number(id), now);
   if (r === null) return null;
-  if (r > now + 1000) return { again: r };
-  return { schedule: [{ key: `render:${r}`, due: now }] };
+  if ('again' in r) return { again: r.again };
+  return { schedule: [{ key: `render:${r.raidId}`, due: now }] };
 };
 
 /** close:<raid id>: the raid closes itself at its closes_at. */
