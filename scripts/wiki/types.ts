@@ -43,5 +43,6 @@ export interface WikiSnapshot {
   buckets: Record<string, { schema: string | null; fields: string[]; rows: Record<string, unknown>[] | null; error?: string }>;
   /** ITEM 3: main-namespace edits and creations in the 24 hours before the fetch. */
   recentChanges: { since: string; changes: { title: string; timestamp: string }[] };
-  requests: { count: number; bytes: number; maxlagWaits: number; log: { shape: string; status: number | null; bytes: number; attempts: number }[] };
+  /** Every request, with what it read (a category's title, or the shape's own subject). */
+  requests: { count: number; bytes: number; maxlagWaits: number; log: { shape: string; target: string; status: number | null; bytes: number; attempts: number }[] };
 }

@@ -56,17 +56,18 @@ export class Relay {
   /** One allowed request. Returns the parsed answer; a bucket's own error string is returned for the caller to record. */
   async call(shape: string, params: Record<string, string>): Promise<Json> {
     const qs = new URLSearchParams({ ...params, format: 'json', formatversion: '2', maxlag: MAXLAG });
+    const target = params.cmtitle ?? params.gcmtitle ?? params.titles ?? (params.query ? params.query.slice(0, 20) : shape);
     for (let lagged = 0; ; ) {
       if (this.count >= this.cap) throw new SnapshotStop(`request cap reached (${this.cap}) before ${shape}`);
       const got = await this.get(`${this.base}/api?${qs}`, { headers: { 'x-relay-token': this.token }, mayRetry: () => this.count + 2 <= this.cap });
       this.count += got.attempts;
       if (!got.res) {
-        this.log.push({ shape, status: null, bytes: 0, attempts: got.attempts });
+        this.log.push({ shape, target, status: null, bytes: 0, attempts: got.attempts });
         throw new SnapshotStop(`${shape}: no answer after ${got.attempts} attempt(s): ${got.error}`);
       }
       const { res, bytes } = got;
       this.bytes += bytes.byteLength;
-      this.log.push({ shape, status: res.status, bytes: bytes.byteLength, attempts: got.attempts });
+      this.log.push({ shape, target, status: res.status, bytes: bytes.byteLength, attempts: got.attempts });
       const body = new TextDecoder().decode(bytes);
       // A block is an answer (override 7): stop, report, never retry.
       if (res.status === 403 || res.status === 429 || res.headers.has('cf-mitigated'))
@@ -158,30 +159,75 @@ export function schemaFields(schema: string | null): string[] {
   }
 }
 
-export async function takeSnapshot(relay: Relay, now: Date): Promise<WikiSnapshot> {
+/** One planned content fetch: a whole category, 50 pages a request (continuation for oversized content may add a few). */
+export interface PlannedFetch {
+  root: string;
+  category: string;
+  /** The category's pages, and how many of them no earlier fetch in the plan brings. */
+  pages: number;
+  newPages: number;
+  requests: number;
+}
+/** The requests after the content: the schema pages (1), one per bucket, and the recent changes (1). */
+export const TAIL_REQUESTS = 1 + BUCKETS.length + 1;
+
+/**
+ * Order 28 (the owner, 2026-10-29: plan first): the content fetches, decided from the title listings before any content
+ * is read. Each tree's root first, then, repeatedly, the category holding the most pages no earlier fetch brings. A
+ * category whose pages all come with earlier fetches is never fetched.
+ */
+export function planContent(categories: Record<string, SnapshotCategory>): PlannedFetch[] {
+  const have = new Set<string>();
+  const plan: PlannedFetch[] = [];
+  const take = (root: string, c: string) => {
+    const pages = categories[c].pages;
+    const newPages = pages.filter((t) => !have.has(t)).length;
+    plan.push({ root, category: c, pages: pages.length, newPages, requests: Math.max(1, Math.ceil(pages.length / 50)) });
+    for (const t of pages) have.add(t);
+  };
+  for (const root of TREES) {
+    if (!categories[root]) continue;
+    if (categories[root].pages.some((t) => !have.has(t))) take(root, root);
+    const inTree = Object.keys(categories).filter((c) => categories[c].roots.includes(root) && c !== root);
+    const missing = (c: string) => categories[c].pages.filter((t) => !have.has(t)).length;
+    for (;;) {
+      const next = inTree.filter((c) => missing(c) > 0).sort((a, b) => missing(b) - missing(a) || a.localeCompare(b))[0];
+      if (!next) break;
+      take(root, next);
+    }
+  }
+  return plan;
+}
+
+/** The run stopped before any content: the plan does not fit the cap (or only the plan was asked for). */
+export class PlanStop extends SnapshotStop {
+  plan: PlannedFetch[];
+  listed: number;
+  constructor(message: string, plan: PlannedFetch[], listed: number) {
+    super(message);
+    this.plan = plan;
+    this.listed = listed;
+  }
+}
+
+export async function takeSnapshot(relay: Relay, now: Date, opts: { planOnly?: boolean } = {}): Promise<WikiSnapshot> {
   const site = await relay.call('siteinfo', { action: 'query', meta: 'siteinfo' });
   const general = site.query?.general ?? {};
 
   const categories: Record<string, SnapshotCategory> = {};
   for (const root of [...TREES, ...MEMBERSHIP]) await walk(relay, root, categories);
 
-  // Content, a category at a time, for the trees only (the membership categories are read as titles): each tree's root
-  // first, then any category holding a page not fetched yet (most first).
+  // The plan, before any content: a run that cannot finish within the cap stops here, having read titles only.
+  const plan = planContent(categories);
+  const planned = plan.reduce((n, p) => n + p.requests, 0) + TAIL_REQUESTS;
+  if (opts.planOnly) throw new PlanStop(`plan only: ${relay.count} listing requests made, ${planned} more planned`, plan, relay.count);
+  if (relay.count + planned > relay.cap)
+    throw new PlanStop(`the plan does not fit the cap: ${relay.count} listing requests made, ${planned} more planned, cap ${relay.cap}`, plan, relay.count);
+
+  // Content, a category at a time, for the trees only (the membership categories are read as titles), in the plan's
+  // order. A page listed but not returned (moved or deleted between the two requests) stays out, and the parser counts it.
   const pages: Record<string, SnapshotPage> = {};
-  for (const root of TREES) {
-    if (categories[root].pages.some((t) => !pages[t])) await categoryContent(relay, root, pages);
-    const inTree = Object.keys(categories).filter((c) => categories[c].roots.includes(root) && c !== root);
-    const missing = (c: string) => categories[c].pages.filter((t) => !pages[t]).length;
-    // Re-sorted after each fetch: one category's pages are often another's. Each category is fetched at most once; a page
-    // listed but not returned (moved or deleted between the two requests) stays out, and the parser counts it.
-    const tried = new Set<string>();
-    for (;;) {
-      const next = inTree.filter((c) => !tried.has(c) && missing(c) > 0).sort((a, b) => missing(b) - missing(a))[0];
-      if (!next) break;
-      tried.add(next);
-      await categoryContent(relay, next, pages);
-    }
-  }
+  for (const p of plan) await categoryContent(relay, p.category, pages);
 
   // The buckets, after their schema pages (select('*') is refused, so the fields come from the schema).
   const schemas: Record<string, SnapshotPage> = {};
@@ -247,11 +293,26 @@ the page text as fetched; its own parsing of it is shared under the same licence
 `;
 
 if (import.meta.main) {
-  const { values: args } = parseArgs({ options: { relay: { type: 'string' }, 'token-file': { type: 'string' }, out: { type: 'string' } } });
+  const { values: args } = parseArgs({
+    options: { relay: { type: 'string' }, 'token-file': { type: 'string' }, out: { type: 'string' }, 'plan-only': { type: 'boolean', default: false } },
+  });
   if (!args.relay || !args['token-file'] || !args.out) throw new Error('--relay, --token-file and --out are required');
   const relay = new Relay(args.relay, readFileSync(args['token-file'], 'utf8').trim());
+  /** Requests per shape and subject, most first: printed on every stop, so a stop says where the requests went. */
+  const spent = () => {
+    const by = new Map<string, { n: number; bytes: number }>();
+    for (const l of relay.log) {
+      const k = `${l.shape} ${l.target}`;
+      const v = by.get(k) ?? { n: 0, bytes: 0 };
+      by.set(k, { n: v.n + l.attempts, bytes: v.bytes + l.bytes });
+    }
+    return [...by].sort((a, b) => b[1].n - a[1].n).map(([k, v]) => `${v.n}\t${v.bytes}\t${k}`).join('\n');
+  };
+  const planTable = (s: PlanStop) =>
+    ['| Tree | Category | Pages | New pages | Requests |', '|---|---|---|---|---|', ...s.plan.map((p) => `| ${p.root} | ${p.category} | ${p.pages} | ${p.newPages} | ${p.requests} |`)].join('\n') +
+    `\n\nListing requests: ${s.listed}. Content requests planned: ${s.plan.reduce((n, p) => n + p.requests, 0)}, then ${TAIL_REQUESTS} for the schema pages, buckets and recent changes. Cap: ${REQUEST_CAP}.`;
   try {
-    const snap = await takeSnapshot(relay, new Date());
+    const snap = await takeSnapshot(relay, new Date(), { planOnly: args['plan-only'] });
     mkdirSync(args.out, { recursive: true });
     writeFileSync(join(args.out, 'snapshot.json'), JSON.stringify(snap));
     writeFileSync(join(args.out, 'CREDIT.md'), CREDIT);
@@ -264,8 +325,15 @@ if (import.meta.main) {
     console.log(`recent changes (24 h, main namespace): ${snap.recentChanges.changes.length}`);
     console.log(`requests: ${snap.requests.count} of ${REQUEST_CAP} (maxlag waits ${snap.requests.maxlagWaits}), ${snap.requests.bytes} bytes`);
   } catch (e) {
-    console.log(`::error::wiki snapshot stopped: ${e instanceof Error ? e.message : String(e)}`);
-    console.log(`requests: ${relay.count} of ${REQUEST_CAP}, ${relay.bytes} bytes`);
-    process.exitCode = 1;
+    if (e instanceof PlanStop) {
+      // The plan (titles only were read): plan.md for the job summary.
+      mkdirSync(args.out, { recursive: true });
+      writeFileSync(join(args.out, 'plan.md'), `### Wiki snapshot plan\n\n${e.message}\n\n${planTable(e)}\n`);
+      console.log(planTable(e));
+    }
+    const planOnly = args['plan-only'] && e instanceof PlanStop;
+    console.log(`${planOnly ? '' : '::error::wiki snapshot stopped: '}${e instanceof Error ? e.message : String(e)}`);
+    console.log(`requests: ${relay.count} of ${REQUEST_CAP}, ${relay.bytes} bytes. By request (attempts, bytes, what):\n${spent()}`);
+    if (!planOnly) process.exitCode = 1;
   }
 }

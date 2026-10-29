@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { allowed } from './allowed.ts';
 import { parseSnapshot, plain, templates, bullets, links, questRewards } from './parse.ts';
-import { Relay, REQUEST_CAP, SnapshotStop, takeSnapshot, type Getter } from './snapshot.ts';
+import { planContent, PlanStop, Relay, REQUEST_CAP, SnapshotStop, takeSnapshot, type Getter } from './snapshot.ts';
 import { CATEGORIES, type WikiSnapshot } from './types.ts';
 import { USER_AGENT } from '../probe/wiki.ts';
 import { buildZonePlan, wikiVersion } from '../import/zones.ts';
@@ -277,6 +277,30 @@ test('snapshot: the trees are walked to the bottom, every page fetched once, buc
   const max = Math.max(...Object.values(snap.pages).map((p) => p.revid));
   assert.equal(snap.version.revid, max);
   assert.deepEqual(wikiVersion(snap), { name: 'wiki/snapshot', sha: String(max), changedAt: snap.version.timestamp });
+});
+
+test('plan first: the content plan comes from the titles; plan-only and a plan over the cap stop before any content', async () => {
+  const { snap } = await snapshot();
+  const plan = planContent(snap.categories);
+  assert.deepEqual(
+    plan.map((p) => [p.category, p.newPages, p.requests]),
+    [
+      ['Category:NPCs', 2, 1],
+      ['Category:Mobs', 1, 1],
+      ['Category:Named in Glinting Hollow', 1, 1],
+      ['Category:Raid Encounters', 1, 1],
+      ['Category:Shared', 1, 1],
+      ['Category:Zones', 4, 1],
+      ['Category:Dungeons', 1, 1],
+    ],
+    'each root first, then the most new pages (ties A→Z); Named Mobs (whose only page A bandit is fetched already) and Class Quests are never fetched',
+  );
+  for (const [opts, cap] of [[{ planOnly: true }, 150], [{}, 25]] as const) {
+    const { get, urls } = fakeWiki();
+    const relay = new Relay('https://relay.example', 't'.repeat(40), get, async () => {}, cap);
+    await assert.rejects(takeSnapshot(relay, new Date('2026-10-29T12:00:00Z'), opts), (e: Error) => e instanceof PlanStop && e.plan.length === plan.length);
+    assert.ok(urls.every((u) => !new URL(u).searchParams.has('generator')), 'no content request');
+  }
 });
 
 // ---------------------------------------------------------------- the parser
