@@ -64,9 +64,9 @@ jobs:
           WANT: ${{ inputs.copy || 'both' }}
         run: node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log('list=' + JSON.stringify(matrix(process.env.WANT)))" | tee -a "$GITHUB_OUTPUT"
   import:
-    # Override 9: always(), so a failed wiki job still imports mnm-tools (and keeps yesterday's zone data).
+    # Override 9: a failed wiki job still imports mnm-tools (and keeps yesterday's zone data); a cancelled run imports nothing.
     needs: [copies, wiki]
-    if: always() && needs.copies.result == 'success'
+    if: ${{ !cancelled() && needs.copies.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -105,5 +105,6 @@ jobs:
           if [ "$SNAP" = success ]; then
             node scripts/import/run.ts --remote $DRY --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot"
           else
-            node scripts/import/run.ts --remote $DRY --zones-kept "the wiki snapshot job ended: $WIKI_RESULT (run $GITHUB_RUN_ID)"
+            if [ "$WIKI_RESULT" = success ]; then why="the wiki snapshot artifact could not be downloaded"; else why="the wiki snapshot job ended: $WIKI_RESULT"; fi
+            node scripts/import/run.ts --remote $DRY --zones-kept "$why (run $GITHUB_RUN_ID)"
           fi

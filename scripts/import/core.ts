@@ -1709,7 +1709,9 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     }
     warnings.push({ kind: 'write_ceiling', ceiling, written: spent, deferredStatements: deferred.length, deferredBound });
   }
-  // Order 28's override 9: a kept zone part outranks 'partial', which is not failing; the next run resumes either way.
+  // Order 28's override 9: a kept zone part outranks 'partial', which is not failing. The game data resumes on the next
+  // run either way; zone groups left by an earlier partial run wait for the next run that has a snapshot (the first
+  // wiki import's bound, 18,197 rows on 2026-10-29, fits one run under the ceiling).
   const status = opts.zonesKept ? 'zones-kept' : deferred.length ? 'partial' : 'ok';
   const error = opts.zonesKept ? lit(`zone data kept: ${opts.zonesKept}`.slice(0, 2000)) : 'NULL';
   const [closed] = await db.run([
