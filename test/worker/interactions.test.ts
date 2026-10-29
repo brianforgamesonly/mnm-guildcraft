@@ -2,12 +2,12 @@ import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 import prd from '../../docs/PRD.md?raw';
 import { COMMANDS, DEFINED, DEFINED_LIST } from '../../src/commands/definitions.ts';
-import { COMING, COMING_SOON, HELP_FOOTER, HELP_PREFIX, helpPage, PAGE_OF, pageText, PAGES } from '../../src/commands/help.ts';
+import { COMING, COMING_SOON, HELP_FOOTER, HELP_PREFIX, helpButton, helpPage, PAGE_OF, pagesFor, pageText, PAGES } from '../../src/commands/help.ts';
 import { WELCOME } from '../../src/commands/welcome.ts';
 import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
 import { NOT_YET } from '../../src/interactions.ts';
-import { DKP_COMING, DKP_DEFINED } from '../../src/dkp/definition.ts';
+import { DKP_COMING, DKP_COMMAND, DKP_DEFINED, DKP_DEFINED_LIST } from '../../src/dkp/definition.ts';
 import { APP_ID, as, exchange, post, press, rawCmd, send, top } from '../discord.ts';
 
 const helpCommand = top(as('100000000000000001'), 'help');
@@ -93,25 +93,32 @@ describe('/help pages (order 18: derived from the definitions)', () => {
     expect(named.length).toBeGreaterThan(10);
     for (const [, name, sub] of named) {
       if (COMING.some((c) => c.cmd === `/${name}${sub ? ` ${sub}` : ''}`)) continue;
-      const c = COMMANDS.find((k) => k.name === name);
+      // Order 27: /dkp is registered per server, where DKP is on (its page shows only there).
+      const c = [...COMMANDS, DKP_COMMAND].find((k) => k.name === name);
       expect(c, `/${name}`).toBeDefined();
       const subs = ((c as { options?: readonly { type: number; name: string }[] }).options ?? []).filter((o) => o.type === 1).map((o) => o.name);
       if (subs.length && sub) expect(subs, `/${name} ${sub}`).toContain(sub);
     }
   });
 
-  it('each page fits an embed with the attribution footer; six page buttons in rows of at most 5; no "draft" left', () => {
-    for (const p of PAGES) {
-      const page = helpPage(p.key);
-      expect(page.embeds[0].description!.length, p.key).toBeLessThanOrEqual(EMBED_LIMITS.description / 2);
-      expect(page.embeds[0].footer!.text).toBe(HELP_FOOTER);
-      expect(page.embeds[0].description).not.toMatch(/draft/i);
-      const rows = page.components as { components: { custom_id: string; disabled?: boolean }[] }[];
-      expect(rows.flatMap((r) => r.components).length).toBe(6);
-      for (const r of rows) expect(r.components.length).toBeLessThanOrEqual(5);
-      expect(rows.flatMap((r) => r.components).filter((b) => b.disabled).map((b) => b.custom_id)).toEqual([`${HELP_PREFIX}${p.key}`]);
-    }
-    expect(PAGES.map((p) => p.label)).toEqual(['Getting started', 'Finding things', 'Your profile', 'Requests', 'Officers', 'Admins']);
+  it('each page fits an embed with the attribution footer; six page buttons (seven where DKP is on) in rows of at most 5; no "draft" left', () => {
+    for (const dkp of [false, true])
+      for (const p of pagesFor(dkp)) {
+        const page = helpPage(p.key, dkp);
+        expect(page.embeds[0].description!.length, p.key).toBeLessThanOrEqual(EMBED_LIMITS.description / 2);
+        expect(page.embeds[0].footer!.text).toBe(HELP_FOOTER);
+        expect(page.embeds[0].description).not.toMatch(/draft/i);
+        const rows = page.components as { components: { custom_id: string; disabled?: boolean }[] }[];
+        expect(rows.flatMap((r) => r.components).length).toBe(dkp ? 7 : 6);
+        for (const r of rows) expect(r.components.length).toBeLessThanOrEqual(5);
+        expect(rows.flatMap((r) => r.components).filter((b) => b.disabled).map((b) => b.custom_id)).toEqual([`${HELP_PREFIX}${p.key}`]);
+      }
+    expect(pagesFor(false).map((p) => p.label)).toEqual(['Getting started', 'Finding things', 'Your profile', 'Requests', 'Officers', 'Admins']);
+    expect(pagesFor(true).map((p) => p.label).at(-1)).toBe('DKP');
+    // Order 27 (override 4): the DKP page lists every /dkp subcommand, each with its own description, and only there.
+    for (const d of DKP_DEFINED_LIST) expect(pageText('dkp').split('\n'), d.cmd).toContain(`\`${d.cmd}\` ${d.description}`);
+    // A DKP page button where DKP is off goes to the first page.
+    expect(helpButton(`${HELP_PREFIX}dkp`, false).data.embeds![0].title).toBe('GuildCraft help · Getting started (1 of 6)');
   });
 
   it('a page button edits the help in place, for anyone, the member gate included', async () => {

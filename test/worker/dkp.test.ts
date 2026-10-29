@@ -7,7 +7,7 @@ import { CATEGORY_NAME, CHANNELS_COPY, storedName } from '../../src/commands/cha
 import { APPROVE_PREFIX, FULL_PAGE_PREFIX } from '../../src/dkp/commands.ts';
 import { DKP_COPY } from '../../src/dkp/copy.ts';
 import { DKP_COMMAND } from '../../src/dkp/definition.ts';
-import { HANDLERS } from '../../src/dkp/due.ts';
+import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
 import { payStatement, POOL_GUILD, readdStatement, reverseStatement } from '../../src/dkp/ledger.ts';
 import { FULL_STANDINGS_PREFIX, STANDINGS_TOP } from '../../src/dkp/messages.ts';
 import { SETTINGS, settingsOf } from '../../src/dkp/settings.ts';
@@ -346,8 +346,8 @@ describe('timers (ITEM 3): one object per guild, its alarm at the earliest due i
     await env.DB.prepare("UPDATE dkp_pending SET due_at = '2000-01-01T00:00:00Z'").run();
     const withToken = { ...env, DISCORD_BOT_TOKEN: 'test-bot-token' } as never;
     const edits = () => fake.calls.filter((c) => c.method === 'PATCH' && c.path.endsWith(`/messages/${p.message_id}`)).length;
-    await HANDLERS.lapse(withToken, GUILD, String(p.id), 0, Date.now());
-    await HANDLERS.lapse(withToken, GUILD, String(p.id), 0, Date.now());
+    await HANDLERS.lapse(withToken, GUILD, String(p.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    await HANDLERS.lapse(withToken, GUILD, String(p.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
     expect(await one('SELECT status FROM dkp_pending')).toEqual({ status: 'lapsed' });
     expect(edits()).toBe(1);
     expect(fake.messages.find((m) => m.id === p.message_id)!.body).toMatchObject({ content: DKP_COPY.lapsed, components: [], allowed_mentions: { parse: [] } });

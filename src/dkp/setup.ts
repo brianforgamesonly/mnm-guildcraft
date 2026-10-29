@@ -25,6 +25,7 @@ import { DKP_COPY } from './copy.ts';
 import { DKP_COMMAND } from './definition.ts';
 import { POOL_GUILD } from './ledger.ts';
 import { refreshStandings } from './messages.ts';
+import { showRemoved } from './raid.ts';
 import { loadDkp } from './state.ts';
 
 export const ADD_DKP_PREFIX = 'dkpadd:';
@@ -147,6 +148,7 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     const del = await api.call('DELETE', `/applications/${appId}/guilds/${g}/commands/${cmd.id}`);
     if (!del.ok && del.status !== 404) return ephemeral(DKP_COPY.commandFailed(del.status));
   }
+  const open = await c.db.prepare('SELECT id FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number }>();
   const [closed] = await c.db.batch([
     closeOpenRaid(c.db, g, c.userId, 'removed'),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.
@@ -155,5 +157,7 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     audit(c.db, g, c.userId, 'dkp.off', `channel:${state.channel_id}`, { enabled: true }, { enabled: false }),
   ]);
   c.effects.dkpCancel = g;
+  // DKP removed mid-raid: the raid is closed at once, and its card says so (its buttons answer "off" from now on).
+  if (open && closed.meta.changes) await showRemoved(c.db, api, g, state.channel_id, open.id);
   return ephemeral([DKP_COPY.removed(state.channel_id), ...(closed.meta.changes ? [DKP_COPY.removedRaid] : [])].join('\n'));
 }

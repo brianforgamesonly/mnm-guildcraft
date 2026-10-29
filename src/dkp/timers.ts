@@ -5,12 +5,19 @@
 // is idempotent: it acts only while D1 still says the item is due (src/dkp/due.ts). It never writes sweep_run and never
 // touches the cron or the health check.
 //
-// Items: lapse:<pending id> (an approval's 24 hours), and, from PR B, check:<kill id>, close:<raid id>, render:<raid id>.
+// Items: lapse:<pending id> (an approval's lapse), check:<kill id> (a Check again window), close:<raid id> (auto-close),
+// render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Keys starting
+// with "!" are the object's own state (its guild, each card's pace), never items.
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env.ts';
-import { runDue } from './due.ts';
+import { budgetLeft } from '../board/api.ts';
+import { countD1 } from '../telemetry.ts';
+import { runDue, timerApi } from './due.ts';
+import { afterEdit, nextEditAt, START, type Pace } from './pace.ts';
 
 const GUILD_KEY = '!guild';
+const paceKey = (key: string) => `!pace:${key}`;
+const isItem = (k: string) => !k.startsWith('!');
 /** Items handled per alarm; the rest stay due and the alarm is set again at once (each run is its own invocation). */
 export const PER_ALARM = 8;
 /** A handler that failed is tried again this much later, up to MAX_TRIES. */
@@ -23,17 +30,19 @@ interface Item {
 }
 
 export class DkpTimers extends DurableObject<Env> {
-  /** Sets each item to its due time; an item already due earlier keeps the earlier time (coalescing). */
+  /** Sets each item to its due time; an item already due earlier keeps the earlier time (coalescing). A card edit is paced. */
   async schedule(guildId: string, items: { key: string; due: number; later?: boolean }[]): Promise<void> {
     const s = this.ctx.storage;
     const keys = items.map((i) => i.key);
     const have = await s.get<Item>(keys);
+    const paces = await s.get<Pace>(keys.filter((k) => k.startsWith('render:')).map(paceKey));
     const put: Record<string, Item | string> = {};
     if ((await s.get<string>(GUILD_KEY)) !== guildId) put[GUILD_KEY] = guildId;
     for (const i of items) {
+      const due = i.key.startsWith('render:') ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
       const was = have.get(i.key);
-      // `later`: replace even with a later time (a check-again window an officer restarted).
-      if (!was || i.later || i.due < was.due) put[i.key] = { due: i.due };
+      // `later`: replace even with a later time.
+      if (!was || i.later || due < was.due) put[i.key] = { due };
     }
     if (Object.keys(put).length) await s.put(put);
     await this.arm();
@@ -54,13 +63,13 @@ export class DkpTimers extends DurableObject<Env> {
   /** The due-list, for tests and the cost bench. */
   async list(): Promise<Record<string, number>> {
     const all = await this.ctx.storage.list<Item | string>();
-    return Object.fromEntries([...all].filter(([k]) => k !== GUILD_KEY).map(([k, v]) => [k, (v as Item).due]));
+    return Object.fromEntries([...all].filter(([k]) => isItem(k)).map(([k, v]) => [k, (v as Item).due]));
   }
 
   /** The alarm at the earliest item, only when it differs from the one set (each setAlarm() is a row written). */
   private async arm(): Promise<void> {
     const s = this.ctx.storage;
-    const items = [...(await s.list<Item | string>())].filter(([k]) => k !== GUILD_KEY).map(([, v]) => (v as Item).due);
+    const items = [...(await s.list<Item | string>())].filter(([k]) => isItem(k)).map(([, v]) => (v as Item).due);
     if (!items.length) {
       if ((await s.getAlarm()) !== null) await s.deleteAlarm();
       return;
@@ -74,13 +83,19 @@ export class DkpTimers extends DurableObject<Env> {
     const guildId = await s.get<string>(GUILD_KEY);
     const now = Date.now();
     const due = [...(await s.list<Item | string>())]
-      .filter(([k, v]) => k !== GUILD_KEY && (v as Item).due <= now)
+      .filter(([k, v]) => isItem(k) && (v as Item).due <= now)
       .sort((a, b) => (a[1] as Item).due - (b[1] as Item).due)
       .slice(0, PER_ALARM) as [string, Item][];
+    // One budget for the whole invocation (review of PR A): every item's D1 and Discord calls share it, D1 counted.
+    const counted = countD1(this.env.DB);
+    const env = { ...this.env, DB: counted.db };
+    const api = timerApi(env, now, () => counted.calls.length);
     for (const [key, item] of due) {
-      let again: number | null = null;
+      // Items left when the budget runs low stay due; the alarm below is set again at once for them.
+      if (api && budgetLeft(api.budget) < 8) break;
+      let r: Awaited<ReturnType<typeof runDue>> = null;
       try {
-        again = guildId ? await runDue(this.env, guildId, key, item.due, now) : null;
+        r = guildId ? await runDue(env, guildId, key, item.due, now, api) : null;
       } catch (e) {
         console.error('dkp timer failed', key, e instanceof Error ? e.message : String(e));
         const tries = (item.tries ?? 0) + 1;
@@ -89,9 +104,14 @@ export class DkpTimers extends DurableObject<Env> {
           continue;
         }
       }
-      // A handler may ask to run again later (a card edit held back by Discord's rate limit).
-      if (again !== null) await s.put(key, { due: again });
+      if (r?.headers && key.startsWith('render:')) {
+        const pace = afterEdit((await s.get<Pace>(paceKey(key))) ?? START, Date.now(), r.headers);
+        await s.put(paceKey(key), pace);
+        console.log(JSON.stringify({ gc: 'dkp-card-edit', remaining: r.headers.remaining ?? null, reset_after: r.headers.resetAfter ?? null, retry_after: r.headers.retryAfter ?? null, gap_ms: pace.gap }));
+      }
+      if (r?.again !== undefined) await s.put(key, { due: r.again });
       else await s.delete(key);
+      if (r?.schedule?.length) await this.schedule(guildId!, r.schedule);
     }
     await this.arm();
   }

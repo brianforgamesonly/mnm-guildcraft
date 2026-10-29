@@ -1,5 +1,5 @@
 // Order 27: every member-facing DKP string (listed for approval in docs/COPY.md, "Work order 27").
-import { md, plural } from '../discord.ts';
+import { md, plural, truncate } from '../discord.ts';
 
 export const DKP_COPY = {
   off: 'DKP is off on this server.',
@@ -51,4 +51,69 @@ export const DKP_COPY = {
   whoRuns: 'Who runs DKP',
   namedValue: (name: string, zone: string, points: number, by: string) => `**Named value:** ${md(name)} in ${md(zone)} now pays ${points} raid points. By ${by}.`,
   unknownZone: (typed: string) => `No zone is called **${md(typed)}**.`,
+} as const;
+
+/** Order 27, PR B: raid nights, history and /me. */
+export const RAID_COPY = {
+  notRunner: DKP_COPY.notRunner,
+  own: DKP_COPY.own,
+  unknownZone: DKP_COPY.unknownZone,
+  title: (zone: string, mode: 'named' | 'flat') => `Raid: ${zone}${mode === 'flat' ? ' (flat)' : ''}`,
+  openUntil: (t: number) => `Open. Closes by itself <t:${t}:t> unless an officer closes it first.`,
+  closedAt: (t: number, reason: string | null) => `Closed <t:${t}:t>${reason === 'auto' ? ' (by itself, at the auto-close time)' : reason === 'removed' ? ' (DKP was turned off)' : ''}.`,
+  present: 'Present',
+  standby: 'Standby',
+  leaving: 'Leaving',
+  nobody: 'nobody yet',
+  frozen: ' (frozen)',
+  counted: (n: number) => `${plural(n, 'member')}: press **Who's here** for the list`,
+  earlier: (n: number) => `…${plural(n, 'earlier kill')} not shown.`,
+  noKills: 'No kills yet. An officer picks **Named killed** below, or uses `/dkp kill`.',
+  noPayouts: 'No payout yet. An officer presses **Pay attendance**.',
+  noCreatures: "GuildCraft's data lists no creatures in this zone: use `/dkp kill named:` and type the name.",
+  flatName: 'Flat payout',
+  checkOpen: (due: number) => ` · Check again: tap **Present** by <t:${due}:T>`,
+  checkClosed: (closed: number, due: number) => ` · Check again closed <t:${closed}:T> (due <t:${due}:T>)`,
+  whoHere: "Who's here",
+  whoEarned: 'Who earned',
+  checkAgain: 'Check again',
+  payAttendance: 'Pay attendance',
+  close: 'Close raid',
+  namedKilled: 'Named killed…',
+  opened: (zone: string, link: string | null) => `Raid open: **${md(zone)}**.${link ? ` ${link}` : ''}`,
+  alreadyOpen: (link: string | null) => `A raid is already open${link ? `: ${link}` : ''}. Close it before opening another.`,
+  cannotPost: DKP_COPY.noChannel,
+  noOpenRaid: 'No raid is open. An officer starts one with `/dkp raid`.',
+  flatNoKills: 'This raid pays a flat value: press **Pay attendance** on its card.',
+  noName: 'Pick or type the named.',
+  respawnAsk: (name: string) => `**${md(name)}** was recorded less than 2 minutes ago. Was it a respawn?`,
+  respawnYes: 'Yes, record it again',
+  respawnDone: 'Already recorded again.',
+  flatPaid: 'This raid has already paid its flat value.',
+  killed: (name: string, points: number, n: number) => `Recorded **${md(name)}**: ${points} raid points to ${plural(n, 'member')}.`,
+  paid: (points: number, n: number) => `Paid ${points} raid points to ${plural(n, 'member')}.`,
+  raidClosed: 'This raid is closed.',
+  noKill: 'That raid has no kills yet.',
+  earnedHead: (name: string, n: number) => `**${md(name)}**: ${plural(n, 'member')} earned it.`,
+  checkAlready: 'Check again has already run on the latest kill.',
+  checkStarted: (name: string, seconds: number) => `Check again on **${md(name)}**: members it paid have ${seconds} seconds to tap **Present**.`,
+  checkReason: 'Did not tap Present for Check again',
+  closedReply: 'Raid closed. The summary and standings are posted.',
+  summary: (zone: string, kills: number, members: number, points: number, reason: 'officer' | 'auto') =>
+    `**Raid closed${reason === 'auto' ? ' by itself' : ''}: ${md(zone)}.** ${plural(kills, 'payout')}, ${plural(members, 'member')} earned, ${points} raid points in all.`,
+  youPresent: "You're **Present**: you earn every kill from now on until you tap **Leaving**.",
+  youStandby: "You're on **Standby**: you earn every kill from now on until you tap **Leaving**.",
+  youLeft: "You've left the raid: you earn nothing more from it unless you tap **Present** again.",
+  reason: DKP_COPY.adjustReason,
+  corrected: (member: string, action: 'add' | 'remove', kills: number, by: string, reason: string) =>
+    `**Correction:** ${member} ${action === 'add' ? 'added to' : 'removed from'} ${plural(kills, 'kill')}. By ${by}. Reason: ${md(reason)}`,
+  correctedReply: 'Done. The correction is posted in GC-DKP.',
+  historyTitle: (pool: string) => `DKP history: ${pool}`,
+  historyLine: (t: number, amount: number, cut: number, balance: number, kind: string, kill: string | null, reason: string | null) =>
+    `<t:${t}:d> ${amount > 0 ? '+' : ''}${amount}${cut > 0 ? ` (${cut} over the cap)` : ''} · ${kind === 'kill' ? `kill${kill ? `: ${md(kill)}` : ''}` : kind === 'flat' ? 'flat payout' : kind}${reason ? ` · ${md(truncate(reason, 80))}` : ''} · now ${balance}`,
+  noHistory: 'No points in this pool yet.',
+  previous: 'Previous',
+  next: 'Next',
+  meHead: '**DKP** (30-day attendance):',
+  meLine: (pool: string, balance: number, earned: number, held: number) => `${md(pool)}: **${balance}**${held ? ` · ${earned}/${held} (${Math.round((100 * earned) / held)}%)` : ''}`,
 } as const;
