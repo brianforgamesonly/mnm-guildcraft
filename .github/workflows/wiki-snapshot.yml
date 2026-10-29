@@ -10,7 +10,7 @@
 # Dispatch only, never scheduled: PR B moves the snapshot into import.yml. No alarm: a failed run is read by the person
 # who dispatched it (order 12: every failed run is listed in the order's report).
 # Expected: about 6 billed minutes per run with the comparison (public repository: free); Cloudflare: one Worker
-# deployed and deleted, about 65 Worker requests (4 refusal checks + 1 per wiki request), 0 D1 rows.
+# deployed and deleted, about 70 Worker requests (3-12 readiness calls + 4 refusal checks + 1 per wiki request), 0 D1 rows.
 name: wiki-snapshot
 on:
   workflow_dispatch:
@@ -54,13 +54,23 @@ jobs:
         env:
           URL: ${{ steps.deploy.outputs.url }}
         run: |
-          # A fixed pause for the new workers.dev script to go live, not a poll.
-          sleep 15
+          # Live means the relay itself answers: a 403 carrying its x-relay-refused header. A new workers.dev script is not
+          # live everywhere at once (run 40952610941: 403 from the relay, then 404 from workers.dev 60 ms later), so this
+          # waits for it with requests the relay refuses before any wiki contact (no token): at most 12, 5 s apart.
           token=$(cat "$RUNNER_TEMP/relay-token")
+          live=0
+          for i in $(seq 1 12); do
+            sleep 5
+            if curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" "$URL/api?action=query&meta=siteinfo" && grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h"; then live=$((live + 1)); else live=0; fi
+            # Three relay answers in a row before the checks.
+            if [ "$live" -ge 3 ]; then break; fi
+          done
+          test "$live" -ge 3 || { echo "::error::the relay did not answer three times in a row within 60 s"; exit 1; }
           check() {
-            code=$(curl -sS -o /dev/null -w '%{http_code}' "$@" || echo "curl exit $?")
+            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code}' "$@" || echo "curl exit $?")
             echo "$code ← ${*: -1}" | sed "s/$token/<token>/g"
             test "$code" = 403
+            grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h" || { echo "::error::a 403 without x-relay-refused: not the relay's answer"; return 1; }
           }
           check -X POST -H "x-relay-token: $token" "$URL/api?action=query&meta=siteinfo"
           check -H "x-relay-token: wrong-token-wrong-token-wrong-token" "$URL/api?action=query&meta=siteinfo"
