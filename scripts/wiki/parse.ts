@@ -3,7 +3,10 @@
 //
 // Rules (order 28, section D):
 // - every template field the import reads is named once, in TEMPLATE_FIELDS; a missing field is NULL, never guessed;
-// - each NPC template block is one NPC × zone (override 6): a block's zone text is one zone name, never split;
+// - a block's zone text is split exactly as Mo Betta's NPC zone text was (order 28b's correction 1 of override 6: on
+//   ", " and " or ", then repeats removed, then each part mapped; scripts/import/zones.ts npcZoneParts), after parsing;
+// - a block's name field is kept as written, the page title only when it has none; a name that differs from its title
+//   by more than the first letter's case is reported (nameMismatches), so the wiki can be fixed, never corrected here;
 // - removing link markup ([[…]], [[…|…]]), HTML entities and tags, and bold/italic quotes is parsing, not a name
 //   normalisation; the label of a [[target|label]] link is kept, as the page shows it (and as Mo Betta kept it);
 // - named and raid come from the wiki's categories (override 4), merchant from Category:Merchant. Nothing is inferred
@@ -178,6 +181,8 @@ export interface WikiParse {
     /** NPC pages using none of the templates. */
     npcPagesWithoutTemplate: string[];
     blocksWithoutZone: { page: string; name: string }[];
+    /** Blocks whose name field differs from the page title by more than the first letter's case (order 28b): wiki typos to report. */
+    nameMismatches: { page: string; name: string }[];
     /** Loot fields with text but no bullet line: their text is not read (reported, never guessed). */
     lootWithoutBullets: { page: string; field: string }[];
     /** Values (a loot bullet counts as one) still holding a {{template}} after parsing: stored NULL or left out; a name falls back to the title. */
@@ -192,6 +197,9 @@ export interface WikiParse {
     merchantPages: number;
   };
 }
+
+/** Equal, or different only in the first letter's case ("a bandit" on page "A bandit"). */
+export const sameButFirstCase = (a: string, b: string) => a === b || (a.slice(1) === b.slice(1) && a[0]?.toLowerCase() === b[0]?.toLowerCase());
 
 /** A category's members, its subcategories' included (a page in a subcategory of Named Mobs is named). */
 const members = treePages;
@@ -228,6 +236,7 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
     npcBlocks: Object.fromEntries(F.npcTemplates.map((t) => [t, 0])),
     npcPagesWithoutTemplate: [],
     blocksWithoutZone: [],
+    nameMismatches: [],
     lootWithoutBullets: [],
     templateValues: [],
     zonePages: 0,
@@ -266,6 +275,7 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
           }
         }
         const name = value(F.npc.name) ?? title;
+        if (!sameButFirstCase(name, title) && !summary.nameMismatches.some((m) => m.page === title && m.name === name)) summary.nameMismatches.push({ page: title, name });
         const zone = value(F.npc.zone, { target: true });
         if (!zone) summary.blocksWithoutZone.push({ page: title, name });
         npcs.push({

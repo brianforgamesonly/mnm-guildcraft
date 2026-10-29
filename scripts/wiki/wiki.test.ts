@@ -15,6 +15,10 @@ import { zoneInput } from '../../test/fixtures/zones-small.ts';
 import { compare, markdown } from './compare.ts';
 import { checkStructure } from '../import/core.ts';
 import { readFileSync } from 'node:fs';
+import { npcZoneParts } from '../import/zones.ts';
+import { sameButFirstCase } from './parse.ts';
+import { busy, DeployStillRunning, overlapping, POLL_MS, waitForDeploys, WAIT_LIMIT_MS, type Run } from './deploys.ts';
+import { FIXTURE_PAGES, type WikiFixture } from './fixtures.ts';
 
 const q = (s: string) => new URLSearchParams(s);
 
@@ -398,4 +402,108 @@ test('compare: both plans from the import code; the gate lists what is missing, 
   assert.ok(c.tags.some((t) => t.zone === 'Glinting Hollow' && t.named === 1));
   assert.equal(c.recentChanges.zoneData, 1);
   assert.match(markdown(c), /### The gate/);
+  // Order 28b: each miss says whether wiki content explains it (a renamed page); the stand-in's misses are not renamed.
+  assert.ok(c.gate.find((g) => g.line === 2)!.detail.every((d) => d.endsWith('NOT explained by wiki content')));
+});
+
+// ---------------------------------------------------------------- order 28b
+
+/** Real pages, cut from a snapshot artifact by scripts/wiki/fixtures.ts (CC BY-SA 4.0: the credit is in the file). */
+const fixture = (): WikiFixture => JSON.parse(readFileSync(new URL('../../test/fixtures/wiki-pages.json', import.meta.url), 'utf8')) as WikiFixture;
+
+test('order 28b fixtures: real pages from a snapshot artifact, credited', () => {
+  const f = fixture();
+  assert.match(f.credit, /CC BY-SA 4\.0/);
+  assert.match(f.from, /^wiki-snapshot run \d+$/);
+  assert.deepEqual(Object.keys(f.pages).sort(), [...FIXTURE_PAGES].sort());
+  assert.ok(Object.values(f.pages).every((p) => p.revid > 0 && p.timestamp), 'each page keeps the revision it was taken from');
+});
+
+test('order 28b correction 1: a block’s zone text is split on ", " and " or ", repeats removed, then mapped', () => {
+  const p = parseSnapshot(fixture());
+  const zoneOf = (page: string) => p.npcs.filter((n) => n.page === page).map((n) => npcZoneParts(n.zone ?? ''));
+  assert.deepEqual(zoneOf('A bag merchant'), [['Faelindral', 'Night Harbor']], 'several zones in one block');
+  assert.deepEqual(zoneOf('A stablemaster'), [["Keeper's Bight", 'Night Harbor']], '" or "');
+  assert.deepEqual(zoneOf('A bandit').flat().sort(), ['Scarwood', 'Shaded Dunes', 'Sungreet Strand'], 'one zone per block, unchanged');
+  assert.deepEqual(zoneOf('Weakened Red Dragon'), [[]], 'no zone: no part');
+  // Repeats ("Underdocks, Underdocks" on A Deepcut marksman's page, run 40959117101), and three zones in one block.
+  assert.deepEqual(npcZoneParts('Underdocks, Underdocks'), ['Underdocks']);
+  assert.deepEqual(npcZoneParts('Night Harbor, Shaded Dunes, Sungreet Strand'), ['Night Harbor', 'Shaded Dunes', 'Sungreet Strand']);
+  // Only ", " and " or ": no other separator, nothing trimmed.
+  assert.deepEqual(npcZoneParts('Rothold and Scarwood'), ['Rothold and Scarwood']);
+  assert.deepEqual(npcZoneParts('Rothold,Scarwood'), ['Rothold,Scarwood']);
+});
+
+test('order 28b correction 1: the zone plan holds one row per zone a block names', async () => {
+  const w = standIn();
+  w.pages['A rat'] = '{{Mobpage\n|zone = [[Scarwood]], [[Rothold|the city]] or [[Scarwood]]\n}}';
+  const { get } = fakeWiki(w);
+  const snap = await takeSnapshot(new Relay('https://relay.example', 't'.repeat(40), get, async () => {}), new Date('2026-10-29T12:00:00Z'));
+  const input = zoneInput();
+  input.wiki = snap;
+  input.versions = [...input.versions, wikiVersion(snap)];
+  const plan = buildZonePlan(input, [], [], '2026-10-29T12:00:00Z');
+  assert.deepEqual(plan.npcs.filter((n) => n.name === 'A rat').map((n) => n.zone_key).sort(), ['rothold', 'scarwood']);
+  assert.ok(plan.names.every((n) => !(n.source === 'wiki:npcs' && n.name.includes(', '))), 'no joined text stored as one unmatched zone');
+});
+
+test('order 28b: names stay as written; a name that differs from its title by more than the first letter’s case is reported', () => {
+  const p = parseSnapshot(fixture());
+  const reaver = p.npcs.find((n) => n.page === 'A golbin shore reaver')!;
+  assert.equal(reaver.name, 'a goblin shore reaver', 'the name field, never corrected');
+  assert.deepEqual(p.summary.nameMismatches, [{ page: 'A golbin shore reaver', name: 'a goblin shore reaver' }], '"a bandit" on "A bandit" is not reported');
+  assert.equal(sameButFirstCase('a bandit', 'A bandit'), true);
+  assert.equal(sameButFirstCase('a mangy bakbiter', 'A mangy backbiter'), false);
+  assert.equal(sameButFirstCase('a marshaled', 'A marshaled corpse'), false);
+  assert.equal(sameButFirstCase('a Bandit', 'A bandit'), false, 'only the first letter’s case');
+});
+
+test('order 28b fixtures: named, raid, merchant, zone and quest read from real pages', () => {
+  const p = parseSnapshot(fixture());
+  const one = (page: string) => p.npcs.find((n) => n.page === page)!;
+  assert.deepEqual([one('A myconid prince').zone, one('A myconid prince').named], ['Glinting Hollow', 1]);
+  assert.deepEqual([one('Weakened Red Dragon').raid, one('Weakened Red Dragon').zone], [1, null]);
+  assert.equal(one('A blacksmith').kind, 'merchant');
+  assert.equal(one('A bandit').named, 0);
+  assert.ok(p.npcs.some((n) => n.page === 'A bandit' && n.zone === 'Scarwood'), 'Brian’s check: /zone Scarwood lists a bandit');
+  assert.deepEqual(p.zones.map((z) => z.name), ['Rothold']);
+  assert.ok(p.quests[0].rewards.some((r) => r.startsWith('Faction with ')));
+});
+
+test('order 28b ITEM 1: the snapshot waits for deploys every 15 s, at most 10 minutes, and lists those that overlapped', async () => {
+  const run = (id: number, status: string, created: string, updated: string): Run => ({ id, status, created_at: created, updated_at: updated });
+  assert.deepEqual(busy([run(1, 'queued', 'a', 'a'), run(2, 'in_progress', 'a', 'a'), run(3, 'completed', 'a', 'a'), run(4, 'waiting', 'a', 'a')]).map((r) => r.id), [1, 2, 4]);
+  // Busy twice, then clear: two sleeps of 15 s.
+  let t = 0;
+  const sleeps: number[] = [];
+  const answers = [[run(9, 'in_progress', 'x', 'x')], [run(9, 'in_progress', 'x', 'x')], [run(9, 'completed', 'x', 'y')]];
+  const w = await waitForDeploys(async () => answers.shift()!, async (ms) => void (sleeps.push(ms), (t += ms)), () => t, () => {});
+  assert.deepEqual(sleeps, [POLL_MS, POLL_MS]);
+  assert.deepEqual(w, { waitedMs: 30_000, polls: 3 });
+  // Never clear: it stops at 10 minutes, "a deploy was still running".
+  t = 0;
+  await assert.rejects(
+    waitForDeploys(async () => [run(9, 'queued', 'x', 'x')], async (ms) => void (t += ms), () => t, () => {}),
+    (e: Error) => e instanceof DeployStillRunning && /a deploy was still running/.test(e.message),
+  );
+  assert.equal(t, WAIT_LIMIT_MS);
+  // An API error is polled again, never read as "no deploy"; one that lasts fails the attempt the same way.
+  t = 0;
+  const flaky = [() => Promise.reject(new Error('HTTP 502')), () => Promise.resolve([] as Run[])];
+  assert.deepEqual(await waitForDeploys(() => flaky.shift()!(), async (ms) => void (t += ms), () => t, () => {}), { waitedMs: POLL_MS, polls: 2 });
+  t = 0;
+  await assert.rejects(
+    waitForDeploys(() => Promise.reject(new Error('HTTP 502')), async (ms) => void (t += ms), () => t, () => {}),
+    (e: Error) => e instanceof DeployStillRunning && /could not be listed/.test(e.message),
+  );
+  // Overlap with [since, until]: run 40958472952's times against run 40958505331's relay, and the ones that did not overlap.
+  const since = '2026-10-29T21:31:44Z';
+  const until = '2026-10-29T21:32:13Z';
+  const runs = [
+    run(40958472952, 'completed', '2026-10-29T21:31:14Z', '2026-10-29T21:31:48Z'),
+    run(40957507745, 'completed', '2026-10-29T21:24:17Z', '2026-10-29T21:24:54Z'),
+    run(2, 'queued', '2026-10-29T21:32:00Z', '2026-10-29T21:32:00Z'),
+    run(3, 'queued', '2026-10-29T21:40:00Z', '2026-10-29T21:40:00Z'),
+  ];
+  assert.deepEqual(overlapping(runs, since, until).map((r) => r.id), [40958472952, 2]);
 });

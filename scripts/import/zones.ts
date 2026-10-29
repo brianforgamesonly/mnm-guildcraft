@@ -5,7 +5,8 @@
 // Rules applied here (order 17, section D):
 // - zone names match only after two normalisations, case and curly to straight apostrophes (zoneKey); anything else
 //   that does not match is stored with zone_key NULL and reported, never guessed;
-// - Mo Betta's NPC zone text is split only on ", " and " or ", then de-duplicated, then mapped;
+// - NPC zone text (Mo Betta's, and each wiki block's: order 28b's correction 1) is split only on ", " and " or ", then
+//   de-duplicated, then mapped;
 // - NPCs are keyed by name (case-insensitive) plus zone; mnm-tools' mobs keep their fields, Mo Betta fills only what a
 //   mob lacks (src/zone/creatures.ts mergeCreature, shared with the card), and every conflict is reported;
 // - a map image is kept only where a checked record states its licence and its author or source (map-licences.ts).
@@ -74,7 +75,7 @@ interface SourceRows {
   zones: { name: string; level: string | null; description: string | null; adjacent: string[]; url: string | null; mapFile: string | null; map: string | null }[];
   npcs: {
     name: string;
-    /** The zone names the record's zone text holds (Mo Betta: split on ", " and " or "; the wiki: one per block). */
+    /** The zone names the record's zone text holds: split on ", " and " or ", then de-duplicated (npcZoneParts; Mo Betta's text and each wiki block's, order 28b). */
     zoneParts: string[];
     kind: string | null;
     level: string | null;
@@ -139,7 +140,8 @@ function wikiRows(snap: WikiSnapshot): SourceRows {
     zones: p.zones.map((z) => ({ name: z.name, level: z.level, description: null, adjacent: z.adjacent, url: z.url, mapFile: null, map: null })),
     npcs: p.npcs.map((n) => ({
       name: n.name,
-      zoneParts: n.zone ? [n.zone] : [],
+      // Order 28b's correction 1 of override 6: a block's zone text is split exactly as Mo Betta's was.
+      zoneParts: npcZoneParts(n.zone ?? ''),
       kind: n.kind,
       level: n.level,
       race: n.race,
@@ -174,7 +176,7 @@ function list(raw: unknown, file: string, key: string): Record<string, unknown>[
 // ---------------------------------------------------------------- names
 
 /**
- * Mo Betta's NPC zone text: split only on ", " and " or ", then de-duplicated. Nothing is trimmed or guessed. Empty text
+ * An NPC's zone text (Mo Betta's, or a wiki block's: order 28b): split only on ", " and " or ", then de-duplicated. Nothing is trimmed or guessed. Empty text
  * names no zone (counted as noZone), not an unmatched name.
  */
 export const npcZoneParts = (text: string): string[] => (text === '' ? [] : [...new Set(text.split(/, | or /))]);

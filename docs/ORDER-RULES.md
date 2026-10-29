@@ -333,3 +333,18 @@ Order 28 reads the Monsters and Memories Wiki directly and retires Mo Betta (the
   - The snapshot job itself is never the alarm; its failure surfaces only through that row. The alarm header is updated to match.
 - Only ITEM 1's job contacts the wiki. Everything else reads its snapshot.
 - A missing wiki field is NULL, never guessed. Every template field the import reads is named in one place in code (scripts/wiki/parse.ts `TEMPLATE_FIELDS`).
+
+## Order 28b
+
+Order 28b finishes order 28: two fixes (PR C), then the switch-over and the DKP tags (PR D, order 28's "PR B"). Order 28's overrides and added rules stand, with the corrections below. Override 6, as corrected, and override 8's committed snapshot take effect in PR C (the snapshot is committed there; CI and the local paths read it from PR D's switch-over).
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests (PR C: ITEMs 1–3; PR D: ITEMs 4–5), each with at most 3 pushes, and 2 merges.
+- Correction 1, of order 28's override 6, quoted in full: "Override 6 (PR B), of order 17's "Zone names match only after two normalisations, case and curly to straight apostrophes (`zoneKey`). Every other difference is a row in the derived mapping (`zone_name`, zone_key NULL) and a warning, never a guess. Mo Betta's NPC zone text is split only on ", " and " or "." — Each NPC template block is one NPC × zone; its zone text is never split. — Removing link markup ([[…]], [[…|…]]) and HTML entities is parsing, not a third name normalisation. The two normalisations are otherwise unchanged. — Text that maps to no zone is stored unmatched and reported."
+  - A block's zone value is split exactly as order 17's rule splits Mo Betta's NPC zone text: split only on ", " and " or "; then remove repeats; then map each part (scripts/import/zones.ts `npcZoneParts`, the one function both sources use).
+  - Removing link markup stays parsing. Order 17's rule is restored for this field, unchanged.
+- No change to names: a block's name field is kept as written, the page title only when it has none (scripts/wiki/parse.ts). A name that differs from its page title by more than the first letter's case is a wiki typo, on either side; the comparison reports each one (`nameMismatches`) so it can be fixed on the wiki, and gate line 2 counts such a miss as explained by wiki content (scripts/wiki/compare.ts: line 2 passes at or above Mo Betta's count, or when every miss is such a one).
+- The wiki snapshot doesn't start while a deploy of either copy's Worker (deploy.yml) is queued or running: it polls every 15 s and waits at most 10 minutes, then fails with "a deploy was still running" (scripts/wiki/deploys.ts; a GitHub API error is polled again, never read as "no deploy"). Never a shared concurrency group: GitHub keeps at most one running and one pending job per group, and a newer arrival cancels the pending one.
+  - A deploy that starts during a snapshot is recorded in that run's result (the job summary lists the deploy runs that overlapped it), with the relay readiness calls' times and answers.
+  - deploy.yml's and register-commands.yml's concurrency keys stay as they are. register-commands.yml is dispatched only after a deploy has concluded with success.
+- Fixtures for the parser are real pages cut from a snapshot artifact (scripts/wiki/fixtures.ts, test/fixtures/wiki-pages.json), carrying their CC BY-SA 4.0 credit and each page's revision. The committed snapshot (data/wiki-snapshot/, with its CREDIT.md) is refreshed by hand from a wiki-snapshot artifact.
+- Failed runs: every one is listed in the FINAL (order 12).

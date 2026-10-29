@@ -116,6 +116,10 @@ export function compare(snap: WikiSnapshot, zones: ZoneInput, wiki: WikiData, no
     return 'no page of that title in the snapshot';
   };
   const missing = mo.npcs.filter((n) => !wkN.has(npcKey(n))).map((n) => ({ zone: zoneName(mo, n.zone_key), name: n.name, why: why(n) }));
+  // Order 28b: a miss whose wiki page names it differently (a name field that differs from its title) is explained by
+  // wiki content, not by the parser: Mo Betta keyed it by the page title, the import by the name field.
+  const renamed = new Set(parsed.summary.nameMismatches.map((m) => m.page.toLowerCase()));
+  const byWikiContent = (m: { name: string }) => renamed.has(m.name.toLowerCase());
   const zonesOf = (p: ZonePlan) => {
     const m = new Map<string, Set<string>>();
     for (const n of p.npcs) m.set(n.name.toLowerCase(), (m.get(n.name.toLowerCase()) ?? new Set()).add(n.zone_key));
@@ -159,8 +163,8 @@ export function compare(snap: WikiSnapshot, zones: ZoneInput, wiki: WikiData, no
     {
       line: 2,
       text: `The wiki's NPC count (unique name × zone) is at least Mo Betta's (${wkN.size} against ${moN.size}), or each missing one is listed and explained`,
-      pass: wkN.size >= moN.size,
-      detail: missing.map((m) => `${m.name} (${m.zone}): ${m.why}`),
+      pass: wkN.size >= moN.size || missing.every(byWikiContent),
+      detail: missing.map((m) => `${m.name} (${m.zone}): ${m.why}${byWikiContent(m) ? ' — wiki content (name field ≠ page title)' : ' — NOT explained by wiki content'}`),
     },
     { line: 3, text: `Faction links are at least today's (${wk.factionLinks.length} against ${mo.factionLinks.length})`, pass: wk.factionLinks.length >= mo.factionLinks.length, detail: lostLinks },
     { line: 4, text: `Quests with "Faction…" lines: none lost (${wkQ.size} against ${moQ.size})`, pass: lostQuests.length === 0, detail: lostQuests },
@@ -232,6 +236,8 @@ export function markdown(c: Comparison): string {
     `Requests: ${c.requests.count} (maxlag waits ${c.requests.maxlagWaits}), ${c.requests.bytes} bytes.`,
     `NPC tree: ${p.npcTree.categories} categories, ${p.npcTree.depth} level(s) of subcategories, ${p.npcTree.pages} pages (${p.npcTree.pagesWithContent} with content). Blocks: ${Object.entries(p.npcBlocks).map(([t, n]) => `${t} ${n}`).join(', ')}. Pages with none: ${p.npcPagesWithoutTemplate.length}. Blocks with no zone: ${p.blocksWithoutZone.map((b) => b.page).join(', ') || 'none'}. Loot fields with text but no bullets: ${p.lootWithoutBullets.length}. Values holding a template (not read): ${p.templateValues.length} (${[...new Set(p.templateValues.map((v) => v.field))].join(', ') || 'none'}).`,
     `Named Mobs: ${p.named.pages} pages (outside the NPC tree: ${p.named.outsideTree.join(', ') || 'none'}). Raid Encounters: ${p.raid.pages} (outside: ${p.raid.outsideTree.join(', ') || 'none'}). Merchant: ${p.merchantPages}. Zone pages: ${p.zonePages} (no {{ZoneDetails}}: ${p.zonePagesWithoutTemplate.join(', ') || 'none'}). Quest pages: ${p.questPages}, ${p.questsWithRewards} with reward lines.`,
+    // Order 28b: the name field is kept as written (the title only when there is none); these are for fixing on the wiki.
+    `Names that differ from their page title by more than the first letter's case (${p.nameMismatches.length}; fix on the wiki):\n${list(p.nameMismatches.map((m) => `"${m.name}" on page "${m.page}"`), 60)}`,
     '### Zones',
     `Registry zones: Mo Betta ${c.zones.moBetta}, wiki ${c.zones.wiki}.`,
     `Only Mo Betta:\n${list(c.zones.onlyMoBetta)}`,
