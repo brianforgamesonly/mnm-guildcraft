@@ -51,8 +51,8 @@ export function mentions(line: string, factions: readonly string[]): string[] {
   return [...new Set(taken.sort((a, b) => a.start - b.start).map((t) => t.faction))];
 }
 
-export function factionQuestLines(raw: unknown, factions: readonly string[]): { rows: QuestLineRow[]; summary: QuestSummary } {
-  if (!isObj(raw) || !Array.isArray(raw.quests)) throw new ZoneStructureError('mo-betta/quests.json: quests is not a list');
+export function factionQuestLines(raw: unknown, factions: readonly string[], label = 'mo-betta/quests.json'): { rows: QuestLineRow[]; summary: QuestSummary } {
+  if (!isObj(raw) || !Array.isArray(raw.quests)) throw new ZoneStructureError(`${label}: quests is not a list`);
   const rows = new Map<string, QuestLineRow>();
   const summary: QuestSummary = { quests: raw.quests.length, questsWithLines: 0, lines: 0, matched: [], unmatched: [], untitled: 0 };
   for (const q of raw.quests as unknown[]) {

@@ -1,0 +1,127 @@
+# Order 28, ITEM 1: the wiki snapshot. The only job that contacts the wiki (order 28's added rule), and only
+# https://monstersandmemories.miraheze.org/w/api.php, through a temporary relay Worker (override 3) because Miraheze
+# challenges GitHub's runners (order 14's probe, run 40933712788). The relay is deployed with a one-time token compiled
+# in, called once per wiki request, one request at a time, then deleted; the delete is verified by a 404 from the
+# Cloudflare API. At most 150 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP, every attempt counted; ~60 expected),
+# maxlag=5, order 14's named User-Agent. A 403, a 429 or a challenge stops the run and is reported, never retried or
+# worked around (override 7).
+# ITEM 3 (input `compare`, default on): the snapshot against Mo Betta (scripts/wiki/compare.ts, writes nothing), and the
+# first import's writes measured on a local D1 in this runner (no Cloudflare database is read or written).
+# Dispatch only, never scheduled: PR B moves the snapshot into import.yml. No alarm: a failed run is read by the person
+# who dispatched it (order 12: every failed run is listed in the order's report).
+# Expected: about 6 billed minutes per run with the comparison (public repository: free); Cloudflare: one Worker
+# deployed and deleted, about 65 Worker requests (4 refusal checks + 1 per wiki request), 0 D1 rows.
+name: wiki-snapshot
+on:
+  workflow_dispatch:
+    inputs:
+      compare:
+        description: 'Also compare with Mo Betta and measure the first import on a local D1 (ITEM 3)'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+# One relay at a time: its name is fixed.
+concurrency: wiki-relay
+jobs:
+  wiki:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RELAY_CONFIG: scripts/wiki/wrangler.jsonc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Deploy the relay, with this run's one-time token compiled in
+        id: deploy
+        shell: bash
+        run: |
+          token=$(openssl rand -hex 24)
+          echo "::add-mask::$token"
+          printf '%s' "$token" > "$RUNNER_TEMP/relay-token"
+          npx wrangler deploy --config "$RELAY_CONFIG" --define "RELAY_TOKEN:\"$token\"" | tee "$RUNNER_TEMP/deploy.log"
+          url=$(grep -oE 'https://guildcraft-wiki-relay\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)
+          test -n "$url" || { echo "::error::no workers.dev URL in the deploy output"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: The relay refuses everything else with a 403, contacting nothing
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # A fixed pause for the new workers.dev script to go live, not a poll.
+          sleep 15
+          token=$(cat "$RUNNER_TEMP/relay-token")
+          check() {
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$@" || echo "curl exit $?")
+            echo "$code ← ${*: -1}" | sed "s/$token/<token>/g"
+            test "$code" = 403
+          }
+          check -X POST -H "x-relay-token: $token" "$URL/api?action=query&meta=siteinfo"
+          check -H "x-relay-token: wrong-token-wrong-token-wrong-token" "$URL/api?action=query&meta=siteinfo"
+          check -H "x-relay-token: $token" "$URL/other?action=query&meta=siteinfo"
+          check -H "x-relay-token: $token" "$URL/api?action=parse&page=Rothold&prop=wikitext"
+      - name: The snapshot, one request at a time through the relay
+        id: snapshot
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: node scripts/wiki/snapshot.ts --relay "$URL" --token-file "$RUNNER_TEMP/relay-token" --out "$RUNNER_TEMP/wiki-snapshot"
+      - name: Delete the relay, even if a step failed, and confirm it is gone
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/relay-token"
+          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
+          npx wrangler delete --config "$RELAY_CONFIG" --force || echo "::warning::wrangler delete exited $?"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-relay")
+          echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
+          test "$code" = 404
+      - name: Upload the snapshot (CC BY-SA 4.0, credit in CREDIT.md)
+        if: steps.snapshot.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wiki-snapshot
+          path: ${{ runner.temp }}/wiki-snapshot
+          if-no-files-found: error
+          retention-days: 30
+      # ITEM 3. The other sources are fetched pinned from GitHub, as the nightly import fetches them.
+      - name: Compare with Mo Betta (writes nothing)
+        if: inputs.compare && steps.snapshot.outcome == 'success'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/compare"
+          node scripts/import/zone-files.ts --out "$RUNNER_TEMP/zones"
+          node scripts/wiki/compare.ts --snapshot "$RUNNER_TEMP/wiki-snapshot" --zones-dir "$RUNNER_TEMP/zones" --json "$RUNNER_TEMP/compare/compare.json" | tee "$RUNNER_TEMP/compare/compare.md" >> "$GITHUB_STEP_SUMMARY"
+      - name: Measure the first import's writes on a local D1 (gate line 5)
+        if: inputs.compare && steps.snapshot.outcome == 'success'
+        shell: bash
+        run: |
+          npm run db:migrate:local
+          z="$RUNNER_TEMP/zones"
+          # Today's state first: Mo Betta, imported until it settles (a fresh import can stop at the ceiling once).
+          for i in 1 2 3; do node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" > "$RUNNER_TEMP/compare/mo-betta-$i.json"; done
+          tail -n 2 "$RUNNER_TEMP"/compare/mo-betta-*.json
+          # Then the switch-over's first import, from the snapshot, and the quiet night after it.
+          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-1.json"
+          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-2.json"
+          {
+            echo '### Gate line 5: the first import from the snapshot, on a local D1 holding today''s data'
+            echo "first import: $(grep -h '^rows written' "$RUNNER_TEMP/compare/wiki-1.json") — $(grep -m1 -oE '"status": "[a-z-]+"' "$RUNNER_TEMP/compare/wiki-1.json")"
+            echo "the same snapshot again: $(grep -h '^rows written' "$RUNNER_TEMP/compare/wiki-2.json")"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Upload the comparison
+        if: always() && inputs.compare && steps.snapshot.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: wiki-compare
+          path: ${{ runner.temp }}/compare
+          if-no-files-found: warn
+          retention-days: 30

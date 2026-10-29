@@ -11,7 +11,7 @@
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
 import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
 import type { QuestLineRow } from './quests.ts';
-import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
+import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type MobForZones, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
 export const SOURCE = 'mnm-tools/wiki.json';
 
@@ -447,7 +447,8 @@ export const zoneDiffers = (o: StoredZone | undefined, z: ZoneRow) => !o || o.ac
 type StoredZoneName = ZoneNameRow & { active: number };
 export const zoneNameDiffers = (o: StoredZoneName | undefined, n: ZoneNameRow) => !o || o.active !== 1 || o.zone_key !== n.zone_key;
 type StoredNpc = NpcRow & { active: number };
-const NPC_FIELDS = ['name', 'kind', 'level', 'race', 'class', 'location', 'loot_json'] as const;
+// Order 28 (0022): named and raid, the wiki's category tags, compared like every other field.
+const NPC_FIELDS = ['name', 'kind', 'level', 'race', 'class', 'location', 'loot_json', 'named', 'raid'] as const;
 export const npcDiffers = (o: StoredNpc | undefined, n: NpcRow) => !o || o.active !== 1 || NPC_FIELDS.some((f) => o[f] !== n[f]);
 export const npcId = (zoneKey: string, name: string) => `${zoneKey}|${name.toLowerCase()}`;
 export const zoneNameId = (source: string, name: string) => `${source}|${name}`;
@@ -1194,16 +1195,19 @@ function zoneGroups(z: ZonePlan, ex: ExistingState | undefined, stmt: (table: Ta
       stmt(
         'npc',
         rows.length,
-        `INSERT INTO npc (zone_key, name, kind, level, race, class, location, loot_json, active) VALUES ` +
+        `INSERT INTO npc (zone_key, name, kind, level, race, class, location, loot_json, named, raid, active) VALUES ` +
           rows
-            .map((n) => `(${lit(n.zone_key)}, ${lit(n.name)}, ${lit(n.kind)}, ${lit(n.level)}, ${lit(n.race)}, ${lit(n.class)}, ${lit(n.location)}, ${lit(n.loot_json)}, 1)`)
+            .map(
+              (n) =>
+                `(${lit(n.zone_key)}, ${lit(n.name)}, ${lit(n.kind)}, ${lit(n.level)}, ${lit(n.race)}, ${lit(n.class)}, ${lit(n.location)}, ${lit(n.loot_json)}, ${lit(n.named)}, ${lit(n.raid)}, 1)`,
+            )
             .join(', ') +
           ` ON CONFLICT(zone_key, name) DO UPDATE SET name = excluded.name, kind = excluded.kind, level = excluded.level, race = excluded.race, ` +
-          `class = excluded.class, location = excluded.location, loot_json = excluded.loot_json, active = 1 ` +
+          `class = excluded.class, location = excluded.location, loot_json = excluded.loot_json, named = excluded.named, raid = excluded.raid, active = 1 ` +
           // name is a NOCASE column: compared as written, so a case change is written (as npcDiffers sees it).
           `WHERE npc.name IS NOT excluded.name COLLATE BINARY OR npc.kind IS NOT excluded.kind OR npc.level IS NOT excluded.level ` +
           `OR npc.race IS NOT excluded.race OR npc.class IS NOT excluded.class OR npc.location IS NOT excluded.location ` +
-          `OR npc.loot_json IS NOT excluded.loot_json OR npc.active IS NOT 1`,
+          `OR npc.loot_json IS NOT excluded.loot_json OR npc.named IS NOT excluded.named OR npc.raid IS NOT excluded.raid OR npc.active IS NOT 1`,
       ),
     ], rows.flatMap(linked.ofNpc)));
   if (ex) {
@@ -1416,7 +1420,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
   const cls = await db.all<{ code: string; item_count: number; bit: number | null }>('SELECT code, item_count, bit FROM game_class');
   const zs = await db.all<StoredZone>('SELECT key, name, level, description, adjacent_json, atlas_id, wiki_url, map_json, markers_json, active FROM zone');
   const zns = await db.all<StoredZoneName>('SELECT source, name, zone_key, active FROM zone_name');
-  const ns = await db.all<StoredNpc>('SELECT zone_key, name, kind, level, race, class, location, loot_json, active FROM npc');
+  const ns = await db.all<StoredNpc>('SELECT zone_key, name, kind, level, race, class, location, loot_json, named, raid, active FROM npc');
   const srcs = await db.all<{ name: string; sha: string; changed_at: string }>('SELECT name, sha, changed_at FROM import_source');
   const fcs = await db.all<{ name: string; active: number }>('SELECT name, active FROM faction');
   const fls = await db.all<StoredLink>('SELECT l.zone_key, l.npc_name, f.name AS faction, l.kind, l.active FROM npc_faction l JOIN faction f ON f.id = l.faction_id');
@@ -1529,6 +1533,21 @@ export async function previousImportFailing(db: Db): Promise<boolean | null> {
   return prior ? isFailing(prior.status) : null;
 }
 
+/** What the zone plan reads from wiki.json: the mobs (zones split) and the items' wikiZones. Order 28: shared with ITEM 3's comparison. */
+export function zoneInputsOf(data: WikiData, plan: Plan): { mobs: MobForZones[]; wikiZones: string[] } {
+  const wikiZones = [...new Set(Object.values(data.items).flatMap((it) => (Array.isArray(it.wikiZones) ? (it.wikiZones as string[]) : [])))];
+  const mobs = plan.mobs.map((m) => ({
+    key: m.key,
+    title: m.title,
+    level: m.level,
+    race: m.race,
+    class: m.class,
+    zones: m.zones_json ? (JSON.parse(m.zones_json) as string[]) : [],
+    loot: m.loot_json ? (JSON.parse(m.loot_json) as string[]) : [],
+  }));
+  return { mobs, wikiZones };
+}
+
 /** Refuse a run that would deactivate most of the stored recipes (or mobs): a truncated source looks like this. */
 const MIN_RECIPE_RATIO = 0.5;
 /** Statements sent per D1 call while the write ceiling is not near (each call is measured before the next). */
@@ -1578,16 +1597,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     return fail(`implausible drop: ${plan.mobs.length} mobs against ${activeMobs} active stored`);
   if (opts.zones) {
     try {
-      const wikiZones = [...new Set(Object.values(data.items).flatMap((it) => (Array.isArray(it.wikiZones) ? (it.wikiZones as string[]) : [])))];
-      const mobs = plan.mobs.map((m) => ({
-        key: m.key,
-        title: m.title,
-        level: m.level,
-        race: m.race,
-        class: m.class,
-        zones: m.zones_json ? (JSON.parse(m.zones_json) as string[]) : [],
-        loot: m.loot_json ? (JSON.parse(m.loot_json) as string[]) : [],
-      }));
+      const { mobs, wikiZones } = zoneInputsOf(data, plan);
       plan.zones = buildZonePlan(opts.zones, mobs, wikiZones, startedAt);
     } catch (e) {
       if (e instanceof ZoneStructureError) return fail(`zone sources: ${e.message}`);

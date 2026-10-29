@@ -33,29 +33,45 @@ export type ProbeResult = {
   error?: string;
 };
 
-const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function one(req: (typeof REQUESTS)[number]): Promise<ProbeResult> {
-  const url = WIKI + req.path;
-  const base = { name: req.name, url, headers: {}, bodyBytes: 0 };
-  let got: { res: Response; bytes: Uint8Array } | undefined;
+/** One GET's outcome: the response and its whole body, or the network error after the one retry. */
+export type Got = { attempts: number; res: Response; bytes: Uint8Array; error?: undefined } | { attempts: number; res?: undefined; bytes?: undefined; error: string };
+
+/**
+ * Order 28, override 3: the probe's request, generalised. One GET with the named User-Agent and no redirects; one retry
+ * after 10 s on a network error only (order 14). Any answer, a 403 or 429 included, is returned as it is. `mayRetry` lets a
+ * caller with a request cap refuse the retry (order 28: every attempt counts toward the cap).
+ */
+export async function politeGet(url: string, opts: { headers?: Record<string, string>; mayRetry?: () => boolean } = {}): Promise<Got> {
   let attempts = 0;
   let error = '';
-  while (!got && attempts < 2) {
-    if (attempts) await wait(RETRY_AFTER_MS);
+  while (attempts < 2) {
+    if (attempts) {
+      if (opts.mayRetry && !opts.mayRetry()) break;
+      await wait(RETRY_AFTER_MS);
+    }
     attempts++;
     try {
       const res = await fetch(url, {
-        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+        headers: { 'User-Agent': USER_AGENT, Accept: 'application/json', ...opts.headers },
         redirect: 'manual',
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      got = { res, bytes: new Uint8Array(await res.arrayBuffer()) };
+      return { attempts, res, bytes: new Uint8Array(await res.arrayBuffer()) };
     } catch (e) {
       error = e instanceof Error ? `${e.name}: ${e.message}${e.cause ? ` (${String(e.cause)})` : ''}` : String(e);
     }
   }
-  if (!got) return { ...base, attempts, status: null, error };
+  return { attempts, error };
+}
+
+async function one(req: (typeof REQUESTS)[number]): Promise<ProbeResult> {
+  const url = WIKI + req.path;
+  const base = { name: req.name, url, headers: {}, bodyBytes: 0 };
+  const got = await politeGet(url);
+  const attempts = got.attempts;
+  if (!got.res) return { ...base, attempts, status: null, error: got.error };
   const { res, bytes } = got;
   const body = new TextDecoder().decode(bytes);
   const headers = Object.fromEntries(HEADERS.flatMap((h) => (res.headers.has(h) ? [[h, res.headers.get(h) ?? '']] : [])));

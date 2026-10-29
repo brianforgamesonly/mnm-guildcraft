@@ -11,7 +11,9 @@ import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, localDb, remoteDb } from './db.ts';
 import { fetchSource, fetchZoneSources, SOURCE_NAME } from './source.ts';
 import { readZoneDir } from './zone-files.ts';
-import type { ZoneInput } from './zones.ts';
+import { wikiVersion, type ZoneInput } from './zones.ts';
+import type { WikiSnapshot } from '../wiki/types.ts';
+import { join } from 'node:path';
 import { alarm } from '../ci/alarm.ts';
 
 const { values: args } = parseArgs({
@@ -22,10 +24,14 @@ const { values: args } = parseArgs({
     file: { type: 'string' },
     sha: { type: 'string' },
     'zones-dir': { type: 'string' },
+    // Order 28, ITEM 3: the zone data from a wiki snapshot instead of Mo Betta, on the local D1 only (gate line 5's
+    // measurement). The nightly import is unchanged until PR B.
+    'wiki-snapshot': { type: 'string' },
   },
 });
 
 if (args.local === args.remote) throw new Error('pass exactly one of --local or --remote');
+if (args['wiki-snapshot'] && !args.local) throw new Error('--wiki-snapshot is for the local D1 only (order 28, PR A)');
 
 let db: Db;
 let dispose = async () => {};
@@ -50,6 +56,10 @@ try {
     const wiki = await fetchSource(process.env.GITHUB_TOKEN);
     ({ sha, raw } = wiki);
     zones = await fetchZoneSources({ name: SOURCE_NAME, sha, changedAt: wiki.changedAt }, process.env.GITHUB_TOKEN);
+  }
+  if (args['wiki-snapshot'] && zones) {
+    const snap = JSON.parse(readFileSync(join(args['wiki-snapshot'], 'snapshot.json'), 'utf8')) as WikiSnapshot;
+    zones = { ...zones, wiki: snap, versions: [...zones.versions, wikiVersion(snap)] };
   }
   const result = await runImport(db, raw, {
     sourceSha: sha,

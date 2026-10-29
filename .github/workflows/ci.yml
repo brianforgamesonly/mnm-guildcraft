@@ -27,6 +27,8 @@ jobs:
       - run: npm run test:operator-text
       - run: npm run test:health
       - run: npm run test:emoji
+      # Order 28: the relay's allow-list and 403s, the snapshot client's polite-guest rules, the parser and the comparison.
+      - run: npm run test:wiki
       # Order 17b: a zone's site link held on main may not disappear (src/zone/sites.json); the base copy is fetched.
       - run: git fetch --no-tags --depth=1 origin +refs/heads/main:refs/remotes/origin/main
       - run: npm run test:zone-sites

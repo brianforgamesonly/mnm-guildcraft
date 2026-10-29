@@ -16,6 +16,8 @@ export { levelSort, zoneKey } from '../../src/zone/names.ts';
 import { factionName } from '../../src/faction-aliases.ts';
 import { MAP_LICENCES, type MapLicence } from './map-licences.ts';
 import { factionQuestLines, type QuestLineRow, type QuestSummary } from './quests.ts';
+import { parseSnapshot } from '../wiki/parse.ts';
+import type { WikiSnapshot } from '../wiki/types.ts';
 
 // ---------------------------------------------------------------- sources
 
@@ -42,13 +44,117 @@ export interface ZoneInput {
   files: Record<ZoneFileName, unknown>;
   /** Every file read this run, wiki.json included. */
   versions: SourceVersion[];
+  /**
+   * Order 28: the wiki snapshot (scripts/wiki/snapshot.ts). When present it replaces Mo Betta's zones, NPCs and quests
+   * (ITEM 2's parser, scripts/wiki/parse.ts), and Mo Betta's files are not read. PR A uses it only for the comparison and
+   * the local measurement (ITEM 3); the nightly import still reads Mo Betta.
+   */
+  wiki?: WikiSnapshot;
+}
+/** Order 28: the snapshot's entry in import_source: sha = its highest revid, changed_at = that revision's time. */
+export const WIKI_SNAPSHOT_SOURCE = 'wiki/snapshot';
+export const wikiVersion = (s: WikiSnapshot): SourceVersion => ({ name: WIKI_SNAPSHOT_SOURCE, sha: String(s.version.revid), changedAt: s.version.timestamp });
+
+/** The mapping's sources: each names where a zone name was read. Order 28: the wiki's three replace Mo Betta's at the switch-over. */
+export const NAME_SOURCES = [
+  'mo-betta:zones', 'wiki:zones', 'mnm-tools:maps', WIKI_ZONES_SOURCE, MOB_ZONES_SOURCE, 'atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs', 'wiki:adjacent', 'wiki:npcs',
+] as const;
+export type NameSource = (typeof NAME_SOURCES)[number];
+/** The registries after the zone source's own; in this order, the first one to use a zone's name gives its display name. */
+const OTHER_REGISTRIES: readonly NameSource[] = ['mnm-tools:maps', 'mnm-tools:wikiZones', 'mnm-tools:mobs'];
+
+/**
+ * The zone source's rows, whichever source holds them (Mo Betta's files, or the wiki snapshot): the one shape the plan
+ * reads. A value the source does not hold is null.
+ */
+interface SourceRows {
+  registry: NameSource;
+  adjacentSource: NameSource;
+  npcSource: NameSource;
+  zones: { name: string; level: string | null; description: string | null; adjacent: string[]; url: string | null; mapFile: string | null; map: string | null }[];
+  npcs: {
+    name: string;
+    /** The zone names the record's zone text holds (Mo Betta: split on ", " and " or "; the wiki: one per block). */
+    zoneParts: string[];
+    kind: string | null;
+    level: string | null;
+    race: string | null;
+    class: string | null;
+    location: string | null;
+    loot: string[];
+    factions: string[];
+    opposingFactions: string[];
+    named: number | null;
+    raid: number | null;
+  }[];
+  /** factionQuestLines' input: { quests: [{ title, url, rewards }] }. */
+  quests: unknown;
+  questsLabel: string;
 }
 
-/** The mapping's sources: each names where a zone name was read. */
-export const NAME_SOURCES = ['mo-betta:zones', 'mnm-tools:maps', WIKI_ZONES_SOURCE, MOB_ZONES_SOURCE, 'atlas:maps', 'mo-betta:adjacent', 'mo-betta:npcs'] as const;
-export type NameSource = (typeof NAME_SOURCES)[number];
-/** The sources whose names are zones; in this order, the first one to use a zone's name gives its display name. */
-const REGISTRIES: readonly NameSource[] = ['mo-betta:zones', 'mnm-tools:maps', 'mnm-tools:wikiZones', 'mnm-tools:mobs'];
+function moBettaRows(files: ZoneInput['files']): SourceRows {
+  const mbZones = list(files['mo-betta/zones.json'], 'mo-betta/zones.json', 'zones');
+  const mbNpcs = list(files['mo-betta/npcs.json'], 'mo-betta/npcs.json', 'npcs');
+  return {
+    registry: 'mo-betta:zones',
+    adjacentSource: 'mo-betta:adjacent',
+    npcSource: 'mo-betta:npcs',
+    zones: mbZones.map((z) => ({
+      name: z.name as string,
+      level: fieldText(z.level),
+      description: fieldText(z.description),
+      adjacent: strs(z.adjacent),
+      url: str(z.url),
+      mapFile: str(z.map_file),
+      map: str(z.map),
+    })),
+    npcs: mbNpcs.map((n) => ({
+      name: n.name as string,
+      zoneParts: npcZoneParts(typeof n.zone === 'string' ? n.zone : ''),
+      kind: str(n.kind),
+      level: fieldText(n.level),
+      race: fieldText(n.race),
+      class: fieldText(n.class),
+      location: fieldText(n.location),
+      loot: strs(n.loot),
+      factions: strs(n.factions),
+      opposingFactions: strs(n.opposing_factions),
+      // Mo Betta holds no named or raid tag: unknown, never guessed.
+      named: null,
+      raid: null,
+    })),
+    quests: files['mo-betta/quests.json'],
+    questsLabel: 'mo-betta/quests.json',
+  };
+}
+
+function wikiRows(snap: WikiSnapshot): SourceRows {
+  const p = parseSnapshot(snap);
+  if (!p.zones.length) throw new ZoneStructureError('wiki snapshot: no zone page uses {{ZoneDetails}}');
+  if (!p.npcs.length) throw new ZoneStructureError('wiki snapshot: no NPC template block');
+  return {
+    registry: 'wiki:zones',
+    adjacentSource: 'wiki:adjacent',
+    npcSource: 'wiki:npcs',
+    zones: p.zones.map((z) => ({ name: z.name, level: z.level, description: null, adjacent: z.adjacent, url: z.url, mapFile: null, map: null })),
+    npcs: p.npcs.map((n) => ({
+      name: n.name,
+      zoneParts: n.zone ? [n.zone] : [],
+      kind: n.kind,
+      level: n.level,
+      race: n.race,
+      class: n.class,
+      location: n.location,
+      loot: n.loot,
+      factions: n.factions,
+      opposingFactions: n.opposingFactions,
+      named: n.named,
+      raid: n.raid,
+    })),
+    quests: { quests: p.quests },
+    questsLabel: 'wiki snapshot quests',
+  };
+}
 
 export class ZoneStructureError extends Error {}
 
@@ -101,6 +207,9 @@ export interface NpcRow {
   class: string | null;
   location: string | null;
   loot_json: string | null;
+  /** Order 28 (0022): the wiki's Category:Named Mobs and Category:Raid Encounters, 1 or 0; NULL from a source without tags. */
+  named: number | null;
+  raid: number | null;
 }
 /**
  * Order 24: an NPC row's faction, by the wiki infobox field it came from, under the wiki's own labels: factions is
@@ -219,24 +328,24 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   const mt = list(input.files['mnm-tools/maps.json'], 'mnm-tools/maps.json', 'zones');
   const mtPinned = input.versions.find((v) => v.name === 'mnm-tools/maps.json');
   const atlas = list(input.files['mnmatlas/maps.json'], 'mnmatlas/maps.json', 'maps');
-  const mbZones = list(input.files['mo-betta/zones.json'], 'mo-betta/zones.json', 'zones');
-  const mbNpcs = list(input.files['mo-betta/npcs.json'], 'mo-betta/npcs.json', 'npcs');
+  // Order 28: the zone source is the wiki snapshot when the input carries one, else Mo Betta's files.
+  const src = input.wiki ? wikiRows(input.wiki) : moBettaRows(input.files);
 
   // 1. Every name each source uses, in source order.
   const used: Record<NameSource, string[]> = Object.fromEntries(NAME_SOURCES.map((s) => [s, []])) as never;
   const use = (s: NameSource, n: string) => void (used[s].includes(n) || used[s].push(n));
-  for (const z of mbZones) use('mo-betta:zones', z.name as string);
+  for (const z of src.zones) use(src.registry, z.name);
   for (const z of mt) use('mnm-tools:maps', z.name as string);
   for (const n of wikiZones) use('mnm-tools:wikiZones', n);
   for (const m of mobs) for (const z of m.zones) use('mnm-tools:mobs', z);
   // Override 1: the atlas registry's map ids and titles only.
   for (const m of atlas) if (str(m.title)) use('atlas:maps', m.title as string);
-  for (const z of mbZones) for (const a of strs(z.adjacent)) use('mo-betta:adjacent', a);
-  for (const n of mbNpcs) for (const p of npcZoneParts(typeof n.zone === 'string' ? n.zone : '')) use('mo-betta:npcs', p);
+  for (const z of src.zones) for (const a of z.adjacent) use(src.adjacentSource, a);
+  for (const n of src.npcs) for (const p of n.zoneParts) use(src.npcSource, p);
 
   // 2. The zones: every registry name, keyed by zoneKey; the first registry to use a key names it.
   const display = new Map<string, string>();
-  for (const s of REGISTRIES) for (const n of used[s]) if (!display.has(zoneKey(n))) display.set(zoneKey(n), n);
+  for (const s of [src.registry, ...OTHER_REGISTRIES]) for (const n of used[s]) if (!display.has(zoneKey(n))) display.set(zoneKey(n), n);
   const keyOf = (n: string) => (display.has(zoneKey(n)) ? zoneKey(n) : null);
 
   const names: ZoneNameRow[] = NAME_SOURCES.flatMap((source) => used[source].map((name) => ({ source, name, zone_key: keyOf(name) })));
@@ -254,22 +363,23 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
 
   // 3. Map images. A map file that Mo Betta records for more than one zone is a placeholder, not that zone's map.
   const fileUse = new Map<string, number>();
-  for (const z of mbZones) if (str(z.map_file)) fileUse.set(z.map_file as string, (fileUse.get(z.map_file as string) ?? 0) + 1);
+  for (const z of src.zones) if (z.mapFile) fileUse.set(z.mapFile, (fileUse.get(z.mapFile) ?? 0) + 1);
   const placeholderFiles = [...fileUse].filter(([, n]) => n > 1).map(([f]) => f);
   const unchecked: { zone: string; file: string }[] = [];
 
   const zones = new Map<string, ZoneRow>();
   for (const [key, name] of display)
     zones.set(key, { key, name, level: null, description: null, adjacent_json: null, atlas_id: null, wiki_url: null, map_json: null, markers_json: null });
-  const mbByKey = new Map(mbZones.map((z) => [zoneKey(z.name as string), z]));
+  const mbByKey = new Map<string, SourceRows['zones'][number]>();
+  for (const z of src.zones) mbByKey.set(zoneKey(z.name), z); // a later record of the same key wins, as before
   for (const [key, z] of zones) {
     const mb = mbByKey.get(key);
     const tools = mt.find((m) => zoneKey(m.name as string) === key);
     if (mb) {
-      z.level = fieldText(mb.level);
-      z.description = fieldText(mb.description);
-      z.adjacent_json = json(strs(mb.adjacent));
-      z.wiki_url = str(mb.url);
+      z.level = mb.level;
+      z.description = mb.description;
+      z.adjacent_json = json(mb.adjacent);
+      z.wiki_url = mb.url;
     }
     const atlasMap = atlas.find((m) => str(m.title) && zoneKey(m.title as string) === key);
     if (atlasMap) z.atlas_id = atlasMap.id as string;
@@ -281,9 +391,9 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
     }
     // mnm-tools' image first (pinned to its maps.json commit); Mo Betta's map as the fallback, never a shared placeholder.
     const toolsUrl = tools && str(tools.image) && mtPinned ? `https://raw.githubusercontent.com/Boisteroux/mnm-tools/${mtPinned.sha}/mnmdb/maps/${tools.image}` : null;
-    const mbFile = mb && str(mb.map_file) && !placeholderFiles.includes(mb.map_file as string) ? (mb.map_file as string) : null;
-    const image =
-      mapImage(tools ? str(tools.source) : null, toolsUrl, licences) ?? mapImage(mbFile, mb ? str(mb.map) : null, licences);
+    // Order 28: the wiki snapshot carries no map file (the fallback is dropped; mnm-tools' maps and MnM Atlas remain).
+    const mbFile = mb && mb.mapFile && !placeholderFiles.includes(mb.mapFile) ? mb.mapFile : null;
+    const image = mapImage(tools ? str(tools.source) : null, toolsUrl, licences) ?? mapImage(mbFile, mb ? mb.map : null, licences);
     if (image) z.map_json = JSON.stringify(image);
     else {
       if (tools && str(tools.source) && toolsUrl) unchecked.push({ zone: z.name, file: tools.source as string });
@@ -304,18 +414,18 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   const fs = { withFactions: 0, withoutRow: 0, leftOut: 0 };
   /** Order 25: each approved misspelling the source still uses, and the npc rows it names (links written under the approved name). */
   const merged = new Map<string, number>();
-  for (const n of mbNpcs) {
-    const keys = [...new Set(npcZoneParts(typeof n.zone === 'string' ? n.zone : '').map(keyOf).filter((k): k is string => k !== null))];
+  for (const n of src.npcs) {
+    const keys = [...new Set(n.zoneParts.map(keyOf).filter((k): k is string => k !== null))];
     if (!keys.length) noZone++;
-    const loot = strs(n.loot);
-    const names = (v: unknown) =>
-      [...new Set(strs(v).map((f) => f.trim()))].map((f) => {
+    const loot = n.loot;
+    const names = (v: string[]) =>
+      [...new Set(v.map((f) => f.trim()).filter((f) => f !== ''))].map((f) => {
         if (factionName(f) !== f && keys.length) merged.set(f, (merged.get(f) ?? 0) + keys.length);
         return factionName(f);
       }).filter((f, i, all) => all.indexOf(f) === i);
     const named: [string, FactionKind][] = [
       ...names(n.factions).map((f): [string, FactionKind] => [f, 'lost']),
-      ...names(n.opposing_factions).map((f): [string, FactionKind] => [f, 'gained']),
+      ...names(n.opposingFactions).map((f): [string, FactionKind] => [f, 'gained']),
     ];
     if (named.length) {
       fs.withFactions++;
@@ -326,7 +436,7 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
       }
     }
     for (const zk of keys) {
-      const rowName = npcs.get(`${zk}|${(n.name as string).toLowerCase()}`)?.name ?? (n.name as string);
+      const rowName = npcs.get(`${zk}|${n.name.toLowerCase()}`)?.name ?? n.name;
       for (const [faction, kind] of named) {
         if (!factionNames.includes(faction)) factionNames.push(faction);
         const id = `${zk}|${rowName.toLowerCase()}|${faction}|${kind}`;
@@ -336,25 +446,27 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
     for (const zk of keys) {
       const row: NpcRow = {
         zone_key: zk,
-        name: n.name as string,
-        kind: str(n.kind),
-        level: fieldText(n.level),
-        race: fieldText(n.race),
-        class: fieldText(n.class),
-        location: fieldText(n.location),
+        name: n.name,
+        kind: n.kind,
+        level: n.level,
+        race: n.race,
+        class: n.class,
+        location: n.location,
         loot_json: json(loot),
+        named: n.named,
+        raid: n.raid,
       };
-      const id = `${zk}|${(n.name as string).toLowerCase()}`;
+      const id = `${zk}|${n.name.toLowerCase()}`;
       const prior = npcs.get(id);
       if (!prior) {
         npcs.set(id, row);
         continue;
       }
       caseDuplicates++;
-      for (const f of ['kind', 'level', 'race', 'class', 'location', 'loot_json'] as const) {
-        if (prior[f] === null) prior[f] = row[f];
+      for (const f of ['kind', 'level', 'race', 'class', 'location', 'loot_json', 'named', 'raid'] as const) {
+        if (prior[f] === null) (prior as unknown as Record<string, unknown>)[f] = row[f];
         else if (row[f] !== null && row[f] !== prior[f])
-          caseDuplicateConflicts.push({ zone: zones.get(zk)!.name, name: prior.name, field: f, kept: prior[f]!, dropped: row[f]! });
+          caseDuplicateConflicts.push({ zone: zones.get(zk)!.name, name: prior.name, field: f, kept: String(prior[f]), dropped: String(row[f]) });
       }
     }
   }
@@ -379,7 +491,7 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   }
 
   // Order 25, ITEM 1: quest reward lines, matched against the faction names above (after the approved merges).
-  const quests = factionQuestLines(input.files['mo-betta/quests.json'], factionNames);
+  const quests = factionQuestLines(src.quests, factionNames, src.questsLabel);
 
   // 6. Staleness: a warning, never a failure.
   const nowMs = Date.parse(now);
@@ -410,8 +522,8 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
       names: nameSummary,
       coverage,
       npcs: {
-        source: mbNpcs.length,
-        merchants: mbNpcs.filter((n) => n.kind === 'merchant').length,
+        source: src.npcs.length,
+        merchants: src.npcs.filter((n) => n.kind === 'merchant').length,
         rows: npcRows.length,
         noZone,
         caseDuplicates,
