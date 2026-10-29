@@ -7,6 +7,10 @@ import { refreshAfterCommand, scheduled as runScheduled } from './board/refresh.
 import type { Effects } from './context.ts';
 import { ackFor, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
 import { countD1, isolateSnapshot, timingLine, type D1Call } from './telemetry.ts';
+import { timersOf } from './dkp/timers.ts';
+
+// Order 27 (override 5 of order 10): the DKP timer object's class, bound as DKP_TIMERS in each copy (wrangler.jsonc).
+export { DkpTimers } from './dkp/timers.ts';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -50,6 +54,13 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
       audited = { action: a.action, ok: false };
       console.error('audit write failed', a.action, errText(e));
     }
+  }
+  // Order 27: DKP timers, after the member has the reply (one Durable Object request each).
+  try {
+    if (effects.dkpCancel) await timersOf(env, effects.dkpCancel).cancel();
+    if (effects.dkpTimers?.items.length) await timersOf(env, effects.dkpTimers.guildId).schedule(effects.dkpTimers.guildId, effects.dkpTimers.items);
+  } catch (e) {
+    console.error('dkp timers failed', errText(e));
   }
   console.log(timingLine(i, calls, colo, Date.now() - started, { ack: plan.ack, deliveries: log, err, isolate, receivedAt, audit: audited }));
   if ((effects.board || effects.factions) && i.guild_id)

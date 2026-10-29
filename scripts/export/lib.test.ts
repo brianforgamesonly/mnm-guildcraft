@@ -63,6 +63,17 @@ function fixture(): string {
       `INSERT INTO craft_notify (guild_id, discord_user_id, tradeskill_id, created_at) VALUES ('${g}', '${u}', 1, '${at}')`,
       `INSERT INTO craft_request (id, guild_id, requester, note, status, thread_id, created_at) VALUES (${n}, '${g}', '${u}', 'Note${n}', 'open', 'reqthread${n}', '${at}')`,
       `INSERT INTO craft_request_item (request_id, position, item_id, quantity, crafters_json) VALUES (${n}, 1, 2, ${n}, '["${u}"]')`,
+      // Order 27: the DKP add-on (attendance, kills and rechecks are children of a raid: no guild_id of their own).
+      `INSERT INTO dkp_guild (guild_id, enabled, channel_id, command_id, changed_at, changed_by) VALUES ('${g}', 1, 'dkpch${n}', 'cmd${n}', '${at}', '${u}')`,
+      `INSERT INTO dkp_setting (guild_id, key, value, set_at, set_by) VALUES ('${g}', 'cap', '${n}00', '${at}', '${u}')`,
+      `INSERT INTO dkp_named_value (guild_id, zone_key, name, points, set_at, set_by) VALUES ('${g}', 'z', 'Named${n}', ${n}, '${at}', '${u}')`,
+      `INSERT INTO dkp_pool (guild_id, pool, message_id, created_at) VALUES ('${g}', 'guild', 'pm${n}', '${at}')`,
+      `INSERT INTO dkp_raid (id, guild_id, pool, mode, opened_by, opened_at, closes_at) VALUES (${n}, '${g}', 'z', 'named', '${u}', '${at}', '${at}')`,
+      `INSERT INTO dkp_attendance (raid_id, member_id, state, since, set_by) VALUES (${n}, '${u}', 'present', '${at}', '${u}')`,
+      `INSERT INTO dkp_kill (id, raid_id, name, points, guild_points, at, by) VALUES (${n}, ${n}, 'Named${n}', 10, 2, '${at}', '${u}')`,
+      `INSERT INTO dkp_recheck (kill_id, member_id, at) VALUES (${n}, '${u}', '${at}')`,
+      `INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, reason, asked_by, asked_at, due_at) VALUES ('${g}', 'adjust', '${u}', 'guild', 30, 'Reason${n}', '${u}', '${at}', '${at}')`,
+      `INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, reason, actor, at) VALUES ('${g}', '${u}', 'z', 10, 0, 10, 'kill', ${n}, ${n}, 'Ledger${n}', 'bot', '${at}')`,
     );
   }
   return `${schema()}\n${rows.map((r) => `${r};`).join('\n')}\n`;
@@ -105,9 +116,11 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
     for (const g of [A, B]) assert.ok(Number((full.prepare(`SELECT count(*) AS n FROM "${t.name}" WHERE guild_id = ?`).get(g) as { n: number }).n) > 0, `${t.name} has no row for ${g}`);
   }
   const out = guildDump(sql, A, IMPORT_WRITES);
-  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2', 'Reason2', 'Ledger2', 'Named2', 'dkpch2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
   // Order 16: the request's items come with it, by their parent.
   assert.equal(out.counts.craft_request_item, 1);
+  // Order 27: a raid's attendance and kills come with it, and a kill's rechecks with the kill.
+  assert.deepEqual([out.counts.dkp_attendance, out.counts.dkp_kill, out.counts.dkp_recheck, out.counts.dkp_ledger], [1, 1, 1, 1]);
   for (const mine of [A, 'Char1', 'Departed1', 'Faction1', 'thread1', 'private1', 'member.left']) assert.ok(out.sql.includes(mine), `A's ${mine} missing`);
   const c = out.counts;
   assert.deepEqual(

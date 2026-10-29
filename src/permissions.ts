@@ -14,7 +14,7 @@ import { ATTACH_FILES, CREATE_GUILD_EXPRESSIONS, CREATE_PRIVATE_THREADS, EMBED_L
  * The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). Order 24: the
  * factions forum is served by the board's own routes (the same machinery, src/board/kinds.ts), so it has no rows of its own.
  */
-export type ChannelKind = 'board' | 'factions' | 'review' | 'vault' | 'requests';
+export type ChannelKind = 'board' | 'factions' | 'review' | 'vault' | 'requests' | 'dkp';
 type RouteChannel = Exclude<ChannelKind, 'factions'>;
 const routeChannel = (kind: ChannelKind): RouteChannel => (kind === 'factions' ? 'board' : kind);
 
@@ -61,6 +61,12 @@ export const ROUTES: Route[] = [
   { method: 'GET', path: '/guilds/{}/emojis', channel: null, needs: [], why: 'emoji: find the server\'s guildcraft emoji (List Guild Emojis: no permission stated)' },
   { method: 'POST', path: '/guilds/{}/emojis', channel: null, needs: [CREATE_GUILD_EXPRESSIONS], why: 'emoji: create the guildcraft emoji once (Create Guild Emoji: "Requires the CREATE_GUILD_EXPRESSIONS permission")' },
   { method: 'PUT', path: '/channels/{}/permissions/{}', channel: null, needs: [MANAGE_ROLES], why: 'channel setup: add the officer role to its private channels later (Edit Channel Permissions: "Requires the MANAGE_ROLES permission")' },
+  // Order 27 (read 2026-10-29, docs.discord.com/developers/resources/message): GC-DKP, the DKP add-on's text channel. The
+  // bot posts and edits only its own messages there and pins nothing (Pin Message "Requires the PIN_MESSAGES permission",
+  // which the install link does not ask for). /dkp's per-server create and delete are application routes (no server
+  // permission; the bot scope "automatically" includes applications.commands).
+  { method: 'POST', path: '/channels/{}/messages', channel: 'dkp', needs: [VIEW_CHANNEL, SEND_MESSAGES, EMBED_LINKS], why: 'dkp: standings messages, raid and approval cards, change notices (Create Message: "must have the SEND_MESSAGES permission")' },
+  { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'dkp', needs: [VIEW_CHANNEL, READ_MESSAGE_HISTORY], why: 'dkp: edit its own messages in place ("can be edited by the original message author"; Read Message History keeps its earlier messages readable, unverified whether an edit needs it)' },
 ];
 
 /** Discord's settings names for the bits the routes use. */

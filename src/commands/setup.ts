@@ -11,6 +11,8 @@ import { FACTION_SHOWN, FACTIONS } from '../board/kinds.ts';
 import { BACKUP_SQL, backupLine, failureText, tokenLine, USAGE_SQL, usageLines, usageParams, type BackupRow, type UsageRow } from '../usage.ts';
 import { ALARM_IMPORT, FINISHED_IMPORT, REAL_IMPORT } from '../import-status.ts';
 import { operatorText, render, type Line } from '../operator-text.ts';
+import { dkpButtons } from '../dkp/setup.ts';
+import { loadDkp } from '../dkp/state.ts';
 
 const describeRoles = (g: Pick<Guild, 'member_role_id' | 'officer_role_id'>) =>
   [
@@ -233,8 +235,11 @@ export async function guildcraftSetup(c: Ctx, opts: Option[]): Promise<MessageRe
   const review = optString(opts, 'review');
   const requests = optString(opts, 'requests');
   const factions = optString(opts, 'factions');
-  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && requests === undefined && factions === undefined)
-    return ephemeral(`Current settings:\n${describeAll(c.guild)}`, setupButtons(c.guild, true));
+  if (memberRole === undefined && officerRole === undefined && board === undefined && review === undefined && requests === undefined && factions === undefined) {
+    // Order 27: the DKP add-on's switch, under the channels button (Add DKP while off, Remove DKP while on).
+    const { enabled } = await loadDkp(c.db, c.guild.id);
+    return ephemeral(`Current settings:\n${describeAll(c.guild)}`, { components: [...(setupButtons(c.guild, true).components ?? []), dkpButtons(enabled)] });
+  }
 
   for (const [id, kind] of [[board, 'board'], [factions, 'factions'], [review, 'review'], [requests, 'requests']] as const) {
     if (id === undefined) continue;

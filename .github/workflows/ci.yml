@@ -23,6 +23,7 @@ jobs:
       - run: npm run test:backup
       - run: npm run test:export
       - run: npm run test:routes
+      - run: npm run test:dkp-register
       - run: npm run test:operator-text
       - run: npm run test:health
       - run: npm run test:emoji

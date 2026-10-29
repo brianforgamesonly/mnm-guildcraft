@@ -6,6 +6,7 @@ declare global {
       DB: D1Database;
       DISCORD_PUBLIC_KEY: string;
       TEST_MIGRATIONS: D1Migration[];
+      DKP_TIMERS: DurableObjectNamespace<import('../src/dkp/timers.ts').DkpTimers>;
     }
   }
 }

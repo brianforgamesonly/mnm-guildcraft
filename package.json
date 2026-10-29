@@ -14,6 +14,8 @@
     "test:backup": "node --test scripts/backup/lib.test.ts",
     "test:export": "node --test scripts/export/lib.test.ts",
     "test:routes": "node --test scripts/ci/routes.test.ts",
+    "test:dkp-register": "node --test scripts/discord/dkp.test.ts",
+    "bench:dkp-reads": "node scripts/bench/dkp-reads.ts",
     "test:operator-text": "node --test scripts/ci/operator-text.test.ts",
     "test:zone-sites": "node --test scripts/ci/zone-sites.test.ts",
     "test:health": "node --test scripts/health/judge.test.ts",

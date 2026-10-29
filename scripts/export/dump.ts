@@ -71,7 +71,13 @@ export function guildDump(fullSql: string, guildId: string, referenceTables: rea
   const plan = exportPlan(db.prepare(TABLES).all() as unknown as TableSql[], guildId, referenceTables);
   const found = db.prepare('SELECT count(*) AS n FROM guild WHERE id = ?').get(guildId) as { n: number };
   if (Number(found.n) !== 1) throw new Error('that guild is not in this database');
+  // Order 27: a trigger may refuse the scoping deletes (dkp_ledger is append-only). This copy is a scratch database, so
+  // its triggers (read from its own sqlite_master, never a list) come off for the deletes and go back before the dump,
+  // which carries them.
+  const triggers = db.prepare("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' AND sql IS NOT NULL").all() as { name: string; sql: string }[];
+  for (const t of triggers) db.exec(`DROP TRIGGER ${q(t.name)}`);
   for (const s of deleteStatements(plan)) db.exec(s);
+  for (const t of triggers) db.exec(t.sql);
   const dangling = db.prepare('PRAGMA foreign_key_check').all();
   if (dangling.length) throw new Error(`${dangling.length} row(s) would point at rows outside the export`);
   const kept = counts(db);

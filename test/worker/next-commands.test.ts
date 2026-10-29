@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { CRAFTABLE_MARK, LISTS, listKey } from '../../src/commands/autocomplete.ts';
 import { COMMANDS as NEXT_COMMANDS, DEFINED, SUBCOMMAND } from '../../src/commands/definitions.ts';
 import { ROUTES } from '../../src/interactions.ts';
+import { DKP_COMMAND } from '../../src/dkp/definition.ts';
 import { ITEM_COPY, USED_IN_SQL } from '../../src/commands/item.ts';
 import { SCREENSHOTS_OFF } from '../../src/commands/images.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
@@ -101,7 +102,8 @@ describe('autocomplete, keyed by command and option', () => {
       (c.options ?? []).flatMap((o) => (o.type === SUBCOMMAND ? (o.options ?? []).filter((p) => p.autocomplete).map((p) => listKey(c.name, o.name, p.name)) : o.autocomplete ? [listKey(c.name, undefined, o.name)] : [])),
     );
   it('every autocomplete option in both lists has a list, and every list names one (derived both ways)', () => {
-    const defined = new Set(autocompleteOptions(NEXT_COMMANDS));
+    // Order 27: /dkp's per-server definition has its lists too.
+    const defined = new Set(autocompleteOptions([...NEXT_COMMANDS, DKP_COMMAND]));
     expect([...defined].filter((k) => !LISTS[k])).toEqual([]);
     expect(Object.keys(LISTS).filter((k) => !defined.has(k))).toEqual([]);
   });

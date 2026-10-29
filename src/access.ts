@@ -83,6 +83,24 @@ export const isAdmin = (m: GuildMember): boolean =>
 export const isOfficer = (guild: Guild | null, m: GuildMember): boolean =>
   isAdmin(m) || (!!guild?.officer_role_id && m.roles.includes(guild.officer_role_id));
 
+/**
+ * Order 27 (override 7 of PRD FR-8's tiering): who runs DKP. Admins always; then the role an admin named in DKP settings,
+ * or, when none is named, the officer role.
+ */
+export const isDkpRunner = (guild: Guild | null, runnerRole: string | null, m: GuildMember): boolean =>
+  isAdmin(m) || (runnerRole ? m.roles.includes(runnerRole) : isOfficer(guild, m));
+
+/**
+ * Order 27: nobody changes, or approves a change to, their own DKP; nor approves a change they asked for. The one decider,
+ * called by every route that changes points (adjust, approve, corrections). Bot-made rows (payouts, Check again) never
+ * reach it. Returns the refusal, or null.
+ */
+export function dkpSelfConflict(actorId: string, change: { member: string; askedBy?: string }): 'own' | 'asked' | null {
+  if (actorId === change.member) return 'own';
+  if (change.askedBy !== undefined && actorId === change.askedBy) return 'asked';
+  return null;
+}
+
 /** Member commands: the guild's member role when one is set, otherwise anyone in the server. */
 export const passesMemberGate = (guild: Guild | null, m: GuildMember): boolean =>
   !guild?.member_role_id || m.roles.includes(guild.member_role_id);

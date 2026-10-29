@@ -15,6 +15,10 @@ export interface Effects {
    * after it stays inside the same 40-call budget (src/board/api.ts BOARD_CALL_CAP).
    */
   discordCalls?: number;
+  /** Order 27: DKP timers to set on the guild's timer object (src/dkp/timers.ts), after the reply. */
+  dkpTimers?: { guildId: string; items: { key: string; due: number }[] };
+  /** Order 27: cancel every DKP timer of this guild (Remove DKP). */
+  dkpCancel?: string;
 }
 
 /** What every command handler gets: the caller, their guild and their rights, checked for this request. */

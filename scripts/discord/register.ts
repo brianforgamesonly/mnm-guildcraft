@@ -11,6 +11,7 @@ import { deflateSync } from 'node:zlib';
 import { commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
 import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, remoteDb } from '../import/db.ts';
+import { DKP_ON_SQL, upsertDkp } from './dkp.ts';
 
 const COPY = currentCopy();
 const GLOBAL = COPY.name === 'production';
@@ -156,6 +157,16 @@ for (const [label, headers] of [
 const registered = (await discord('PUT', commandsPath, COMMANDS)) as Command[];
 console.log(`registered (${GLOBAL ? 'global' : 'guild-scoped'}):`, JSON.stringify(describe(registered)));
 
+// Order 27 (override 4): /dkp on every server of this copy whose DKP is on, after the PUT (which, in dev, replaced the
+// test server's whole list). A refused upsert fails the run after the endpoint is set.
+// Registered from the reviewed branch before its merge deploys (order 18), migration 0021 may not be applied yet: no
+// table, no server has DKP on.
+const hasDkp = (await db.all<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'dkp_guild'"))[0].n === 1;
+const dkpOn = hasDkp ? (await db.all<{ guild_id: string }>(DKP_ON_SQL)).map((r) => r.guild_id) : [];
+const dkp = await upsertDkp(call, appId, dkpOn);
+console.log(`/dkp upserted on ${dkpOn.length - dkp.failed} of ${dkpOn.length} server(s) with DKP on`);
+for (const l of dkp.lines) console.log(l);
+
 // Discord sends the Worker a PING to validate the URL; the Worker answers it with this copy's public key.
 console.log('setting interactions_endpoint_url:', url);
 const patch = await call('PATCH', '/applications/@me', { interactions_endpoint_url: url });
@@ -173,4 +184,4 @@ console.log('read back GET /applications/@me:', JSON.stringify({ id: me.id, inte
 const readBack = (await discord('GET', commandsPath)) as Command[];
 console.log(`read back ${GLOBAL ? 'global' : 'guild'} commands:`, JSON.stringify(describe(readBack)));
 for (const d of descriptions(readBack)) console.log('read back:', JSON.stringify(d));
-if (me.interactions_endpoint_url !== url) process.exitCode = 1;
+if (me.interactions_endpoint_url !== url || dkp.failed) process.exitCode = 1;

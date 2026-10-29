@@ -11,6 +11,8 @@ export interface Env {
    * name, passed by the deploy workflow; anything else, unset included, is off. It ships off.
    */
   ATLAS_ZONE_IMAGES?: string;
+  /** Order 27: one DKP timer object per guild (src/dkp/timers.ts DkpTimers; SQLite-backed, wrangler.jsonc). */
+  DKP_TIMERS: DurableObjectNamespace<import('./dkp/timers.ts').DkpTimers>;
 }
 
 /** Order 11's one decider of dev and production, held in src/copy.ts (order 12). */
