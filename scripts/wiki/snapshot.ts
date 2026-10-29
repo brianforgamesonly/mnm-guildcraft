@@ -8,27 +8,26 @@
 // one retry after 10 s (scripts/probe/wiki.ts politeGet); a 403, a 429 or a challenge stops the run and is reported, never
 // retried. A stop writes no snapshot: the import keeps yesterday's zone data (override 9).
 //
-// What it reads (ITEM 1's allowed actions, scripts/wiki/allowed.ts): siteinfo; the category trees under Category:NPCs and
-// Category:Quests, every subcategory followed (list=categorymembers); the content of their pages, a category at a time
-// (generator=categorymembers, 50 a request), skipping categories whose pages are all fetched already; Category:Zones,
-// Named Mobs, Raid Encounters and Merchant the same way where the trees do not reach them; the Quests and Factions
-// buckets after their schema pages; and ITEM 3's 24-hour count of main-namespace edits (list=recentchanges).
+// What it reads (ITEM 1's allowed actions, scripts/wiki/allowed.ts): siteinfo; the category trees under Category:NPCs,
+// Category:Quests and Category:Zones, every subcategory followed (list=categorymembers), and the content of their pages, a
+// category at a time (generator=categorymembers, 50 a request), skipping categories whose pages are all fetched already;
+// Category:Named Mobs, Raid Encounters and Merchant as trees too, for membership only (titles, no content); the Quests
+// and Factions buckets after their schema pages; and ITEM 3's 24-hour count of main-namespace edits (list=recentchanges).
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { politeGet, wait, type Got } from '../probe/wiki.ts';
 import { BUCKETS, MAXLAG, SCHEMA_PAGES } from './allowed.ts';
-import { CATEGORIES, TREES, type SnapshotCategory, type SnapshotPage, type WikiSnapshot } from './types.ts';
+import { MEMBERSHIP, TREES, type SnapshotCategory, type SnapshotPage, type WikiSnapshot } from './types.ts';
 
 /** Override 1: at most 150 requests per workflow run (about 60 expected). */
 export const REQUEST_CAP = 150;
 export const MAXLAG_WAITS = 3;
 /** A Retry-After above this is not waited out: the run stops (the job has a time limit). */
 const MAX_RETRY_AFTER_S = 60;
-
-/** The categories read on their own where no tree reaches them. */
-const SINGLES = [CATEGORIES.zones, CATEGORIES.named, CATEGORIES.raid, CATEGORIES.merchant];
+// Known limit (review, order 28): after a client-side timeout (20 s), order 14's retry 10 s later can reach the wiki while
+// the first relayed request is still being served. Rare, and counted against the cap.
 
 export class SnapshotStop extends Error {}
 
@@ -131,15 +130,20 @@ function addPages(json: Json, into: Record<string, SnapshotPage>): void {
   }
 }
 
-/** Every category under a root, breadth first, each listed once (a category reached twice keeps its first depth). */
+/**
+ * Every category under a root, breadth first, each listed once. A category already listed from another root is not
+ * listed again: it, and what is below it, gain this root too (a category reached twice keeps its first depth).
+ */
 async function walk(relay: Relay, root: string, into: Record<string, SnapshotCategory>): Promise<void> {
   const queue: [string, number][] = [[root, 0]];
+  const seen = new Set<string>();
   while (queue.length) {
     const [title, depth] = queue.shift()!;
-    if (into[title]) continue;
-    const { pages, subcats } = await listCategory(relay, title);
-    into[title] = { pages, subcats, depth, root };
-    for (const s of subcats) if (!into[s]) queue.push([s, depth + 1]);
+    if (seen.has(title)) continue;
+    seen.add(title);
+    if (!into[title]) into[title] = { ...(await listCategory(relay, title)), depth, roots: [] };
+    if (!into[title].roots.includes(root)) into[title].roots.push(root);
+    for (const s of into[title].subcats) if (!seen.has(s)) queue.push([s, depth + 1]);
   }
 }
 
@@ -159,17 +163,14 @@ export async function takeSnapshot(relay: Relay, now: Date): Promise<WikiSnapsho
   const general = site.query?.general ?? {};
 
   const categories: Record<string, SnapshotCategory> = {};
-  for (const root of TREES) await walk(relay, root, categories);
-  for (const c of SINGLES) if (!categories[c]) categories[c] = { ...(await listCategory(relay, c)), depth: null, root: null };
+  for (const root of [...TREES, ...MEMBERSHIP]) await walk(relay, root, categories);
 
-  // Content, a category at a time: each tree's root first, then any category holding a page not fetched yet (most first).
+  // Content, a category at a time, for the trees only (the membership categories are read as titles): each tree's root
+  // first, then any category holding a page not fetched yet (most first).
   const pages: Record<string, SnapshotPage> = {};
-  const fetchFrom = async (cats: string[]) => {
-    for (const c of cats) if (categories[c].pages.some((t) => !pages[t])) await categoryContent(relay, c, pages);
-  };
   for (const root of TREES) {
-    await fetchFrom([root]);
-    const inTree = Object.keys(categories).filter((c) => categories[c].root === root && c !== root);
+    if (categories[root].pages.some((t) => !pages[t])) await categoryContent(relay, root, pages);
+    const inTree = Object.keys(categories).filter((c) => categories[c].roots.includes(root) && c !== root);
     const missing = (c: string) => categories[c].pages.filter((t) => !pages[t]).length;
     // Re-sorted after each fetch: one category's pages are often another's. Each category is fetched at most once; a page
     // listed but not returned (moved or deleted between the two requests) stays out, and the parser counts it.
@@ -181,7 +182,6 @@ export async function takeSnapshot(relay: Relay, now: Date): Promise<WikiSnapsho
       await categoryContent(relay, next, pages);
     }
   }
-  await fetchFrom(SINGLES);
 
   // The buckets, after their schema pages (select('*') is refused, so the fields come from the schema).
   const schemas: Record<string, SnapshotPage> = {};
@@ -255,8 +255,8 @@ if (import.meta.main) {
     mkdirSync(args.out, { recursive: true });
     writeFileSync(join(args.out, 'snapshot.json'), JSON.stringify(snap));
     writeFileSync(join(args.out, 'CREDIT.md'), CREDIT);
-    const tree = (root: string) => Object.values(snap.categories).filter((c) => c.root === root);
-    for (const root of TREES)
+    const tree = (root: string) => Object.values(snap.categories).filter((c) => c.roots.includes(root));
+    for (const root of [...TREES, ...MEMBERSHIP])
       console.log(`${root}: ${tree(root).length} categories, ${Math.max(...tree(root).map((c) => c.depth ?? 0))} levels of subcategories below it, ${new Set(tree(root).flatMap((c) => c.pages)).size} pages`);
     console.log(`pages with content: ${Object.keys(snap.pages).length}`);
     for (const [k, b] of Object.entries(snap.buckets)) console.log(`bucket ${k}: ${b.fields.length} fields, ${b.rows === null ? `no rows (${b.error})` : `${b.rows.length} rows`}`);

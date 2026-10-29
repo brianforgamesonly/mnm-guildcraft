@@ -11,7 +11,7 @@ import { buildPlan, checkStructure, zoneInputsOf, type ExistingState, type WikiD
 import { readZoneDir } from '../import/zone-files.ts';
 import { buildZonePlan, wikiVersion, type NpcRow, type ZoneInput, type ZonePlan } from '../import/zones.ts';
 import { parseSnapshot, type WikiParse } from './parse.ts';
-import { CATEGORIES, type WikiSnapshot } from './types.ts';
+import { CATEGORIES, treePages, type WikiSnapshot } from './types.ts';
 
 const emptyExisting = (): ExistingState => ({
   tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(), zones: new Map(),
@@ -104,7 +104,7 @@ export function compare(snap: WikiSnapshot, zones: ZoneInput, wiki: WikiData, no
   const wkN = new Map(wk.npcs.map((n) => [npcKey(n), n]));
   const byPage = new Map<string, WikiParse['npcs']>();
   for (const n of parsed.npcs) byPage.set(n.page.toLowerCase(), [...(byPage.get(n.page.toLowerCase()) ?? []), n]);
-  const npcTree = new Set(Object.values(snap.categories).filter((c) => c.root === CATEGORIES.npcs).flatMap((c) => c.pages.map((t) => t.toLowerCase())));
+  const npcTree = new Set([...treePages(snap, CATEGORIES.npcs)].map((t) => t.toLowerCase()));
   const pageTitles = new Map(Object.keys(snap.pages).map((t) => [t.toLowerCase(), t]));
   const why = (n: NpcRow): string => {
     const elsewhere = wk.npcs.filter((w) => w.name.toLowerCase() === n.name.toLowerCase()).map((w) => zoneName(wk, w.zone_key));
@@ -175,9 +175,9 @@ export function compare(snap: WikiSnapshot, zones: ZoneInput, wiki: WikiData, no
     },
   ];
 
-  const zoneTitles = new Set(snap.categories[CATEGORIES.zones]?.pages ?? []);
-  const questTitles = new Set(Object.values(snap.categories).filter((c) => c.root === CATEGORIES.quests).flatMap((c) => c.pages));
-  const npcTitles = new Set(Object.values(snap.categories).filter((c) => c.root === CATEGORIES.npcs).flatMap((c) => c.pages));
+  const zoneTitles = treePages(snap, CATEGORIES.zones);
+  const questTitles = treePages(snap, CATEGORIES.quests);
+  const npcTitles = treePages(snap, CATEGORIES.npcs);
   const changed = [...new Set(snap.recentChanges.changes.map((c) => c.title))];
   const zoneData = changed.filter((t) => npcTitles.has(t) || zoneTitles.has(t) || questTitles.has(t));
   const { log: _log, ...requests } = snap.requests;
@@ -230,7 +230,7 @@ export function markdown(c: Comparison): string {
   return [
     '## Order 28, ITEM 3: the wiki snapshot against Mo Betta',
     `Requests: ${c.requests.count} (maxlag waits ${c.requests.maxlagWaits}), ${c.requests.bytes} bytes.`,
-    `NPC tree: ${p.npcTree.categories} categories, ${p.npcTree.depth} level(s) of subcategories, ${p.npcTree.pages} pages (${p.npcTree.pagesWithContent} with content). Blocks: ${Object.entries(p.npcBlocks).map(([t, n]) => `${t} ${n}`).join(', ')}. Pages with none: ${p.npcPagesWithoutTemplate.length}. Blocks with no zone: ${p.blocksWithoutZone.map((b) => b.page).join(', ') || 'none'}. Loot fields with text but no bullets: ${p.lootWithoutBullets.length}.`,
+    `NPC tree: ${p.npcTree.categories} categories, ${p.npcTree.depth} level(s) of subcategories, ${p.npcTree.pages} pages (${p.npcTree.pagesWithContent} with content). Blocks: ${Object.entries(p.npcBlocks).map(([t, n]) => `${t} ${n}`).join(', ')}. Pages with none: ${p.npcPagesWithoutTemplate.length}. Blocks with no zone: ${p.blocksWithoutZone.map((b) => b.page).join(', ') || 'none'}. Loot fields with text but no bullets: ${p.lootWithoutBullets.length}. Values holding a template (not read): ${p.templateValues.length} (${[...new Set(p.templateValues.map((v) => v.field))].join(', ') || 'none'}).`,
     `Named Mobs: ${p.named.pages} pages (outside the NPC tree: ${p.named.outsideTree.join(', ') || 'none'}). Raid Encounters: ${p.raid.pages} (outside: ${p.raid.outsideTree.join(', ') || 'none'}). Merchant: ${p.merchantPages}. Zone pages: ${p.zonePages} (no {{ZoneDetails}}: ${p.zonePagesWithoutTemplate.join(', ') || 'none'}). Quest pages: ${p.questPages}, ${p.questsWithRewards} with reward lines.`,
     '### Zones',
     `Registry zones: Mo Betta ${c.zones.moBetta}, wiki ${c.zones.wiki}.`,

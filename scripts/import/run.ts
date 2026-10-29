@@ -57,6 +57,7 @@ try {
     ({ sha, raw } = wiki);
     zones = await fetchZoneSources({ name: SOURCE_NAME, sha, changedAt: wiki.changedAt }, process.env.GITHUB_TOKEN);
   }
+  if (args['wiki-snapshot'] && !zones) throw new Error('--wiki-snapshot needs the zone sources: pass --zones-dir with --file');
   if (args['wiki-snapshot'] && zones) {
     const snap = JSON.parse(readFileSync(join(args['wiki-snapshot'], 'snapshot.json'), 'utf8')) as WikiSnapshot;
     zones = { ...zones, wiki: snap, versions: [...zones.versions, wikiVersion(snap)] };

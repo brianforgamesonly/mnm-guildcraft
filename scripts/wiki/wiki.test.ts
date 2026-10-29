@@ -154,6 +154,7 @@ const BANDIT = `{{Namedmobpage
 |known_loot =
 * [[Rusty Dagger]]&lt;/li&gt;
 * [[Bandit Mask|a bandit mask]]
+* {{Item|Rusty Sword}}
 |common_loot =
 * [[Rusty Dagger]]
 |factions = [[Vermahn's Brood]]
@@ -166,11 +167,11 @@ const BANDIT = `{{Namedmobpage
 }}
 {{Namedmobpage
 |name = a bandit
-|zone = [[Rothold|the city of Rothold]]
+|zone = [[Rothold#Inn|the city of Rothold]]
 }}`;
 const PRINCE = `{{Namedmobpage
-|zone = [[Glinting Hollow]]
-|level = 25
+|zone = [[Glinting_Hollow]]
+|level = 25<ref name="p">patch notes</ref><ref name="q" />
 |location = Deep in the caves, {{Coords|1|2}}
 }}`;
 const DRAGON = `{{Namedmobpage
@@ -200,14 +201,18 @@ function standIn(): { pages: Record<string, string>; cats: Record<string, string
       'Guard Duty': QUEST,
     },
     cats: {
-      'Category:NPCs': ['A bandit', 'Supplier Jul', 'Category:Named Mobs', 'Category:Mobs'],
-      'Category:Named Mobs': ['A bandit', 'A myconid prince', 'Category:Raid Encounters'],
+      'Category:NPCs': ['A bandit', 'Supplier Jul', 'Category:Named Mobs', 'Category:Mobs', 'Category:Shared'],
+      'Category:Named Mobs': ['A bandit', 'Category:Named in Glinting Hollow', 'Category:Raid Encounters'],
+      'Category:Named in Glinting Hollow': ['A myconid prince'],
       'Category:Raid Encounters': ['Weakened Red Dragon'],
       'Category:Mobs': ['A rat', 'A bandit'],
       'Category:Merchant': ['Supplier Jul'],
-      'Category:Zones': ['Shaded Dunes', 'Scarwood', 'Rothold', 'Glinting Hollow', 'Starting City by Race, Class, and Deity'],
+      'Category:Zones': ['Shaded Dunes', 'Scarwood', 'Rothold', 'Starting City by Race, Class, and Deity', 'Category:Dungeons'],
+      'Category:Dungeons': ['Glinting Hollow'],
       'Category:Quests': ['Category:Class Quests'],
-      'Category:Class Quests': ['Guard Duty'],
+      'Category:Class Quests': ['Category:Shared'],
+      // Under both trees: its pages count for both.
+      'Category:Shared': ['Guard Duty'],
     },
   };
 }
@@ -253,7 +258,12 @@ test('snapshot: the trees are walked to the bottom, every page fetched once, buc
   const { snap, urls } = await snapshot();
   assert.equal(snap.site, 'Monsters and Memories Wiki · MediaWiki 1.46.2');
   assert.equal(snap.categories['Category:Raid Encounters'].depth, 2, 'NPCs → Named Mobs → Raid Encounters');
-  assert.equal(snap.categories['Category:Class Quests'].root, CATEGORIES.quests);
+  assert.deepEqual(snap.categories['Category:Shared'].roots, [CATEGORIES.npcs, CATEGORIES.quests]);
+  assert.ok(snap.categories['Category:Named in Glinting Hollow'].roots.includes(CATEGORIES.named));
+  assert.ok(snap.categories['Category:Dungeons'].roots.includes(CATEGORIES.zones));
+  // A membership category outside the content trees (here Merchant) is read as titles only: no content request for it.
+  assert.ok(urls.every((u) => new URL(u).searchParams.get('gcmtitle') !== CATEGORIES.merchant));
+  assert.equal(urls.filter((u) => new URL(u).searchParams.get('cmtitle') === 'Category:Shared').length, 1, 'listed once, though under two trees');
   assert.deepEqual(Object.keys(snap.pages).sort(), Object.keys(standIn().pages).sort());
   assert.equal(snap.requests.count, urls.length);
   assert.ok(urls.every((u) => u.startsWith('https://relay.example/api?')));
@@ -273,6 +283,8 @@ test('snapshot: the trees are walked to the bottom, every page fetched once, buc
 
 test('parse: link markup, entities, tags and quotes are removed; labels kept; bullets and links read', () => {
   assert.equal(plain("[[Rothold|the city]] &amp; [[Scarwood]]&lt;/li&gt; '''bold'''"), 'the city & Scarwood bold');
+  assert.equal(plain('10<ref>patch notes</ref> &lt;ref name="x"/&gt;'), '10', 'a reference is removed whole, encoded or not');
+  assert.equal(plain('[[Rothold_Keep#Inn|the keep]] and [[:Scarwood]]', { target: true }), 'Rothold Keep and Scarwood', 'a link target as a page title');
   assert.deepEqual(links('[[A]], [[B|b]] and [[C|]]'), ['A', 'b', 'C']);
   assert.deepEqual(bullets('intro\n* [[X]]&lt;/li&gt;\n** Y\nnot\n*'), ['X', 'Y']);
   const blocks = templates(BANDIT + '\n{{Namedmobpages|zone=no}}', 'Namedmobpage');
@@ -293,7 +305,14 @@ test('parse: one row per block, name else title, flags and merchant from categor
   assert.equal(bandit[1].level, '12');
   const prince = p.npcs.find((n) => n.page === 'A myconid prince')!;
   assert.equal(prince.name, 'A myconid prince', 'no name field: the page title');
-  assert.equal(prince.location, 'Deep in the caves, {{Coords|1|2}}');
+  assert.equal(prince.zone, 'Glinting Hollow');
+  assert.equal(prince.level, '25', 'references removed');
+  assert.equal(prince.location, null, 'a value holding a template is not read');
+  assert.equal(prince.named, 1, 'named through a subcategory of Named Mobs');
+  assert.deepEqual(p.summary.templateValues, [
+    { page: 'A bandit', field: 'known_loot' },
+    { page: 'A myconid prince', field: 'location' },
+  ]);
   const dragon = p.npcs.find((n) => n.page === 'Weakened Red Dragon')!;
   assert.equal(dragon.zone, null);
   assert.equal(dragon.raid, 1);
@@ -305,6 +324,8 @@ test('parse: one row per block, name else title, flags and merchant from categor
   assert.deepEqual(p.summary.npcBlocks, { Namedmobpage: 5, Mobpage: 1, NPCpage: 0, Merchantpage: 1 });
   assert.equal(p.summary.npcTree.depth, 2);
   assert.deepEqual(p.summary.named.outsideTree, []);
+  assert.ok(p.zones.some((z) => z.name === 'Glinting Hollow'), 'a zone in a subcategory of Category:Zones');
+  assert.deepEqual(p.summary.npcPagesWithoutTemplate, ['Guard Duty']);
   const dunes = p.zones.find((z) => z.name === 'Shaded Dunes')!;
   assert.equal(dunes.level, '10-20', 'the leading "-" removed');
   assert.deepEqual(dunes.adjacent, ['Scarwood', 'Rothold']);

@@ -109,14 +109,18 @@ jobs:
           # Today's state first: Mo Betta, imported until it settles (a fresh import can stop at the ceiling once).
           for i in 1 2 3; do node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" > "$RUNNER_TEMP/compare/mo-betta-$i.json"; done
           tail -n 2 "$RUNNER_TEMP"/compare/mo-betta-*.json
-          # Then the switch-over's first import, from the snapshot, and the quiet night after it.
-          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-1.json"
-          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-2.json"
+          # Then the switch-over's first import, from the snapshot, and the quiet night after it. A failing run is the
+          # result to read, so its status is reported below and the step fails at the end.
+          rc=0
+          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-1.json" || rc=$?
+          node scripts/import/run.ts --local --file "$z/mnm-tools__wiki.json" --sha local --zones-dir "$z" --wiki-snapshot "$RUNNER_TEMP/wiki-snapshot" > "$RUNNER_TEMP/compare/wiki-2.json" || rc=$?
           {
             echo '### Gate line 5: the first import from the snapshot, on a local D1 holding today''s data'
             echo "first import: $(grep -h '^rows written' "$RUNNER_TEMP/compare/wiki-1.json") — $(grep -m1 -oE '"status": "[a-z-]+"' "$RUNNER_TEMP/compare/wiki-1.json")"
-            echo "the same snapshot again: $(grep -h '^rows written' "$RUNNER_TEMP/compare/wiki-2.json")"
+            echo "the same snapshot again: $(grep -h '^rows written' "$RUNNER_TEMP/compare/wiki-2.json") — $(grep -m1 -oE '"status": "[a-z-]+"' "$RUNNER_TEMP/compare/wiki-2.json")"
+            grep -h -m1 -oE '"error": "[^"]{0,300}' "$RUNNER_TEMP"/compare/wiki-*.json || true
           } | tee -a "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
       - name: Upload the comparison
         if: always() && inputs.compare && steps.snapshot.outcome == 'success'
         uses: actions/upload-artifact@v7

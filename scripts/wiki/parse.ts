@@ -10,7 +10,7 @@
 //   from a name.
 
 import { WIKI } from '../probe/wiki.ts';
-import { CATEGORIES, type WikiSnapshot } from './types.ts';
+import { CATEGORIES, treePages, type WikiSnapshot } from './types.ts';
 
 /**
  * Every template and field the import reads, in one place. Keys are matched case-insensitively (the parser lowercases
@@ -56,17 +56,24 @@ const LINK = /\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g;
 
 /**
  * The text a reader sees: links to their label, entities decoded, tags and bold/italic quotes removed, spaces collapsed.
- * `target`: a link to the page it names instead (the zone field: [[Rothold|the city]] names the zone page Rothold).
+ * `target`: a link to the page it names instead (the zone field: [[Rothold|the city]] names the zone page Rothold), as a
+ * page title: without a "#section" or a leading ":", underscores as spaces (link markup, not a name normalisation).
+ * References (<ref>…</ref>, <ref …/>) are footnotes, not the value: removed whole. A {{template}} inside a value is left
+ * as it is; the parser stores such a value as NULL and counts it (hasTemplate).
  */
 export function plain(s: string | undefined | null, opts: { target?: boolean } = {}): string {
   if (!s) return '';
-  let t = s.replace(LINK, (_, target: string, label?: string) => (!opts.target && label?.trim() ? label : target));
-  t = decodeEntities(t);
+  const page = (t: string) => t.split('#')[0].replace(/_/g, ' ').replace(/^\s*:/, '').trim();
+  let t = s.replace(LINK, (_, target: string, label?: string) => (!opts.target && label?.trim() ? label : opts.target ? page(target) : target));
+  const refs = (x: string) => x.replace(/<ref\b[^>]*\/>/gi, '').replace(/<ref\b[^>]*>[\s\S]*?<\/ref>/gi, '');
+  t = refs(decodeEntities(refs(t)));
   t = t.replace(/<[^>]*>/g, '').replace(/'''|''/g, '');
   return t.replace(/\s+/g, ' ').trim();
 }
 /** plain(), or NULL when nothing is left. */
 export const text = (s: string | undefined | null): string | null => plain(s) || null;
+/** A value that still holds a template after parsing: its text is not read (NULL, counted). */
+export const hasTemplate = (s: string) => s.includes('{{');
 
 /** The labels of a value's links, in order. */
 export const links = (s: string | undefined | null): string[] =>
@@ -173,6 +180,8 @@ export interface WikiParse {
     blocksWithoutZone: { page: string; name: string }[];
     /** Loot fields with text but no bullet line: their text is not read (reported, never guessed). */
     lootWithoutBullets: { page: string; field: string }[];
+    /** Values (a loot bullet counts as one) still holding a {{template}} after parsing: stored NULL or left out; a name falls back to the title. */
+    templateValues: { page: string; field: string }[];
     zonePages: number;
     zonePagesWithoutTemplate: string[];
     questPages: number;
@@ -184,10 +193,8 @@ export interface WikiParse {
   };
 }
 
-/** Pages in a category tree (the root and every category reached from it). */
-const treePages = (snap: WikiSnapshot, root: string) =>
-  new Set(Object.values(snap.categories).filter((c) => c.root === root).flatMap((c) => c.pages));
-const members = (snap: WikiSnapshot, cat: string) => new Set(snap.categories[cat]?.pages ?? []);
+/** A category's members, its subcategories' included (a page in a subcategory of Named Mobs is named). */
+const members = treePages;
 
 /** The level-2 section a line sits in, and the reward bullets (Mo Betta's rule, kept for the quest lines: order 25). */
 export function questRewards(page: string): string[] {
@@ -211,7 +218,7 @@ export function questRewards(page: string): string[] {
 
 export function parseSnapshot(snap: WikiSnapshot): WikiParse {
   const F = TEMPLATE_FIELDS;
-  const npcTree = Object.values(snap.categories).filter((c) => c.root === CATEGORIES.npcs);
+  const npcTree = Object.values(snap.categories).filter((c) => c.roots.includes(CATEGORIES.npcs));
   const npcPages = treePages(snap, CATEGORIES.npcs);
   const named = members(snap, CATEGORIES.named);
   const raid = members(snap, CATEGORIES.raid);
@@ -222,6 +229,7 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
     npcPagesWithoutTemplate: [],
     blocksWithoutZone: [],
     lootWithoutBullets: [],
+    templateValues: [],
     zonePages: 0,
     zonePagesWithoutTemplate: [],
     questPages: 0,
@@ -241,14 +249,24 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
       for (const b of templates(page.content, template)) {
         any = true;
         summary.npcBlocks[template]++;
+        // A value still holding a template is not read: NULL, counted (a missing field is NULL, never guessed).
+        const unread = (field: string) => void summary.templateValues.push({ page: title, field });
+        const value = (field: string, opts?: { target?: boolean }): string | null => {
+          const v = plain(b[field], opts) || null;
+          if (v !== null && hasTemplate(v)) return (unread(field), null);
+          return v;
+        };
         const loot: string[] = [];
         for (const field of F.npc.loot) {
           const got = bullets(b[field]);
           if (!got.length && plain(b[field])) summary.lootWithoutBullets.push({ page: title, field });
-          for (const l of got) if (!loot.includes(l)) loot.push(l);
+          for (const l of got) {
+            if (hasTemplate(l)) unread(field);
+            else if (!loot.includes(l)) loot.push(l);
+          }
         }
-        const name = text(b[F.npc.name]) ?? title;
-        const zone = plain(b[F.npc.zone], { target: true }) || null;
+        const name = value(F.npc.name) ?? title;
+        const zone = value(F.npc.zone, { target: true });
         if (!zone) summary.blocksWithoutZone.push({ page: title, name });
         npcs.push({
           page: title,
@@ -256,10 +274,10 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
           name,
           zone,
           kind: merchant.has(title) ? 'merchant' : 'npc',
-          level: text(b[F.npc.level]),
-          race: text(b[F.npc.race]),
-          class: text(b[F.npc.class]),
-          location: text(b[F.npc.location]),
+          level: value(F.npc.level),
+          race: value(F.npc.race),
+          class: value(F.npc.class),
+          location: value(F.npc.location),
           loot,
           factions: links(b[F.npc.factions]),
           opposingFactions: links(b[F.npc.opposingFactions]),

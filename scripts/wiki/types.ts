@@ -2,8 +2,13 @@
 
 /** The categories the snapshot reads (ITEM 1) and the parser uses (ITEM 2). */
 export const CATEGORIES = { npcs: 'Category:NPCs', quests: 'Category:Quests', zones: 'Category:Zones', named: 'Category:Named Mobs', raid: 'Category:Raid Encounters', merchant: 'Category:Merchant' } as const;
-/** The trees read in full, every subcategory followed. */
-export const TREES = [CATEGORIES.npcs, CATEGORIES.quests] as const;
+/** Every category is read as a tree, every subcategory followed; the content of these trees' pages is fetched. */
+export const TREES = [CATEGORIES.npcs, CATEGORIES.quests, CATEGORIES.zones] as const;
+/** Read for membership only (titles; no page content). */
+export const MEMBERSHIP = [CATEGORIES.named, CATEGORIES.raid, CATEGORIES.merchant] as const;
+/** A category tree's pages: the root's and those of every category reached from it. */
+export const treePages = (snap: Pick<WikiSnapshot, 'categories'>, root: string): Set<string> =>
+  new Set(Object.values(snap.categories).filter((c) => c.roots.includes(root)).flatMap((c) => c.pages));
 
 export interface SnapshotPage {
   pageid: number;
@@ -20,10 +25,10 @@ export interface SnapshotCategory {
   pages: string[];
   /** Subcategories, by title ("Category:…"). */
   subcats: string[];
-  /** Steps below the root it was reached from (the root is 0); null for a category read on its own. */
-  depth: number | null;
-  /** The root it was reached from. */
-  root: string | null;
+  /** Steps below the root it was first reached from (that root is 0). */
+  depth: number;
+  /** Every root it is reached from (a category under two roots counts for both). */
+  roots: string[];
 }
 
 export interface WikiSnapshot {
