@@ -138,13 +138,19 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
   const g = c.guild.id;
   const state = await loadDkp(c.db, g);
   if (!state.enabled) return ephemeral(DKP_COPY.alreadyOff);
-  // A command already gone (404) is as good as deleted.
-  if (state.command_id) {
-    const del = await api.call('DELETE', `/applications/${appId}/guilds/${g}/commands/${state.command_id}`);
+  // /dkp by name, not by the saved id (review of PR A): in dev, register-commands' bulk PUT removes it and its upsert
+  // recreates it with a new id, which only Discord holds (the job never writes D1). A command already gone is as good as
+  // deleted.
+  const list = await api.call<{ id: string; name: string }[]>('GET', `/applications/${appId}/guilds/${g}/commands`);
+  if (!list.ok) return ephemeral(DKP_COPY.commandFailed(list.status));
+  for (const cmd of list.body.filter((x) => x.name === DKP_COMMAND.name)) {
+    const del = await api.call('DELETE', `/applications/${appId}/guilds/${g}/commands/${cmd.id}`);
     if (!del.ok && del.status !== 404) return ephemeral(DKP_COPY.commandFailed(del.status));
   }
   const [closed] = await c.db.batch([
     closeOpenRaid(c.db, g, c.userId, 'removed'),
+    // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.
+    c.db.prepare("UPDATE dkp_pending SET status = 'lapsed', decided_at = ?1 WHERE guild_id = ?2 AND status = 'open'").bind(now(), g),
     ...saveStatements(c, { enabled: 0, channel: state.channel_id, command: null }),
     audit(c.db, g, c.userId, 'dkp.off', `channel:${state.channel_id}`, { enabled: true }, { enabled: false }),
   ]);

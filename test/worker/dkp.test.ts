@@ -66,6 +66,7 @@ beforeEach(async () => {
       fake.commands.push(c);
       return json(c, 201);
     }
+    if (method === 'GET' && path === `/applications/${APP_ID}/guilds/${GUILD}/commands`) return json(fake.commands);
     const del = path.match(new RegExp(`^/applications/${APP_ID}/guilds/${GUILD}/commands/(\\d+)$`));
     if (method === 'DELETE' && del) {
       fake.commands = fake.commands.filter((c) => c.id !== del[1]);
@@ -90,6 +91,10 @@ beforeEach(async () => {
 });
 
 const pressAs = (m: Member, id: string) => send(press(m, id), TOKEN);
+/** Waits (up to 2 s) for a condition an alarm brings about. */
+const until = async (ok: () => Promise<boolean>) => {
+  for (let i = 0; i < 40 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 50));
+};
 const dkp = (m: Member, sub: string, opts: Record<string, unknown> = {}) => send(rawCmd(m, 'dkp', sub, opts), TOKEN);
 const addDkp = () => pressAs(admin, ADD_DKP_PREFIX);
 const dkpChannel = () => fake.channels.find((c) => c.name === storedName(DKP_CHANNEL_NAME));
@@ -213,6 +218,22 @@ describe('the ledger (ITEM 2)', () => {
     expect(list[`lapse:${q.id}`]).toBe(due);
   });
 
+  it('review of PR A: two officers approving at once pay once; Remove DKP lapses open approvals and finds /dkp by name', async () => {
+    const officerC = as('100000000000000006', { roles: [OFFICER_ROLE] });
+    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: 25, reason: 'carry' });
+    const p = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    // (The harness reads back one reply per send by the latest token, so concurrent sends are judged from D1, not replies.)
+    await Promise.all([pressAs(officerB, `${APPROVE_PREFIX}${p.id}`), pressAs(officerC, `${APPROVE_PREFIX}${p.id}`)]);
+    expect(await count('dkp_ledger')).toBe(1);
+    expect(await count('audit_log', "action = 'dkp.approve'")).toBe(1);
+    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: 30, reason: 'x' });
+    // A registration recreated /dkp with a new id (dev's bulk PUT, then the upsert): the saved id is stale.
+    fake.commands = [{ id: '799999999999999999', name: 'dkp' }];
+    await pressAs(admin, REMOVE_DKP_PREFIX);
+    expect(fake.commands).toEqual([]);
+    expect(await all('SELECT status FROM dkp_pending ORDER BY id')).toEqual([{ status: 'approved' }, { status: 'lapsed' }]);
+  });
+
   it('every balance_after equals the running sum of its member\'s amounts in that pool (override 8)', async () => {
     const at = '2026-10-29T00:00:00Z';
     const members = Array.from({ length: 6 }, (_, i) => `2000000000000000${i}`);
@@ -227,7 +248,10 @@ describe('the ledger (ITEM 2)', () => {
       const k = `${r.pool}|${r.member_id}`;
       sums.set(k, (sums.get(k) ?? 0) + r.amount);
       expect(r.balance_after, `row ${r.id}`).toBe(sums.get(k));
-      expect(r.amount + r.cut).toBe(r.kind === 'adjust' ? -7 : r.amount + r.cut);
+      // asked = amount + cut: -7 for each adjustment, the kill's 10 + k for each payout (review of PR A: a real check).
+      if (r.kind === 'adjust') expect(r.amount + r.cut).toBe(-7);
+      else expect(r.amount + r.cut).toBeGreaterThanOrEqual(10);
+      expect(r.cut).toBeGreaterThanOrEqual(0);
     }
     expect(Math.max(...rows.map((r) => r.balance_after))).toBe(100);
   });
@@ -305,7 +329,9 @@ describe('timers (ITEM 3): one object per guild, its alarm at the earliest due i
     await stub.schedule(GUILD, [{ key: 'lapse:2', due: t + 9_000 }]); // later: ignored
     expect(await runInDurableObject(stub, (_o, s) => s.storage.getAlarm())).toBe(t + 5_000);
     await stub.schedule(GUILD, [{ key: 'lapse:2', due: t - 1 }]); // earlier: taken
-    expect(await runDurableObjectAlarm(stub)).toBe(true);
+    // An alarm already due may be run by workerd itself before the helper does: either way, the due item runs once.
+    await runDurableObjectAlarm(stub);
+    await until(async () => JSON.stringify(await stub.list()) === JSON.stringify({ 'lapse:1': t + 60_000 }));
     expect(await stub.list()).toEqual({ 'lapse:1': t + 60_000 });
     expect(await runInDurableObject(stub, (_o, s) => s.storage.getAlarm())).toBe(t + 60_000);
     await stub.cancel();
@@ -330,6 +356,7 @@ describe('timers (ITEM 3): one object per guild, its alarm at the earliest due i
     const stub = timersOf(env, GUILD);
     await stub.schedule(GUILD, [{ key: `lapse:${p.id}`, due: Date.now() - 1 }]);
     await runDurableObjectAlarm(stub);
+    await until(async () => Object.keys(await stub.list()).length === 0);
     expect(await stub.list()).toEqual({});
   });
 });

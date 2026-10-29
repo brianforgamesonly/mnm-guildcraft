@@ -13,7 +13,7 @@
 --                    naming the row it corrects. balance_after is order 27's explicit override 8 of "Never add a column
 --                    for a value the table already holds": the member's balance in that pool once the row applies,
 --                    written in the same statement as the row, so a balance is one indexed row, not the whole history
---                    (test/worker/dkp-ledger.test.ts recomputes every one). cut: what the cap cut (asked - amount).
+--                    (test/worker/dkp.test.ts recomputes every one). cut: what the cap cut (asked - amount).
 -- Columns: dkp_pool.pool and dkp_ledger.pool are a zone key, or 'guild'. dkp_raid.closes_at is opened_at plus the
 -- auto-close setting at opening (a later setting applies to later raids). dkp_kill.name is the named, as picked or typed;
 -- NULL for a flat payout. dkp_ledger.actor is a Discord user id, or 'bot' for payouts and timers.

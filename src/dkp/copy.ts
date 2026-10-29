@@ -35,6 +35,7 @@ export const DKP_COPY = {
   approvalPosted: (threshold: number) => `That is over ${threshold} points, so it needs a second officer: it is posted in GC-DKP for approval.`,
   approvalCard: (member: string, points: number, pool: string, by: string, reason: string, due: string) =>
     `**Needs a second officer:** ${member}: ${points > 0 ? '+' : ''}${points} in **${md(pool)}**. Asked by ${by}. Reason: ${md(reason)}\nAnother officer presses **Approve** before <t:${due}:f>, or it lapses.`,
+  noChannel: "I can't post in GC-DKP right now, so nothing was changed. An admin can press **Add DKP** in `/guildcraft setup` to restore it.",
   approve: 'Approve',
   approved: (by: string) => `Approved by ${by}.`,
   lapsed: 'Lapsed: nobody approved it in time.',

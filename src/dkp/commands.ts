@@ -96,6 +96,8 @@ async function askApproval(
   api: BotApi | null,
   a: { member: string; name: string; pool: { key: string; name: string }; points: number; reason: string; at: string },
 ): Promise<MessageReply> {
+  // No card, no approval: nobody could press Approve (review of PR A).
+  if (!api || !d.channel_id) return ephemeral(DKP_COPY.noChannel);
   const due = Date.parse(a.at) + d.settings.approval_hours * 3_600_000;
   const p = await c.db
     .prepare(
@@ -104,7 +106,7 @@ async function askApproval(
     .bind(c.guild.id, a.member, a.pool.key, a.points, a.reason, c.userId, a.at, new Date(due).toISOString())
     .first<{ id: number }>();
   c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `lapse:${p!.id}`, due }] };
-  if (api && d.channel_id) {
+  {
     const id = await postIn(api, d.channel_id, {
       embeds: [{ description: DKP_COPY.approvalCard(memberTag(a.member, a.name), a.points, a.pool.name, by(c), a.reason, String(Math.floor(due / 1000))) }],
       components: [row([button(`${APPROVE_PREFIX}${p!.id}`, DKP_COPY.approve, STYLE_SUCCESS)])],
@@ -125,17 +127,15 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   const conflict = dkpSelfConflict(c.userId, { member: p.member_id, askedBy: p.asked_by });
   if (conflict) return ephemeral(conflict === 'own' ? DKP_COPY.own : DKP_COPY.asked);
   const at = now();
-  // One approval wins: the status changes once, and only the press that changed it pays.
-  const took = await c.db
-    .prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2 RETURNING id")
-    .bind(c.userId, at, pid)
-    .first();
-  if (!took) return ephemeral(DKP_COPY.notOpen);
-  await c.db.batch([
+  // One approval wins, and it pays in the same batch (review of PR A): the status changes once, and the payment is
+  // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing.
+  const [took] = await c.db.batch([
+    c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2").bind(c.userId, at, pid),
     registerPool(c.db, c.guild.id, p.pool, at),
-    payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at }),
-    audit(c.db, c.guild.id, c.userId, 'dkp.approve', `pending:${pid}`, { status: 'open' }, { status: 'approved' }),
+    payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
   ]);
+  if (took.meta.changes !== 1) return ephemeral(DKP_COPY.notOpen);
+  await audit(c.db, c.guild.id, c.userId, 'dkp.approve', `pending:${pid}`, { status: 'open' }, { status: 'approved' }).run();
   // Its lapse timer stays set and finds it approved (lapse acts only on an open row).
   const api = apiFor(c);
   try {
@@ -210,7 +210,10 @@ async function namedValue(c: Ctx, opts: Option[], d: DkpState): Promise<MessageR
 /** dkpfs:<pool>:<page> (a new private message) and dkpfp:<pool>:<page> (that message, edited in place). Open to members. */
 export async function fullStandings(c: Ctx, id: string): Promise<MessageReply> {
   const inPlace = id.startsWith(FULL_PAGE_PREFIX);
-  const [pool, pageText] = id.slice((inPlace ? FULL_PAGE_PREFIX : FULL_STANDINGS_PREFIX).length).split(':');
+  // The page is after the last ':' (a zone key may hold one; review of PR A).
+  const rest = id.slice((inPlace ? FULL_PAGE_PREFIX : FULL_STANDINGS_PREFIX).length);
+  const pool = rest.slice(0, rest.lastIndexOf(':'));
+  const pageText = rest.slice(rest.lastIndexOf(':') + 1);
   const [{ standings }, names] = await Promise.all([dkpRead(c.db, c.guild.id, { pools: [pool] }), poolNames(c.db, [pool])]);
   const list = standings.get(pool) ?? [];
   const pages = Math.max(1, Math.ceil(list.length / FULL_PAGE));

@@ -30,6 +30,8 @@ export interface Payment {
   reason?: string | null;
   actor: string;
   at: string;
+  /** Pays only while this approval stands as this press decided it (an approval's status change and payment, in one batch). */
+  approvedPending?: number;
 }
 
 /** One statement: a row per member (members must be distinct), each with its own balance_after. */
@@ -39,9 +41,11 @@ export function payStatement(db: D1Database, p: Payment): D1PreparedStatement {
       `WITH t AS (SELECT j.value AS member_id, ${PREV('j.value')} AS prev FROM json_each(?9) j),
             a AS (SELECT member_id, prev, CASE WHEN ?3 > 0 THEN min(?3, max(0, ?4 - prev)) ELSE ?3 END AS applied FROM t)
        INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at)
-       SELECT ?1, member_id, ?2, applied, ?3 - applied, prev + applied, ?5, ?6, ?7, NULL, ?8, ?10, ?11 FROM a`,
+       SELECT ?1, member_id, ?2, applied, ?3 - applied, prev + applied, ?5, ?6, ?7, NULL, ?8, ?10, ?11 FROM a
+       WHERE ?12 IS NULL OR (EXISTS (SELECT 1 FROM dkp_pending q WHERE q.id = ?12 AND q.status = 'approved' AND q.decided_by = ?10 AND q.decided_at = ?11)
+         AND NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.guild_id = ?1 AND x.pool = ?2 AND x.member_id = a.member_id AND x.actor = ?10 AND x.at = ?11))`,
     )
-    .bind(p.guildId, p.pool, p.asked, p.cap, p.kind, p.raidId ?? null, p.killId ?? null, p.reason ?? null, JSON.stringify([...new Set(p.members)]), p.actor, p.at);
+    .bind(p.guildId, p.pool, p.asked, p.cap, p.kind, p.raidId ?? null, p.killId ?? null, p.reason ?? null, JSON.stringify([...new Set(p.members)]), p.actor, p.at, p.approvedPending ?? null);
 }
 
 /**
