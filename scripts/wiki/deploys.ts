@@ -34,10 +34,18 @@ export class DeployStillRunning extends Error {}
 export async function waitForDeploys(list: ListRuns, sleep: (ms: number) => Promise<void>, now: () => number, log: (s: string) => void): Promise<{ waitedMs: number; polls: number }> {
   const start = now();
   for (let polls = 1; ; polls++) {
-    const b = busy(await list());
-    if (!b.length) return { waitedMs: now() - start, polls };
-    if (now() - start >= WAIT_LIMIT_MS) throw new DeployStillRunning(`a deploy was still running after ${WAIT_LIMIT_MS / 60_000} minutes: run ${b.map((r) => r.id).join(', ')}`);
-    log(`deploy run ${b.map((r) => `${r.id} (${r.status})`).join(', ')}: waiting ${POLL_MS / 1000} s`);
+    // An API error is not "clear": it is polled again like a busy answer, within the same 10 minutes.
+    let b: Run[] | null;
+    try {
+      b = busy(await list());
+    } catch (e) {
+      b = null;
+      log(`deploy runs not listed (${e instanceof Error ? e.message : String(e)})`);
+    }
+    if (b && !b.length) return { waitedMs: now() - start, polls };
+    if (now() - start >= WAIT_LIMIT_MS)
+      throw new DeployStillRunning(b ? `a deploy was still running after ${WAIT_LIMIT_MS / 60_000} minutes: run ${b.map((r) => r.id).join(', ')}` : `a deploy was still running, or could not be ruled out, after ${WAIT_LIMIT_MS / 60_000} minutes (the deploy runs could not be listed)`);
+    if (b) log(`deploy run ${b.map((r) => `${r.id} (${r.status})`).join(', ')}: waiting ${POLL_MS / 1000} s`);
     await sleep(POLL_MS);
   }
 }
@@ -51,7 +59,7 @@ function githubList(): ListRuns {
   const token = process.env.GITHUB_TOKEN;
   if (!repo || !token) throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required');
   return async () => {
-    const res = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${DEPLOY_WORKFLOW}/runs?per_page=30`, {
+    const res = await fetch(`https://api.github.com/repos/${repo}/actions/workflows/${DEPLOY_WORKFLOW}/runs?per_page=100`, {
       headers: { 'User-Agent': 'mnm-guildcraft-wiki-snapshot', Accept: 'application/vnd.github+json', Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(`GitHub API, ${DEPLOY_WORKFLOW} runs: HTTP ${res.status}`);

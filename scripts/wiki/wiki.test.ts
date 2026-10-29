@@ -402,6 +402,8 @@ test('compare: both plans from the import code; the gate lists what is missing, 
   assert.ok(c.tags.some((t) => t.zone === 'Glinting Hollow' && t.named === 1));
   assert.equal(c.recentChanges.zoneData, 1);
   assert.match(markdown(c), /### The gate/);
+  // Order 28b: each miss says whether wiki content explains it (a renamed page); the stand-in's misses are not renamed.
+  assert.ok(c.gate.find((g) => g.line === 2)!.detail.every((d) => d.endsWith('NOT explained by wiki content')));
 });
 
 // ---------------------------------------------------------------- order 28b
@@ -485,6 +487,15 @@ test('order 28b ITEM 1: the snapshot waits for deploys every 15 s, at most 10 mi
     (e: Error) => e instanceof DeployStillRunning && /a deploy was still running/.test(e.message),
   );
   assert.equal(t, WAIT_LIMIT_MS);
+  // An API error is polled again, never read as "no deploy"; one that lasts fails the attempt the same way.
+  t = 0;
+  const flaky = [() => Promise.reject(new Error('HTTP 502')), () => Promise.resolve([] as Run[])];
+  assert.deepEqual(await waitForDeploys(() => flaky.shift()!(), async (ms) => void (t += ms), () => t, () => {}), { waitedMs: POLL_MS, polls: 2 });
+  t = 0;
+  await assert.rejects(
+    waitForDeploys(() => Promise.reject(new Error('HTTP 502')), async (ms) => void (t += ms), () => t, () => {}),
+    (e: Error) => e instanceof DeployStillRunning && /could not be listed/.test(e.message),
+  );
   // Overlap with [since, until]: run 40958472952's times against run 40958505331's relay, and the ones that did not overlap.
   const since = '2026-10-29T21:31:44Z';
   const until = '2026-10-29T21:32:13Z';

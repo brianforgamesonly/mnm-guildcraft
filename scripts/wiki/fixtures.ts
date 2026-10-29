@@ -1,5 +1,5 @@
 // Order 28b, ITEM 3: the parser's fixtures, cut from a real snapshot artifact (ITEM 1's job), never from the live wiki.
-//   node scripts/wiki/fixtures.ts --snapshot <artifact dir> --out test/fixtures/wiki-pages.json
+//   node scripts/wiki/fixtures.ts --snapshot <artifact dir> --out test/fixtures/wiki-pages.json --run <wiki-snapshot run id>
 // The fixture is a small snapshot: FIXTURE_PAGES as fetched (revid and timestamp kept, so each page's history on the wiki
 // names its authors), and every category that lists one of them, its list cut to them. CC BY-SA 4.0: the credit travels
 // in the file itself.
@@ -52,9 +52,9 @@ export function cutFixture(snap: WikiSnapshot, from: string): WikiFixture {
 }
 
 if (import.meta.main) {
-  const { values: args } = parseArgs({ options: { snapshot: { type: 'string' }, out: { type: 'string' }, from: { type: 'string' } } });
-  if (!args.snapshot || !args.out || !args.from) throw new Error('--snapshot, --out and --from (the run id) are required');
+  const { values: args } = parseArgs({ options: { snapshot: { type: 'string' }, out: { type: 'string' }, run: { type: 'string' } } });
+  if (!args.snapshot || !args.out || !/^\d+$/.test(args.run ?? '')) throw new Error('--snapshot, --out and --run <the wiki-snapshot run id> are required');
   const snap = JSON.parse(readFileSync(join(args.snapshot, 'snapshot.json'), 'utf8')) as WikiSnapshot;
-  writeFileSync(args.out, JSON.stringify(cutFixture(snap, args.from), null, 2) + '\n');
+  writeFileSync(args.out, JSON.stringify(cutFixture(snap, `wiki-snapshot run ${args.run}`), null, 2) + '\n');
   console.log(`${FIXTURE_PAGES.length} pages written to ${args.out}`);
 }

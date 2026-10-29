@@ -81,7 +81,9 @@ jobs:
           echo '### Relay readiness (UTC, answer, relay header, seconds)' >> "$GITHUB_STEP_SUMMARY"
           for i in $(seq 1 12); do
             sleep 5
-            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code} %{time_total}' "$URL/api?action=query&meta=siteinfo" || echo "curl-exit-$? -")
+            # curl prints its -w line even when it fails (000 for no answer), so its exit is not added to it.
+            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code} %{time_total}' "$URL/api?action=query&meta=siteinfo" || true)
+            code=${code:-000 -}
             hdr=no; grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h" 2>/dev/null && hdr=yes
             echo "$(date -u +%H:%M:%S.%3N) call $i: HTTP ${code% *}, relay header $hdr, ${code#* } s" | tee -a "$GITHUB_STEP_SUMMARY"
             : > "$RUNNER_TEMP/h"
@@ -124,6 +126,8 @@ jobs:
           test "$code" = 404
       - name: List the deploys that overlapped the snapshot (order 28b)
         if: always() && steps.deploy.outputs.since != ''
+        # A record, never a gate: a GitHub API error here must not throw away a good snapshot.
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/wiki/deploys.ts overlap --since "${{ steps.deploy.outputs.since }}"

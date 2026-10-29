@@ -275,7 +275,7 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
           }
         }
         const name = value(F.npc.name) ?? title;
-        if (!sameButFirstCase(name, title)) summary.nameMismatches.push({ page: title, name });
+        if (!sameButFirstCase(name, title) && !summary.nameMismatches.some((m) => m.page === title && m.name === name)) summary.nameMismatches.push({ page: title, name });
         const zone = value(F.npc.zone, { target: true });
         if (!zone) summary.blocksWithoutZone.push({ page: title, name });
         npcs.push({
