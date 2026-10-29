@@ -9,7 +9,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { runImport } from '../import/core.ts';
 import { localDb } from '../import/db.ts';
-import { readZoneDir } from '../import/zone-files.ts';
+import { COMMITTED_SNAPSHOT, readSnapshot, readZoneDir } from '../import/zone-files.ts';
+import { withWiki } from '../import/zones.ts';
 
 const { values: args } = parseArgs({
   options: {
@@ -19,6 +20,7 @@ const { values: args } = parseArgs({
     runs: { type: 'string', default: '2' },
     // Order 17: the zone sources, as scripts/import/zone-files.ts wrote them.
     'zones-dir': { type: 'string' },
+    'wiki-snapshot': { type: 'string' },
     // Order 24: apply migrations only up to this one (inclusive), to build the remote copy's state on a fresh local database.
     until: { type: 'string' },
   },
@@ -51,7 +53,8 @@ try {
       sourceSha: args.sha!,
       now: () => new Date().toISOString(),
       writeCeiling: args.ceiling ? Number(args.ceiling) : undefined,
-      zones: args['zones-dir'] ? readZoneDir(args['zones-dir']) : undefined,
+      // Order 28b, PR D: the zone part reads a wiki snapshot (default: the committed one).
+      zones: args['zones-dir'] ? withWiki(readZoneDir(args['zones-dir']), readSnapshot(args['wiki-snapshot'] ?? COMMITTED_SNAPSHOT)) : undefined,
     });
     console.log(
       `import run ${i}: ${res.status} · rows written ${res.rowsWritten} of ceiling ${res.ceiling}` +

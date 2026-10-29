@@ -79,7 +79,7 @@ Members no longer send item screenshots, so there is no vault channel to set up;
 
 `/zone name:` shows a zone's card, privately, with **Post to channel**. The card has MnM Atlas's picture of the zone, its level range and a line about it, the zones next to it, its creatures by level (each with a **find on map** link to MnM Atlas), and spots from the community maps. Link buttons open the zone's page on the Monsters and Memories Wiki (**Wiki**), on monstersandmemories.wiki (**MnM Wiki**) and on Stories of MnM, the zone and world schematic (**Zone connections**), and the zone in MnM Atlas. A button appears only when that site has a page for the zone. **More creatures** pages through every creature. **Gear here** asks for your class, then shows `/gear` for that zone, by AC, with a sort menu. `/gear` also has a `zone:` option.
 
-The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas, mnm-tools and Mo Betta, and updates with the nightly import. The other sites' addresses are checked one by one, by hand, when zones change (`scripts/zone/sites.ts`).
+The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas and mnm-tools, and updates with the nightly import. The other sites' addresses are checked one by one, by hand, when zones change (`scripts/zone/sites.ts`).
 
 ### MnM Atlas's zone pictures (operator)
 

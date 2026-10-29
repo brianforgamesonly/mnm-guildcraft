@@ -29,11 +29,12 @@ export const ZONE_COPY = {
   missingName: 'Not recorded yet',
   missing: (parts: string[], atlas: string | null) =>
     `No ${parts.length > 1 ? `${parts.slice(0, -1).join(', ')} or ${parts.at(-1)}` : parts[0]} recorded for this zone yet.${atlas ? ` [MnM Atlas](${atlas}) may have more.` : ''}`,
-  missingParts: { creatures: 'creatures', level: 'level range', description: 'description' },
+  missingParts: { creatures: 'creatures', level: 'level range' },
   atlasCredit: 'Map: MnM Atlas (mnmatlas.com) and its original map authors',
   mapCredit: (author: string | null, via: string) => `Map: ${author ? `${author} · ` : ''}via ${via}`,
   licence: (licence: string, licenceUrl: string, page: string) => `[${licence}](${licenceUrl}) · [file page](${page})`,
-  footer: 'Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools · Mo Betta',
+  // Order 28b, PR D: Mo Betta's credit removed; the wiki's CC BY-SA credit stays first (docs/COPY.md).
+  footer: 'Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools',
   creaturesTitle: (zone: string) => `Creatures in ${zone}`,
   pageFooter: (page: number, pages: number, sort: string) => `Page ${page} of ${pages} · ${sort}`,
   creatureSort: 'by level, lowest first',
@@ -122,8 +123,8 @@ interface NpcRow {
 const list = (json: string | null): string[] => (json ? (JSON.parse(json) as string[]) : []);
 
 /**
- * The zone's creatures: mnm-tools' mobs keep their fields, Mo Betta fills what a mob lacks (mergeCreature, the rule the
- * import reports with); Mo Betta's merchants are not creatures. By level (the first whole number), no level last, then name.
+ * The zone's creatures: mnm-tools' mobs keep their fields, the wiki's NPCs fill what a mob lacks (mergeCreature, the rule
+ * the import reports with); merchants are not creatures. By level (the first whole number), no level last, then name.
  */
 export function creaturesOf(mobs: MobRow[], npcs: NpcRow[]): Creature[] {
   const merchants = new Set(npcs.filter((n) => n.kind === 'merchant').map((n) => n.name.toLowerCase()));
@@ -239,7 +240,8 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   const P = ZONE_COPY.missingParts;
   const missing = [
     ...(z.level ? [] : [P.level]),
-    ...(z.description ? [] : [P.description]),
+    // Order 28b, PR D: no zone source records a description since Mo Betta left (the wiki's {{ZoneDetails}} has no such
+    // field), so a missing one is not reported as "not recorded yet"; a stored one is still shown.
     ...(d.creatures.length ? [] : [P.creatures]),
     // No map is already said, with the atlas link when there is one, in the Map field above.
   ];

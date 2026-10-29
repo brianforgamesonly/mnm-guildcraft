@@ -1,0 +1,137 @@
+# Order 28, ITEM 1, as one reusable job (order 28b, PR D): the wiki snapshot, called by import.yml's wiki job (nightly)
+# and by wiki-snapshot.yml (dispatch, to refresh the committed data/wiki-snapshot by hand). The only job that contacts
+# the wiki (order 28's added rule), and only https://monstersandmemories.miraheze.org/w/api.php, through a temporary
+# relay Worker (override 3) because Miraheze challenges GitHub's runners (order 14's probe, run 40933712788). The relay is
+# deployed with a one-time token compiled in, called once per wiki request, one request at a time, then deleted; the
+# delete is verified by a 404 from the Cloudflare API. At most 200 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP,
+# every attempt counted; 153 measured), maxlag=5, order 14's named User-Agent. A 403, a 429 or a challenge stops the run
+# and is reported, never retried or worked around (override 7).
+# Order 28b, ITEM 1: it starts only when no deploy.yml run is queued or running (every 15 s, at most 10 minutes, then it
+# fails "a deploy was still running"; scripts/wiki/deploys.ts), records each readiness call's time and answer, and lists
+# the deploy runs that overlapped it. Never a shared concurrency group with deploys (a newer arrival cancels a pending job).
+# The caller passes `secrets: inherit` and grants `actions: read`.
+# Expected: about 2 billed minutes per run (public repository: free); Cloudflare: one Worker deployed and deleted, about
+# 160 Worker requests (3-12 readiness calls + 4 refusal checks + 1 per wiki request), 0 D1 rows.
+name: wiki-job
+on:
+  workflow_call:
+    inputs:
+      plan_only:
+        description: 'List the categories (titles only), print the content plan, and stop before reading any page content'
+        type: boolean
+        default: false
+      retention_days:
+        type: number
+        default: 30
+jobs:
+  wiki:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    # One relay at a time: its name is fixed.
+    concurrency: wiki-relay
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      RELAY_CONFIG: scripts/wiki/wrangler.jsonc
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Wait until no deploy of either copy is queued or running (order 28b)
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/wiki/deploys.ts wait
+      - name: Deploy the relay, with this run's one-time token compiled in
+        id: deploy
+        shell: bash
+        run: |
+          echo "since=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          token=$(openssl rand -hex 24)
+          echo "::add-mask::$token"
+          printf '%s' "$token" > "$RUNNER_TEMP/relay-token"
+          npx wrangler deploy --config "$RELAY_CONFIG" --define "RELAY_TOKEN:\"$token\"" | tee "$RUNNER_TEMP/deploy.log"
+          url=$(grep -oE 'https://guildcraft-wiki-relay\.[a-z0-9-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -n 1 || true)
+          test -n "$url" || { echo "::error::no workers.dev URL in the deploy output"; exit 1; }
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - name: The relay refuses everything else with a 403, contacting nothing
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          # Live means the relay itself answers: a 403 carrying its x-relay-refused header. A new workers.dev script is not
+          # live everywhere at once (run 40952610941: 403 from the relay, then 404 from workers.dev 60 ms later; run
+          # 40961604702: a 404 first, then the relay), so this waits for it with requests the relay refuses before any wiki
+          # contact (no token): at most 12, 5 s apart.
+          token=$(cat "$RUNNER_TEMP/relay-token")
+          live=0
+          # Order 28b: every readiness call's time, answer and duration is recorded, in the log and the job summary.
+          echo '### Relay readiness (UTC, answer, relay header, seconds)' >> "$GITHUB_STEP_SUMMARY"
+          for i in $(seq 1 12); do
+            sleep 5
+            # curl prints its -w line even when it fails (000 for no answer), so its exit is not added to it.
+            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code} %{time_total}' "$URL/api?action=query&meta=siteinfo" || true)
+            code=${code:-000 -}
+            hdr=no; grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h" 2>/dev/null && hdr=yes
+            echo "$(date -u +%H:%M:%S.%3N) call $i: HTTP ${code% *}, relay header $hdr, ${code#* } s" | tee -a "$GITHUB_STEP_SUMMARY"
+            : > "$RUNNER_TEMP/h"
+            if [ "${code% *}" = 403 ] && [ "$hdr" = yes ]; then live=$((live + 1)); else live=0; fi
+            # Three relay answers in a row before the checks.
+            if [ "$live" -ge 3 ]; then break; fi
+          done
+          test "$live" -ge 3 || { echo "::error::the relay did not answer three times in a row within 60 s"; exit 1; }
+          check() {
+            code=$(curl -sS --max-time 10 -o /dev/null -D "$RUNNER_TEMP/h" -w '%{http_code}' "$@" || echo "curl exit $?")
+            echo "$code ← ${*: -1}" | sed "s/$token/<token>/g"
+            test "$code" = 403
+            grep -qi '^x-relay-refused:' "$RUNNER_TEMP/h" || { echo "::error::a 403 without x-relay-refused: not the relay's answer"; return 1; }
+          }
+          check -X POST -H "x-relay-token: $token" "$URL/api?action=query&meta=siteinfo"
+          check -H "x-relay-token: wrong-token-wrong-token-wrong-token" "$URL/api?action=query&meta=siteinfo"
+          check -H "x-relay-token: $token" "$URL/other?action=query&meta=siteinfo"
+          check -H "x-relay-token: $token" "$URL/api?action=parse&page=Rothold&prop=wikitext"
+      - name: The snapshot, one request at a time through the relay
+        id: snapshot
+        shell: bash
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          PLAN_ONLY: ${{ inputs.plan_only && '--plan-only' || '' }}
+        run: |
+          # The plan is read from the title listings before any content; a plan over the cap stops here (titles only read).
+          rc=0
+          node scripts/wiki/snapshot.ts --relay "$URL" --token-file "$RUNNER_TEMP/relay-token" --out "$RUNNER_TEMP/wiki-snapshot" $PLAN_ONLY || rc=$?
+          if [ -f "$RUNNER_TEMP/wiki-snapshot/plan.md" ]; then cat "$RUNNER_TEMP/wiki-snapshot/plan.md" >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$rc"
+      - name: Delete the relay, even if a step failed, and confirm it is gone
+        if: always()
+        shell: bash
+        run: |
+          rm -f "$RUNNER_TEMP/relay-token"
+          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
+          npx wrangler delete --config "$RELAY_CONFIG" --force || echo "::warning::wrangler delete exited $?"
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-relay")
+          echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
+          test "$code" = 404
+      - name: List the deploys that overlapped the snapshot (order 28b)
+        if: always() && steps.deploy.outputs.since != ''
+        # A record, never a gate: a GitHub API error here must not throw away a good snapshot.
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/wiki/deploys.ts overlap --since "${{ steps.deploy.outputs.since }}"
+      - name: What the parser read, and the names to fix on the wiki (writes nothing)
+        if: ${{ !inputs.plan_only && steps.snapshot.outcome == 'success' }}
+        run: node scripts/wiki/report.ts --snapshot "$RUNNER_TEMP/wiki-snapshot" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the snapshot (CC BY-SA 4.0, credit in CREDIT.md)
+        if: ${{ !inputs.plan_only && steps.snapshot.outcome == 'success' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: wiki-snapshot
+          path: ${{ runner.temp }}/wiki-snapshot
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention_days }}

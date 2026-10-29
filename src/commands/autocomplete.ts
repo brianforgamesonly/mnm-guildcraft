@@ -93,7 +93,7 @@ const dkpPools: Lister = async (a) => [{ name: DKP_COPY.guildPool, value: POOL_G
 /** Order 27: the zone's creatures (src/dkp/creatures.ts), for the zone already filled in; one statement. */
 const dkpCreatures: Lister = async ({ db, options, typed }) => {
   const zone = optString(options, 'zone');
-  return zone ? asChoices(matchChoices(await zoneCreatures(db, zoneKey(zone)), typed)) : [];
+  return zone ? asChoices(matchChoices((await zoneCreatures(db, zoneKey(zone))).map((c) => c.name), typed)) : [];
 };
 /**
  * Order 27: /dkp kill named: the open raid's creatures, and first what was typed, as typed (a creature the data doesn't

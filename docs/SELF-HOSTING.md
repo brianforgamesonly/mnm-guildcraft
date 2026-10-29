@@ -134,6 +134,8 @@ https://discord.com/oauth2/authorize?client_id=<APP ID>&scope=bot+applications.c
 
 **Actions → import → Run workflow** with *dry run* on: it prints what it would write. Run it again with *dry run* off. After that it runs every morning by itself (07:30 UTC). Expect about 1,200 recipes and 5,500 items (the numbers grow with the community data).
 
+The zones, NPCs and quests come from the Monsters and Memories Wiki (CC BY-SA 4.0), read by the import's first job, `wiki`. It deploys a small temporary Worker, `guildcraft-wiki-relay`, in your Cloudflare account, makes at most 200 requests through it, and deletes it again; your existing Cloudflare token already covers this. It waits while a `deploy` run is in progress. If the wiki can't be read one night, the import still loads the game data and keeps the previous day's zones, and GitHub emails you that the import failed.
+
 ## Step 11 — Settings and the boards
 
 Run `/guildcraft status` in your server. If you loaded an export, your roles and channels are already set.

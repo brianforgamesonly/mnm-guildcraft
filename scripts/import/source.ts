@@ -2,7 +2,7 @@
 // Freshness is recorded as that SHA plus the file's generatedAt, never as our fetch time.
 // Order 17: the zone sources (scripts/import/zones.ts ZONE_FILES) are fetched the same way, each with its commit's date.
 
-import { ZONE_FILES, type SourceVersion, type ZoneFileName, type ZoneInput } from './zones.ts';
+import { ZONE_FILES, type SourceVersion, type ZoneFileName, type ZoneSources } from './zones.ts';
 
 export const SOURCE_REPO = 'Boisteroux/mnm-tools';
 export const SOURCE_PATH = 'mnmdb/wiki.json';
@@ -28,7 +28,7 @@ export async function fetchSource(githubToken?: string): Promise<{ sha: string; 
 }
 
 /** The zone sources, each pinned; `wiki` is wiki.json's own version, so its staleness is judged with the rest. */
-export async function fetchZoneSources(wiki: SourceVersion, githubToken?: string): Promise<ZoneInput> {
+export async function fetchZoneSources(wiki: SourceVersion, githubToken?: string): Promise<ZoneSources> {
   const files = {} as Record<ZoneFileName, unknown>;
   const versions: SourceVersion[] = [wiki];
   for (const f of ZONE_FILES) {

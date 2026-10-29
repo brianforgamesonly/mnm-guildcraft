@@ -6,17 +6,24 @@
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { fetchSource, fetchZoneSources, SOURCE_NAME } from './source.ts';
-import { ZONE_FILES, type SourceVersion, type ZoneFileName, type ZoneInput } from './zones.ts';
+import { ZONE_FILES, type SourceVersion, type ZoneFileName, type ZoneSources } from './zones.ts';
+import type { WikiSnapshot } from '../wiki/types.ts';
 
 const fileName = (name: string) => name.replace('/', '__');
 
-export function readZoneDir(dir: string): ZoneInput {
+export function readZoneDir(dir: string): ZoneSources {
   const versions = JSON.parse(readFileSync(join(dir, 'manifest.json'), 'utf8')) as SourceVersion[];
   const files = Object.fromEntries(ZONE_FILES.map((f) => [f.name, JSON.parse(readFileSync(join(dir, fileName(f.name)), 'utf8'))])) as Record<ZoneFileName, unknown>;
   return { files, versions };
 }
+
+/** Order 28's override 8: the wiki snapshot committed for CI and local runs (refreshed by hand from a wiki-snapshot artifact). */
+export const COMMITTED_SNAPSHOT = fileURLToPath(new URL('../../data/wiki-snapshot', import.meta.url));
+/** A snapshot directory (snapshot.json and CREDIT.md), as ITEM 1's job writes it. */
+export const readSnapshot = (dir: string): WikiSnapshot => JSON.parse(readFileSync(join(dir, 'snapshot.json'), 'utf8')) as WikiSnapshot;
 
 if (import.meta.main) {
   const { values: args } = parseArgs({ options: { out: { type: 'string' } } });

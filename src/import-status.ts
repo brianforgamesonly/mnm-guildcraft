@@ -10,6 +10,10 @@ export const IMPORT_STATUS = {
   // Order 13: stopped at the write ceiling (scripts/import/core.ts WRITE_CEILING) between whole groups; the next run
   // writes the rest. What it wrote is complete, so readers of the game data treat it as finished.
   partial: { real: true, alarm: true, failing: false, finished: true },
+  // Order 28's override 9 (order 28b, PR D): the game data imported, but the zone part kept yesterday's zone data because
+  // the wiki snapshot job failed (its reason in `error`). Finished for the game data's readers; failing for the alarm, so
+  // the owner hears of it once per state change.
+  'zones-kept': { real: true, alarm: true, failing: true, finished: true },
   failed: { real: true, alarm: true, failing: true, finished: false },
   // A 'running' row seen by a later run is a run that crashed mid-write: failing (order 9 review).
   running: { real: true, alarm: true, failing: true, finished: false },

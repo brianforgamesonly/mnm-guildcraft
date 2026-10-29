@@ -27,10 +27,8 @@ export const ZONE_FILES = [
   { name: 'mnm-tools/maps.json', repo: 'Boisteroux/mnm-tools', path: 'mnmdb/maps.json', stale: true },
   // MnM Atlas's map registry rarely changes: exempt from the staleness warning (order 17, ITEM 1).
   { name: 'mnmatlas/maps.json', repo: 'ocombe/mnmatlas', path: 'data/maps.json', stale: false },
-  { name: 'mo-betta/zones.json', repo: 'amyklindley/mo-betta-quests', path: 'zones.json', stale: true },
-  { name: 'mo-betta/npcs.json', repo: 'amyklindley/mo-betta-quests', path: 'npcs.json', stale: true },
-  // Order 25's override 1: quests.json, for the faction posts' quest lines only (scripts/import/quests.ts).
-  { name: 'mo-betta/quests.json', repo: 'amyklindley/mo-betta-quests', path: 'quests.json', stale: true },
+  // Order 28b, PR D (order 28's override 2): Mo Betta's zones.json, npcs.json and quests.json left here; the wiki snapshot
+  // (ZoneInput.wiki) holds the zones, NPCs and quests.
 ] as const;
 export type ZoneFileName = (typeof ZONE_FILES)[number]['name'];
 export const STALE_DAYS = 30;
@@ -46,15 +44,19 @@ export interface ZoneInput {
   /** Every file read this run, wiki.json included. */
   versions: SourceVersion[];
   /**
-   * Order 28: the wiki snapshot (scripts/wiki/snapshot.ts). When present it replaces Mo Betta's zones, NPCs and quests
-   * (ITEM 2's parser, scripts/wiki/parse.ts), and Mo Betta's files are not read. PR A uses it only for the comparison and
-   * the local measurement (ITEM 3); the nightly import still reads Mo Betta.
+   * Order 28: the wiki snapshot (scripts/wiki/snapshot.ts), parsed by scripts/wiki/parse.ts: the zones, NPCs and quests.
+   * Order 28b, PR D: the only zone source (Mo Betta is no longer read). Without it the import leaves the zone tables as
+   * they are (core.ts ImportOptions.zonesKept).
    */
-  wiki?: WikiSnapshot;
+  wiki: WikiSnapshot;
 }
 /** Order 28: the snapshot's entry in import_source: sha = its highest revid, changed_at = that revision's time. */
 export const WIKI_SNAPSHOT_SOURCE = 'wiki/snapshot';
 export const wikiVersion = (s: WikiSnapshot): SourceVersion => ({ name: WIKI_SNAPSHOT_SOURCE, sha: String(s.version.revid), changedAt: s.version.timestamp });
+/** The files fetched from GitHub (ZONE_FILES), before the wiki snapshot joins them. */
+export type ZoneSources = Omit<ZoneInput, 'wiki'>;
+/** The zone input: the GitHub files and the wiki snapshot, its version recorded with the rest. */
+export const withWiki = (z: ZoneSources, snap: WikiSnapshot): ZoneInput => ({ ...z, wiki: snap, versions: [...z.versions, wikiVersion(snap)] });
 
 /** The mapping's sources: each names where a zone name was read. Order 28: the wiki's three replace Mo Betta's at the switch-over. */
 export const NAME_SOURCES = [
@@ -91,42 +93,6 @@ interface SourceRows {
   /** factionQuestLines' input: { quests: [{ title, url, rewards }] }. */
   quests: unknown;
   questsLabel: string;
-}
-
-function moBettaRows(files: ZoneInput['files']): SourceRows {
-  const mbZones = list(files['mo-betta/zones.json'], 'mo-betta/zones.json', 'zones');
-  const mbNpcs = list(files['mo-betta/npcs.json'], 'mo-betta/npcs.json', 'npcs');
-  return {
-    registry: 'mo-betta:zones',
-    adjacentSource: 'mo-betta:adjacent',
-    npcSource: 'mo-betta:npcs',
-    zones: mbZones.map((z) => ({
-      name: z.name as string,
-      level: fieldText(z.level),
-      description: fieldText(z.description),
-      adjacent: strs(z.adjacent),
-      url: str(z.url),
-      mapFile: str(z.map_file),
-      map: str(z.map),
-    })),
-    npcs: mbNpcs.map((n) => ({
-      name: n.name as string,
-      zoneParts: npcZoneParts(typeof n.zone === 'string' ? n.zone : ''),
-      kind: str(n.kind),
-      level: fieldText(n.level),
-      race: fieldText(n.race),
-      class: fieldText(n.class),
-      location: fieldText(n.location),
-      loot: strs(n.loot),
-      factions: strs(n.factions),
-      opposingFactions: strs(n.opposing_factions),
-      // Mo Betta holds no named or raid tag: unknown, never guessed.
-      named: null,
-      raid: null,
-    })),
-    quests: files['mo-betta/quests.json'],
-    questsLabel: 'mo-betta/quests.json',
-  };
 }
 
 function wikiRows(snap: WikiSnapshot): SourceRows {
@@ -330,8 +296,9 @@ export function buildZonePlan(input: ZoneInput, mobs: MobForZones[], wikiZones: 
   const mt = list(input.files['mnm-tools/maps.json'], 'mnm-tools/maps.json', 'zones');
   const mtPinned = input.versions.find((v) => v.name === 'mnm-tools/maps.json');
   const atlas = list(input.files['mnmatlas/maps.json'], 'mnmatlas/maps.json', 'maps');
-  // Order 28: the zone source is the wiki snapshot when the input carries one, else Mo Betta's files.
-  const src = input.wiki ? wikiRows(input.wiki) : moBettaRows(input.files);
+  // Order 28b, PR D: the zone source is the wiki snapshot (Mo Betta is no longer read).
+  if (!input.wiki) throw new ZoneStructureError('no wiki snapshot: the zone data needs one');
+  const src = wikiRows(input.wiki);
 
   // 1. Every name each source uses, in source order.
   const used: Record<NameSource, string[]> = Object.fromEntries(NAME_SOURCES.map((s) => [s, []])) as never;

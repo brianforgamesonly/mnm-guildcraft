@@ -80,6 +80,8 @@ export const RAID_COPY = {
   payAttendance: 'Pay attendance',
   close: 'Close raid',
   namedKilled: 'Named killed…',
+  /** Order 28b: each Named killed option's part of the list, from the wiki's tags (src/dkp/creatures.ts; docs/COPY.md). */
+  creaturePart: { raid: 'Raid encounter', named: 'Named', other: 'Other creatures' } as Record<'raid' | 'named' | 'other', string>,
   opened: (zone: string, link: string | null) => `Raid open: **${md(zone)}**.${link ? ` ${link}` : ''}`,
   alreadyOpen: (link: string | null) => `A raid is already open${link ? `: ${link}` : ''}. Close it before opening another.`,
   cannotPost: DKP_COPY.noChannel,

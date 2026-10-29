@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
 import { buildPlan, buildStatements, IMPORT_TABLES, loadExisting, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
 import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
-import { IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
+import { FINISHED_IMPORT, IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
 import small from '../fixtures/wiki-small.json';
 import { buildZonePlan } from '../../scripts/import/zones.ts';
@@ -192,7 +192,19 @@ describe('import', () => {
     await load(fixture());
     await env.DB.prepare("INSERT INTO data_import (source, source_version, status, started_at, finished_at) VALUES ('t', 'v', 'refused', 'x', 'x'), ('t', 'v', 'dry-run', 'x', 'x')").run();
     expect(await one(`SELECT status FROM data_import WHERE ${REAL_IMPORT} ORDER BY id DESC LIMIT 1`)).toEqual({ status: 'ok' });
-    expect(Object.keys(IMPORT_STATUS).sort()).toEqual(['dry-run', 'failed', 'ok', 'partial', 'refused', 'running']);
+    expect(Object.keys(IMPORT_STATUS).sort()).toEqual(['dry-run', 'failed', 'ok', 'partial', 'refused', 'running', 'zones-kept']);
+  });
+
+  it('order 28b (override 9): without the wiki snapshot the game data imports, zone rows stay, and the run is zones-kept (failing, finished)', async () => {
+    await load(fixture());
+    const zonesBefore = await env.DB.prepare('SELECT count(*) AS n FROM zone').first<{ n: number }>();
+    const res = await runImport(db, fixture(), { sourceSha: 'd'.repeat(40), now, zonesKept: 'the wiki snapshot job failed' });
+    expect(res.status).toBe('zones-kept');
+    expect(res.error).toBe('zone data kept: the wiki snapshot job failed');
+    expect(await one('SELECT status, error FROM data_import ORDER BY id DESC LIMIT 1')).toEqual({ status: 'zones-kept', error: 'zone data kept: the wiki snapshot job failed' });
+    expect(isFailing('zones-kept')).toBe(true);
+    expect(await one(`SELECT status FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1`)).toEqual({ status: 'zones-kept' });
+    expect(await env.DB.prepare('SELECT count(*) AS n FROM zone').first<{ n: number }>()).toEqual(zonesBefore);
   });
 
   it('a structure failure in a dry run does not unlock real writes', async () => {

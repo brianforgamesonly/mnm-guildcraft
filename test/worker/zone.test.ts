@@ -61,14 +61,16 @@ beforeEach(async () => {
 });
 
 describe('/zone: the card', () => {
-  it('a big zone: level text, a one-line description, creatures by level with find-on-map links, no drops list, spots, credits', async () => {
+  it('a big zone: level text, creatures by level with find-on-map links, no drops list, spots, credits', async () => {
     const r = await zone('Evershade Weald');
     expect(r.data.flags).toBe(64);
     const e = r.data.embeds![0] as { title: string; url?: string; description: string; footer: { text: string } };
     expect(e.title).toBe('Evershade Weald');
     expect(e.url).toBe('https://monstersandmemories.miraheze.org/wiki/Evershade_Weald');
-    expect(e.description).toBe('**Levels:** 1 - ??\nA forest.');
-    // mnm-tools' "A gnoll scout" (L8 - 10) keeps its level; Mo Betta adds Marshal Harding (20); the jackal (3) is mnm-tools only.
+    // Order 28b, PR D: the wiki records no zone description, and a missing one is not reported.
+    expect(e.description).toBe('**Levels:** 1 - ??');
+    expect(field(r, ZONE_COPY.missingName)).toBeUndefined();
+    // mnm-tools' "A gnoll scout" (L8 - 10) keeps its level; the wiki adds Marshal Harding (20); the jackal (3) is mnm-tools only.
     const creatures = field(r, /^Creatures/)!;
     expect(creatures.name).toBe('Creatures (3)');
     expect(creatures.value.split('\n')).toEqual([
