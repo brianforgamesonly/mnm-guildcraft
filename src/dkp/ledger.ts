@@ -149,6 +149,29 @@ export const standbyReverseStatement = (db: D1Database, r: { guildId: string; po
     )
     .bind(r.guildId, r.pool, r.raidId, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at, r.approvedPending ?? null);
 
+// ---------------------------------------------------------------- spending (order 29)
+
+/**
+ * A spend, by the bot: the price comes off the member's balance in the pool, checked inside this insert (ORDER-RULES Order
+ * 29: "A spend checks the balance inside its own insert, so a shop purchase and an auction can't both spend the same
+ * points"). For an auction: only while the auction stands sold to this member at this price at this close (the batch's
+ * UPDATE before it); once per auction (dkp_ledger_auction_spend). A spend is never capped and never cut.
+ */
+export const auctionSpendStatement = (db: D1Database, p: { guildId: string; pool: string; member: string; price: number; auctionId: number; raidId: number | null; reason: string; at: string }) =>
+  db
+    .prepare(
+      `WITH t AS (SELECT ${PREV('?3')} AS prev)
+       INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at, auction_id)
+       SELECT ?1, ?3, ?2, -?4, 0, prev - ?4, 'spend', ?5, NULL, NULL, ?6, 'bot', ?7, ?8 FROM t
+       WHERE prev >= ?4
+         AND EXISTS (SELECT 1 FROM dkp_auction a WHERE a.id = ?8 AND a.status = 'sold' AND a.winner = ?3 AND a.price = ?4 AND a.closed_at = ?7)
+         AND NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.auction_id = ?8 AND x.kind = 'spend')`,
+    )
+    .bind(p.guildId, p.pool, p.member, p.price, p.raidId, p.reason, p.at, p.auctionId);
+
+/** The member's balance in the pool, as an SQL expression over ?1 (guild) and ?2 (pool): one indexed row. */
+export const balanceSql = (member: string) => PREV(member);
+
 // ---------------------------------------------------------------- the one reader
 
 export interface Standing {

@@ -6,7 +6,8 @@
 // touches the cron or the health check.
 //
 // Items: lapse:<pending id> (an approval's lapse), check:<kill id> (a Check again window), close:<raid id> (auto-close),
-// render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Keys starting
+// render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Order 29:
+// auction:<id> (an auction closes, by its timer only), acard:<id> (an auction card's coalesced, paced edit). Keys starting
 // with "!" are the object's own state (its guild, each card's pace), never items.
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env.ts';
@@ -17,6 +18,8 @@ import { afterEdit, nextEditAt, START, type Pace } from './pace.ts';
 
 const GUILD_KEY = '!guild';
 const paceKey = (key: string) => `!pace:${key}`;
+/** Card edits, each paced by its own message's last answer: raid cards (render:) and, order 29, auction cards (acard:). */
+const paced = (key: string) => key.startsWith('render:') || key.startsWith('acard:');
 const isItem = (k: string) => !k.startsWith('!');
 /** Items handled per alarm; the rest stay due and the alarm is set again at once (each run is its own invocation). */
 export const PER_ALARM = 8;
@@ -35,11 +38,11 @@ export class DkpTimers extends DurableObject<Env> {
     const s = this.ctx.storage;
     const keys = items.map((i) => i.key);
     const have = await s.get<Item>(keys);
-    const paces = await s.get<Pace>(keys.filter((k) => k.startsWith('render:')).map(paceKey));
+    const paces = await s.get<Pace>(keys.filter(paced).map(paceKey));
     const put: Record<string, Item | string> = {};
     if ((await s.get<string>(GUILD_KEY)) !== guildId) put[GUILD_KEY] = guildId;
     for (const i of items) {
-      const due = i.key.startsWith('render:') ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
+      const due = paced(i.key) ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
       const was = have.get(i.key);
       // `later`: replace even with a later time.
       if (!was || i.later || due < was.due) put[i.key] = { due };
@@ -104,7 +107,7 @@ export class DkpTimers extends DurableObject<Env> {
           continue;
         }
       }
-      if (r?.headers && key.startsWith('render:')) {
+      if (r?.headers && paced(key)) {
         const pace = afterEdit((await s.get<Pace>(paceKey(key))) ?? START, Date.now(), r.headers);
         await s.put(paceKey(key), pace);
         console.log(JSON.stringify({ gc: 'dkp-card-edit', remaining: r.headers.remaining ?? null, reset_after: r.headers.resetAfter ?? null, retry_after: r.headers.retryAfter ?? null, gap_ms: pace.gap }));

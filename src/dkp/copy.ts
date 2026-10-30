@@ -53,6 +53,76 @@ export const DKP_COPY = {
   unknownZone: (typed: string) => `No zone is called **${md(typed)}**.`,
 } as const;
 
+/** Order 29, PR B: auctions (docs/PRD.md "Order 29: spending points"). Members are memberTag; nobody is pinged. */
+export const AUCTION_COPY = {
+  auctionDrop: 'Auction a drop',
+  pickDrop: (named: string) => `Pick the drop from **${md(named)}** to auction. Then set the minimum bid and the length.`,
+  dropPlaceholder: 'The drop…',
+  noLoot: (named: string) => `GuildCraft's data lists no known loot for **${md(named)}** that matches an item. Use \`/dkp auction item:\` to pick any item.`,
+  noKillYet: 'This raid has no kills yet: record one first, or use `/dkp auction item:`.',
+  formTitle: 'Auction a drop',
+  minimumLabel: 'Minimum bid (points)',
+  minutesLabel: 'Length (minutes)',
+  noItem: (typed: string) => `There is no item called **${md(typed)}**. Pick one from the list.`,
+  noRaid: 'No raid is open, so there is no raid auction to run. For guild points, use `/dkp auction item: general: True`.',
+  wholeNumber: (label: string) => `${label} must be a whole number.`,
+  minimumRange: 'The minimum bid must be at least 1.',
+  minutesRange: (max: number) => `The length must be between 1 and ${max} minutes.`,
+  opened: (item: string, link: string | null) => `Auction open: **${md(item)}**.${link ? ` ${link}` : ''}`,
+  cannotPost: DKP_COPY.noChannel,
+  // the card
+  title: (item: string) => `Auction: ${item}`,
+  raidLine: (pool: string) => `Raid auction for **${md(pool)}** raid points. Members at a kill of this raid may bid.`,
+  generalLine: 'General auction for guild points. Every member may bid.',
+  minimum: (n: number) => `Minimum bid: **${n}** points.`,
+  closes: (t: number) => `Closes <t:${t}:R> (<t:${t}:t>), by its timer only.`,
+  bidders: (n: number) => `**${plural(n, 'bidder')}** so far. Bids are sealed until it closes: nobody sees them, officers included.`,
+  bid: 'Bid',
+  cancel: 'Cancel auction',
+  postGeneral: 'Post to general auction',
+  // bidding
+  bidTitle: (item: string) => truncate(`Bid: ${item}`, 45),
+  amountLabel: 'Your bid (points)',
+  amountHint: (min: number, balance: number) => `A whole number from ${min} to ${balance}. 0 withdraws your bid.`,
+  refusal: {
+    frozen: "You can't bid: your DKP is frozen (you left the server). Use any GuildCraft command to come back.",
+    not_at_raid: 'Only members Present or on Standby at one or more kills of this raid can bid.',
+    raid_limit: (n: number) => `You've already won ${plural(n, 'item')} in this raid, the most a raid allows.`,
+    week_limit: (n: number) => `You've already won ${plural(n, 'item')} in the last 7 days, the most that allows.`,
+    new_member: (n: number) => `New members bid after ${plural(n, 'kill')} in this zone's pool (Present or Standby).`,
+  },
+  tooPoor: (min: number, balance: number) => `The minimum bid is ${min} points, and you have ${balance} in this pool.`,
+  belowMinimum: (min: number) => `Bids start at ${min} points.`,
+  overBalance: (balance: number) => `You have ${balance} points in this pool, so you can bid at most ${balance}.`,
+  closed: 'This auction is closed.',
+  bidIn: (n: number, closes: number) => `Your bid: **${n}** points. It's sealed until the auction closes <t:${closes}:R>. Bid again to change it; 0 withdraws it.`,
+  withdrawn: 'Your bid is withdrawn.',
+  noBidToWithdraw: 'You have no bid to withdraw.',
+  // closing
+  sold: (winner: string, price: number) => `**Sold** to ${winner} for **${price}** points.`,
+  unsold: 'Closed with no valid bids.',
+  bidsHead: 'Every bid, revealed:',
+  bidLine: (member: string, amount: number, dropped: string | null) => `${member}: ${amount}${dropped ? ` (did not count: ${dropped})` : ''}`,
+  dropped: { balance: 'not enough points at close', limit: 'no longer eligible at close' } as Record<string, string>,
+  noBids: 'No bids.',
+  result: (item: string, winner: string | null, price: number | null, link: string | null) =>
+    `**Auction closed: ${md(item)}.** ${winner ? `Sold to ${winner} for ${price} points.` : 'No valid bids.'}${link ? ` ${link}` : ''}`,
+  spendReason: (item: string) => `Won ${truncate(item, 80)}`,
+  // cancelling
+  cancelTitle: 'Cancel this auction',
+  reasonLabel: 'Why (shown publicly; it reveals the bids)',
+  cancelledBy: (by: string, reason: string) => `**Cancelled** by ${by}. Reason: ${md(reason)}`,
+  cancelled: (item: string, by: string, reason: string, link: string | null) => `**Auction cancelled: ${md(item)}.** By ${by}. Reason: ${md(reason)}${link ? ` ${link}` : ''}`,
+  cancelledReply: 'Cancelled. The bids are revealed on the card.',
+  ownBid: "You've bid in this auction, so another officer has to cancel it.",
+  removedReason: 'DKP removed',
+  notRunner: DKP_COPY.notRunner,
+  // the general auction
+  posted: (link: string | null) => `Posted to the general auction.${link ? ` ${link}` : ''}`,
+  alreadyPosted: 'It is already in the general auction.',
+  notUnsold: 'Only an auction that closed with no bids can be posted to the general auction.',
+} as const;
+
 /** Order 27, PR B: raid nights, history and /me. */
 export const RAID_COPY = {
   notRunner: DKP_COPY.notRunner,

@@ -145,6 +145,8 @@ export const LISTS: Record<string, Lister> = {
   '/dkp kill named': dkpOpenRaidCreatures,
   '/dkp correct kill': dkpKills,
   '/dkp history pool': dkpPools,
+  // Order 29: any item, as /item name lists them (one statement per keystroke: the cached item list).
+  '/dkp auction item': allItems,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

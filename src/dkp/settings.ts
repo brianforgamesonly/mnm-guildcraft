@@ -23,6 +23,12 @@ export const SETTINGS = [
   { key: 'second_officer_over', label: 'Second officer needed over', default: 20, min: 0, max: 100000, unit: 'points' },
   { key: 'approval_hours', label: 'Approval lapses after', default: 24, min: 1, max: 168, unit: 'hours' },
   { key: 'auto_close_hours', label: 'Raid auto-closes after', default: 8, min: 1, max: 24, unit: 'hours' },
+  // Order 29: auctions (docs/PRD.md "Order 29: spending points").
+  { key: 'wins_per_raid', label: 'Wins per raid', default: 2, min: 1, max: 100, unit: 'items' },
+  { key: 'wins_per_week', label: 'Wins per 7 days', default: 4, min: 1, max: 100, unit: 'items' },
+  { key: 'new_member_kills', label: 'New-member wait (kills in that pool)', default: 3, min: 0, max: 1000, unit: 'kills' },
+  { key: 'raid_auction_seconds', label: 'Raid auction length', default: 180, min: 30, max: 3600, unit: 'seconds' },
+  { key: 'general_auction_hours', label: 'General auction length', default: 24, min: 1, max: 168, unit: 'hours' },
 ] as const satisfies readonly NumberSetting[];
 
 export type SettingKey = (typeof SETTINGS)[number]['key'];

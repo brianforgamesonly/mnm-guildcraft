@@ -93,11 +93,12 @@ export const isDkpRunner = (guild: Guild | null, runnerRole: string | null, m: G
 /**
  * Order 27: nobody changes, or approves a change to, their own DKP; nor approves a change they asked for. The one decider,
  * called by every route that changes points (adjust, approve, corrections). Bot-made rows (payouts, Check again) never
- * reach it. Returns the refusal, or null.
+ * reach it. Returns the refusal, or null. Order 29: nor cancels an auction they have bid in (`bidders`).
  */
-export function dkpSelfConflict(actorId: string, change: { member: string; askedBy?: string }): 'own' | 'asked' | null {
-  if (actorId === change.member) return 'own';
+export function dkpSelfConflict(actorId: string, change: { member?: string; askedBy?: string; bidders?: string[] }): 'own' | 'asked' | 'bid' | null {
+  if (change.member !== undefined && actorId === change.member) return 'own';
   if (change.askedBy !== undefined && actorId === change.askedBy) return 'asked';
+  if (change.bidders?.includes(actorId)) return 'bid';
   return null;
 }
 

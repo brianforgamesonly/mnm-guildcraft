@@ -26,6 +26,7 @@ import { DKP_COMMAND } from './definition.ts';
 import { POOL_GUILD } from './ledger.ts';
 import { refreshStandings } from './messages.ts';
 import { showRemoved, standbyPayouts } from './raid.ts';
+import { cancelAllStatement, showCancelled } from './auction.ts';
 import { loadDkp } from './state.ts';
 
 export const ADD_DKP_PREFIX = 'dkpadd:';
@@ -38,8 +39,11 @@ const PLAN = { kind: 'dkp', type: GUILD_TEXT, private: false } as const;
  * be allowed/denied"). Refused with Create GuildCraft channels' own text (CHANNELS_COPY.missing).
  */
 export const DKP_NEEDS = MANAGE_CHANNELS | MANAGE_ROLES | VIEW_CHANNEL | SEND_MESSAGES | SEND_MESSAGES_IN_THREADS | CREATE_PRIVATE_THREADS | channelBits('dkp');
-/** 4 reads, the category, the channel, the command, and the standings (the guild pool and each pool already used, up to 8). */
-export const DKP_CALL_CAP = 4 + 1 + 1 + 1 + 8;
+/**
+ * 4 reads, the category, the channel, the command, and the standings (the guild pool and each pool already used, up to 8).
+ * Order 29: Remove DKP also edits each open auction's card (up to 8; a ninth stays as it was, its buttons answering "off").
+ */
+export const DKP_CALL_CAP = 4 + 1 + 1 + 1 + 8 + 8;
 
 /** The setup reply's DKP row: Add DKP while it is off, Remove DKP while it is on. */
 export const dkpButtons = (enabled: boolean) => row([enabled ? button(REMOVE_DKP_PREFIX, DKP_COPY.removeLabel, STYLE_DANGER) : button(ADD_DKP_PREFIX, DKP_COPY.addLabel, STYLE_PRIMARY)]);
@@ -150,8 +154,10 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
   }
   const open = await c.db.prepare('SELECT id, pool, standby_once FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number; pool: string; standby_once: number }>();
   const at = now();
-  const [closed] = await c.db.batch([
+  const [closed, cancelled] = await c.db.batch<{ id: number; message_id: string | null }>([
     closeOpenRaid(c.db, g, c.userId, 'removed'),
+    // Order 29: every open or queued auction is cancelled ("DKP removed"; its card reveals the bids) before the timers go.
+    cancelAllStatement(c.db, g, at),
     // Order 29 (override 2): a raid closed by Remove DKP pays its Standby once, as any close does.
     ...(open ? standbyPayouts(c.db, g, open, state.settings, at) : []),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.
@@ -162,5 +168,6 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
   c.effects.dkpCancel = g;
   // DKP removed mid-raid: the raid is closed at once, and its card says so (its buttons answer "off" from now on).
   if (open && closed.meta.changes) await showRemoved(c.db, api, g, state.channel_id, open.id);
+  await showCancelled(c.db, api, c.guild, state.channel_id, cancelled.results.filter((r) => r.message_id).map((r) => r.id));
   return ephemeral([DKP_COPY.removed(state.channel_id), ...(closed.meta.changes ? [DKP_COPY.removedRaid] : [])].join('\n'));
 }

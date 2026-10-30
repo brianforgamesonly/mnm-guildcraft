@@ -9,6 +9,7 @@ import { SETTINGS } from './settings.ts';
 const SUBCOMMAND = 1;
 const STRING = 3;
 const INTEGER = 4;
+const BOOLEAN = 5;
 const USER = 6;
 const ROLE = 8;
 
@@ -57,6 +58,17 @@ export const DKP_COMMAND = {
     },
     {
       type: SUBCOMMAND,
+      name: 'auction',
+      description: 'Officers: auction an item (sealed bids; the bot closes it on time and sets the price)',
+      options: [
+        { type: STRING, name: 'item', description: 'The item: pick from the list', required: true, autocomplete: true, max_length: 100 },
+        { type: INTEGER, name: 'minimum', description: 'The minimum bid (default 1)', min_value: 1, max_value: 100000 },
+        { type: INTEGER, name: 'minutes', description: 'How long it runs (default: the auction length setting)', min_value: 1, max_value: 10080 },
+        { type: BOOLEAN, name: 'general', description: 'The general auction: guild points, open to every member (default: the open raid)' },
+      ],
+    },
+    {
+      type: SUBCOMMAND,
       name: 'adjust',
       description: "Officers: change a member's points, with a reason (posted publicly)",
       options: [
@@ -96,4 +108,4 @@ export const DKP_DEFINED = new Set(DKP_DEFINED_LIST.map((d) => d.cmd));
  * The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). Order 29: each
  * leaves this list in the pull request that builds it (auction in PR B, wishlist in PR C, shop in PR D).
  */
-export const DKP_COMING: string[] = ['/dkp auction', '/dkp wishlist', '/dkp shop'];
+export const DKP_COMING: string[] = ['/dkp wishlist', '/dkp shop'];

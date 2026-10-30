@@ -34,8 +34,9 @@ import { FULL_STANDINGS_PREFIX } from './dkp/messages.ts';
 import { ADD_DKP_PREFIX, addDkpButton, REMOVE_DKP_PREFIX, removeDkpButton } from './dkp/setup.ts';
 import { loadDkp } from './dkp/state.ts';
 import { raidComponent } from './dkp/raid.ts';
+import { AUCTION_OPENS_MODAL, auctionComponent, auctionImmediate } from './dkp/auction.ts';
 import type { Ctx, Effects } from './context.ts';
-import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type Option } from './discord.ts';
+import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type ModalComponent, type Option } from './discord.ts';
 import type { Env } from './env.ts';
 
 export type { Interaction, InteractionReply } from './discord.ts';
@@ -138,7 +139,7 @@ function withWelcome(reply: MessageReply): MessageReply {
  * The components that answer with a modal, at once (skillSelect below): a modal cannot follow a deferral. Order 18:
  * Report a missing recipe on /item's "No item called" reply; /me's Add character and Edit character (and its select).
  */
-export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL];
+export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL, ...AUCTION_OPENS_MODAL];
 
 export type Plan ={ defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
 
@@ -183,7 +184,7 @@ async function dkpCommand(i: Interaction, env: Env, ctx: WaitUntil, effects: Eff
 }
 
 /** Order 27: a DKP button or select (prefix dkp, after Add DKP and Remove DKP). */
-async function dkpComponent(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
+async function dkpComponent(c: Ctx, id: string, values: string[], components?: ModalComponent[]): Promise<MessageReply> {
   const d = await loadDkp(c.db, c.guild.id);
   if (!d.enabled) return ephemeral(DKP_COPY.off);
   if (id.startsWith(DKP_APPROVE_PREFIX)) return approveButton(c, id, d);
@@ -191,7 +192,18 @@ async function dkpComponent(c: Ctx, id: string, values: string[]): Promise<Messa
   // button's presser without the member role is refused privately (officers' controls re-check the runner role).
   if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
   if (id.startsWith(FULL_STANDINGS_PREFIX) || id.startsWith(FULL_PAGE_PREFIX)) return fullStandings(c, id);
+  // Order 29: auctions (their forms' submits too: a modal submit routes here by its dkp prefix).
+  const auction = await auctionComponent(c, id, components, d);
+  if (auction) return auction;
   return (await raidComponent(c, id, values, d)) ?? ephemeral(STALE_FORM);
+}
+
+/** Order 29: a DKP control that answers at once (a modal: Bid, Cancel auction, the drop select), as dkpComponent gates. */
+async function dkpImmediate(c: Ctx, id: string, values: string[]): Promise<InteractionReply> {
+  const d = await loadDkp(c.db, c.guild.id);
+  if (!d.enabled) return ephemeral(DKP_COPY.off);
+  if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
+  return (await auctionImmediate(c, id, values, d)) ?? ephemeral(STALE_FORM);
 }
 
 async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
@@ -234,7 +246,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 27: Add DKP and Remove DKP, admins only, as Create GuildCraft channels; then every other DKP control.
   if (id.startsWith(ADD_DKP_PREFIX)) return isAdmin(i.member!) ? addDkpButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(REMOVE_DKP_PREFIX)) return isAdmin(i.member!) ? removeDkpButton(c) : ephemeral(ADMIN_ONLY);
-  if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id, i.data?.values ?? []);
+  if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id, i.data?.values ?? [], i.data?.components);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);
@@ -315,7 +327,9 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   const guild = await loadGuild(env.DB, i.guild_id!);
   if (!guild) return ephemeral(STALE_FORM);
   const id = i.data?.custom_id ?? '';
-  const c = ctxFor(env, guild, i.member!, {});
+  const c = ctxFor(env, guild, i.member!, {}, i);
+  // Order 29: the DKP controls that open a form (dkpImmediate keeps DKP's own gates).
+  if (id.startsWith(DKP_PREFIX)) return dkpImmediate(c, id, i.data?.values ?? []);
   const passes = passesMemberGate(guild, i.member!);
   // Order 18: /me's forms (the officer path as in component()).
   if (passes || c.officer) {
