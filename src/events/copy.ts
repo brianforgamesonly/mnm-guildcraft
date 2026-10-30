@@ -1,4 +1,6 @@
 // Order 32: every member-facing Events string (listed for approval in docs/COPY.md, "Work order 32").
+import { AUCTION_COPY } from '../dkp/copy.ts';
+
 export const EVENT_COPY = {
   off: 'The Events module is off on this server.',
   notRunner: 'Only officers (or the role an admin named in `/event settings`) can do that.',
@@ -35,6 +37,8 @@ export const EVENT_COPY = {
   unknownClass: (typed: string) => `There is no class called **${typed}**. Pick one from the list.`,
   // statuses and the card
   signedUp: 'Signed up',
+  /** Order 33: the button is the action; the roster still reads Signed up. */
+  signUp: 'Sign up',
   tentative: 'Tentative',
   bench: 'Bench',
   waitlist: 'Waitlist',
@@ -46,7 +50,8 @@ export const EVENT_COPY = {
   noRole: 'No role',
   overLimit: '(over limit)',
   cancelledTag: 'Cancelled: ',
-  cancelledLine: (reason: string) => `**Cancelled.** ${reason}`,
+  /** Order 33: DKP's form, one string for both. It escapes the reason itself. */
+  cancelledLine: AUCTION_COPY.cancelledBy,
   closedLine: '**Closed.** This is the final roster.',
   duration: (hours: number) => `${hours} h`,
   posted: (who: string) => `Posted by ${who}`,

@@ -10,4 +10,5 @@ export interface DueResult {
   /** Discord's rate-limit headers on the card edit, for the pace of the next one (src/dkp/pace.ts). */
   headers?: { remaining?: string | null; resetAfter?: string | null; retryAfter?: number | null } | null;
 }
-export type DueHandler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null) => Promise<DueResult | null>;
+/** `stale`: the sweep's redraw of an out-of-date card (src/dkp/stale.ts). */
+export type DueHandler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null, stale?: boolean) => Promise<DueResult | null>;

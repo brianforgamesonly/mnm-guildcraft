@@ -15,7 +15,7 @@ import {
   ADMINISTRATOR, button, CREATE_PRIVATE_THREADS, ephemeral, GUILD_CATEGORY, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, row, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, STYLE_DANGER, STYLE_PRIMARY,
   VIEW_CHANNEL, type MessageReply,
 } from '../discord.ts';
-import { withLease } from '../dkp/setup.ts';
+import { keepChannel, withLease } from '../dkp/setup.ts';
 import { channelBits, PERMISSION_NAMES } from '../permissions.ts';
 import { EVENT_COPY } from './copy.ts';
 import { EVENT_COMMAND } from './definition.ts';
@@ -87,8 +87,7 @@ async function addEvents(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
   }
   const cmd = await api.call<{ id: string }>('POST', `/applications/${appId}/guilds/${g}/commands`, EVENT_COMMAND);
   if (!cmd.ok) {
-    // The channel is saved and the switch stays as it was, so a retry keeps it and a second press never turns the module off.
-    await saveStatement(c, { enabled: state.enabled ? 1 : 0, channel: channel.id, command: state.command_id }).run();
+    await keepChannel(c, 'event_guild', channel.id).run();
     return ephemeral([...lines, EVENT_COPY.commandFailed(cmd.status)].join('\n'));
   }
   await c.db.batch([saveStatement(c, { enabled: 1, channel: channel.id, command: cmd.body.id }), audit(c.db, g, c.userId, 'event.on', `channel:${channel.id}`, { enabled: state.enabled }, { enabled: true })]);

@@ -750,12 +750,12 @@ Approved by the owner on 2026-10-30. Events is an optional module for raids and 
 
 | Type | Statuses offered | Character and role | Role limits | Zone |
 |---|---|---|---|---|
-| Raid | Signed up · Tentative · Bench · Can't make it | Required | Yes | Required |
-| Group | Signed up · Tentative · Can't make it | Required | Yes | Optional |
+| Raid | Sign up · Tentative · Bench · Can't make it | Required | Yes | Required |
+| Group | Sign up · Tentative · Can't make it | Required | Yes | Optional |
 | Social | Going · Maybe · Can't make it | Not asked | No | No |
 | Other | Going · Maybe · Can't make it | Optional | No | Optional |
 
-"Going" is stored as signed up, and "Maybe" as tentative. The type can't change once anyone has signed up.
+The buttons name actions: the button is Sign up, and the roster says Signed up (order 33). "Going" is stored as signed up, and "Maybe" as tentative. The type can't change once anyone has signed up.
 
 **Roles** (fixed keys tank, healer, dps, support, with renameable labels).
 
@@ -775,7 +775,7 @@ Approved by the owner on 2026-10-30. Events is an optional module for raids and 
 - Raising one promotes from the waitlist.
 - A new start moves the lock.
 
-**`/event cancel`.** A reason is required and shown publicly. The card says Cancelled and loses its buttons.
+**`/event cancel`.** A reason is required and shown publicly. The card reads "Cancelled by @X (X). Reason: …", as DKP's does, and loses its buttons.
 
 **`/event list`.** Upcoming events, privately, with links, filtered by type. It can show one event's full roster privately. Sign-up history is shown only to officers, here.
 

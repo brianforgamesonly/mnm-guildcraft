@@ -204,8 +204,9 @@ describe('keep active (nightly)', () => {
     expect(run.results[0]).toMatchObject({ bumped: 16, edited: 16, left_dirty: 0, index: 'edited' });
     expect(run.d1_calls + run.discord_calls).toBeLessThanOrEqual(BOARD_CALL_CAP);
     logs.push(`worst case nightly: ${run.d1_calls} D1 + ${run.discord_calls} Discord`);
-    // Order 20: 38 = 37 + the heartbeat's start (its finish comes after the line, one past the cap checks).
-    expect(run.d1_calls + run.discord_calls).toBe(38);
+    // Order 20: 38 = 37 + the heartbeat's start (its finish comes after the line, one past the cap checks). Order 33: + the
+    // out-of-date cards read.
+    expect(run.d1_calls + run.discord_calls).toBe(39);
   });
 });
 

@@ -8,7 +8,7 @@ import { audit, now } from '../access.ts';
 import { ADD_PREFIX as ME_ADD_PREFIX } from '../commands/me.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, NO_PINGS, optString, row, STYLE_PRIMARY, truncate, updateMessage, type GuildMember, type MessageReply, type Option } from '../discord.ts';
-import { CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, loadEvent, STATUS_PREFIX, statusLabel, type EventRow } from './card.ts';
+import { actionLabel, CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, loadEvent, STATUS_PREFIX, statusLabel, type EventRow } from './card.ts';
 import { byName, eventApi, spentEvent, type EventRun } from './commands.ts';
 import { EVENT_COPY } from './copy.ts';
 import { signupRefusal, SPAM_WINDOW_MS, type SignupRefusal } from './eligible.ts';
@@ -164,7 +164,7 @@ function picker(e: EventRow, d: EventState, status: Choice, chars: Own[], charId
   };
   const ready = !required || (charId !== 0 && role !== null);
   return ephemeral(EVENT_COPY.pickHead(md(e.title)), {
-    components: [row([charSelect]), row([roleSelect]), row([button(`${CONFIRM_PREFIX}${e.id}:${status}:${charId}:${role ?? NONE}`, statusLabel(status, e.type), STYLE_PRIMARY, !ready)])],
+    components: [row([charSelect]), row([roleSelect]), row([button(`${CONFIRM_PREFIX}${e.id}:${status}:${charId}:${role ?? NONE}`, actionLabel(status, e.type), STYLE_PRIMARY, !ready)])],
   });
 }
 

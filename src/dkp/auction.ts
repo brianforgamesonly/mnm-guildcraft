@@ -41,7 +41,8 @@ import { AUCTION_COPY as A, QUEUE_COPY as Q, RAID_COPY } from './copy.ts';
 import { WISHERS_SQL } from './wishlist.ts';
 import { eligibility, refusalOf, type Refusal } from './eligible.ts';
 import { auctionSpendStatement, balanceSql, dkpRead, POOL_GUILD } from './ledger.ts';
-import { editIn, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import { editCard, editCardItem, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import { markStale } from './stale.ts';
 import type { Settings } from './settings.ts';
 import type { DkpState } from './state.ts';
 
@@ -226,9 +227,7 @@ async function cardFor(db: D1Database, guild: Guild, a: Auction, s?: Settings): 
 export async function renderAuction(db: D1Database, api: BotApi, guildId: string, channelId: string, id: number, s?: Settings) {
   const [a, guild] = await Promise.all([auctionById(db, guildId, id), loadGuild(db, guildId)]);
   if (!a?.message_id || !guild) return null;
-  await editIn(api, channelId, a.message_id, await cardFor(db, guild, a, s));
-  const last = api.log.at(-1);
-  return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
+  return editCardItem(db, api, guildId, `acard:${id}`, channelId, a.message_id, await cardFor(db, guild, a, s));
 }
 
 // ---------------------------------------------------------------- opening
@@ -614,7 +613,7 @@ export async function announceResult(db: D1Database, api: BotApi | null, guild: 
   const a = await auctionById(db, guild.id, id);
   if (!a || (a.status !== 'sold' && a.status !== 'unsold') || !api || !channelId) return null;
   if (budgetLeft(api.budget) < RESULT_NEEDS) return { again: nowMs };
-  if (a.message_id) await editIn(api, channelId, a.message_id, await cardFor(db, guild, a));
+  if (a.message_id) await editCard(db, api, guild.id, `acard:${id}`, channelId, a.message_id, await cardFor(db, guild, a));
   if (a.winner) await refreshStandings(db, api, guild.id, channelId, [a.pool]);
   const name = a.winner ? (await db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(guild.id, a.winner).first<{ display_name: string }>())?.display_name : null;
   await postIn(api, channelId, { content: A.result(a.item_name, a.winner ? memberTag(a.winner, name ?? a.winner) : null, a.price, link(guild.id, channelId, a.message_id)) });
@@ -653,7 +652,7 @@ async function cancelAuction(c: Ctx, d: DkpState, id: number, reason: string): P
     await audit(c.db, c.guild.id, c.userId, 'dkp.auction.cancel', `auction:${id}`, { status: 'open' }, { status: 'cancelled' }).run();
     const a = (await auctionById(c.db, c.guild.id, id))!;
     if (api && d.channel_id) {
-      carded = (await editIn(api, d.channel_id, a.message_id!, await cardFor(c.db, c.guild, a))) !== 'failed';
+      carded = (await editCard(c.db, api, c.guild.id, `acard:${id}`, d.channel_id, a.message_id!, await cardFor(c.db, c.guild, a))) !== 'failed';
       await postIn(api, d.channel_id, { content: A.cancelled(a.item_name, by(c), reason, link(c.guild.id, d.channel_id, a.message_id)) });
     }
     // The item queue: the raid's next drop opens now, so its card follows the cancel notice.
@@ -738,7 +737,7 @@ async function recordSubmitted(c: Ctx, d: DkpState, id: number, components: Moda
   const api = apiFor(c);
   try {
     if (api && d.channel_id) {
-      if (a.message_id) await editIn(api, d.channel_id, a.message_id, await cardFor(c.db, c.guild, a));
+      if (a.message_id) await editCard(c.db, api, c.guild.id, `acard:${id}`, d.channel_id, a.message_id, await cardFor(c.db, c.guild, a));
       await postIn(api, d.channel_id, { content: Q.disposalLine(a.item_name, text, by(c)) });
     }
   } finally {
@@ -803,7 +802,10 @@ export async function showCancelled(db: D1Database, api: BotApi, guild: Guild, c
   if (!channelId) return;
   for (const id of ids) {
     const a = await auctionById(db, guild.id, id);
-    if (a?.message_id && budgetLeft(api.budget) > 1) await editIn(api, channelId, a.message_id, await cardFor(db, guild, a));
+    if (!a?.message_id) continue;
+    // Order 33: a card past the budget still says Bid, so the sweep is told to redraw it.
+    if (budgetLeft(api.budget) > 1) await editCard(db, api, guild.id, `acard:${id}`, channelId, a.message_id, await cardFor(db, guild, a));
+    else await markStale(db, guild.id, `acard:${id}`, { status: 0 }).run();
   }
 }
 

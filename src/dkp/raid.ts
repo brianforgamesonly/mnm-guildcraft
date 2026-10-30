@@ -23,7 +23,7 @@ import { askApproval, type DkpRun } from './commands.ts';
 import {
   historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, rosterAddStatement, rosterRemoveStatement, standbyReverseStatement, standbyStatement, type LedgerRow,
 } from './ledger.ts';
-import { editIn, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import { editCard, editCardItem, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
 import type { Settings } from './settings.ts';
 import type { DkpState } from './state.ts';
 
@@ -221,10 +221,7 @@ export function cardMessage(d: CardData, guildId: string): Message {
 export async function renderCard(db: D1Database, api: BotApi, guildId: string, channelId: string, raidId: number): Promise<{ remaining?: string | null; resetAfter?: string | null; retryAfter?: number | null } | null> {
   const raid = await raidById(db, guildId, raidId);
   if (!raid?.message_id) return null;
-  const m = cardMessage(await cardData(db, raid), guildId);
-  await editIn(api, channelId, raid.message_id, m);
-  const last = api.log.at(-1);
-  return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
+  return editCardItem(db, api, guildId, `render:${raidId}`, channelId, raid.message_id, cardMessage(await cardData(db, raid), guildId));
 }
 
 // ---------------------------------------------------------------- /dkp raid, /dkp kill, /dkp correct, /dkp history
@@ -608,7 +605,7 @@ export async function closeRaid(db: D1Database, api: BotApi | null, guildId: str
   if (!closed) return false;
   if (api && channelId) {
     const data = await cardData(db, closed);
-    if (closed.message_id) await editIn(api, channelId, closed.message_id, cardMessage(data, guildId));
+    if (closed.message_id) await editCard(db, api, guildId, `render:${closed.id}`, channelId, closed.message_id, cardMessage(data, guildId));
     // Who was there: every roster; the points: what the ledger paid in the raid's pool (kills, and the standby payouts).
     const earners = new Set([...data.earned.values()].flat().map((e) => e.member_id));
     const paid = await db
@@ -628,5 +625,5 @@ export async function closeRaid(db: D1Database, api: BotApi | null, guildId: str
 /** Remove DKP mid-raid: the card shows the raid closed (src/dkp/setup.ts closed it in D1). */
 export async function showRemoved(db: D1Database, api: BotApi, guildId: string, channelId: string | null, raidId: number) {
   const raid = await raidById(db, guildId, raidId);
-  if (raid?.message_id && channelId) await editIn(api, channelId, raid.message_id, cardMessage(await cardData(db, raid), guildId));
+  if (raid?.message_id && channelId) await editCard(db, api, guildId, `render:${raidId}`, channelId, raid.message_id, cardMessage(await cardData(db, raid), guildId));
 }

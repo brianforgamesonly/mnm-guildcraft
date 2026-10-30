@@ -1208,3 +1208,12 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/events/copy.ts (/event roster) | Done. The change is posted in the events channel. · Done, but I could not post the change in the events channel. · GuildCraft has that member marked as gone from this server. They run `/me` once to come back, then you can add them. · That member doesn't have the \<role> role. · That member has no such character on `/me`. This event needs one. · Pick a `role:` for that member: this event needs one. · That member isn't on this event's roster. · That member is already on the roster. Use `action: Move`. · This event doesn't use the Bench. | DRAFT |
 | src/events/definition.ts | `roster` Officers: add, move or remove a member, with a public reason; officers may exceed a limit; and its options | DRAFT |
 | src/commands/help.ts | (help page) On a card, press a status to sign up. **Change character** and **Change role** keep your place. After the lock you can only press **Can't make it**. | DRAFT |
+
+## Work order 33, PR A: wording from the owner's check (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/events/copy.ts:41 | (button, Raid and Group, card and sign-up form) Sign up. Before: Signed up, which the roster keeps | DRAFT |
+| src/events/copy.ts:54 | (cancelled card) **Cancelled** by \<member> (\<name>). Reason: \<reason>. One string with DKP's (src/dkp/copy.ts). Before: **Cancelled.** \<reason> | DRAFT |
+| src/commands/autocomplete.ts:146 | (`/event edit`, `cancel`, `roster` and `list`, the event list) \<title> · Sat Oct 31, 8:00 PM EDT, in the server time zone. Before: \<title> · 2026-11-01 00:00 UTC | DRAFT |
+| src/commands/autocomplete.ts:122 | (`/dkp correct kill`, the kill list) \<creature> · Sat Oct 31, 8:00 PM EDT · #\<id>, in the server time zone. Before: \<creature> · 00:00:00 UTC · #\<id> | DRAFT |

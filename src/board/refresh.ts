@@ -34,6 +34,7 @@ import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, type BoardMessage, type LineMode } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { guardDecay, isDecayGuardRun, rotate } from '../dkp/guard.ts';
+import { STALE_GUILDS, sweepStale } from '../dkp/stale.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
 import { sweepFinished, sweepStarted } from '../heartbeat.ts';
@@ -777,6 +778,15 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       console.error('dkp decay guard failed', e instanceof Error ? e.message : String(e));
     }
     before = { d1: counted.calls.length, discord: budget.discord, log: api?.log.length ?? 0 };
+  }
+  // Order 33: out-of-date cards. One D1 read; one Durable Object request per guild with a flag, each counted as a call, and
+  // no Discord call here: each guild's object redraws its own cards, on its own invocations.
+  try {
+    const r = await sweepStale({ ...env, DB: counted.db }, rotate(Math.min(STALE_GUILDS, budgetLeft(budget) - 2), controller.scheduledTime));
+    budget.discord += r.asked;
+    if (r.cards) console.log(JSON.stringify({ gc: 'stale-cards', ...r }));
+  } catch (e) {
+    console.error('stale card sweep failed', e instanceof Error ? e.message : String(e));
   }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string; board: BoardName }>();

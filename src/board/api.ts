@@ -17,7 +17,7 @@ const MAX_WAIT_MS = 5_000;
 
 export type ApiResult<T> =
   | { ok: true; status: number; body: T }
-  | { ok: false; status: number; code?: number; error: string; skipped?: 'budget' | 'deadline' | 'rate' };
+  | { ok: false; status: number; code?: number; error: string; skipped?: 'budget' | 'deadline' | 'rate'; retryMs?: number };
 
 /** One call, as the run's log line records it (no ids: routes are templated). */
 export interface ApiLogEntry {
@@ -112,7 +112,8 @@ export function botApi(token: string, budget: BoardBudget, fetcher: typeof fetch
       if (budgetLeft(budget) < 1) return { ok: false, status: 0, error: 'call budget spent', skipped: 'budget' };
       if (Date.now() >= budget.deadline) return { ok: false, status: 0, error: 'deadline passed', skipped: 'deadline' };
       const w = await waitFor(route);
-      if (w === 'rate' || w === 'deadline') return { ok: false, status: 0, error: `rate limited on ${logRoute(route)}`, skipped: w };
+      // Order 33: how long Discord asked for, so a card's next try waits for it.
+      if (w === 'rate' || w === 'deadline') return { ok: false, status: 0, error: `rate limited on ${logRoute(route)}`, skipped: w, retryMs: (blockedUntil.get(route) ?? 0) - Date.now() };
       waited += w;
       const { res, error } = await once(method, path, body, route);
       if (!res) {
@@ -139,7 +140,8 @@ export function botApi(token: string, budget: BoardBudget, fetcher: typeof fetch
         continue;
       }
       if (res.ok) return { ok: true, status: res.status, body: json as T };
-      return { ok: false, status: res.status, code: json?.code, error: (json?.message ?? text).slice(0, 300) };
+      const retry = res.status === 429 ? Number(json?.retry_after ?? res.headers.get('Retry-After')) : NaN;
+      return { ok: false, status: res.status, code: json?.code, error: (json?.message ?? text).slice(0, 300), ...(Number.isFinite(retry) ? { retryMs: retry * 1000 } : {}) };
     }
     return { ok: false, status: 429, error: `rate limited twice on ${logRoute(route)}`, skipped: 'rate' };
   }
@@ -150,5 +152,6 @@ export function botApi(token: string, budget: BoardBudget, fetcher: typeof fetch
 // Discord JSON error codes the board acts on (docs.discord.com/developers/topics/opcodes-and-status-codes).
 export const UNKNOWN_CHANNEL = 10003;
 export const UNKNOWN_MESSAGE = 10008;
+export const MISSING_ACCESS = 50001;
 /** "Thread is archived": an edit reached an archived thread (its state changed since the active-threads read). */
 export const THREAD_ARCHIVED = 50083;
