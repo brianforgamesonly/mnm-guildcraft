@@ -8,7 +8,7 @@
 //   Named killed / /dkp kill / Pay attendance: guild, state, raid, respawn (or flat) check, named value, earners, the kill,
 //     one pay batch: 8 D1; 0
 //     Discord (card edit: a timer item).
-//   Check again: guild, state, raid, latest kill, one write: 5 D1; 0 Discord. Who's here / Who earned: 3-4 D1; 0 Discord.
+//   Kill roll call: guild, state, raid, latest kill, one write: 5 D1; 0 Discord. Who's here / Who earned: 3-4 D1; 0 Discord.
 //   Close raid: guild, state, close, card render (1 batch), summary, standings (2 + 1 per pool): about 8 D1; 3 Discord.
 //   The card render (timer): 1 batch of 5 statements, 1 Discord edit.
 import { audit, dkpSelfConflict, isDkpRunner, now, touchMember } from '../access.ts';
@@ -112,7 +112,7 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
       )
       .bind(raid.guild_id, raid.id),
     db.prepare('SELECT id, name, points, at, check_due, check_closed_at FROM dkp_kill WHERE raid_id = ? ORDER BY id').bind(raid.id),
-    // Order 29: who was at each kill, from its roster (corrections and Check again keep it current), never the ledger.
+    // Order 29: who was at each kill, from its roster (corrections and Kill roll call keep it current), never the ledger.
     db
       .prepare(
         `SELECT km.kill_id, km.member_id, coalesce(m.display_name, km.member_id) AS name, km.state FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id
@@ -145,7 +145,7 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
 
 /**
  * One kill's line: time, named, points, how many earned (order 29: and how many were on Standby, who earn once at close),
- * changes against the kill before it (who was at it), Check again's state.
+ * changes against the kill before it (who was at it), Kill roll call's state.
  */
 export function killLine(k: CardData['kills'][number], at: AtKill[], before: AtKill[] | null, raid: Pick<Raid, 'standby_once'> = { standby_once: 0 }): string {
   const ids = new Set(at.map((e) => e.member_id));
@@ -521,7 +521,7 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
   return null;
 }
 
-/** Present, Standby or Leaving: the member's state from now on (and, inside an open Check again, keeping a kill). */
+/** Present, Standby or Leaving: the member's state from now on (and, inside an open Kill roll call, keeping a kill). */
 async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'): Promise<MessageReply> {
   // A raid button refreshes the member's row as a command does (a frozen member thaws).
   await touchMember(c.db, c.guild.id, c.member);
@@ -533,7 +533,7 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
          ON CONFLICT (raid_id, member_id) DO UPDATE SET state = ?3, since = ?4, set_by = ?2 WHERE state <> ?3`,
       )
       .bind(raid.id, c.userId, state, at),
-    // Inside a kill's Check again window, Present (or Standby) keeps the kill for a member it credited.
+    // Inside a kill's Kill roll call window, Present (or Standby) keeps the kill for a member it credited.
     c.db
       .prepare(
         `INSERT INTO dkp_recheck (kill_id, member_id, at) SELECT id, ?2, ?3 FROM dkp_kill WHERE raid_id = ?1 AND ?4 <> 'absent'

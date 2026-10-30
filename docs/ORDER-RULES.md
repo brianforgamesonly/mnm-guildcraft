@@ -390,3 +390,16 @@ Order 30 clears four small items: forum post guidelines, a building line on boar
 - The DKP switch is called the "DKP module" on its buttons, its confirmations and in help. No button, reply or help text uses "Add DKP" or "Remove DKP" unless the word "module" follows, because the bare phrase reads like awarding points.
 - A guild with DKP on always has exactly one decay item on its Durable Object. One idempotent function ensures it (src/dkp/timers.ts `ensureDecay`), and every path that can find it missing calls that function: Add DKP module, the cron's daily slot (09:00 UTC, src/dkp/guard.ts) and, because a runner can't reach a Durable Object, the post-deploy step through the Worker's signed route `POST /ops/decay-guard` (`register-commands.yml`, or `decay-guard.yml` by dispatch). The route is signed with an HMAC under the copy's bot token, needs no new credential, and answers counts only.
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 31
+
+Order 31 moves cancelling an auction to a command and renames the after-kill re-check (the owner, 2026-10-30, 07:52 and 08:08).
+
+- Override of the PRD's Order 29 Cancel rule, as stored at 155155d: "Cancel: an officer can cancel an open auction unless they have bid in it. The reason is required; the cancellation is public and reveals the bids. There's no spend."
+  - Who may cancel, the self-conflict refusal, the required public reason, revealing the bids and no spend do not change. Only the control changes: cancelling moves from a button on the card to `/dkp cancel`.
+- Auction cards show members only controls they can use. On an auction card, every button any viewer sees is one a member can press; an officer-only auction action is a command. Exception: Post to general auction on a closed, unsold card stays. Raid cards and approval cards are officer workflow cards, and they keep their buttons.
+  - Open question for the owner (order 31's FINAL): Record what was done, on a closed, unsold general auction card, is officer-only and is not in the exception. It is unchanged until the owner decides.
+- "Kill roll call" is the name of the after-kill re-check, on the card, in replies, in the setting's label and in help. An earlier rule's "Check again" means it. The custom_id and the setting key `check_seconds` stay.
+- Ledger rows already written keep their stored reason text, because history is never rewritten (order 27). New rows use the new reason.
+- `/dkp cancel` and an old card's form share one cancel function (src/dkp/auction.ts `cancelAuction`). `dkpac:` and `dkpacm:` stay handled (order 18).
+- Failed runs: every one is listed in the FINAL (order 12).

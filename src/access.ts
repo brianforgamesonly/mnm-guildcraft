@@ -92,7 +92,7 @@ export const isDkpRunner = (guild: Guild | null, runnerRole: string | null, m: G
 
 /**
  * Order 27: nobody changes, or approves a change to, their own DKP; nor approves a change they asked for. The one decider,
- * called by every route that changes points (adjust, approve, corrections). Bot-made rows (payouts, Check again) never
+ * called by every route that changes points (adjust, approve, corrections). Bot-made rows (payouts, Kill roll call) never
  * reach it. Returns the refusal, or null. Order 29: nor cancels an auction they have bid in (`bidders`), nor buys from a
  * shop listing they posted (`postedBy`).
  */

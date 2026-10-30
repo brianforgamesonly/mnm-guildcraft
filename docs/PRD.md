@@ -649,7 +649,7 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
   - Everyone Present at that moment earns the named's raid points and the guild points. Order 29: everyone Standby at that moment goes on the kill's roster and earns the standby value once, at close (below); a raid opened before order 29 keeps the old rule (Standby earned each kill).
   - The kill line on the card shows the named, the points, how many earned, and the changes against the previous kill (for example +Kestrel −Pip).
   - Who earned answers privately with the full list.
-- *Check again* (officer, per kill).
+- *Kill roll call* (officer, per kill).
   - For the window (default 300 seconds), members credited on that kill tap Present again to keep it.
   - Those who don't are removed from that kill when the window closes. They are then absent for later kills until they tap Present.
   - A member who first taps Present inside the window doesn't gain that kill; an officer correction can add them.
@@ -693,7 +693,7 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 | Decay after (order 29) | 180 idle days |
 | Decay per week (order 29) | 10% |
 | Wishlist size (order 29) | 30 items |
-| Check-again window | 300 seconds |
+| Kill roll call window | 300 seconds |
 | Second officer needed | over 20 points |
 | Approval lapses after | 24 hours |
 | Raid auto-closes after | 8 hours |
@@ -710,13 +710,13 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 
 - *Standby* (raids opened from order 29 on). A member who is Standby at one or more kills (or at a flat raid's Pay attendance) earns the standby value once (its own setting, default 30), paid when the raid closes, with the guild points for that payout. The raid closes this way however it closes: an officer, auto-close, or Remove DKP module. Mixed attendance: the per-kill points for the Present kills, plus the standby value once. Removing a member's last Standby kill before close means no standby pay; after close, a correction row reverses the standby row. The pool cap applies.
 - *Cap.* The default is 200. A server's admin can set it to anything in `/dkp settings`; servers that never changed it get 200 at once.
-- *Who was at a kill* is the kill's roster (who was Present or Standby), written with the kill and updated by Check again and corrections.
+- *Who was at a kill* is the kill's roster (who was Present or Standby), written with the kill and updated by Kill roll call and corrections.
 - *Raid auctions.*
   - Starting one: from the raid card, **Auction a drop** offers the latest kill's known loot (the named's loot names matched to items, at most 25), or `/dkp auction item:` picks any item. A raid auction needs an open raid; with none, the reply points to the general auction. The officer can set a minimum bid (default 1) and a duration (default 3 minutes). The card shows the item's stats (the `/item` card).
   - Who may bid: a member Present or Standby at one or more kills of that raid (points belong to the member, so the item can go to any of their characters), under the win limits (2 per raid, 4 in any 7 days; general-auction wins count only toward the 7 days; shop purchases toward neither), past the new-member wait (3 kills, Present or Standby, in that raid zone's pool, ever), and not frozen. One function decides this.
   - Bidding: **Bid** opens a form for an amount: a whole number, at least the minimum, at most the member's balance in that raid's pool. A bid counts only if it arrives before the close time by the server's clock. While the auction is open a member can raise, lower or withdraw their bid. Nobody sees any bid, officers included; the card shows only the number of bidders.
   - Closing: on the timer only, with no extension. Every bid is checked again against the bidder's balance; one that can no longer be paid is dropped, and the result says so. The price is the second-highest valid bid + 1, never more than the winner's own bid; a lone bidder pays the minimum. A tie goes to the higher 30-day attendance in that pool, then to the earlier bid. The winner's points come off as a spend row. The result is posted with every bid revealed (members shown, nobody pinged) and the price.
-  - Cancel: an officer can cancel an open auction unless they have bid in it. The reason is required; the cancellation is public and reveals the bids. There's no spend.
+  - Cancel (order 31): an officer can cancel an open auction with `/dkp cancel auction: reason:`, unless they have bid in it. The reason is required; the cancellation is public and reveals the bids. There's no spend. The card has no Cancel button, because Discord can't hide a button from some viewers.
   - An auction open when its raid closes runs to its timer. Remove DKP module cancels every open auction ("DKP removed", bids revealed) before the timers are cleared. An auction with no bids offers **Post to general auction**.
 - *The general auction.* An officer posts any item, or one that went unsold, for guild points. Every active member may bid: no presence rule and no new-member wait, but the win limits count. The same sealed bids, price rule and timer, 24 hours by default. If it expires unsold, the officer records what was done with the item (free text, public), and the record is kept.
 - *The item queue.* From the raid card, an officer can queue several drops: each auction opens as the one before it closes. The raid card keeps a Won tonight list (item, winner, price).
@@ -729,6 +729,6 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 **Departures from this section, named (order 27).**
 
 - Corrections are made with `/dkp correct member: action: reason: kill:`, on the latest raid (the open one, or the last closed). Leaving out kill: corrects the whole raid. The specification names no command for corrections.
-- The card's Who earned and Check again act on the raid's latest kill. Order 29: so does **Auction a drop** (one button on the card, not one per kill line: a card holds at most 5 rows of buttons).
+- The card's Who earned and Kill roll call act on the raid's latest kill. Order 29: so does **Auction a drop** (one button on the card, not one per kill line: a card holds at most 5 rows of buttons).
 - Order 29: the close re-checks who may bid (the one function), not only the balance: a member whose win limit another auction filled meanwhile is dropped, and the result says so. `/dkp auction item: general:` is how an officer posts any item to the general auction.
 - A raid zone's standings message is posted when that pool is first used, so it sits below GC-DKP's earlier messages rather than at the top. Only the guild pool's message, posted by Add DKP module, is at the top. The bot cannot pin the others there: Pin Message requires PIN_MESSAGES, which the install link does not ask for.

@@ -257,7 +257,7 @@ describe('raid nights (ITEM 4)', () => {
     expect(await one('SELECT name FROM dkp_kill')).toEqual({ name: 'Sir Unlisted' });
   });
 
-  it('Check again: who taps Present keeps the kill; who does not loses it and is absent after; a first-time Present inside the window gains nothing; the card shows closed (due)', async () => {
+  it('Kill roll call: who taps Present keeps the kill; who does not loses it and is absent after; a first-time Present inside the window gains nothing; the card shows closed (due)', async () => {
     await open();
     const { id } = await raid();
     await pressAs(kestrel, `${PRESENT_PREFIX}${id}`);
@@ -523,7 +523,7 @@ describe('order 29, ITEM 1: Standby earns the standby value once, at close; the 
     expect([await balance(pip, 'the ruins'), await balance(pip, POOL_GUILD)]).toEqual([30, 2]);
   });
 
-  it('Check again reads the roster: a member at a kill that paid 0 points, who does not tap, comes off it (not "sum > 0")', async () => {
+  it('Kill roll call reads the roster: a member at a kill that paid 0 points, who does not tap, comes off it (not "sum > 0")', async () => {
     await dkp(officer, 'named-value', { zone: 'The Ruins', named: 'Bob', points: 0 });
     await open();
     const { id } = await raid();
@@ -549,6 +549,24 @@ describe('what members see (ITEM 5)', () => {
     const next = await pressAs(pip, h.data.components![0].components[1].custom_id);
     expect(next.type).toBe(7);
     expect(next.data.embeds![0].description!.split('\n').filter((l) => l.startsWith('<t:')).length).toBe(2);
+  });
+
+  it('order 31: Kill roll call says minutes when the window is whole minutes; new rows use the new reason; /dkp history shows an old row as stored', async () => {
+    expect(RAID_COPY.checkStarted('Kestrel the Old', 300)).toBe('Kill roll call on **Kestrel the Old**: members it paid have 5 minutes to tap **Present**.');
+    expect(RAID_COPY.checkStarted('X', 60)).toContain('have 1 minute to tap');
+    expect(RAID_COPY.checkStarted('X', 90)).toContain('have 90 seconds to tap');
+    await open();
+    const { id } = await raid();
+    await pressAs(kestrel, `${PRESENT_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Kestrel the Old' });
+    await pressAs(officer, `${CHECK_PREFIX}${id}`);
+    const kill = await one<{ id: number; check_due: string }>('SELECT id, check_due FROM dkp_kill');
+    const due = Date.parse(kill.check_due);
+    await HANDLERS.check(withToken, GUILD, String(kill.id), due, due + 3000, null);
+    expect(await count('dkp_ledger', 'reason = ?', RAID_COPY.checkReason)).toBe(2);
+    const old = 'Did not tap Present for Check again';
+    await env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, reason, actor, at) VALUES (?, ?, ?, 0, 0, 0, 'adjust', ?, 'bot', ?)").bind(GUILD, kestrel.user.id, POOL_GUILD, old, new Date().toISOString()).run();
+    expect((await dkp(pip, 'history', { member: kestrel.user.id })).data.embeds![0].description).toContain(old);
   });
 
   it('/help shows the DKP page only where DKP is on', async () => {

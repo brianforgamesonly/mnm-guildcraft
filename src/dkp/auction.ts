@@ -16,8 +16,10 @@
 //     about 12 D1; 1 Discord (the card).
 //   Bid (press): guild, state, auction, eligibility, balance, own bid: 6 D1; 0 (a modal).
 //   Bid (submitted): guild, state, auction, eligibility, balance, upsert: 6 D1; 0 (the card's bidder count: 1 timer item).
-//   Cancel auction (press): guild, state, auction, bidders: 4 D1; 0. Its form: guild, state, auction, bidders, update,
-//     card (bids, item card 4): about 11 D1; 2 Discord (the card, the notice).
+//   /dkp cancel: 14 D1, 2 Discord (the card, the notice), as the test's timing line counts it; 25 D1, 3 Discord when a
+//     queued drop opens. A raid auction's timer items add next: (3 D1) and render: (a card read; 1 Discord). An old card's
+//     Cancel auction (press): guild, state, auction, bidders: 4 D1; 0. Its form: about 13 D1; 2 Discord.
+//     The auction: autocomplete: 1 D1 per keystroke; 0.
 //   Post to general auction: guild, state, auction, insert, open: about 11 D1; 1 Discord.
 //   The close (auction:, timer): guild, state, auction, bids with their fingerprint (1 batch), balances, eligibility (tie: 1
 //     per tied bidder), the closing batch, the auction again: about 8 D1; 0 Discord; it starts only with CLOSE_NEEDS calls
@@ -30,7 +32,7 @@ import { itemCard } from '../commands/item.ts';
 import { modalValues } from '../commands/reports.ts';
 import type { Ctx } from '../context.ts';
 import {
-  button, EMBED_LIMITS, embedChars, ephemeral, memberTag, NO_PINGS, optBool, optInt, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, type Embed, type InteractionReply, type MessageReply,
+  button, EMBED_LIMITS, embedChars, ephemeral, memberTag, NO_PINGS, optBool, optInt, optString, row, STYLE_PRIMARY, STYLE_SECONDARY, truncate, type Embed, type InteractionReply, type MessageReply,
   type ModalComponent,
 } from '../discord.ts';
 import { MOB_ZONES_SOURCE, zoneNamesSql } from '../zone/names.ts';
@@ -187,7 +189,7 @@ export function auctionMessage(
   let embed = build(shown);
   while (n > 1 && embedChars([...(d.item ? [d.item] : []), embed]) > EMBED_LIMITS.total - 200) embed = build(shown.slice(0, --n));
   const components: unknown[] = open
-    ? [row([button(`${BID_PREFIX}${a.id}`, A.bid, STYLE_PRIMARY), button(`${CANCEL_PREFIX}${a.id}`, A.cancel, STYLE_DANGER)])]
+    ? [row([button(`${BID_PREFIX}${a.id}`, A.bid, STYLE_PRIMARY)])]
     : a.status === 'unsold' && a.kind === 'raid'
       ? [row([button(`${POST_GENERAL_PREFIX}${a.id}`, A.postGeneral, STYLE_SECONDARY)])]
       : a.status === 'unsold' && a.kind === 'general' && !a.disposal
@@ -623,43 +625,94 @@ export async function announceResult(db: D1Database, api: BotApi | null, guild: 
 
 const biddersOf = async (db: D1Database, id: number) => (await db.prepare('SELECT member_id FROM dkp_bid WHERE auction_id = ?').bind(id).all<{ member_id: string }>()).results.map((r) => r.member_id);
 
-/** Cancel auction: officers, never one who has bid in it (dkpSelfConflict); the reason, in a form. */
+/** The longest reason: the old form's, and /dkp cancel's max_length (src/dkp/definition.ts holds literals; a test ties them). */
+export const CANCEL_REASON_MAX = 200;
+
+/**
+ * The one cancel (order 31): /dkp cancel and an old card's form both end here. The update holds only while the auction is
+ * open and before its close time, so it can't race the timer's close (review of PR B: a late alarm leaves the close to the
+ * timer). The auction:<id> item stays set and does nothing when it fires (closeAuction reads the status).
+ */
+async function cancelAuction(c: Ctx, d: DkpState, id: number, reason: string): Promise<MessageReply> {
+  // The conflict from this press: a bid placed after an old form opened counts.
+  if (dkpSelfConflict(c.userId, { bidders: await biddersOf(c.db, id) })) return ephemeral(A.ownBid);
+  const at = now();
+  // A card must exist: openAuction commits 'open' before it posts, and a cancel in that gap would leave a Bid card behind.
+  const done = await c.db
+    .prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = ?2, closed_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND status = 'open' AND closes_at > ?3 AND message_id IS NOT NULL RETURNING raid_id")
+    .bind(reason, c.userId, at, id, c.guild.id)
+    .first<{ raid_id: number | null }>();
+  if (!done) return ephemeral(A.closed);
+  // From here it is cancelled, whatever fails below, and effects run even after a throw (src/index.ts): the timer object
+  // opens the raid's next drop (next: does nothing if this run already did) and redraws the raid card's queue line.
+  if (done.raid_id) schedule(c, [{ key: `next:${done.raid_id}`, due: Date.now() + 1 }, { key: `render:${done.raid_id}`, due: Date.now() }]);
+  const api = apiFor(c);
+  let carded = false;
+  try {
+    // The audit row only for a cancel made (as review of PR C had it for a record).
+    await audit(c.db, c.guild.id, c.userId, 'dkp.auction.cancel', `auction:${id}`, { status: 'open' }, { status: 'cancelled' }).run();
+    const a = (await auctionById(c.db, c.guild.id, id))!;
+    if (api && d.channel_id) {
+      carded = (await editIn(api, d.channel_id, a.message_id!, await cardFor(c.db, c.guild, a))) !== 'failed';
+      await postIn(api, d.channel_id, { content: A.cancelled(a.item_name, by(c), reason, link(c.guild.id, d.channel_id, a.message_id)) });
+    }
+    // The item queue: the raid's next drop opens now, so its card follows the cancel notice.
+    schedule(c, await openNext(c.db, api, c.guild, d.channel_id, a.raid_id, Date.now(), d.settings, 1));
+  } finally {
+    // A card that still shows Bid is edited by the timer object (acard:).
+    if (!carded) schedule(c, [{ key: `acard:${id}`, due: Date.now() }]);
+    spent(c, api);
+  }
+  return ephemeral(A.cancelledReply);
+}
+
+/** /dkp cancel auction: reason: (officers, DKP_ROUTES). The value is an auction id from the list; anything else is refused. */
+export const cancelCommand: DkpRun = async (c, opts, d) => {
+  const typed = (optString(opts, 'auction') ?? '').trim();
+  const a = /^\d{1,15}$/.test(typed) ? await auctionById(c.db, c.guild.id, Number(typed)) : null;
+  if (!a) return ephemeral(A.pickAuction);
+  if (a.status !== 'open') return ephemeral(A.notOpen);
+  const reason = (optString(opts, 'reason') ?? '').trim();
+  if (!reason) return ephemeral(RAID_COPY.reason);
+  return cancelAuction(c, d, a.id, reason);
+};
+
+/** Choices for /dkp cancel auction: this server's open auctions, newest first, matched on item or place. One statement. */
+const OPEN_AUCTIONS_SQL = `SELECT a.id, i.name AS item, coalesce(z.name, r.pool) AS zone, a.closes_at FROM dkp_auction a
+  JOIN item i ON i.id = a.item_id LEFT JOIN dkp_raid r ON r.id = a.raid_id LEFT JOIN zone z ON z.key = r.pool
+  WHERE a.guild_id = ?1 AND a.status = 'open' AND a.closes_at > ?2 AND a.message_id IS NOT NULL
+    AND (instr(lower(i.name), lower(?3)) > 0 OR instr(lower(coalesce(z.name, r.pool, ?4)), lower(?3)) > 0)
+  ORDER BY a.opened_at DESC, a.id DESC LIMIT 25`;
+
+/** "2 h 14 m": plain text, because Discord's <t:…> tags don't render in choices. Rounded up, so it never reads 0. */
+export function timeLeft(ms: number): string {
+  const minutes = Math.max(1, Math.ceil(ms / 60_000));
+  const [d, h, m] = [Math.floor(minutes / 1440), Math.floor(minutes / 60) % 24, minutes % 60];
+  return d ? `${d} d ${h} h` : h ? `${h} h ${m} m` : `${m} m`;
+}
+
+export async function openAuctionChoices(db: D1Database, guildId: string, typed: string, nowMs: number): Promise<{ name: string; value: string }[]> {
+  const { results } = await db
+    .prepare(OPEN_AUCTIONS_SQL)
+    .bind(guildId, new Date(nowMs).toISOString(), typed.trim(), A.generalChoice)
+    .all<{ id: number; item: string; zone: string | null; closes_at: string }>();
+  return results.map((r) => ({ name: A.choice(r.item, r.zone ?? A.generalChoice, timeLeft(Date.parse(r.closes_at) - nowMs)), value: String(r.id) }));
+}
+
+/** An old card's Cancel auction (order 31: new cards have none; order 18: it stays handled): the reason, in a form. */
 async function cancelButton(c: Ctx, d: DkpState, id: number): Promise<InteractionReply> {
   if (!runner(c, d)) return ephemeral(A.notRunner);
   const a = await auctionById(c.db, c.guild.id, id);
   if (!a || a.status !== 'open') return ephemeral(A.closed);
   if (dkpSelfConflict(c.userId, { bidders: await biddersOf(c.db, id) })) return ephemeral(A.ownBid);
-  return { type: InteractionResponseType.MODAL, data: { custom_id: `${CANCEL_MODAL_PREFIX}${id}`, title: A.cancelTitle, components: [textInput('reason', A.reasonLabel, { style: 2, max: 200 })] } };
+  return { type: InteractionResponseType.MODAL, data: { custom_id: `${CANCEL_MODAL_PREFIX}${id}`, title: A.cancelTitle, components: [textInput('reason', A.reasonLabel, { style: 2, max: CANCEL_REASON_MAX })] } };
 }
 
 async function cancelSubmitted(c: Ctx, d: DkpState, id: number, components: ModalComponent[] | undefined): Promise<MessageReply> {
   if (!runner(c, d)) return ephemeral(A.notRunner);
   const reason = (modalValues(components).get('reason') ?? '').trim();
   if (!reason) return ephemeral(RAID_COPY.reason);
-  // The conflict again, from this press: a bid placed after the form opened counts.
-  if (dkpSelfConflict(c.userId, { bidders: await biddersOf(c.db, id) })) return ephemeral(A.ownBid);
-  const at = now();
-  const [res] = await c.db.batch([
-    // Not after its close time (review of PR B: a late alarm leaves the close to the timer, never to a cancel).
-    c.db
-      .prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = ?2, closed_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND status IN ('open', 'queued') AND (closes_at IS NULL OR closes_at > ?3)")
-      .bind(reason, c.userId, at, id, c.guild.id),
-    audit(c.db, c.guild.id, c.userId, 'dkp.auction.cancel', `auction:${id}`, { status: 'open' }, { status: 'cancelled' }),
-  ]);
-  if (!res.meta.changes) return ephemeral(A.closed);
-  const a = (await auctionById(c.db, c.guild.id, id))!;
-  const api = apiFor(c);
-  try {
-    if (api && d.channel_id) {
-      if (a.message_id) await editIn(api, d.channel_id, a.message_id, await cardFor(c.db, c.guild, a));
-      await postIn(api, d.channel_id, { content: A.cancelled(a.item_name, by(c), reason, link(c.guild.id, d.channel_id, a.message_id)) });
-    }
-    // The item queue: the raid's next drop opens.
-    schedule(c, await openNext(c.db, api, c.guild, d.channel_id, a.raid_id, Date.now(), d.settings, 1));
-  } finally {
-    spent(c, api);
-  }
-  return ephemeral(A.cancelledReply);
+  return cancelAuction(c, d, id, reason);
 }
 
 // ---------------------------------------------------------------- the general auction's record (order 29, PR C)

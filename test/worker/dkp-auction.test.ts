@@ -4,9 +4,12 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { storedName } from '../../src/commands/channels.ts';
 import {
-  AUCTION_DROP_PREFIX, AUCTION_OPENS_MODAL, AUCTION_PREFIXES, BID_MODAL_PREFIX, BID_PREFIX, CANCEL_MODAL_PREFIX, CANCEL_PREFIX, decide, DROP_MODAL_PREFIX, DROP_SELECT_PREFIX, POST_GENERAL_PREFIX,
-  RECORD_MODAL_PREFIX, RECORD_PREFIX,
+  AUCTION_DROP_PREFIX, AUCTION_OPENS_MODAL, AUCTION_PREFIXES, BID_MODAL_PREFIX, BID_PREFIX, CANCEL_MODAL_PREFIX, CANCEL_PREFIX, CANCEL_REASON_MAX, cancelCommand, decide, DROP_MODAL_PREFIX, DROP_SELECT_PREFIX,
+  openAuctionChoices, POST_GENERAL_PREFIX, RECORD_MODAL_PREFIX, RECORD_PREFIX, timeLeft,
 } from '../../src/dkp/auction.ts';
+import { loadGuild } from '../../src/access.ts';
+import { DKP_COMMAND } from '../../src/dkp/definition.ts';
+import { loadDkp } from '../../src/dkp/state.ts';
 import { AUCTION_COPY, DKP_COPY, QUEUE_COPY, SHOP_COPY, WISHLIST_COPY } from '../../src/dkp/copy.ts';
 import { BUY_PREFIX, SHOP_CLOSE_PREFIX, SHOP_PREFIXES } from '../../src/dkp/shop.ts';
 import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
@@ -154,7 +157,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect(card.embeds[0].title).toBe('Fungal Robe');
     expect(card.embeds[1].description).toContain(AUCTION_COPY.minimum(5));
     expect(card.embeds[1].description).toContain(AUCTION_COPY.bidders(0));
-    expect(card.components[0].components.map((b: any) => b.custom_id)).toEqual([`${BID_PREFIX}${a.id}`, `${CANCEL_PREFIX}${a.id}`]);
+    expect(card.components[0].components.map((b: any) => b.custom_id)).toEqual([`${BID_PREFIX}${a.id}`]);
     expect(card.allowed_mentions).toEqual({ parse: [] });
     // Closing is the timer's: auction:<id> at closes_at, 3 minutes on.
     expect((await timersOf(env, GUILD).list())[`auction:${a.id}`]).toBe(Date.parse(a.closes_at));
@@ -517,6 +520,193 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect(new Set(AUCTION_PREFIXES).size).toBe(AUCTION_PREFIXES.length);
     expect(storedName(DKP_CHANNEL_NAME)).toBeTruthy();
     void all;
+  });
+});
+
+describe('/dkp cancel (order 31)', () => {
+  const buttons = (body: any) => (body.components ?? []).flatMap((r: any) => r.components).map((b: any) => b.custom_id as string);
+  const cancel = (m: Member, value: unknown, reason = 'wrong drop') => dkp(m, 'cancel', { auction: String(value), reason });
+  const choices = async (m: Member, typed: string) =>
+    (await send({ type: 4, guild_id: GUILD, member: m, data: { name: 'dkp', options: [{ type: 1, name: 'cancel', options: [{ type: 3, name: 'auction', value: typed, focused: true }] }] } }, TOKEN)).data.choices!;
+
+  it('no card shows Cancel: open raid and general cards show Bid only; every state offers only what the rule allows', async () => {
+    const r = await nightWithKill([kestrel]);
+    await auctionDrop(r);
+    const raided = await auction();
+    expect(buttons(cardOf(raided.message_id))).toEqual([`${BID_PREFIX}${raided.id}`]);
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    const general = await auction();
+    expect(buttons(cardOf(general.message_id))).toEqual([`${BID_PREFIX}${general.id}`]);
+    // Closed and unsold: Post to general auction stays on a raid card. Record what was done is the owner's open question.
+    await closeAt(raided.id);
+    expect(buttons(cardOf(raided.message_id))).toEqual([`${POST_GENERAL_PREFIX}${raided.id}`]);
+    await closeAt(general.id);
+    expect(buttons(cardOf(general.message_id))).toEqual([`${RECORD_PREFIX}${general.id}`]);
+  });
+
+  it('an old card loses its Cancel on its next edit, and until then its button and form still cancel', async () => {
+    const r = await nightWithKill([kestrel]);
+    await give(kestrel, 30);
+    await auctionDrop(r);
+    const a = await auction();
+    const m = fake.messages.find((x) => x.id === a.message_id)!;
+    const bidRow = m.body.components[0];
+    m.body.components = [{ ...bidRow, components: [...bidRow.components, { type: 2, style: 4, label: 'Cancel auction', custom_id: `${CANCEL_PREFIX}${a.id}` }] }];
+    await bid(kestrel, a.id, '9');
+    await HANDLERS.acard(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect(buttons(cardOf(a.message_id))).toEqual([`${BID_PREFIX}${a.id}`]);
+    expect((await pressAs(officerB, `${CANCEL_PREFIX}${a.id}`)).type).toBe(9);
+    expect((await send(submit(officerB, `${CANCEL_MODAL_PREFIX}${a.id}`, { reason: 'old form' }), TOKEN)).data.content).toBe(AUCTION_COPY.cancelledReply);
+    expect((await auction()).status).toBe('cancelled');
+  });
+
+  it('an officer cancels from the command: the card reveals every bid with the reason, nothing is spent, the reply is private; the timer then does nothing', async () => {
+    const r = await nightWithKill([kestrel]);
+    await give(kestrel, 30);
+    await auctionDrop(r);
+    const a = await auction();
+    await bid(kestrel, a.id, '11');
+    const done = await cancel(officerB, a.id);
+    expect(done.data.content).toBe(AUCTION_COPY.cancelledReply);
+    expect(done.data.flags).toBe(64);
+    const text = cardOf(a.message_id).embeds[1].description;
+    expect(text).toContain(AUCTION_COPY.cancelledBy(`<@${officerB.user.id}> (OfficerB)`, 'wrong drop'));
+    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 11`);
+    expect(cardOf(a.message_id).components).toEqual([]);
+    const posts = () => fake.messages.filter((m) => m.body.content?.startsWith('**Auction')).length;
+    expect(posts()).toBe(1);
+    // The timer fires after the cancel, past the close time: no second post, no spend, one audit row.
+    expect(await closeAt(a.id)).toBe(null);
+    expect(await HANDLERS.result(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0))).toBe(null);
+    expect(posts()).toBe(1);
+    expect(await count('dkp_ledger', "kind = 'spend'")).toBe(0);
+    expect(await count('audit_log', "action = 'dkp.auction.cancel'")).toBe(1);
+  });
+
+  it('refusals: a member, an officer who bid, a closed auction, a typed value, an id from another server, a blank reason', async () => {
+    const r = await nightWithKill([kestrel, officer]);
+    await give(officer, 30);
+    await auctionDrop(r);
+    const a = await auction();
+    await bid(officer, a.id, '8');
+    expect((await cancel(kestrel, a.id)).data.content).toBe(DKP_COPY.notRunner);
+    expect((await cancel(officer, a.id)).data.content).toBe(AUCTION_COPY.ownBid);
+    expect((await cancel(officerB, a.id, '   ')).data.content).toBe(DKP_COPY.adjustReason);
+    expect((await cancel(officerB, 'Fungal Robe')).data.content).toBe(AUCTION_COPY.pickAuction);
+    expect((await cancel(officerB, `${a.id}.5`)).data.content).toBe(AUCTION_COPY.pickAuction);
+    expect((await cancel(officerB, 999999)).data.content).toBe(AUCTION_COPY.pickAuction);
+    await env.DB.prepare("INSERT INTO guild (id, name, created_at) VALUES ('999', 'other', 'x') ON CONFLICT DO NOTHING").run();
+    const closes = new Date(Date.now() + 3_600_000).toISOString();
+    const other = await env.DB.prepare("INSERT INTO dkp_auction (guild_id, kind, item_id, min_bid, seconds, status, created_by, created_at, opened_at, closes_at) VALUES ('999', 'general', 7003, 1, 60, 'open', 'x', 'x', 'x', ?) RETURNING id").bind(closes).first<{ id: number }>();
+    expect((await cancel(officerB, other!.id)).data.content).toBe(AUCTION_COPY.pickAuction);
+    expect(await one('SELECT status FROM dkp_auction WHERE id = ?', other!.id)).toEqual({ status: 'open' });
+    expect((await auction()).status).toBe('open');
+    await closeAt(a.id);
+    expect((await cancel(officerB, a.id)).data.content).toBe(AUCTION_COPY.notOpen);
+    // Past its close time with the alarm not yet run: the timer's to close, never a cancel's.
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    const late = await auction();
+    await env.DB.prepare("UPDATE dkp_auction SET closes_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(late.id).run();
+    expect((await cancel(officerB, late.id)).data.content).toBe(AUCTION_COPY.closed);
+    expect(await count('audit_log', "action = 'dkp.auction.cancel'")).toBe(0);
+  });
+
+  it('a general auction is cancelled; a cancelled raid auction lets the next queued drop open, and the raid card follows', async () => {
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    const g = await auction();
+    expect((await cancel(officer, g.id)).data.content).toBe(AUCTION_COPY.cancelledReply);
+    expect((await auction()).status).toBe('cancelled');
+    const r = await nightWithKill([kestrel]);
+    const pick = await pressAs(officer, `${AUCTION_DROP_PREFIX}${r.id}`);
+    const form = await send(select(officer, pick.data.components![0].components[0].custom_id, [String(ROBE), String(MUSHROOM)]), TOKEN);
+    await send(submit(officer, form.data.custom_id!, { minimum: '3', minutes: '3' }), TOKEN);
+    const rows = await all<{ id: number; status: string }>('SELECT id, status FROM dkp_auction WHERE raid_id = ? ORDER BY id', r.id);
+    expect(rows.map((x) => x.status)).toEqual(['open', 'queued']);
+    await cancel(officerB, rows[0].id);
+    expect((await one<{ status: string }>('SELECT status FROM dkp_auction WHERE id = ?', rows[1].id)).status).toBe('open');
+    expect((await timersOf(env, GUILD).list())[`auction:${rows[1].id}`]).toBeTypeOf('number');
+    // The raid card's queue line follows. The item runs at once on the timer object, so it is read here, as it is asked for.
+    const effects: { dkpTimers?: { items: { key: string }[] } } = {};
+    const opts = [{ type: 3, name: 'auction', value: String(rows[1].id) }, { type: 3, name: 'reason', value: 'duplicate' }];
+    const c = { db: env.DB, guild: await loadGuild(env.DB, GUILD), userId: officerB.user.id, member: officerB, effects };
+    expect((await cancelCommand(c as never, opts as never, await loadDkp(env.DB, GUILD))).data?.content).toBe(AUCTION_COPY.cancelledReply);
+    expect(effects.dkpTimers!.items.map((i) => i.key)).toContain(`render:${r.id}`);
+  });
+
+  it('review: a failure after the cancel commits still leaves the timer object the card, the next drop and the raid card', async () => {
+    const r = await nightWithKill([kestrel]);
+    await auctionDrop(r);
+    const a = await auction();
+    const effects: { dkpTimers?: { items: { key: string }[] } } = {};
+    const db = { prepare: (s: string) => (s.includes('audit_log') ? (() => { throw new Error('D1 down'); })() : env.DB.prepare(s)), batch: env.DB.batch.bind(env.DB) };
+    const c = { db, guild: await loadGuild(env.DB, GUILD), userId: officerB.user.id, member: officerB, effects };
+    const opts = [{ type: 3, name: 'auction', value: String(a.id) }, { type: 3, name: 'reason', value: 'x' }];
+    await expect(cancelCommand(c as never, opts as never, await loadDkp(env.DB, GUILD))).rejects.toThrow('D1 down');
+    expect((await auction()).status).toBe('cancelled');
+    expect(effects.dkpTimers!.items.map((i) => i.key).sort()).toEqual([`acard:${a.id}`, `next:${r.id}`, `render:${r.id}`].sort());
+  });
+
+  it('review: an auction whose card has not posted yet is not offered and cannot be cancelled', async () => {
+    const r = await nightWithKill([kestrel]);
+    await auctionDrop(r);
+    const a = await auction();
+    await env.DB.prepare('UPDATE dkp_auction SET message_id = NULL WHERE id = ?').bind(a.id).run();
+    expect(await choices(officerB, '')).toEqual([]);
+    expect((await cancel(officerB, a.id)).data.content).toBe(AUCTION_COPY.closed);
+    expect((await auction()).status).toBe('open');
+  });
+
+  it('autocomplete: only this server\'s open auctions, newest first, filtered, 25 at most, plain labels cut at 100 with the item shortened first; one statement', async () => {
+    const r = await nightWithKill([kestrel]);
+    await auctionDrop(r);
+    const raided = await auction();
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    const general = await auction();
+    const list = await choices(officerB, '');
+    expect(list.map((c) => c.value)).toEqual([String(general.id), String(raided.id)]);
+    expect(list[0].name).toMatch(/^Lantern · general · closes in (23 h 59 m|1 d 0 h)$/);
+    expect(list[1].name).toMatch(/^Fungal Robe · Glinting Hollow · closes in [1-3] m$/);
+    expect(list.map((c) => c.name).join('')).not.toContain('<t:');
+    expect((await choices(officerB, 'FUNGAL')).map((c) => c.value)).toEqual([String(raided.id)]);
+    expect((await choices(officerB, 'general')).map((c) => c.value)).toEqual([String(general.id)]);
+    expect(await choices(officerB, 'nothing like it')).toEqual([]);
+    // Another server's, a closed one and one past its close time are not offered.
+    await env.DB.prepare("INSERT INTO guild (id, name, created_at) VALUES ('999', 'other', 'x') ON CONFLICT DO NOTHING").run();
+    const later = new Date(Date.now() + 3_600_000).toISOString();
+    await env.DB.prepare("INSERT INTO dkp_auction (guild_id, kind, item_id, min_bid, seconds, status, created_by, created_at, opened_at, closes_at, message_id) VALUES ('999', 'general', 7003, 1, 60, 'open', 'x', 'x', 'x', ?, '1')").bind(later).run();
+    await env.DB.prepare("UPDATE dkp_auction SET closes_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(raided.id).run();
+    expect((await choices(officerB, '')).map((c) => c.value)).toEqual([String(general.id)]);
+    // 25 at most, and a long item name is what gives way.
+    const long = 'A Very Long Item Name '.repeat(8);
+    await env.DB.prepare("INSERT INTO item (id, name, name_key, imported_at) VALUES (7009, ?, 'long', 'x')").bind(long).run();
+    await env.DB.batch(
+      Array.from({ length: 30 }, () => env.DB.prepare("INSERT INTO dkp_auction (guild_id, kind, item_id, min_bid, seconds, status, created_by, created_at, opened_at, closes_at, message_id) VALUES (?, 'general', 7009, 1, 60, 'open', 'x', 'x', ?, ?, '1')").bind(GUILD, new Date().toISOString(), later)),
+    );
+    const many = await choices(officerB, '');
+    expect(many.length).toBe(25);
+    expect(many.every((c) => c.name.length <= 100)).toBe(true);
+    expect(many[0].name.length).toBe(100);
+    expect(many[0].name).toMatch(/… · general · closes in (59|60) m$|… · general · closes in 1 h 0 m$/);
+    let statements = 0;
+    const counted = { prepare: (s: string) => (statements++, env.DB.prepare(s)) } as unknown as D1Database;
+    await openAuctionChoices(counted, GUILD, 'long', Date.now());
+    expect(statements).toBe(1);
+    await env.DB.prepare('DELETE FROM dkp_auction WHERE item_id = 7009').run();
+    await env.DB.prepare('DELETE FROM item WHERE id = 7009').run();
+  });
+
+  it('the time left is plain text, and never reads 0', () => {
+    expect(timeLeft((2 * 60 + 14) * 60_000)).toBe('2 h 14 m');
+    expect(timeLeft((2 * 60 + 13) * 60_000 + 1)).toBe('2 h 14 m');
+    expect(timeLeft(1000)).toBe('1 m');
+    expect(timeLeft(-5000)).toBe('1 m');
+    expect(timeLeft(7 * 86_400_000)).toBe('7 d 0 h');
+  });
+
+  it('the reason keeps the old form\'s limit, on the option; /dkp has room under Discord\'s 25', () => {
+    const sub = DKP_COMMAND.options.find((o) => o.name === 'cancel')! as unknown as { options: { name: string; max_length: number }[] };
+    expect(sub.options.find((o) => o.name === 'reason')!.max_length).toBe(CANCEL_REASON_MAX);
+    expect(DKP_COMMAND.options.length).toBeLessThanOrEqual(25);
   });
 });
 

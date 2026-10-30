@@ -104,7 +104,7 @@ export const rosterAddStatement = (db: D1Database, killId: number, members: { me
     )
     .bind(killId, JSON.stringify(members.map((m) => ({ m: m.member_id, s: m.state }))), approvedPending?.id ?? null, approvedPending?.actor ?? null, approvedPending?.at ?? null);
 
-/** Members off one kill's roster (Check again, a correction). */
+/** Members off one kill's roster (Kill roll call, a correction). */
 export const rosterRemoveStatement = (db: D1Database, killId: number, members: string[], approvedPending?: { id: number; actor: string; at: string }) =>
   db
     .prepare(`DELETE FROM dkp_kill_member WHERE kill_id = ?1 AND member_id IN (SELECT value FROM json_each(?2)) AND ${APPROVED_GATE('?3', '?4', '?5')}`)
@@ -132,7 +132,7 @@ export const standbyStatement = (db: D1Database, p: { guildId: string; pool: str
     .bind(p.guildId, p.pool, p.raidId, p.asked, p.cap, p.at);
 
 /**
- * After close, a member who no longer has a Standby kill in the raid (Check again or a correction removed their last) loses
+ * After close, a member who no longer has a Standby kill in the raid (Kill roll call or a correction removed their last) loses
  * the standby payout: a correction row returning what it paid (corrects: the standby row). Runs after the roster change in
  * the same batch; once only (a reversed payout is not reversed again).
  */

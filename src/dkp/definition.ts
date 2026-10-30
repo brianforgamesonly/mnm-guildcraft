@@ -69,6 +69,15 @@ export const DKP_COMMAND = {
       ],
     },
     {
+      type: SUBCOMMAND,
+      name: 'cancel',
+      description: 'Officers: cancel an open auction, with a public reason; it reveals the bids',
+      options: [
+        { type: STRING, name: 'auction', description: 'The open auction: pick from the list', required: true, autocomplete: true, max_length: 100 },
+        { type: STRING, name: 'reason', description: 'Why (shown publicly; it reveals the bids)', required: true, max_length: 200 },
+      ],
+    },
+    {
       type: SUBCOMMAND_GROUP,
       name: 'wishlist',
       description: 'Wishlists, public in this server (adding an item opts you in to a direct message)',

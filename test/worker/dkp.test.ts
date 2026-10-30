@@ -22,6 +22,7 @@ import { all, count, dkpTriggerNames, one, reset } from '../db.ts';
 import { ADMIN, APP_ID, as, botApi, GUILD, press, rawCmd, send, type Member } from '../discord.ts';
 
 const TOKEN = { env: { DISCORD_BOT_TOKEN: 'test-bot-token' } };
+const SOURCES = import.meta.glob('../../src/**/*.ts', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
 const OFFICER_ROLE = '600000000000000002';
 const BOT_ROLE = '600000000000000001';
 const admin = as('100000000000000001', { permissions: ADMIN });
@@ -186,6 +187,14 @@ describe('Add DKP and Remove DKP (ITEM 1)', () => {
     await addDkp();
     expect(await labels()).toContainEqual([REMOVE_DKP_PREFIX, 'Remove DKP module']);
     expect([ADD_DKP_PREFIX, REMOVE_DKP_PREFIX]).toEqual(['dkpadd:', 'dkprm:']);
+    // Order 31: the source says Kill roll call. It scans source only: rows already written keep their stored reason.
+    const old = /check[ -]again/i;
+    expect(texts.filter((t) => old.test(t))).toEqual([]);
+    expect(old.test(JSON.stringify(DKP_COMMAND))).toBe(false);
+    expect(PAGES.filter((p) => old.test(pageText(p.key)))).toEqual([]);
+    expect(Object.keys(SOURCES).length).toBeGreaterThan(50);
+    expect(Object.entries(SOURCES).filter(([, text]) => old.test(text)).map(([path]) => path)).toEqual([]);
+    expect(old.test('Check-again window')).toBe(true);
   });
 
   it('routes each new custom_id prefix (order 23), none opens a modal, and every DKP prefix shares one stem', () => {
