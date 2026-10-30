@@ -43,7 +43,7 @@ export const ROUTES: Route[] = [
   { method: 'DELETE', path: '/channels/{}', channel: 'board', needs: [VIEW_CHANNEL, MANAGE_THREADS], why: 'board rebuild: delete its old posts ("MANAGE_THREADS if the channel is a thread")' },
   { method: 'GET', path: '/channels/{}', channel: null, needs: [], why: 'setup: read a channel to compute permissions (Get Channel: no permission stated)' },
   { method: 'GET', path: '/guilds/{}/roles', channel: null, needs: [], why: 'setup: roles, to compute permissions (no permission stated)' },
-  { method: 'GET', path: '/guilds/{}/members/{}', channel: null, needs: [], why: 'setup: the bot\'s own roles (Get Guild Member: no permission stated)' },
+  { method: 'GET', path: '/guilds/{}/members/{}', channel: null, needs: [], why: 'setup: the bot\'s own roles; order 32: the lock\'s Left check, a 404 with Unknown Member (10007) (Get Guild Member: no permission or intent stated)' },
   { method: 'GET', path: '/guilds/{}/members', channel: null, needs: [], why: 'departures: who is still in the server ("requires the GUILD_MEMBERS Privileged Intent"; the Server Members intent, not a permission)' },
   { method: 'GET', path: '/guilds/{}', channel: null, needs: [], why: 'the server\'s name (Get Guild: no permission stated)' },
   // Order 16: craft requests, one private thread each in the request channel (read 2026-10-21).
