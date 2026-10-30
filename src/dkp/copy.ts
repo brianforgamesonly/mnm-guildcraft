@@ -142,6 +142,31 @@ export const QUEUE_COPY = {
     `From your GuildCraft wishlist: **${md(item)}** is up for auction: ${link}\nIt closes <t:${closes}:R>. You get these because you added it to your wishlist; \`/dkp wishlist remove\` stops them.`,
 } as const;
 
+/** Order 29, PR D: the shop (fixed prices, guild points) and decay. */
+export const SHOP_COPY = {
+  noItem: (typed: string) => `There is no item called **${md(typed)}**. Pick one from the list.`,
+  title: (item: string) => `Shop: ${item}`,
+  price: (n: number) => `**${n}** guild points each. First come, first served.`,
+  left: (left: number, of: number, perMember: number) => `${left} of ${of} left · at most ${perMember} per member.`,
+  postedBy: (by: string) => `Posted by ${by} (who can't buy from it).`,
+  closedEarly: (by: string) => `**Closed** by ${by}.`,
+  soldOut: '**Sold out.**',
+  buy: 'Buy',
+  close: 'Close listing',
+  posted: (link: string | null) => `Listed.${link ? ` ${link}` : ''}`,
+  own: "You posted this listing, so you can't buy from it.",
+  closed: 'This listing is closed.',
+  gone: 'Sold out.',
+  limit: (n: number) => `You've bought ${plural(n, 'of these', 'of these')}, the most a member may.`,
+  poor: (price: number, balance: number) => `It costs ${price} guild points, and you have ${balance}.`,
+  bought: (item: string, price: number, balance: number) => `You bought **${md(item)}** for ${price} guild points (now ${balance}). It's posted in GC-DKP; collect it from an officer.`,
+  purchaseLine: (member: string, item: string, price: number) => `**Bought:** ${member} bought **${md(item)}** for ${price} guild points.`,
+  spendReason: (item: string) => `Bought ${truncate(item, 80)}`,
+  closedReply: 'Closed. The listing says so.',
+  cannotPost: DKP_COPY.noChannel,
+  decayReason: (days: number, percent: number) => `Decay: ${percent}% a week after ${days} idle days`,
+} as const;
+
 /** Order 29, PR C: wishlists. */
 export const WISHLIST_COPY = {
   noItem: (typed: string) => `There is no item called **${md(typed)}**. Pick one from the list.`,

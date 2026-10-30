@@ -2,7 +2,8 @@
 // it acts only on a row that D1 still shows as due and open, in a statement that checks that state itself.
 import { botApi, type BotApi } from '../board/api.ts';
 import type { Env } from '../env.ts';
-import { DKP_COPY } from './copy.ts';
+import { DKP_COPY, SHOP_COPY } from './copy.ts';
+import { decayStatement } from './ledger.ts';
 import { editIn } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
 import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
@@ -112,8 +113,29 @@ const acard: Handler = async (env, guildId, id, _due, _now, api) => {
   return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id), state.settings) };
 };
 
+/** Order 29, PR D: the decay item's key, seeded on Add DKP, and its week. */
+export const DECAY_KEY = 'decay:week';
+export const WEEK_MS = 7 * 86_400_000;
+
+/** Order 29, PR D: decay:week, once a week: idle balances lose the decay percent (src/dkp/ledger.ts decayStatement). */
+const decay: Handler = async (env, guildId, _id, _due, now) => {
+  const state = await loadDkp(env.DB, guildId);
+  // DKP off: the item ends (Remove DKP clears every item anyway; Add DKP seeds it again).
+  if (!state.enabled) return null;
+  const s = state.settings;
+  const at = new Date(now).toISOString();
+  try {
+    await env.DB.batch([decayStatement(env.DB, { guildId, idleSince: new Date(now - s.decay_days * 86_400_000).toISOString(), percent: s.decay_percent, reason: SHOP_COPY.decayReason(s.decay_days, s.decay_percent), at })]);
+  } catch (e) {
+    // Review of PR D: a failed run tries again within the hour, never ends decay (the object drops an item after 5 throws).
+    console.error('dkp decay failed', e instanceof Error ? e.message : String(e));
+    return { again: now + 3_600_000 };
+  }
+  return { again: now + WEEK_MS };
+};
+
 /** The handlers by item kind ("kind:id"). */
-export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard };
+export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, decay };
 
 /** The calls one alarm's items share (the alarm is one invocation). */
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>

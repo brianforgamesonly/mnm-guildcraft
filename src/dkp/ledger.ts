@@ -169,6 +169,39 @@ export const auctionSpendStatement = (db: D1Database, p: { guildId: string; pool
     )
     .bind(p.guildId, p.pool, p.member, p.price, p.raidId, p.reason, p.at, p.auctionId);
 
+/**
+ * Order 29, PR D: a shop purchase's spend, by the bot, in the purchase's own batch after its insert: the price off the
+ * member's guild-pool balance, checked inside this insert; once per purchase (dkp_ledger_purchase_spend).
+ */
+export const purchaseSpendStatement = (db: D1Database, p: { guildId: string; member: string; price: number; listingId: number; reason: string; at: string }) =>
+  db
+    .prepare(
+      `WITH t AS (SELECT ${PREV('?3')} AS prev)
+       INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at, purchase_id)
+       SELECT ?1, ?3, ?2, -?4, 0, prev - ?4, 'spend', NULL, NULL, NULL, ?6, 'bot', ?7, p.id FROM t, dkp_purchase p
+       WHERE p.listing_id = ?5 AND p.member_id = ?3 AND p.at = ?7 AND prev >= ?4
+         AND NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.purchase_id = p.id AND x.kind = 'spend')`,
+    )
+    .bind(p.guildId, POOL_GUILD, p.member, p.price, p.listingId, p.reason, p.at);
+
+/**
+ * Order 29, PR D: decay, by the bot, once a week (decay:week on the guild's timer object). Every pool balance above 0
+ * whose member has had no ledger row other than decay in that pool since ?2 (the idle days) loses ?4 percent, rounded
+ * down, at least 1. Frozen members decay too. Never twice in 6 days (alarms run at least once). One statement per guild.
+ */
+export const decayStatement = (db: D1Database, p: { guildId: string; idleSince: string; percent: number; reason: string; at: string }) =>
+  db
+    .prepare(
+      `WITH last AS (SELECT member_id, pool, max(id) AS id FROM dkp_ledger WHERE guild_id = ?1 GROUP BY member_id, pool),
+            bal AS (SELECT l.member_id, l.pool, l.balance_after AS balance FROM last JOIN dkp_ledger l ON l.id = last.id WHERE l.balance_after > 0),
+            idle AS (SELECT b.member_id, b.pool, b.balance, max(1, CAST(b.balance * CAST(?4 AS INTEGER) / 100 AS INTEGER)) AS loss FROM bal b
+                     WHERE NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.guild_id = ?1 AND x.pool = b.pool AND x.member_id = b.member_id AND x.kind <> 'decay' AND x.at > ?2)
+                       AND NOT EXISTS (SELECT 1 FROM dkp_ledger y WHERE y.guild_id = ?1 AND y.pool = b.pool AND y.member_id = b.member_id AND y.kind = 'decay' AND y.at > ?3))
+       INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, reason, actor, at)
+       SELECT ?1, member_id, pool, -min(loss, balance), 0, balance - min(loss, balance), 'decay', ?5, 'bot', ?6 FROM idle WHERE ?4 > 0`,
+    )
+    .bind(p.guildId, p.idleSince, new Date(Date.parse(p.at) - 6 * 86_400_000).toISOString(), p.percent, p.reason, p.at);
+
 /** The member's balance in the pool, as an SQL expression over ?1 (guild) and ?2 (pool): one indexed row. */
 export const balanceSql = (member: string) => PREV(member);
 

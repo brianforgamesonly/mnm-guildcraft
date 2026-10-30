@@ -27,6 +27,7 @@ import { POOL_GUILD } from './ledger.ts';
 import { refreshStandings } from './messages.ts';
 import { showRemoved, standbyPayouts } from './raid.ts';
 import { cancelAllStatement, showCancelled } from './auction.ts';
+import { DECAY_KEY, WEEK_MS } from './due.ts';
 import { loadDkp } from './state.ts';
 
 export const ADD_DKP_PREFIX = 'dkpadd:';
@@ -119,6 +120,8 @@ async function addDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageReply>
   // The guild pool's standings, and each pool already used (Add DKP after Remove DKP resumes them).
   const { results } = await c.db.prepare('SELECT pool FROM dkp_pool WHERE guild_id = ? ORDER BY pool = ? DESC, created_at').bind(g, POOL_GUILD).all<{ pool: string }>();
   await refreshStandings(c.db, api, g, channel.id, [...new Set([POOL_GUILD, ...results.map((r) => r.pool)])]);
+  // Order 29, PR D: the weekly decay item, seeded on the guild's timer object (Remove DKP clears it with every item).
+  c.effects.dkpTimers = { guildId: g, items: [...(c.effects.dkpTimers?.items ?? []), { key: DECAY_KEY, due: Date.now() + WEEK_MS }] };
   return ephemeral([...lines, DKP_COPY.added(channel.id)].join('\n'));
 }
 
@@ -158,6 +161,8 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     closeOpenRaid(c.db, g, c.userId, 'removed'),
     // Order 29: every open or queued auction is cancelled ("DKP removed"; its card reveals the bids) before the timers go.
     cancelAllStatement(c.db, g, at),
+    // Review of PR D: open shop listings close too (their Buy answers "DKP is off", then "closed" after Add DKP).
+    c.db.prepare("UPDATE dkp_listing SET closed_at = ?1, closed_by = 'bot' WHERE guild_id = ?2 AND closed_at IS NULL").bind(at, g),
     // Order 29 (override 2): a raid closed by Remove DKP pays its Standby once, as any close does.
     ...(open ? standbyPayouts(c.db, g, open, state.settings, at) : []),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.

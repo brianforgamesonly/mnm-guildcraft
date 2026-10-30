@@ -14,6 +14,7 @@ import type { DkpState } from './state.ts';
 import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand } from './raid.ts';
 import { auctionCommand } from './auction.ts';
 import { wishlistAdd, wishlistRemove, wishlistShow } from './wishlist.ts';
+import { shopAdd } from './shop.ts';
 
 export const APPROVE_PREFIX = 'dkpap:';
 /** Full standings' paging, in the presser's own private message (edited in place). */
@@ -38,6 +39,8 @@ export const DKP_ROUTES: Record<string, { access: 'runner' | 'admin' | 'member';
   'dkp wishlist add': { access: 'member', run: (c, o, d) => wishlistAdd(c, o, d) },
   'dkp wishlist remove': { access: 'member', run: (c, o, d) => wishlistRemove(c, o, d) },
   'dkp wishlist show': { access: 'member', run: (c, o, d) => wishlistShow(c, o, d) },
+  // Order 29, PR D: the shop.
+  'dkp shop add': { access: 'runner', run: (c, o, d) => shopAdd(c, o, d) },
 };
 
 const apiFor = (c: Ctx, cap = DKP_COMMAND_CAP): BotApi | null => (c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap, deadline: Date.now() + 10_000 }) : null);

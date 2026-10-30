@@ -92,6 +92,24 @@ export const DKP_COMMAND = {
       ],
     },
     {
+      type: SUBCOMMAND_GROUP,
+      name: 'shop',
+      description: 'The shop: items at fixed prices in guild points',
+      options: [
+        {
+          type: SUBCOMMAND,
+          name: 'add',
+          description: 'Officers: list an item for guild points in GC-DKP (first come, first served)',
+          options: [
+            { type: STRING, name: 'item', description: 'The item: pick from the list', required: true, autocomplete: true, max_length: 100 },
+            { type: INTEGER, name: 'price', description: 'Guild points each', required: true, min_value: 1, max_value: 100000 },
+            { type: INTEGER, name: 'quantity', description: 'How many to sell (default 1)', min_value: 1, max_value: 1000 },
+            { type: INTEGER, name: 'per_member', description: 'At most this many per member (default 1)', min_value: 1, max_value: 1000 },
+          ],
+        },
+      ],
+    },
+    {
       type: SUBCOMMAND,
       name: 'adjust',
       description: "Officers: change a member's points, with a reason (posted publicly)",
@@ -128,8 +146,5 @@ export const DKP_COMMAND = {
 /** "/dkp sub" with its description, as /help lists it (order 27: only where DKP is on). */
 export const DKP_DEFINED_LIST = DKP_COMMAND.options.map((o) => ({ cmd: `/${DKP_NAME} ${o.name}`, command: DKP_NAME, description: o.description as string }));
 export const DKP_DEFINED = new Set(DKP_DEFINED_LIST.map((d) => d.cmd));
-/**
- * The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). Order 29: each
- * leaves this list in the pull request that builds it (auction in PR B, wishlist in PR C, shop in PR D).
- */
-export const DKP_COMING: string[] = ['/dkp shop'];
+/** The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md): none (order 29, PR D). */
+export const DKP_COMING: string[] = [];
