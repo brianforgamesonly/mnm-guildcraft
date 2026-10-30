@@ -121,7 +121,10 @@ const bid = (m: Member, id: number, amount: string) => send(submit(m, `${BID_MOD
 const closeAt = async (id: number, offsetMs = 1000) => {
   const a = await one<{ closes_at: string }>('SELECT closes_at FROM dkp_auction WHERE id = ?', id);
   const due = Date.parse(a.closes_at);
-  return HANDLERS.auction(withToken, GUILD, String(id), due, due + offsetMs, timerApi(withToken, Date.now(), () => 0));
+  const r = await HANDLERS.auction(withToken, GUILD, String(id), due, due + offsetMs, timerApi(withToken, Date.now(), () => 0));
+  // The result is its own timer item (review of PR B), run here as the object would.
+  if (r?.schedule?.some((s) => s.key === `result:${id}`)) await HANDLERS.result(withToken, GUILD, String(id), due, due + offsetMs, timerApi(withToken, Date.now(), () => 0));
+  return r;
 };
 
 describe('raid auctions (order 29, ITEM 4)', () => {
@@ -233,7 +236,9 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     await bid(kestrel, a.id, '12');
     expect(await one('SELECT amount FROM dkp_bid WHERE member_id = ?', kestrel.user.id)).toEqual({ amount: 12 });
     expect((await bid(kestrel, a.id, '0')).data.content).toBe(AUCTION_COPY.withdrawn);
-    expect(await count('dkp_bid')).toBe(0);
+    // The row stays, marked withdrawn (it never counts); a second withdrawal finds nothing to withdraw.
+    expect(await one('SELECT dropped FROM dkp_bid WHERE member_id = ?', kestrel.user.id)).toEqual({ dropped: 'withdrawn' });
+    expect((await bid(kestrel, a.id, '0')).data.content).toBe(AUCTION_COPY.noBidToWithdraw);
     await bid(kestrel, a.id, '12');
     // Past closes_at, the alarm not yet run: the bid is refused, and the close sees the bid as it stood.
     await env.DB.prepare("UPDATE dkp_auction SET closes_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(a.id).run();
@@ -394,6 +399,42 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect(cardOf(a.message_id).embeds[1].description).toContain(`<@${kestrel.user.id}> (Kestrel): 9`);
     expect(await timersOf(env, GUILD).list()).toEqual({});
     expect((await pressAs(kestrel, `${BID_PREFIX}${a.id}`)).data.content).toBe(DKP_COPY.off);
+  });
+
+  it('review of PR B: an officer who bid and withdrew still cannot cancel; nobody cancels after the close time; a withdrawn bid neither counts nor shows', async () => {
+    const r = await nightWithKill([kestrel, officer]);
+    await give(kestrel, 30);
+    await give(officer, 30);
+    await auctionDrop(r);
+    const a = await auction();
+    await bid(officer, a.id, '9');
+    await bid(officer, a.id, '0');
+    expect((await pressAs(officer, `${CANCEL_PREFIX}${a.id}`)).data.content).toBe(AUCTION_COPY.ownBid);
+    await bid(kestrel, a.id, '6');
+    await env.DB.prepare("UPDATE dkp_auction SET closes_at = '2000-01-01T00:00:00.000Z' WHERE id = ?").bind(a.id).run();
+    expect((await send(submit(officerB, `${CANCEL_MODAL_PREFIX}${a.id}`, { reason: 'late' }), TOKEN)).data.content).toBe(AUCTION_COPY.closed);
+    await closeAt(a.id);
+    expect(await auction()).toMatchObject({ status: 'sold', winner: kestrel.user.id, price: 5 });
+    const text = cardOf(a.message_id).embeds[1].description;
+    expect(text).not.toContain(`<@${officer.user.id}>`);
+    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 6`);
+  });
+
+  it('review of PR B: the close waits for a run with the calls it needs; the result is its own item and posts the line', async () => {
+    const r = await nightWithKill([kestrel]);
+    await give(kestrel, 30);
+    await auctionDrop(r);
+    const a = await auction();
+    await bid(kestrel, a.id, '7');
+    const due = Date.parse(a.closes_at);
+    const spentApi = timerApi(withToken, Date.now(), () => 39);
+    expect(await HANDLERS.auction(withToken, GUILD, String(a.id), due, due + 1, spentApi)).toEqual({ again: due + 1 });
+    expect((await auction()).status).toBe('open');
+    expect(await HANDLERS.result(withToken, GUILD, String(a.id), due, due + 1, spentApi)).toBe(null);
+    await closeAt(a.id);
+    expect(fake.messages.filter((m) => m.body.content?.startsWith('**Auction closed: Fungal Robe.**')).length).toBe(1);
+    // A result item with too few calls left waits.
+    expect(await HANDLERS.result(withToken, GUILD, String(a.id), due, due + 2, spentApi)).toEqual({ again: due + 2 });
   });
 
   it('routes each new custom_id prefix (order 23): Bid, Cancel auction and the drop select open a form at once; the rest defer', () => {

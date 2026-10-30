@@ -19,8 +19,10 @@
 //   Cancel auction (press): guild, state, auction, bidders: 4 D1; 0. Its form: guild, state, auction, bidders, update,
 //     card (bids, item card 4): about 11 D1; 2 Discord (the card, the notice).
 //   Post to general auction: guild, state, auction, insert, open: about 11 D1; 1 Discord.
-//   The close (timer): auction, bids, balances, eligibility, (tie: 1 per tied bidder), one batch, card (about 6): about
-//     12 D1; 3 Discord (card, result, standings). The card edit (acard:, timer): about 7 D1; 1 Discord.
+//   The close (auction:, timer): guild, state, auction, bids with their fingerprint (1 batch), balances, eligibility (tie: 1
+//     per tied bidder), the closing batch, the auction again: about 8 D1; 0 Discord; it starts only with CLOSE_NEEDS calls
+//     left. The result (result:, its own item): guild, state, auction, card (about 7), standings (3), name: about 13 D1;
+//     3 Discord (card, standings, line), only with RESULT_NEEDS left. The card edit (acard:): about 9 D1; 1 Discord.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, dkpSelfConflict, isDkpRunner, loadGuild, now, type Guild } from '../access.ts';
 import { botApi, budgetLeft, type BotApi } from '../board/api.ts';
@@ -28,7 +30,8 @@ import { itemCard } from '../commands/item.ts';
 import { modalValues } from '../commands/reports.ts';
 import type { Ctx } from '../context.ts';
 import {
-  button, ephemeral, memberTag, optBool, optInt, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent,
+  button, EMBED_LIMITS, embedChars, ephemeral, memberTag, optBool, optInt, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, type Embed, type InteractionReply, type MessageReply,
+  type ModalComponent,
 } from '../discord.ts';
 import { MOB_ZONES_SOURCE, zoneNamesSql } from '../zone/names.ts';
 import type { DkpRun } from './commands.ts';
@@ -88,6 +91,14 @@ const AUCTION_SQL = `SELECT a.id, a.guild_id, a.kind, a.raid_id, a.kill_id, a.fr
 export const auctionById = (db: D1Database, guildId: string, id: number) => db.prepare(AUCTION_SQL).bind(id, guildId).first<Auction>();
 
 const unix = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+/**
+ * A bid's write counts only while the auction is open and before closes_at by the receipt time (?4 / ?3, the Worker's clock)
+ * and by D1's own clock at the write (review of PR B: a bid read, checked and written slowly must not land after the close
+ * read the bids). The close also compares the bids it read with the bids at its write (BIDS_FINGERPRINT).
+ */
+const STILL_OPEN = `status = 'open' AND closes_at > ?4 AND closes_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`;
+/** The bids as one text: changed by any bid, raise, lower or withdrawal (the close's check that nothing moved). */
+const BIDS_FINGERPRINT = (id: string) => `(SELECT count(*) || ':' || coalesce(sum(amount), 0) || ':' || coalesce(max(at), '') || ':' || coalesce(sum(dropped IS NOT NULL), 0) FROM dkp_bid WHERE auction_id = ${id})`;
 const link = (guildId: string, channel: string | null, message: string | null) => (channel && message ? `https://discord.com/channels/${guildId}/${channel}/${message}` : null);
 const apiFor = (c: Ctx): BotApi | null => (c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: CALL_CAP, deadline: Date.now() + 10_000 }) : null);
 const spent = (c: Ctx, api: BotApi | null) => {
@@ -130,6 +141,8 @@ interface BidRow {
   at: string;
   dropped: string | null;
 }
+/** dkp_bid.dropped for a withdrawn bid (it never counts, and is never revealed as a bid). */
+export const WITHDRAWN = 'withdrawn';
 const BIDS_SQL = `SELECT b.member_id, coalesce(m.display_name, b.member_id) AS name, b.amount, b.at, b.dropped FROM dkp_bid b
   LEFT JOIN member m ON m.guild_id = ?2 AND m.discord_user_id = b.member_id WHERE b.auction_id = ?1 ORDER BY b.amount DESC, b.at`;
 
@@ -137,17 +150,28 @@ const BIDS_SQL = `SELECT b.member_id, coalesce(m.display_name, b.member_id) AS n
 export function auctionMessage(a: Auction, d: { item: Embed | null; poolName: string; bids: BidRow[]; winnerName: string | null; cancelledByName: string | null }): Message {
   const lines: string[] = [a.kind === 'raid' ? A.raidLine(d.poolName) : A.generalLine, A.minimum(a.min_bid)];
   const open = a.status === 'open';
-  if (open && a.closes_at) lines.push(A.closes(unix(a.closes_at)), '', A.bidders(d.bids.length));
+  // A withdrawn bid is not a bid (its row stays: review of PR B).
+  const bids = d.bids.filter((b) => b.dropped !== WITHDRAWN);
+  const head: string[] = [];
+  const shown: string[] = [];
+  if (open && a.closes_at) lines.push(A.closes(unix(a.closes_at)), '', A.bidders(bids.length));
   else {
     lines.push('');
     if (a.status === 'sold') lines.push(A.sold(memberTag(a.winner!, d.winnerName ?? a.winner!), a.price!));
     else if (a.status === 'unsold') lines.push(A.unsold);
     else if (a.status === 'cancelled') lines.push(A.cancelledBy(a.cancelled_by === 'bot' || !a.cancelled_by ? 'GuildCraft' : memberTag(a.cancelled_by, d.cancelledByName ?? a.cancelled_by), a.reason ?? ''));
     // Revealed after close (order 29's override 4: guild-public DKP data), members shown, nobody pinged.
-    lines.push('', A.bidsHead, ...(d.bids.length ? d.bids.slice(0, BIDS_SHOWN).map((b) => A.bidLine(memberTag(b.member_id, b.name), b.amount, b.dropped ? (A.dropped[b.dropped] ?? b.dropped) : null)) : [A.noBids]));
-    if (d.bids.length > BIDS_SHOWN) lines.push(RAID_COPY.counted(d.bids.length - BIDS_SHOWN));
+    head.push('', A.bidsHead);
+    shown.push(...(bids.length ? bids.slice(0, BIDS_SHOWN).map((b) => A.bidLine(memberTag(b.member_id, b.name), b.amount, b.dropped ? (A.dropped[b.dropped] ?? b.dropped) : null)) : [A.noBids]));
   }
-  const embed: Embed = { title: truncate(A.title(a.item_name), 256), description: truncate(lines.join('\n'), 4096) };
+  // Whole bid lines only, inside Discord's 6,000 characters across the message's embeds (the item card's included).
+  const build = (list: string[]): Embed => {
+    const more = bids.length - list.length;
+    return { title: truncate(A.title(a.item_name), 256), description: truncate([...lines, ...head, ...list, ...(more > 0 && list.length ? [RAID_COPY.counted(more)] : [])].join('\n'), 4096) };
+  };
+  let n = shown.length;
+  let embed = build(shown);
+  while (n > 1 && embedChars([...(d.item ? [d.item] : []), embed]) > EMBED_LIMITS.total - 200) embed = build(shown.slice(0, --n));
   const components: unknown[] = open
     ? [row([button(`${BID_PREFIX}${a.id}`, A.bid, STYLE_PRIMARY), button(`${CANCEL_PREFIX}${a.id}`, A.cancel, STYLE_DANGER)])]
     : a.status === 'unsold' && a.kind === 'raid'
@@ -209,12 +233,15 @@ async function createAuction(
   if (!api || !d.channel_id) return ephemeral(A.cannotPost);
   try {
     const at = now();
+    // An unsold auction goes to the general auction once (review of PR B: the check is inside the insert).
     const row = await c.db
       .prepare(
-        "INSERT INTO dkp_auction (guild_id, kind, raid_id, kill_id, from_auction, item_id, min_bid, seconds, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?) RETURNING id",
+        `INSERT INTO dkp_auction (guild_id, kind, raid_id, kill_id, from_auction, item_id, min_bid, seconds, status, created_by, created_at)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', ?9, ?10 WHERE ?5 IS NULL OR NOT EXISTS (SELECT 1 FROM dkp_auction WHERE from_auction = ?5) RETURNING id`,
       )
       .bind(c.guild.id, p.kind, p.raidId, p.killId, p.fromAuction ?? null, p.itemId, p.min, p.seconds, c.userId, at)
       .first<{ id: number }>();
+    if (!row) return ephemeral(A.alreadyPosted);
     await audit(c.db, c.guild.id, c.userId, 'dkp.auction.open', `auction:${row!.id}`, null, { kind: p.kind, item: p.itemId, min: p.min, seconds: p.seconds }).run();
     const items = await openAuction(c.db, api, c.guild, d.channel_id, row!.id, Date.now());
     if (!items.length) return ephemeral(A.cannotPost);
@@ -345,9 +372,10 @@ async function bidSubmitted(c: Ctx, d: DkpState, id: number, components: ModalCo
   const n = whole(modalValues(components).get('amount'));
   if (n === null) return ephemeral(A.wholeNumber(A.amountLabel));
   if (n === 0) {
+    // A withdrawal keeps its row, marked (review of PR B: an officer who bid stays a bidder for dkpSelfConflict).
     const gone = await c.db
-      .prepare("DELETE FROM dkp_bid WHERE auction_id = ?1 AND member_id = ?2 AND EXISTS (SELECT 1 FROM dkp_auction WHERE id = ?1 AND status = 'open' AND closes_at > ?3)")
-      .bind(id, c.userId, at.toISOString())
+      .prepare(`UPDATE dkp_bid SET dropped = 'withdrawn', at = ?3 WHERE auction_id = ?1 AND member_id = ?2 AND dropped IS NULL AND EXISTS (SELECT 1 FROM dkp_auction WHERE id = ?1 AND ${STILL_OPEN})`)
+      .bind(id, c.userId, at.toISOString(), at.toISOString())
       .run();
     if (!gone.meta.changes) return ephemeral(A.noBidToWithdraw);
     recount(c, id);
@@ -360,7 +388,7 @@ async function bidSubmitted(c: Ctx, d: DkpState, id: number, components: ModalCo
   if (n > balance) return ephemeral(A.overBalance(balance));
   const put = await c.db
     .prepare(
-      `INSERT INTO dkp_bid (auction_id, member_id, amount, at) SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM dkp_auction WHERE id = ?1 AND status = 'open' AND closes_at > ?4)
+      `INSERT INTO dkp_bid (auction_id, member_id, amount, at) SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM dkp_auction WHERE id = ?1 AND ${STILL_OPEN})
        ON CONFLICT (auction_id, member_id) DO UPDATE SET amount = ?3, at = ?4, dropped = NULL`,
     )
     .bind(id, c.userId, n, at.toISOString())
@@ -396,16 +424,25 @@ export function decide(
   return { winner: w.member_id, price: second ? Math.min(w.amount, second.amount + 1) : minBid, dropped };
 }
 
+/** Calls a close needs in one invocation (D1 and Discord, the tie-break aside): it waits for a fresh run below this. */
+export const CLOSE_NEEDS = 16;
+/** Calls the result's card edit, line and standings need (result:<id>). */
+export const RESULT_NEEDS = 14;
+
 /**
  * auction:<id> at closes_at. Idempotent (alarms run at least once): only an open auction past its close time closes, in a
- * batch whose first statement re-checks both, with the winner's balance; a balance that moved since it was read (a shop
- * purchase in between) closes nothing, and the item runs again at once.
+ * batch whose first statement re-checks both, with the winner's balance and the bids as they were read (review of PR B):
+ * a balance or a bid that moved since (a shop purchase, a bid landing during the close) closes nothing, and the item runs
+ * again at once. The card, the result line and the standings are their own item, result:<id>, so they retry on their own.
  */
-export async function closeAuction(db: D1Database, api: BotApi | null, guild: Guild, channelId: string | null, id: number, nowMs: number, s: Settings): Promise<{ again: number } | { closed: Auction } | null> {
+export async function closeAuction(db: D1Database, api: BotApi | null, guild: Guild, id: number, nowMs: number, s: Settings): Promise<{ again: number } | { closed: Auction } | null> {
   const a = await auctionById(db, guild.id, id);
   if (!a || a.status !== 'open') return null;
   if (Date.parse(a.closes_at!) > nowMs) return { again: Date.parse(a.closes_at!) };
-  const { results: bids } = await db.prepare(BIDS_SQL).bind(id, guild.id).all<BidRow>();
+  if (api && budgetLeft(api.budget) < CLOSE_NEEDS) return { again: nowMs };
+  const [read, print] = await db.batch<Record<string, unknown>>([db.prepare(BIDS_SQL).bind(id, guild.id), db.prepare(`SELECT ${BIDS_FINGERPRINT('?1')} AS fp`).bind(id)]);
+  const bids = (read.results as unknown as BidRow[]).filter((b) => b.dropped !== WITHDRAWN);
+  const fp = (print.results[0] as { fp: string }).fp;
   const members = bids.map((b) => b.member_id);
   const [{ standings }, refusals] = await Promise.all([dkpRead(db, guild.id, { pools: [a.pool] }), eligibility(db, guild.id, a, members, nowMs, s)]);
   const balances = new Map((standings.get(a.pool) ?? []).map((m) => [m.member_id, m.balance]));
@@ -422,37 +459,42 @@ export async function closeAuction(db: D1Database, api: BotApi | null, guild: Gu
     }
   const result = decide(bids, (m) => balances.get(m) ?? 0, refused, (m) => attendance.get(m) ?? 0, a.min_bid);
   const at = new Date(nowMs).toISOString();
-  const marks = [...result.dropped].map(([m, why]) => db.prepare('UPDATE dkp_bid SET dropped = ? WHERE auction_id = ? AND member_id = ?').bind(why, id, m));
-  if (result.winner) {
-    const [closed] = await db.batch([
-      db
-        .prepare(
-          `UPDATE dkp_auction SET status = 'sold', winner = ?3, price = ?4, closed_at = ?5 WHERE id = ?6 AND status = 'open' AND closes_at <= ?5
-             AND ${balanceSql('?3')} >= ?4`,
-        )
-        .bind(guild.id, a.pool, result.winner, result.price, at, id),
-      auctionSpendStatement(db, { guildId: guild.id, pool: a.pool, member: result.winner, price: result.price!, auctionId: id, raidId: a.raid_id, reason: A.spendReason(a.item_name), at }),
-      ...marks,
-    ]);
-    if (!closed.meta.changes) {
-      const still = await auctionById(db, guild.id, id);
-      return still?.status === 'open' ? { again: nowMs } : null;
-    }
-  } else {
-    const [closed] = await db.batch([
-      db.prepare("UPDATE dkp_auction SET status = 'unsold', closed_at = ?1 WHERE id = ?2 AND status = 'open' AND closes_at <= ?1").bind(at, id),
-      ...marks,
-    ]);
-    if (!closed.meta.changes) return null;
+  // The marks apply only with this close (review of PR B: a close that changed nothing leaves no stale mark).
+  const marks = [...result.dropped].map(([m, why]) =>
+    db.prepare('UPDATE dkp_bid SET dropped = ?1 WHERE auction_id = ?2 AND member_id = ?3 AND EXISTS (SELECT 1 FROM dkp_auction WHERE id = ?2 AND closed_at = ?4)').bind(why, id, m, at),
+  );
+  const [closed] = await db.batch([
+    result.winner
+      ? db
+          .prepare(
+            `UPDATE dkp_auction SET status = 'sold', winner = ?3, price = ?4, closed_at = ?5 WHERE id = ?6 AND status = 'open' AND closes_at <= ?5
+               AND ${balanceSql('?3')} >= ?4 AND ${BIDS_FINGERPRINT('?6')} = ?7`,
+          )
+          .bind(guild.id, a.pool, result.winner, result.price, at, id, fp)
+      : db.prepare(`UPDATE dkp_auction SET status = 'unsold', closed_at = ?1 WHERE id = ?2 AND status = 'open' AND closes_at <= ?1 AND ${BIDS_FINGERPRINT('?2')} = ?3`).bind(at, id, fp),
+    ...(result.winner ? [auctionSpendStatement(db, { guildId: guild.id, pool: a.pool, member: result.winner, price: result.price!, auctionId: id, raidId: a.raid_id, reason: A.spendReason(a.item_name), at })] : []),
+    ...marks,
+  ]);
+  if (!closed.meta.changes) {
+    const still = await auctionById(db, guild.id, id);
+    return still?.status === 'open' ? { again: nowMs } : null;
   }
-  const done = (await auctionById(db, guild.id, id))!;
-  if (api && channelId) {
-    if (done.message_id) await editIn(api, channelId, done.message_id, await cardFor(db, guild, done));
-    const winner = done.winner ? memberTag(done.winner, bids.find((b) => b.member_id === done.winner)?.name ?? done.winner) : null;
-    await postIn(api, channelId, { content: A.result(done.item_name, winner, done.price, link(guild.id, channelId, done.message_id)) });
-    if (done.winner) await refreshStandings(db, api, guild.id, channelId, [done.pool]);
-  }
-  return { closed: done };
+  return { closed: (await auctionById(db, guild.id, id))! };
+}
+
+/**
+ * result:<id> after a close: the card edited into the result (every bid revealed), the result line, the standings. Waits
+ * for a run with the calls it needs; a throw is retried by the timer object (the line is posted last, after the edits).
+ */
+export async function announceResult(db: D1Database, api: BotApi | null, guild: Guild, channelId: string | null, id: number, nowMs: number): Promise<{ again: number } | null> {
+  const a = await auctionById(db, guild.id, id);
+  if (!a || (a.status !== 'sold' && a.status !== 'unsold') || !api || !channelId) return null;
+  if (budgetLeft(api.budget) < RESULT_NEEDS) return { again: nowMs };
+  if (a.message_id) await editIn(api, channelId, a.message_id, await cardFor(db, guild, a));
+  if (a.winner) await refreshStandings(db, api, guild.id, channelId, [a.pool]);
+  const name = a.winner ? (await db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(guild.id, a.winner).first<{ display_name: string }>())?.display_name : null;
+  await postIn(api, channelId, { content: A.result(a.item_name, a.winner ? memberTag(a.winner, name ?? a.winner) : null, a.price, link(guild.id, channelId, a.message_id)) });
+  return null;
 }
 
 // ---------------------------------------------------------------- cancel, and Post to general auction
@@ -476,7 +518,10 @@ async function cancelSubmitted(c: Ctx, d: DkpState, id: number, components: Moda
   if (dkpSelfConflict(c.userId, { bidders: await biddersOf(c.db, id) })) return ephemeral(A.ownBid);
   const at = now();
   const [res] = await c.db.batch([
-    c.db.prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = ?2, closed_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND status IN ('open', 'queued')").bind(reason, c.userId, at, id, c.guild.id),
+    // Not after its close time (review of PR B: a late alarm leaves the close to the timer, never to a cancel).
+    c.db
+      .prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = ?2, closed_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND status IN ('open', 'queued') AND (closes_at IS NULL OR closes_at > ?3)")
+      .bind(reason, c.userId, at, id, c.guild.id),
     audit(c.db, c.guild.id, c.userId, 'dkp.auction.cancel', `auction:${id}`, { status: 'open' }, { status: 'cancelled' }),
   ]);
   if (!res.meta.changes) return ephemeral(A.closed);
