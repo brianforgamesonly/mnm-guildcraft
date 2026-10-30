@@ -10,7 +10,7 @@
 // view of another member's panel leaves them out. Edit, Remove, Update skills and Cancel a request work for officers,
 // as /character edit member:, /character remove member:, the Update skills buttons and /craft requests did.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
-import { audit, now } from '../access.ts';
+import { audit, now, touchMember } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
@@ -261,12 +261,15 @@ export async function addSubmitted(c: Ctx, customId: string, components: ModalCo
   const v = modalValues(components);
   const level = levelOf(v.get('level'));
   const cls = (v.get('class') ?? '').trim();
-  return characterAdd(c, [
+  // Order 32: an event card's Add a character reaches this form from a member who may never have run a command.
+  const { isNew } = await touchMember(c.db, c.guild.id, c.member);
+  const reply = await characterAdd(c, [
     opt('name', v.get('name') ?? ''),
     ...(cls ? [opt('class', cls)] : []),
     ...(level !== undefined ? [opt('level', level)] : []),
     ...(v.get('main') === YES ? [opt('main', true)] : []),
   ]);
+  return isNew ? { ...reply, data: { ...reply.data, embeds: [...(reply.data.embeds ?? []).slice(0, 9), WELCOME] } } : reply;
 }
 
 // ---------------------------------------------------------------- Edit character (a select when several, then a modal)
