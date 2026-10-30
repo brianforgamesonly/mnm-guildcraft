@@ -38,4 +38,7 @@ export const TYPE_RULES: Record<EventType, TypeRule> = {
   other: { statuses: ['signed_up', 'tentative', 'declined'], character: 'optional', limits: false, zone: 'optional', casual: true, hours: 2 },
 };
 
+/** The stored status of a preview not yet posted (migrations/0024's CHECK). Members never see the word. */
+export const PREVIEW = 'draft';
+
 export const LIMIT_COLUMN: Record<Role, 'limit_tank' | 'limit_healer' | 'limit_dps' | 'limit_support'> = { tank: 'limit_tank', healer: 'limit_healer', dps: 'limit_dps', support: 'limit_support' };

@@ -198,6 +198,23 @@ describe('re-arming on Add (section E)', () => {
   });
 });
 
+describe('evclose (review of PR A)', () => {
+  const run = (id: number, db: D1Database = env.DB) => EVENT_HANDLERS.evclose({ ...env, DB: db } as never, GUILD, String(id), 0, Date.now(), null);
+
+  it('a second run still asks for the card: the first may have died before it could', async () => {
+    await addEvents();
+    const id = await insertEvent(new Date(Date.now() - 1000).toISOString(), null);
+    expect(await run(id)).toMatchObject({ schedule: [{ key: `evcard:${id}` }] });
+    expect(await run(id)).toMatchObject({ schedule: [{ key: `evcard:${id}` }] });
+  });
+
+  it('a failed run tries again within the hour rather than being dropped', async () => {
+    const before = Date.now();
+    const r = await run(1, { prepare: () => { throw new Error('D1 down'); } } as unknown as D1Database);
+    expect(r!.again).toBeGreaterThanOrEqual(before + 3_600_000);
+  });
+});
+
 describe('/event settings and the switch\'s help page', () => {
   it('defaults, as section E states them', () => {
     expect(eventSettingsOf(null)).toEqual({
@@ -231,9 +248,28 @@ describe('/event settings and the switch\'s help page', () => {
     expect(await count('event_class_role')).toBe(0);
   });
 
-  it('class: without role: is refused', async () => {
+  it('class: without role: is refused, and so is a class the game does not have; a class is stored as the game spells it', async () => {
     await addEvents();
     expect((await eventCmd(admin, 'settings', { class: 'CLR' })).data.content).toBe(EVENT_COPY.classNeedsRole);
+    expect((await eventCmd(admin, 'settings', { class: 'Nonsense', role: 'tank' })).data.content).toBe(EVENT_COPY.unknownClass('Nonsense'));
+    expect(await count('event_class_role')).toBe(0);
+    await eventCmd(admin, 'settings', { class: 'clr', role: 'tank' });
+    expect(await one('SELECT class_code FROM event_class_role')).toEqual({ class_code: 'CLR' });
+  });
+
+  it('an audit row keeps the value before', async () => {
+    await addEvents();
+    await eventCmd(admin, 'settings', { lock_minutes: 10 });
+    const row = await one<{ detail_json: string }>("SELECT detail_json FROM audit_log WHERE action = 'event.setting'");
+    expect(JSON.parse(row.detail_json)).toEqual({ before: { value: 30 }, after: { value: '10' } });
+  });
+
+  it('a refused upsert on a second Add leaves a running module on', async () => {
+    await addEvents();
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'POST' && p.endsWith('/commands') ? json({ message: 'no', code: 0 }, 500) : handle(m, p, b));
+    expect((await addEvents()).data.content).toContain(EVENT_COPY.commandFailed(500));
+    expect(await one('SELECT enabled FROM event_guild')).toEqual({ enabled: 1 });
   });
 
   it('the Events help page shows only where the module is on', () => {

@@ -47,58 +47,68 @@ function settingsText(d: EventState, classes: { class_code: string; role: Role }
 
 async function settings(c: Ctx, opts: Option[], d: EventState): Promise<MessageReply> {
   const g = c.guild.id;
-  /** key, stored value (null deletes the row), and how the public notice shows it. */
-  const changes: { key: string; label: string; value: string | null; shown: string }[] = [];
+  const s = d.settings;
+  /** key, stored value (null deletes the row), how the public notice shows it, and the value before. */
+  const changes: { key: string; label: string; value: string | null; shown: string; before: unknown }[] = [];
   const tz = optString(opts, 'time_zone')?.trim();
   if (tz !== undefined) {
     if (!validTimeZone(tz)) return ephemeral(EVENT_COPY.badTimeZone(md(truncate(tz, 64))));
-    changes.push({ key: TIME_ZONE, label: EVENT_COPY.timeZone, value: tz, shown: tz });
+    changes.push({ key: TIME_ZONE, label: EVENT_COPY.timeZone, value: tz, shown: tz, before: s.time_zone });
   }
   for (const n of EVENT_SETTINGS) {
     const v = optInt(opts, n.key);
-    if (v !== undefined && eventSettingOf(n.key)) changes.push({ key: n.key, label: n.label, value: String(v), shown: `${v} ${n.unit}` });
+    if (v !== undefined && eventSettingOf(n.key)) changes.push({ key: n.key, label: n.label, value: String(v), shown: `${v} ${n.unit}`, before: s[n.key] });
   }
   const eventsRole = optString(opts, 'events_role');
-  if (eventsRole !== undefined) changes.push({ key: EVENTS_ROLE, label: EVENT_COPY.whoCreates, value: eventsRole, shown: roleName(eventsRole) });
+  if (eventsRole !== undefined) changes.push({ key: EVENTS_ROLE, label: EVENT_COPY.whoCreates, value: eventsRole, shown: roleName(eventsRole), before: s.events_role });
   const signupRole = optString(opts, 'signup_role');
-  if (signupRole !== undefined) changes.push({ key: SIGNUP_ROLE, label: EVENT_COPY.defaultSignup, value: signupRole, shown: roleName(signupRole) });
+  if (signupRole !== undefined) changes.push({ key: SIGNUP_ROLE, label: EVENT_COPY.defaultSignup, value: signupRole, shown: roleName(signupRole), before: s.signup_role });
   const clear = optString(opts, 'clear');
-  if (clear === EVENTS_ROLE) changes.push({ key: EVENTS_ROLE, label: EVENT_COPY.whoCreates, value: null, shown: EVENT_COPY.officerRole });
-  if (clear === SIGNUP_ROLE) changes.push({ key: SIGNUP_ROLE, label: EVENT_COPY.defaultSignup, value: null, shown: EVENT_COPY.none });
+  if (clear === EVENTS_ROLE) changes.push({ key: EVENTS_ROLE, label: EVENT_COPY.whoCreates, value: null, shown: EVENT_COPY.officerRole, before: s.events_role });
+  if (clear === SIGNUP_ROLE) changes.push({ key: SIGNUP_ROLE, label: EVENT_COPY.defaultSignup, value: null, shown: EVENT_COPY.none, before: s.signup_role });
   const support = optBool(opts, 'support');
-  if (support !== undefined) changes.push({ key: SUPPORT_ON, label: EVENT_COPY.support, value: support ? '1' : '0', shown: support ? EVENT_COPY.on : EVENT_COPY.off_ });
+  if (support !== undefined) changes.push({ key: SUPPORT_ON, label: EVENT_COPY.support, value: support ? '1' : '0', shown: support ? EVENT_COPY.on : EVENT_COPY.off_, before: s.support_on });
   for (const r of ROLES) {
     const v = optString(opts, `role_${r}`)?.trim();
-    if (v) changes.push({ key: roleLabelKey(r), label: `${EVENT_COPY.roleLabels}: ${md(d.settings.role_labels[r])}`, value: v, shown: md(v) });
+    if (v) changes.push({ key: roleLabelKey(r), label: `${EVENT_COPY.roleLabels}: ${md(s.role_labels[r])}`, value: v, shown: md(v), before: s.role_labels[r] });
   }
   for (const t of TYPES) {
     const v = optString(opts, `type_${t}`)?.trim();
-    if (v) changes.push({ key: typeLabelKey(t), label: `${EVENT_COPY.typeLabels}: ${md(d.settings.type_labels[t])}`, value: v, shown: md(v) });
+    if (v) changes.push({ key: typeLabelKey(t), label: `${EVENT_COPY.typeLabels}: ${md(s.type_labels[t])}`, value: v, shown: md(v), before: s.type_labels[t] });
   }
-  const cls = optString(opts, 'class')?.trim();
+  const typedClass = optString(opts, 'class')?.trim();
   const role = optString(opts, 'role') as Role | 'none' | undefined;
-  if (!!cls !== !!role) return ephemeral(EVENT_COPY.classNeedsRole);
-  if (!changes.length && !cls) {
+  if (!!typedClass !== !!role) return ephemeral(EVENT_COPY.classNeedsRole);
+  if (!changes.length && !typedClass) {
     const { results } = await c.db.prepare('SELECT class_code, role FROM event_class_role WHERE guild_id = ? ORDER BY class_code').bind(g).all<{ class_code: string; role: Role }>();
-    return ephemeral(settingsText(d, results));
+    return ephemeral(truncate(settingsText(d, results), 2000));
+  }
+  // A class is one the game has (autocomplete accepts free text). None clears what is stored, whatever it says.
+  let cls = typedClass;
+  const known = cls ? await c.db.prepare('SELECT code FROM game_class WHERE code = ? COLLATE NOCASE').bind(cls).first<{ code: string }>() : null;
+  if (cls && role !== 'none') {
+    if (!known) return ephemeral(EVENT_COPY.unknownClass(md(truncate(cls, 32))));
+    cls = known.code;
   }
   const at = now();
   const stmts: D1PreparedStatement[] = changes.flatMap((x) => [
     x.value === null
       ? c.db.prepare('DELETE FROM event_setting WHERE guild_id = ? AND key = ?').bind(g, x.key)
       : c.db.prepare('INSERT INTO event_setting (guild_id, key, value, set_at, set_by) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (guild_id, key) DO UPDATE SET value = ?3, set_at = ?4, set_by = ?5').bind(g, x.key, x.value, at, c.userId),
-    audit(c.db, g, c.userId, 'event.setting', `setting:${x.key}`, null, { value: x.value }),
+    audit(c.db, g, c.userId, 'event.setting', `setting:${x.key}`, { value: x.before }, { value: x.value }),
   ]);
-  const notices = changes.map((x) => EVENT_COPY.changed(x.label, x.shown, byName(c)));
+  const notices = changes.map((x) => EVENT_COPY.changed(x.label, x.shown));
   if (cls && role) {
+    const was = await c.db.prepare('SELECT role FROM event_class_role WHERE guild_id = ? AND class_code = ?').bind(g, cls).first<{ role: Role }>();
     stmts.push(
       role === 'none'
         ? c.db.prepare('DELETE FROM event_class_role WHERE guild_id = ? AND class_code = ?').bind(g, cls)
         : c.db.prepare('INSERT INTO event_class_role (guild_id, class_code, role, set_at, set_by) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (guild_id, class_code) DO UPDATE SET role = ?3, set_at = ?4, set_by = ?5').bind(g, cls, role, at, c.userId),
-      audit(c.db, g, c.userId, 'event.setting', `class:${cls}`, null, { role }),
+      audit(c.db, g, c.userId, 'event.setting', `class:${cls}`, { role: was?.role ?? null }, { role }),
     );
-    notices.push(EVENT_COPY.changed(EVENT_COPY.classRole(md(cls)), role === 'none' ? EVENT_COPY.none : md(d.settings.role_labels[role]), byName(c)));
+    notices.push(EVENT_COPY.changed(EVENT_COPY.classRole(md(cls)), role === 'none' ? EVENT_COPY.none : md(s.role_labels[role])));
   }
+  notices.push(EVENT_COPY.changedBy(byName(c)));
   await c.db.batch(stmts);
   const api = eventApi(c, 1);
   try {

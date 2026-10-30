@@ -9,7 +9,7 @@ import { EVENT_COPY } from './copy.ts';
 import type { EventSettings } from './settings.ts';
 import type { EventState } from './state.ts';
 import { stamp } from './times.ts';
-import { LIMIT_COLUMN, ROLE_DEFAULTS, ROLES, TYPE_RULES, type Choice, type EventType, type Role, type Status } from './types.ts';
+import { LIMIT_COLUMN, PREVIEW, ROLE_DEFAULTS, ROLES, TYPE_RULES, type Choice, type EventType, type Role, type Status } from './types.ts';
 
 export const STATUS_PREFIX = 'evs:';
 export const CHANGE_CHARACTER_PREFIX = 'evcc:';
@@ -34,7 +34,7 @@ export interface EventRow {
   signup_role: string | null;
   lock_at: string | null;
   closes_at: string;
-  status: 'draft' | 'open' | 'cancelled' | 'closed';
+  status: typeof PREVIEW | 'open' | 'cancelled' | 'closed';
   message_id: string | null;
   posted_by: string;
   poster_name?: string | null;
@@ -147,10 +147,14 @@ export function layoutRoster(header: string, sections: Section[], reserved: numb
       if (value.length + add.length > EMBED_LIMITS.fieldValue - MORE_RESERVE || used + name.length + value.length + add.length > total) break;
       value += add;
     }
-    fields.push({ name, value: value || EVENT_COPY.nobodyYet });
+    if (!value) {
+      // A field that took nothing means the next line can't fit at all; an empty group still says so, when that fits.
+      if (i < lines.length && !lines[i].first) break;
+      value = EVENT_COPY.nobodyYet;
+      if (used + name.length + value.length > total) break;
+    }
+    fields.push({ name, value });
     used += name.length + value.length;
-    // A field that took nothing means the next line can't fit at all.
-    if (!value && i < lines.length && !lines[i].first) break;
   }
   const left = lines.slice(i).filter((l) => !l.first).length;
   if (left) {
@@ -170,7 +174,7 @@ function header(e: EventRow, now: number): string {
     e.status === 'cancelled' ? EVENT_COPY.cancelledLine(md(e.cancel_reason ?? '')) : e.status === 'closed' ? EVENT_COPY.closedLine : null,
     `${stamp(start, 'F')} (${stamp(start, 'R')})`,
     [EVENT_COPY.duration(hours), zone, EVENT_COPY.posted(memberTag(e.posted_by, e.poster_name ?? e.posted_by))].filter(Boolean).join(' · '),
-    e.status === 'open' || e.status === 'draft' ? (lock === null ? EVENT_COPY.noLock : lock <= now ? EVENT_COPY.locked(stamp(lock, 'f')) : EVENT_COPY.locks(stamp(lock, 'f'), stamp(lock, 'R'))) : null,
+    e.status === 'open' || e.status === PREVIEW ? (lock === null ? EVENT_COPY.noLock : lock <= now ? EVENT_COPY.locked(stamp(lock, 'f')) : EVENT_COPY.locks(stamp(lock, 'f'), stamp(lock, 'R'))) : null,
     e.signup_role ? EVENT_COPY.signupRole(e.signup_role) : null,
     e.description ? md(e.description) : null,
   ]
@@ -186,7 +190,7 @@ export function cardButtons(e: Pick<EventRow, 'id' | 'type'>): unknown[] {
   return [row(statuses), ...(changes.length ? [row(changes)] : [])];
 }
 
-/** The card's embed and buttons. Only an open event has buttons (a draft's are the preview's own). */
+/** The card's embed and buttons. Only an open event has buttons (a preview carries its own). */
 export function cardMessage(e: EventRow, signups: SignupRow[], s: EventSettings, now: number): { embeds: Embed[]; components: unknown[] } {
   const title = `${e.status === 'cancelled' ? EVENT_COPY.cancelledTag : ''}${md(s.type_labels[e.type])} · ${md(e.title)}`.slice(0, EMBED_LIMITS.title);
   const declined = signups.filter((x) => x.status === 'declined').length;
@@ -207,7 +211,7 @@ export const messageLink = (guildId: string, channelId: string, messageId: strin
  */
 export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, state: EventState, id: number, now: number) {
   const e = await loadEvent(env.DB, guildId, id);
-  if (!e || e.status === 'draft' || !state.channel_id) return null;
+  if (!e || e.status === PREVIEW || !state.channel_id) return null;
   const m = cardMessage(e, await loadSignups(env.DB, id), state.settings, now);
   const body = { ...m, allowed_mentions: NO_PINGS };
   if (e.message_id) {

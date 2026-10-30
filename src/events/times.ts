@@ -101,7 +101,7 @@ export function parseStart(typed: string, tz: string, nowMs: number): { at: numb
 }
 
 /** The full date in the server's zone: "Saturday, October 31, 2026 at 8:00 PM EDT". */
-export const fullDate = (ms: number, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, dateStyle: 'full', timeStyle: 'short' }).format(ms);
+export const fullDate = (ms: number, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(ms);
 /** Discord's local-time displays. */
 export const stamp = (ms: number, style: 'F' | 'R' | 'f' | 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 

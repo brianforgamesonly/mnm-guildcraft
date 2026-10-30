@@ -1,6 +1,6 @@
 // Order 32 (ITEM 2): /event create (with its private preview), edit, cancel and list. Create takes its fields as options:
 // 13 fit Discord's 25 per subcommand, and options bring the zone's autocomplete and Discord's role picker, which a modal
-// doesn't, so no modal is used. A preview is a row with status 'draft'; Post opens it.
+// doesn't, so no modal is used. A preview is a row with status PREVIEW; Post opens it.
 import { audit, isEventRunner, now } from '../access.ts';
 import type { Ctx } from '../context.ts';
 import { button, EMBED_LIMITS, ephemeral, md, memberTag, NO_PINGS, optInt, optBool, optString, row, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
@@ -10,7 +10,7 @@ import { EVENT_COPY } from './copy.ts';
 import { eventApi, spentEvent, type EventRun } from './commands.ts';
 import type { EventState } from './state.ts';
 import { fullDate, lockAndClose, MAX_DAYS_AHEAD, parseStart, stamp } from './times.ts';
-import { LIMIT_COLUMN, ROLES, TYPE_RULES, type EventType, type Role } from './types.ts';
+import { LIMIT_COLUMN, PREVIEW, ROLES, TYPE_RULES, type EventType, type Role } from './types.ts';
 import { MAX_PROMOTIONS, promotionStatements } from './signup.ts';
 
 export const POST_PREFIX = 'evpost:';
@@ -77,7 +77,7 @@ export const createCommand: EventRun = async (c, opts, d) => {
   const at = now();
   const times = lockAndClose(parsed.at, d.settings);
   const [, inserted] = await c.db.batch<{ id: number }>([
-    c.db.prepare("DELETE FROM event WHERE guild_id = ? AND status = 'draft' AND created_at < ?").bind(c.guild.id, new Date(Date.now() - DRAFT_MS).toISOString()),
+    c.db.prepare('DELETE FROM event WHERE guild_id = ? AND status = ? AND created_at < ?').bind(c.guild.id, PREVIEW, new Date(Date.now() - DRAFT_MS).toISOString()),
     c.db
       .prepare(INSERT_SQL)
       .bind(c.guild.id, f.type, f.title, new Date(parsed.at).toISOString(), f.duration_minutes, f.zone_key, f.description, f.capacity, f.limit_tank, f.limit_healer, f.limit_dps, f.limit_support, f.when_full, f.signup_role, times.lock_at, times.closes_at, c.userId, at),
@@ -95,19 +95,19 @@ export async function postDraft(c: Ctx, id: string, d: EventState): Promise<Mess
   if (!isEventRunner(c.guild, d.settings.events_role, c.member)) return ephemeral(EVENT_COPY.notRunner);
   const eventId = Number(id.slice(POST_PREFIX.length));
   const e = await loadEvent(c.db, c.guild.id, eventId);
-  if (!e || e.status !== 'draft' || e.posted_by !== c.userId) return updateMessage({ content: EVENT_COPY.draftGone, embeds: [], components: [] });
+  if (!e || e.status !== PREVIEW || e.posted_by !== c.userId) return updateMessage({ content: EVENT_COPY.draftGone, embeds: [], components: [] });
   if (Date.parse(e.start_at) <= Date.now()) return ephemeral(EVENT_COPY.pastStart);
   if (!d.channel_id) return ephemeral(EVENT_COPY.noChannel);
   const api = eventApi(c, 1);
   if (!api) return ephemeral(EVENT_COPY.noChannel);
   try {
     // One press wins: the row opens first, so a second press finds it open and posts nothing.
-    const took = await c.db.prepare("UPDATE event SET status = 'open' WHERE id = ? AND guild_id = ? AND status = 'draft'").bind(eventId, c.guild.id).run();
+    const took = await c.db.prepare("UPDATE event SET status = 'open' WHERE id = ? AND guild_id = ? AND status = ?").bind(eventId, c.guild.id, PREVIEW).run();
     if (took.meta.changes !== 1) return updateMessage({ content: EVENT_COPY.draftGone, embeds: [], components: [] });
     const open: EventRow = { ...e, status: 'open' };
     const posted = await api.call<{ id: string }>('POST', `/channels/${d.channel_id}/messages`, { ...cardMessage(open, [], d.settings, Date.now()), allowed_mentions: NO_PINGS });
     if (!posted.ok) {
-      await c.db.prepare("UPDATE event SET status = 'draft' WHERE id = ?").bind(eventId).run();
+      await c.db.prepare('UPDATE event SET status = ? WHERE id = ?').bind(PREVIEW, eventId).run();
       return ephemeral(EVENT_COPY.postFailed(posted.status));
     }
     await c.db.batch([c.db.prepare('UPDATE event SET message_id = ? WHERE id = ?').bind(posted.body.id, eventId), audit(c.db, c.guild.id, c.userId, 'event.create', `event:${eventId}`, null, { type: e.type, start: e.start_at })]);
@@ -120,7 +120,7 @@ export async function postDraft(c: Ctx, id: string, d: EventState): Promise<Mess
 
 /** evdrop:<id>: the preview's Cancel. It removes the poster's own unposted row. */
 export async function dropDraft(c: Ctx, id: string): Promise<MessageReply> {
-  await c.db.prepare("DELETE FROM event WHERE id = ? AND guild_id = ? AND status = 'draft' AND posted_by = ?").bind(Number(id.slice(DROP_PREFIX.length)), c.guild.id, c.userId).run();
+  await c.db.prepare('DELETE FROM event WHERE id = ? AND guild_id = ? AND status = ? AND posted_by = ?').bind(Number(id.slice(DROP_PREFIX.length)), c.guild.id, PREVIEW, c.userId).run();
   return updateMessage({ content: EVENT_COPY.dropped, embeds: [], components: [] });
 }
 
@@ -229,7 +229,7 @@ async function upcoming(c: Ctx, d: EventState, type: EventType | undefined): Pro
 /** One event's full roster, paged, in the presser's private message. */
 async function rosterPage(c: Ctx, d: EventState, id: number, page: number, inPlace: boolean): Promise<MessageReply> {
   const e = await loadEvent(c.db, c.guild.id, id);
-  if (!e || e.status === 'draft') return ephemeral(EVENT_COPY.notOpen);
+  if (!e || e.status === PREVIEW) return ephemeral(EVENT_COPY.notOpen);
   const sections = rosterSections(e, await loadSignups(c.db, id), d.settings);
   const lines = sections.flatMap((s) => [`**${s.head}**`, ...s.lines]);
   const pages = Math.max(1, Math.ceil(lines.length / ROSTER_PAGE));
@@ -252,7 +252,7 @@ export function rosterPageButton(c: Ctx, id: string, d: EventState): Promise<Mes
 async function history(c: Ctx, d: EventState, id: number): Promise<MessageReply> {
   if (!isEventRunner(c.guild, d.settings.events_role, c.member)) return ephemeral(EVENT_COPY.historyOfficers);
   const e = await loadEvent(c.db, c.guild.id, id);
-  if (!e || e.status === 'draft') return ephemeral(EVENT_COPY.notOpen);
+  if (!e || e.status === PREVIEW) return ephemeral(EVENT_COPY.notOpen);
   const { results } = await c.db
     .prepare(
       `SELECT h.member_id, h.status, h.actor, h.reason, h.at, coalesce(m.display_name, h.member_id) AS name FROM event_signup_history h
