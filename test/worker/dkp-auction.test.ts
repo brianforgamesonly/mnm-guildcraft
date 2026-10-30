@@ -680,6 +680,12 @@ describe('decay (order 29, ITEM 8)', () => {
     expect(await run(Date.now())).toBe(null);
   });
 
+  it('review of PR D: Remove DKP closes open shop listings', async () => {
+    await shopAdd(officer, { item: 'Lantern', price: 1 });
+    await pressAs(admin, REMOVE_DKP_PREFIX);
+    expect(await one<{ closed_by: string }>('SELECT closed_by FROM dkp_listing')).toEqual({ closed_by: 'bot' });
+  });
+
   it('cost: one statement per guild per week; rows read for 1 guild, and for 1 of 10 guilds of the same size', async () => {
     const members = 50;
     const seed = async (guild: string) => {

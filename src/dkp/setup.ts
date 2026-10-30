@@ -161,6 +161,8 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     closeOpenRaid(c.db, g, c.userId, 'removed'),
     // Order 29: every open or queued auction is cancelled ("DKP removed"; its card reveals the bids) before the timers go.
     cancelAllStatement(c.db, g, at),
+    // Review of PR D: open shop listings close too (their Buy answers "DKP is off", then "closed" after Add DKP).
+    c.db.prepare("UPDATE dkp_listing SET closed_at = ?1, closed_by = 'bot' WHERE guild_id = ?2 AND closed_at IS NULL").bind(at, g),
     // Order 29 (override 2): a raid closed by Remove DKP pays its Standby once, as any close does.
     ...(open ? standbyPayouts(c.db, g, open, state.settings, at) : []),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.

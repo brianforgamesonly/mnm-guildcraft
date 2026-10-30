@@ -124,7 +124,13 @@ const decay: Handler = async (env, guildId, _id, _due, now) => {
   if (!state.enabled) return null;
   const s = state.settings;
   const at = new Date(now).toISOString();
-  await env.DB.batch([decayStatement(env.DB, { guildId, idleSince: new Date(now - s.decay_days * 86_400_000).toISOString(), percent: s.decay_percent, reason: SHOP_COPY.decayReason(s.decay_days, s.decay_percent), at })]);
+  try {
+    await env.DB.batch([decayStatement(env.DB, { guildId, idleSince: new Date(now - s.decay_days * 86_400_000).toISOString(), percent: s.decay_percent, reason: SHOP_COPY.decayReason(s.decay_days, s.decay_percent), at })]);
+  } catch (e) {
+    // Review of PR D: a failed run tries again within the hour, never ends decay (the object drops an item after 5 throws).
+    console.error('dkp decay failed', e instanceof Error ? e.message : String(e));
+    return { again: now + 3_600_000 };
+  }
   return { again: now + WEEK_MS };
 };
 
