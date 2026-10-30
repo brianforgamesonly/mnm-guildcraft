@@ -135,6 +135,17 @@ const openEvents = (gate: 'member' | 'runner'): Lister => async ({ db, i, typed 
     .map((r) => ({ name: truncate(`${r.title} · ${r.start_at.slice(0, 16).replace('T', ' ')} UTC`, CHOICE_MAX), value: String(r.id) }));
 };
 
+/** Order 32: /event roster character: the characters of the member: option, for whoever runs events. One statement. */
+const rosterCharacters: Lister = async ({ db, i, options, typed }) => {
+  const member = optString(options, 'member');
+  if (!member) return [];
+  const { results } = await db
+    .prepare(`SELECT c.name FROM character c WHERE c.guild_id = ?1 AND c.deleted_at IS NULL AND (?3 = ?3) AND c.owner_user_id = ?4 AND ${SQL_RUNS_EVENTS} ORDER BY c.is_main DESC, c.name COLLATE NOCASE`)
+    .bind(...sqlAccessParams(i.guild_id, i.member), member)
+    .all<{ name: string }>();
+  return asChoices(matchChoices(results.map((r) => r.name), typed));
+};
+
 /**
  * Order 18: each list is chosen by command and option ("/command [subcommand] option"), never by the option's name alone,
  * so /item name: (every item) and /request item: (items with a recipe) keep their own lists. Every autocomplete option in
@@ -180,7 +191,7 @@ export const LISTS: Record<string, Lister> = {
   '/event cancel event': openEvents('runner'),
   '/event list event': openEvents('member'),
   '/event roster event': openEvents('runner'),
-  '/event roster character': characters,
+  '/event roster character': rosterCharacters,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

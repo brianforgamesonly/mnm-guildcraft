@@ -53,11 +53,14 @@ const evlock: DueHandler = async (env, guildId, id, _due, now, api) => {
   if (!state.enabled) return null;
   const eventId = Number(id);
   const e = await loadEvent(env.DB, guildId, eventId);
-  if (!e || e.status !== 'open' || !e.lock_at || e.lock_done_at) return null;
+  if (!e || e.status !== 'open' || !e.lock_at) return null;
+  const card = [{ key: `evcard:${id}`, due: now }];
+  // Done, by this run or by one that died before it could ask for the card (alarms run at least once).
+  if (e.lock_done_at) return { schedule: card };
   if (Date.parse(e.lock_at) > now) return { again: Date.parse(e.lock_at) };
   const at = new Date(now).toISOString();
-  const card = [{ key: `evcard:${id}`, due: now }];
-  const finish = (cursor: string | null) => env.DB.prepare('UPDATE event SET lock_done_at = ?, left_cursor = ? WHERE id = ?').bind(at, cursor, eventId);
+  // Each write names the lock it worked for, so a start moved during this run keeps its fresh lock.
+  const finish = (cursor: string | null) => env.DB.prepare('UPDATE event SET lock_done_at = ?, left_cursor = ? WHERE id = ? AND lock_at = ?').bind(at, cursor, eventId, e.lock_at);
   if (!api || Date.parse(e.start_at) <= now) {
     await finish(e.left_cursor).run();
     return { schedule: card };
@@ -81,15 +84,17 @@ const evlock: DueHandler = async (env, guildId, id, _due, now, api) => {
     looked++;
   }
   const done = !stopped && looked === results.length && results.length < LEFT_BATCH;
+  // Names first: once the batch below has run, a failure here could lose the notice.
+  const signups = left.length ? new Map((await loadSignups(env.DB, eventId)).map((s) => [s.member_id, s.name])) : new Map<string, string>();
   const moved = await env.DB.batch<{ member_id: string }>([
     ...(left.length ? [...leftStatements(env.DB, eventId, left, at), ...promotionStatements(env.DB, eventId, at, Math.min(left.length, MAX_PROMOTIONS))] : []),
-    done ? finish(cursor) : env.DB.prepare('UPDATE event SET left_cursor = ? WHERE id = ?').bind(cursor, eventId),
+    done ? finish(cursor) : env.DB.prepare('UPDATE event SET left_cursor = ? WHERE id = ? AND lock_at = ?').bind(cursor, eventId, e.lock_at),
   ]);
   if (left.length && state.channel_id) {
     const promoted = moved.slice(2, -2).flatMap((r) => r.results.map((x) => x.member_id));
-    const signups = new Map((await loadSignups(env.DB, eventId)).map((s) => [s.member_id, s.name]));
     const tags = (ids: string[]) => ids.map((m) => memberTag(m, signups.get(m) ?? m)).join(', ');
-    await api.call('POST', `/channels/${state.channel_id}/messages`, { content: truncate([EVENT_COPY.leftLine(md(e.title), tags(left)), ...(promoted.length ? [EVENT_COPY.promotedLine(tags(promoted))] : [])].join('\n'), 2000), allowed_mentions: NO_PINGS });
+    const posted = await api.call('POST', `/channels/${state.channel_id}/messages`, { content: truncate([EVENT_COPY.leftLine(md(e.title), tags(left)), ...(promoted.length ? [EVENT_COPY.promotedLine(tags(promoted))] : [])].join('\n'), 2000), allowed_mentions: NO_PINGS });
+    if (!posted.ok) console.error('event notice failed', posted.status);
   }
   if (done) return { schedule: card };
   // Discord said something else, or the budget ran out: the next batch, a moment later (each alarm is its own invocation).

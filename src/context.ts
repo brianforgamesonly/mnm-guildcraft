@@ -19,6 +19,8 @@ export interface Effects {
   dkpTimers?: { guildId: string; items: { key: string; due: number; later?: boolean }[] };
   /** Order 27: cancel every DKP timer of this guild (Remove DKP). */
   dkpCancel?: string;
+  /** Order 32: a press created this member's row, so its reply carries the one-time welcome a first command would. */
+  welcome?: boolean;
   /** Order 32: cancel every Events timer of this guild (Remove Events module). */
   eventsCancel?: string;
   /** Order 30: ensure this guild's decay item (Add DKP), after the reply. */

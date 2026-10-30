@@ -60,15 +60,15 @@ const OWN_SQL = `SELECT c.id, c.name, c.class, c.level, c.is_main, r.role AS sug
   WHERE c.guild_id = ? AND c.owner_user_id = ? AND c.deleted_at IS NULL ORDER BY c.is_main DESC, c.created_at, c.id`;
 const ownCharacters = async (c: Ctx, member: string) => (await c.db.prepare(OWN_SQL).bind(c.guild.id, member).all<Own>()).results;
 
-function refusalText(r: SignupRefusal): string {
+function refusalText(r: SignupRefusal, officer = false): string {
   switch (r.code) {
     case 'cancelled': return EVENT_COPY.isCancelled;
     case 'closed': return EVENT_COPY.isClosed;
     case 'spam': return EVENT_COPY.tooFast;
-    case 'frozen': return EVENT_COPY.frozen;
+    case 'frozen': return officer ? EVENT_COPY.memberFrozen : EVENT_COPY.frozen;
     case 'left': return EVENT_COPY.leftServer;
     case 'locked': return EVENT_COPY.isLocked;
-    default: return EVENT_COPY.needsRole(r.role);
+    default: return officer ? EVENT_COPY.memberNeedsServerRole(r.role) : EVENT_COPY.needsRole(r.role);
   }
 }
 
@@ -85,17 +85,20 @@ const memberRow = (c: Ctx, m: GuildMember) =>
   c.db.prepare("INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, ?, 'active', ?) ON CONFLICT DO NOTHING").bind(c.guild.id, m.user.id, m.nick || m.user.global_name || m.user.username, now());
 
 /** Names for a notice. */
-async function tags(c: Ctx, ids: string[]): Promise<string> {
+export async function tags(c: Ctx, ids: string[]): Promise<string> {
   const { results } = await c.db.prepare('SELECT discord_user_id AS id, display_name AS name FROM member WHERE guild_id = ? AND discord_user_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, JSON.stringify(ids)).all<{ id: string; name: string }>();
   const names = new Map(results.map((r) => [r.id, r.name]));
   return ids.map((id) => memberTag(id, names.get(id) ?? id)).join(', ');
 }
 
 /** A line in GC-Events: every change after the lock, and every /event roster change. It pings nobody. */
-async function notice(c: Ctx, d: EventState, line: string): Promise<void> {
-  const api = eventApi(c, 1);
+export async function notice(c: Ctx, d: EventState, line: string): Promise<boolean> {
+  const api = eventApi(c, 2);
   try {
-    if (api && d.channel_id) await api.call('POST', `/channels/${d.channel_id}/messages`, { content: truncate(line, 2000), allowed_mentions: NO_PINGS });
+    if (!api || !d.channel_id) return false;
+    const r = await api.call('POST', `/channels/${d.channel_id}/messages`, { content: truncate(line, 2000), allowed_mentions: NO_PINGS });
+    if (!r.ok) console.error('event notice failed', r.status);
+    return r.ok;
   } finally {
     spentEvent(c, api);
   }
@@ -118,6 +121,7 @@ async function apply(c: Ctx, d: EventState, e: EventRow, cur: Current | null, st
     ...changeStatements(c.db, { eventId: e.id, member: c.userId, status, role, character, actor: c.userId, reason: null, at }),
     ...(freed ? promotionStatements(c.db, e.id, at, 1) : []),
   ]);
+  if (results[0].meta.changes === 1) c.effects.welcome = true;
   const final = results[1].results[0]?.status;
   if (!final) return EVENT_COPY.notOpen;
   const promoted = freed ? (results[3].results[0]?.member_id ?? null) : null;
@@ -137,6 +141,8 @@ function picker(e: EventRow, d: EventState, status: Choice, chars: Own[], charId
   const rule = TYPE_RULES[e.type];
   const required = rule.character === 'required';
   const roles = ROLES.filter((r) => d.settings.support_on || r !== 'support' || cur?.role === 'support');
+  // A class default that isn't on offer (Support turned off) is no suggestion.
+  if (role && !roles.includes(role)) role = null;
   const shown = chars.slice(0, SELECT_MAX - 1);
   const charSelect = {
     type: MessageComponentTypes.STRING_SELECT,
@@ -162,6 +168,9 @@ function picker(e: EventRow, d: EventState, status: Choice, chars: Own[], charId
   });
 }
 
+/** Already there: nothing changes, and a member on the waitlist or holding a place keeps it (a form left open can't cost it). */
+const alreadyThere = (cur: Current | null, status: Status) => cur?.status === status || (status === 'signed_up' && cur?.status === 'waitlist');
+
 /** evs:<event>:<status>: one of the card's status buttons. */
 export async function statusPress(c: Ctx, id: string, d: EventState): Promise<MessageReply> {
   const [eventText, statusText] = parseEvent(id, STATUS_PREFIX);
@@ -175,8 +184,7 @@ export async function statusPress(c: Ctx, id: string, d: EventState): Promise<Me
   const refusal = askRefusal(c, e, p, leaving);
   if (refusal) return ephemeral(refusalText(refusal));
   const cur = p.current;
-  // Already there: nothing changes, and a waitlisted member keeps their place.
-  if (cur?.status === status || (status === 'signed_up' && cur?.status === 'waitlist')) return ephemeral(EVENT_COPY.already(statusWord(cur.status, e)));
+  if (alreadyThere(cur, status)) return ephemeral(EVENT_COPY.already(statusWord(cur!.status, e)));
   if (leaving) return ephemeral(await apply(c, d, e, cur, status, cur?.role ?? null, keptSnapshot(cur)));
   if (rule.character === 'none') return ephemeral(await apply(c, d, e, cur, status, null, null));
   if (keptSnapshot(cur) && (cur?.role || rule.character !== 'required')) return ephemeral(await apply(c, d, e, cur, status, cur!.role, keptSnapshot(cur)));
@@ -217,6 +225,7 @@ export async function confirmPress(c: Ctx, id: string, d: EventState): Promise<M
   const refusal = askRefusal(c, e, p, false);
   if (refusal) return updateMessage({ content: refusalText(refusal), components: [] });
   if (!TYPE_RULES[e.type].statuses.includes(status as Choice)) return updateMessage({ content: EVENT_COPY.notOpen, components: [] });
+  if (alreadyThere(p.current, status as Status)) return updateMessage({ content: EVENT_COPY.already(statusWord(p.current!.status, e)), components: [] });
   const role = roleText === NONE ? null : (roleText as Role);
   if (role && !ROLES.includes(role)) return updateMessage({ content: EVENT_COPY.notOpen, components: [] });
   if (role === 'support' && !d.settings.support_on && p.current?.role !== 'support') return updateMessage({ content: EVENT_COPY.supportOff(md(d.settings.role_labels.support)), components: [] });
@@ -301,7 +310,7 @@ export const rosterCommand: EventRun = async (c, opts: Option[], d) => {
   const leaving = action === 'remove' || optString(opts, 'status') === 'declined';
   const resolved = c.resolved?.members?.[member] as { nick?: string | null; roles?: string[] } | undefined;
   const refusal = signupRefusal({ event: e, memberRole: c.guild.member_role_id, roles: resolved?.roles ?? [], memberStatus: p.memberStatus, current: cur?.status ?? null, leaving, route: 'officer', inServer: !!resolved, recent: 0, now: Date.now() });
-  if (refusal) return ephemeral(refusalText(refusal));
+  if (refusal) return ephemeral(refusalText(refusal, true));
   const rule = TYPE_RULES[e.type];
   const onRoster = cur && (ON_ROSTER as readonly string[]).includes(cur.status);
   if (action !== 'add' && !onRoster) return ephemeral(EVENT_COPY.notOnRoster);
@@ -324,11 +333,12 @@ export const rosterCommand: EventRun = async (c, opts: Option[], d) => {
   const results = await c.db.batch<{ status?: Status; member_id?: string }>([
     c.db.prepare("INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, ?, 'active', ?) ON CONFLICT DO NOTHING").bind(c.guild.id, member, name, at),
     ...changeStatements(c.db, { eventId: e.id, member, status, role, character, actor: c.userId, reason, at, force: true }),
-    ...(freed ? promotionStatements(c.db, e.id, at, 1) : []),
+    ...(freed ? promotionStatements(c.db, e.id, at, 1, member) : []),
     audit(c.db, c.guild.id, c.userId, 'event.roster', `event:${e.id}`, { member, status: cur?.status ?? null }, { status, role }),
   ]);
   redraw(c, e.id);
   const promoted = freed ? results[3].results[0]?.member_id : undefined;
-  await notice(c, d, [EVENT_COPY.rosterLine(md(e.title), memberTag(member, name), statusWord(status, e), byName(c), md(reason)), ...(promoted ? [EVENT_COPY.promotedLine(await tags(c, [promoted]))] : [])].join('\n'));
-  return ephemeral(EVENT_COPY.rosterDone);
+  const shown = role ? `${statusWord(status, e)} (${md(d.settings.role_labels[role])})` : statusWord(status, e);
+  const posted = await notice(c, d, [EVENT_COPY.rosterLine(md(e.title), memberTag(member, name), shown, byName(c), md(reason)), ...(promoted ? [EVENT_COPY.promotedLine(await tags(c, [promoted]))] : [])].join('\n'));
+  return ephemeral(posted ? EVENT_COPY.rosterDone : EVENT_COPY.rosterQuiet);
 };

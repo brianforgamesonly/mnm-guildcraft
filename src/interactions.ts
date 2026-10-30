@@ -301,7 +301,10 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 32: Add and Remove Events module, admins only; then every other Events control.
   if (id.startsWith(ADD_EVENTS_PREFIX)) return isAdmin(i.member!) ? addEventsButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(REMOVE_EVENTS_PREFIX)) return isAdmin(i.member!) ? removeEventsButton(c) : ephemeral(ADMIN_ONLY);
-  if (id.startsWith(EVENT_PREFIX)) return eventComponent(c, id, i.data?.values ?? []);
+  if (id.startsWith(EVENT_PREFIX)) {
+    const reply = await eventComponent(c, id, i.data?.values ?? []);
+    return effects.welcome ? withWelcome(reply) : reply;
+  }
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

@@ -12,6 +12,7 @@ import { eventApi, spentEvent, type EventRun } from './commands.ts';
 import type { EventState } from './state.ts';
 import { fullDate, lockAndClose, MAX_DAYS_AHEAD, parseStart, stamp } from './times.ts';
 import { LIMIT_COLUMN, PREVIEW, ROLES, TYPE_RULES, type EventType, type Role } from './types.ts';
+import { notice, tags } from './press.ts';
 import { MAX_PROMOTIONS, promotionStatements } from './signup.ts';
 
 export const POST_PREFIX = 'evpost:';
@@ -198,8 +199,11 @@ export const editCommand: EventRun = async (c, opts, d) => {
     // Raising a limit promotes from the waitlist; lowering one moves nobody (the statement finds no room).
     ...(waiting?.n ? promotionStatements(c.db, id, at, Math.min(waiting.n, MAX_PROMOTIONS)) : []),
   ];
-  const [took] = await c.db.batch(stmts);
-  if (took.meta.changes !== 1) return ephemeral(retype ? EVENT_COPY.typeLocked : EVENT_COPY.notOpen);
+  const results = await c.db.batch<{ member_id?: string }>(stmts);
+  if (results[0].meta.changes !== 1) return ephemeral(retype ? EVENT_COPY.typeLocked : EVENT_COPY.notOpen);
+  // Each change after the lock is posted, a promotion by this edit too.
+  const promoted = results.slice(2, -1).flatMap((r) => r.results.map((x) => x.member_id!)).filter(Boolean);
+  if (promoted.length && lock && Date.parse(lock) <= Date.now()) await notice(c, d, `**${md(f.title)}:** ${EVENT_COPY.promotedLine(await tags(c, promoted))}`);
   const items: { key: string; due: number; later?: boolean }[] = [{ key: `evcard:${id}`, due: Date.now() }];
   // A new start moves the lock and the close: `later` replaces the old items even with a later time.
   if (moved) items.push(...(lock ? [{ key: `evlock:${id}`, due: Date.parse(lock), later: true }] : []), { key: `evclose:${id}`, due: Date.parse(closes), later: true });

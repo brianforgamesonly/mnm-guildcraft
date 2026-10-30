@@ -36,7 +36,7 @@ export function signupRefusal(a: Asking): SignupRefusal | null {
   if (a.route === 'member' && a.recent >= SPAM_LIMIT) return { code: 'spam' };
   if (a.leaving) return null;
   if (a.memberStatus === 'left') return { code: 'frozen' };
-  if (a.current === 'left' && !a.inServer) return { code: 'left' };
+  if (!a.inServer) return { code: 'left' };
   if (a.route === 'member' && a.event.lock_at && Date.parse(a.event.lock_at) <= a.now) return { code: 'locked' };
   if (a.memberRole && !a.roles.includes(a.memberRole)) return { code: 'member_role', role: a.memberRole };
   if (a.event.signup_role && !a.roles.includes(a.event.signup_role)) return { code: 'signup_role', role: a.event.signup_role };

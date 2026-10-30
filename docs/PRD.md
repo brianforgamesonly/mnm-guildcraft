@@ -824,3 +824,8 @@ Approved by the owner on 2026-10-30. Events is an optional module for raids and 
 - Events settings have their own table, event_setting, in dkp_setting's pattern (a row per changed value), rather than rows in dkp_setting: a server can run Events without DKP.
 - The rule for a time on the weekday form: today when that time is still ahead, otherwise the same weekday next week. The preview shows the full date.
 - A local time that doesn't exist (the hour clocks skip in spring) is refused; one that happens twice (the hour repeated in autumn) means the first.
+- `/event create` takes its fields as options, with no modal: 13 fit Discord's 25, and options bring the zone's autocomplete and the role picker.
+- Only Signed up (Going) counts against a limit or the capacity; Tentative, Bench and Waitlist take no place. Bench takes members only by the event's when-full setting or their own press, and nobody moves up from it automatically.
+- A member changing role while waitlisted keeps their place, and moves up on that press if the new role has room.
+- A member marked frozen (status left) can still press Can't make it, which is never gated. The spam limit applies to it.
+- An officer's `/event roster` passes the lock and limits, but not the member role, the event's sign-up role or frozen, and the member must be in the server.

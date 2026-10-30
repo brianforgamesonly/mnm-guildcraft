@@ -16,7 +16,8 @@ import { ADMIN_ONLY } from '../../src/interactions.ts';
 import { SEND_MESSAGES, VIEW_CHANNEL } from '../../src/discord.ts';
 import { INSTALL_PERMISSIONS } from '../../src/permissions.ts';
 import { all, count, one, reset } from '../db.ts';
-import { ADMIN, APP_ID, as, botApi, GUILD, press, rawCmd, select, send, type Member } from '../discord.ts';
+import { WELCOME } from '../../src/commands/welcome.ts';
+import { ADMIN, APP_ID, as, auto, botApi, GUILD, press, rawCmd, select, send, submit, type Member } from '../discord.ts';
 
 const TOKEN = { env: { DISCORD_BOT_TOKEN: 'test-bot-token' } };
 const OFFICER_ROLE = '600000000000000002';
@@ -471,7 +472,9 @@ describe('the spam limit', () => {
     await env.DB.prepare("UPDATE event_signup_history SET at = '2000-01-01T00:00:00.000Z'").run();
     await pressAs(ann, `${STATUS_PREFIX}${id}:bench`);
     expect((await row(id, ann))!.status).toBe('bench');
-    expect((await event(officer, 'roster', { event: String(id), action: 'move', member: ann.user.id, status: 'tentative', reason: 'x' })).data.content).toBe(EVENT_COPY.rosterDone);
+    const i = rawCmd(officer, 'event', 'roster', { event: String(id), action: 'move', member: ann.user.id, status: 'tentative', reason: 'x' });
+    const r = await send({ ...i, data: { ...i.data, resolved: { users: { [ann.user.id]: ann.user }, members: { [ann.user.id]: { nick: null, roles: [] } } } } }, TOKEN);
+    expect(r.data.content).toBe(EVENT_COPY.rosterDone);
   });
 });
 
@@ -586,7 +589,7 @@ describe('/event roster', () => {
     await lockPassed(id);
     expect((await roster(ann, bo, { event: String(id), action: 'add', reason: 'x' })).data.content).toBe(EVENT_COPY.notRunner);
     expect((await roster(officer, ann, { event: String(id), action: 'add', role: 'tank', reason: ' ' })).data.content).toBe(EVENT_COPY.noReason);
-    expect((await roster(officer, ann, { event: String(id), action: 'add', role: 'tank', reason: 'x' })).data.content).toBe(EVENT_COPY.needsRole(RAID_ROLE));
+    expect((await roster(officer, ann, { event: String(id), action: 'add', role: 'tank', reason: 'x' })).data.content).toBe(EVENT_COPY.memberNeedsServerRole(RAID_ROLE));
     expect((await roster(officer, ann, { event: String(id), action: 'add', role: 'tank', reason: 'x' }, [RAID_ROLE])).data.content).toBe(EVENT_COPY.rosterDone);
   });
 
@@ -625,6 +628,102 @@ it('the card is derived from the rows, and every press asks for one edit', async
 const until = async (ok: () => Promise<boolean>) => {
   for (let i = 0; i < 40 && !(await ok()); i++) await new Promise((r) => setTimeout(r, 50));
 };
+
+describe('review of PR C', () => {
+  it('Add a character works for a member who has never run a command, with the one-time welcome', async () => {
+    const id = await posted(RAID);
+    const r = await pressAs(ann, `${STATUS_PREFIX}${id}:signed_up`);
+    expect(r.data.components![0].components[0].custom_id).toBe(`mea:${ann.user.id}`);
+    const done = await send(submit(ann, `meam:${ann.user.id}`, { name: 'Firsttimer', class: 'CLR', level: '5' }), TOKEN);
+    expect(await count('character', 'owner_user_id = ?', ann.user.id)).toBe(1);
+    expect(JSON.stringify(done.data.embeds)).toContain(WELCOME.title);
+  });
+
+  it('a first sign-up by press carries the welcome a first command would', async () => {
+    const id = await posted(SOCIAL);
+    const r = await pressAs(ann, `${STATUS_PREFIX}${id}:signed_up`);
+    expect(JSON.stringify(r.data.embeds)).toContain(WELCOME.title);
+    const again = await pressAs(ann, `${STATUS_PREFIX}${id}:tentative`);
+    expect(again.data.embeds).toBeUndefined();
+  });
+
+  it('a form left open can\'t cost a member their place', async () => {
+    const [a, b] = [await character(ann, 'Aelin', 'CLR', 32), await character(bo, 'Bryn', 'CLR', 30)];
+    const id = await posted({ ...RAID, healer: 1, tank: 1 });
+    await signUp(id, ann, a, 'tank');
+    await signUp(id, bo, b, 'healer');
+    const r = await pressAs(ann, `${CONFIRM_PREFIX}${id}:signed_up:${a}:healer`);
+    expect(r.data.content).toBe(EVENT_COPY.already('Signed up'));
+    expect(await row(id, ann)).toMatchObject({ status: 'signed_up', role: 'tank' });
+  });
+
+  const resolved = (m: Member) => ({ users: { [m.user.id]: m.user }, members: { [m.user.id]: { nick: null, roles: [] } } });
+  const roster = (target: Member, opts: Record<string, unknown>, inServer = true) => {
+    const i = rawCmd(officer, 'event', 'roster', { member: target.user.id, ...opts });
+    return send({ ...i, data: { ...i.data, resolved: inServer ? resolved(target) : { users: { [target.user.id]: target.user } } } }, TOKEN);
+  };
+
+  it('an officer moving a member to the waitlist means it; someone earlier still moves up', async () => {
+    const [a, b] = [await character(ann, 'Aelin', 'CLR', 32), await character(bo, 'Bryn', 'CLR', 30)];
+    const id = await posted({ ...RAID, healer: 1 });
+    await signUp(id, ann, a, 'healer');
+    await roster(ann, { event: String(id), action: 'move', status: 'waitlist', reason: 'x' });
+    expect((await row(id, ann))!.status).toBe('waitlist');
+    await env.DB.prepare("UPDATE event_signup SET status = 'signed_up', queued_at = NULL WHERE member_id = ?").bind(ann.user.id).run();
+    await signUp(id, bo, b, 'healer');
+    await roster(ann, { event: String(id), action: 'move', status: 'waitlist', reason: 'x' });
+    expect((await row(id, bo))!.status).toBe('signed_up');
+    expect((await row(id, ann))!.status).toBe('waitlist');
+  });
+
+  it('a user not in the server can\'t be added; a role-only move names the role; a failed post says so', async () => {
+    await character(ann, 'Aelin', 'CLR', 32);
+    const id = await posted(RAID);
+    expect((await roster(ann, { event: String(id), action: 'add', role: 'tank', reason: 'x' }, false)).data.content).toBe(EVENT_COPY.leftServer);
+    await roster(ann, { event: String(id), action: 'add', role: 'tank', reason: 'x' });
+    await roster(ann, { event: String(id), action: 'move', role: 'dps', reason: 'y' });
+    expect(notices().at(-1)).toContain('(DPS)');
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'POST' && p.endsWith('/messages') ? json({ message: 'no', code: 50013 }, 403) : handle(m, p, b));
+    expect((await roster(ann, { event: String(id), action: 'move', role: 'tank', reason: 'z' })).data.content).toBe(EVENT_COPY.rosterQuiet);
+  });
+
+  it('a second evlock run still asks for the card; a start moved during a run keeps its fresh lock', async () => {
+    const id = await posted(RAID);
+    await lockPassed(id);
+    await runItem('evlock', id);
+    expect(await runItem('evlock', id)).toMatchObject({ schedule: [{ key: `evcard:${id}` }] });
+  });
+
+  it('a class default that is turned off is no suggestion, so the form stays usable', async () => {
+    const a = await character(ann, 'Aelin', 'CLR', 32);
+    await event(admin, 'settings', { class: 'CLR', role: 'support' });
+    await event(admin, 'settings', { support: false });
+    const id = await posted(RAID);
+    const form = await pressAs(ann, `${STATUS_PREFIX}${id}:signed_up`);
+    expect(form.data.components![2].components[0]).toMatchObject({ disabled: true, custom_id: `${CONFIRM_PREFIX}${id}:signed_up:${a}:-` });
+  });
+
+  it('an edit that promotes after the lock is posted', async () => {
+    const [a, b] = [await character(ann, 'Aelin', 'CLR', 32), await character(bo, 'Bryn', 'CLR', 30)];
+    const id = await posted({ ...RAID, healer: 1 });
+    await signUp(id, ann, a, 'healer');
+    await signUp(id, bo, b, 'healer');
+    await lockPassed(id);
+    await event(officer, 'edit', { event: String(id), healer: 2 });
+    expect((await row(id, bo))!.status).toBe('signed_up');
+    expect(notices().at(-1)).toContain('moved up');
+  });
+
+  it('the roster\'s character list is the named member\'s, for whoever runs events', async () => {
+    await character(ann, 'Aelin', 'CLR', 32);
+    const runner = as('100000000000000031', { roles: [RAID_ROLE] });
+    await event(admin, 'settings', { events_role: RAID_ROLE });
+    const r = await send(auto(runner, 'event', 'roster', { member: ann.user.id, character: '' }, 'character'), TOKEN);
+    expect(r.data.choices!.map((c) => c.name)).toEqual(['Aelin']);
+    expect((await send(auto(bo, 'event', 'roster', { member: ann.user.id, character: '' }, 'character'), TOKEN)).data.choices).toEqual([]);
+  });
+});
 
 describe('the cost of a press', () => {
   const spy = vi.spyOn(console, 'log');

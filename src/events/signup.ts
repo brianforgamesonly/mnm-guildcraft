@@ -106,17 +106,18 @@ export const MAX_PROMOTIONS = 50;
 
 /**
  * Up to `slots` promotions, in order: each statement moves the earliest waitlisted member whose role now has room, up to
- * the start, and then one history statement records them. Each returns the member it moved.
+ * the start, and then one history statement records them. Each returns the member it moved. `except`: an officer who has
+ * just moved this member to the waitlist means it, so their own place doesn't bring them straight back.
  */
-export function promotionStatements(db: D1Database, eventId: number, at: string, slots: number): D1PreparedStatement[] {
+export function promotionStatements(db: D1Database, eventId: number, at: string, slots: number, except = ''): D1PreparedStatement[] {
   const one = db
     .prepare(
       `UPDATE event_signup SET status = 'signed_up', queued_at = NULL, updated_at = ?2, changed_by = 'bot', change_reason = '${PROMOTED}'
        WHERE event_id = ?1 AND member_id = (SELECT s.member_id FROM event_signup s JOIN event e ON e.id = s.event_id
-         WHERE s.event_id = ?1 AND s.status = 'waitlist' AND e.status = 'open' AND e.start_at > ?2 AND ${roomSql('s.role', 's.member_id')}
+         WHERE s.event_id = ?1 AND s.status = 'waitlist' AND s.member_id <> ?3 AND e.status = 'open' AND e.start_at > ?2 AND ${roomSql('s.role', 's.member_id')}
          ORDER BY s.queued_at, s.rowid LIMIT 1)
        RETURNING member_id`,
     )
-    .bind(eventId, at);
+    .bind(eventId, at, except);
   return [...Array.from({ length: slots }, () => one), historyStatement(db, eventId, at, { reason: PROMOTED })];
 }
