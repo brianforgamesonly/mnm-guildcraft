@@ -16,9 +16,11 @@ export interface Effects {
    */
   discordCalls?: number;
   /** Order 27: DKP timers to set on the guild's timer object (src/dkp/timers.ts), after the reply. */
-  dkpTimers?: { guildId: string; items: { key: string; due: number }[] };
+  dkpTimers?: { guildId: string; items: { key: string; due: number; later?: boolean }[] };
   /** Order 27: cancel every DKP timer of this guild (Remove DKP). */
   dkpCancel?: string;
+  /** Order 32: cancel every Events timer of this guild (Remove Events module). */
+  eventsCancel?: string;
   /** Order 30: ensure this guild's decay item (Add DKP), after the reply. */
   dkpDecay?: string;
 }

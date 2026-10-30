@@ -398,8 +398,38 @@ Order 31 moves cancelling an auction to a command and renames the after-kill re-
 - Override of the PRD's Order 29 Cancel rule, as stored at 155155d: "Cancel: an officer can cancel an open auction unless they have bid in it. The reason is required; the cancellation is public and reveals the bids. There's no spend."
   - Who may cancel, the self-conflict refusal, the required public reason, revealing the bids and no spend do not change. Only the control changes: cancelling moves from a button on the card to `/dkp cancel`.
 - Auction cards show members only controls they can use. On an auction card, every button any viewer sees is one a member can press; an officer-only auction action is a command. Exception: Post to general auction on a closed, unsold card stays. Raid cards and approval cards are officer workflow cards, and they keep their buttons.
-  - Open question for the owner (order 31's FINAL): Record what was done, on a closed, unsold general auction card, is officer-only and is not in the exception. It is unchanged until the owner decides.
+  - Decided by the owner (2026-10-30 12:11; order 32's override 3): Record what was done stays on closed, unsold general-auction cards. It is this rule's second exception.
 - "Kill roll call" is the name of the after-kill re-check, on the card, in replies, in the setting's label and in help. An earlier rule's "Check again" means it. The custom_id and the setting key `check_seconds` stay.
 - Ledger rows already written keep their stored reason text, because history is never rewritten (order 27). New rows use the new reason.
 - `/dkp cancel` and an old card's form share one cancel function (src/dkp/auction.ts `cancelAuction`). `dkpac:` and `dkpacm:` stay handled (order 18).
+- Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 32
+
+Order 32 is the Events module, part 1 (docs/PRD.md, "Events module"; the owner approved it on 2026-10-30). Its explicit overrides each quote the earlier rule in full.
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 3 pull requests, each with at most 3 pushes, and 3 merges. PR A: ITEMs 0–1; PR B: ITEM 2; PR C: ITEM 3.
+- Override 1, of order 18's "Order 18's explicit override 1 of the earlier orders' and the PRD's command names: the commands are `/me`, `/skills`, `/item`, `/gear`, `/roster`, `/zone`, `/request`, `/help`, `/officer` and `/guildcraft` (docs/PRD.md, "Work order 18" table). The old names are not registered and answer "not available"."
+  - `/event` is added beside it, registered per server only while the Events module is on, by the same step as `/dkp` (src/events/definition.ts, outside COMMANDS; scripts/discord/dkp.ts). Nothing else changes.
+- Override 2, of order 27's override 5, "one Durable Object class (SQLite-backed), DkpTimers, bound as DKP_TIMERS to each copy's Worker and used only for DKP timers;", and of Remove DKP module's `deleteAll()` (src/dkp/timers.ts at e29b905).
+  - The Events module's items share the guild's due-list. Every Events kind starts `ev`; no DKP kind does (test/worker/events-switch.test.ts).
+  - Each module removes only its own items. Remove DKP module keeps its effect on DKP items exactly; Remove Events module removes only Events items, and each card's pace goes with its item.
+- Override 3, of order 31's "Auction cards show members only controls they can use. On an auction card, every button any viewer sees is one a member can press; an officer-only auction action is a command. Exception: Post to general auction on a closed, unsold card stays. Raid cards and approval cards are officer workflow cards, and they keep their buttons."
+  - Second exception (the owner, 2026-10-30 12:11): Record what was done, on a closed, unsold general auction card, stays.
+  - The old Cancel button's handlers (`dkpac:`, `dkpacm:`) stay permanently, under order 18's "A button on a message the bot already sent keeps working after a rename: every custom_id prefix the code has ever sent is still handled." No removal is planned.
+- Override 4, of order 5's "The session never creates channels or posts on the owner's server. Live board posts start from the owner's own `/guildcraft setup board:`; before that, board code is verified in workerd against a mocked Discord API, and the dry run is a read-only render from live D1 (`.github/workflows/board.yml`, action `render`), with `delete` as the rollback.", as extended by orders 7, 9, 16, 19, 24 and 27, and of order 9's "A button on a posted (public) message answers the presser with a new private message (type 4, private), never UPDATE_MESSAGE (type 7): one member's press never changes a public post. Only officer cards and vault messages are edited in place."
+  - When an admin presses **Add Events module** in `/guildcraft setup`, the bot creates one text channel, GC-Events, with GC-DKP's overwrites (src/events/setup.ts): members read; only GuildCraft posts.
+  - In GC-Events the bot posts and edits only its own messages: event cards, setting notices, change notices and roster changes, each edited in place under order 27's override 2. The presser's own answer is always a new private message.
+  - The session posts nothing live. Tests use a mocked Discord.
+- Override 5, of order 2's "A member's command never reveals another member's private data. Replies about the caller are ephemeral. A name that resolves to another member's character returns the same "not found" a missing name would, unless the caller is an officer.", as order 29's override 4 extends it.
+  - Event rosters (character, class, level, status and member) are guild-public on the card.
+  - Sign-up history is shown only to officers, in `/event list`.
+  - Every reply to a press, `/event list` and the preview are private.
+- Override 6, of order 16's "Order 16's explicit override 2: members are shown as Discord user mentions (`<@id>`, src/discord.ts `memberTag`), always sent with `allowed_mentions` that pings nobody. Every create and every edit sends `allowed_mentions` explicitly (Discord re-parses an edit without it with default allowances). The only pings permitted: a request thread's first message pings the crafters it adds; a claim message pings the requester; a Done or Cancel message pings the other party.", restated for Events as order 27's override 9 is for DKP: Events messages ping nobody. Every GC-Events post and edit sets `allowed_mentions: {parse: []}`.
+- Events members see only controls they can use. On the event card every button is one any member can press. Officer actions are `/event` commands. This is order 31's rule, applied to event cards.
+- One function decides who may sign up for an event (the member role, the event's sign-up role, the lock, frozen, left), and every route calls it.
+- Every status change is a row in the event's sign-up history, with time and actor. The card and every count are derived from the current rows.
+- A sign-up keeps a snapshot of its character's name, class and level, so a deleted or renamed character never breaks a card. This is a deliberate exception to "Never add a column for a value the table already holds."
+- Roles and types are stored as fixed keys. Admins rename only their labels.
+- Direct messages of any kind are not in order 32: they are part 2, which brings the ping override.
 - Failed runs: every one is listed in the FINAL (order 12).

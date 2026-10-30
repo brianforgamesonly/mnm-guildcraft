@@ -8,6 +8,7 @@ import { HOW_TO_GET_LISTED } from '../../src/board/render.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
 import { NOT_YET } from '../../src/interactions.ts';
 import { DKP_COMING, DKP_COMMAND, DKP_DEFINED, DKP_DEFINED_LIST } from '../../src/dkp/definition.ts';
+import { EVENT_COMING, EVENT_DEFINED } from '../../src/events/definition.ts';
 import { APP_ID, as, exchange, post, press, rawCmd, send, top } from '../discord.ts';
 
 const helpCommand = top(as('100000000000000001'), 'help');
@@ -81,7 +82,11 @@ describe('/help pages (order 18: derived from the definitions)', () => {
   it('"coming soon" is exactly the PRD\'s commands that are not built (/recipe add), derived', () => {
     // Order 27: /dkp is a per-server definition; its PRD commands are built (DKP_DEFINED) or due in PR B (DKP_COMING).
     const isDkp = (c: string) => c.startsWith('/dkp ');
-    const unbuilt = prdCommands.filter((c) => !isDkp(c) && !DEFINED.has(c) && !COMMANDS.some((k) => `/${k.name}` === c));
+    // Order 32: /event likewise (EVENT_DEFINED, or EVENT_COMING until PR C).
+    const isEvent = (c: string) => c.startsWith('/event ');
+    expect(prdCommands.filter((c) => isEvent(c) && !EVENT_DEFINED.has(c)).sort()).toEqual([...EVENT_COMING].sort());
+    expect([...EVENT_DEFINED].filter((c) => !prdCommands.includes(c))).toEqual([]);
+    const unbuilt = prdCommands.filter((c) => !isDkp(c) && !isEvent(c) && c !== '/event' && !DEFINED.has(c) && !COMMANDS.some((k) => `/${k.name}` === c));
     expect(COMING.map((c) => c.cmd).sort()).toEqual(unbuilt.sort());
     expect(prdCommands.filter((c) => isDkp(c) && !DKP_DEFINED.has(c)).sort()).toEqual([...DKP_COMING].sort());
     expect([...DKP_DEFINED].filter((c) => !prdCommands.includes(c))).toEqual([]);
@@ -94,6 +99,7 @@ describe('/help pages (order 18: derived from the definitions)', () => {
     for (const [, name, sub] of named) {
       if (COMING.some((c) => c.cmd === `/${name}${sub ? ` ${sub}` : ''}`)) continue;
       // Order 27: /dkp is registered per server, where DKP is on (its page shows only there).
+      if (name === 'event') continue; // Order 32: checked against EVENT_DEFINED above, and registered per server.
       const c = [...COMMANDS, DKP_COMMAND].find((k) => k.name === name);
       expect(c, `/${name}`).toBeDefined();
       // Order 29: a subcommand group (type 2) is named as a subcommand is (`/dkp wishlist`).

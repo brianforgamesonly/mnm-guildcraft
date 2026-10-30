@@ -39,6 +39,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'dkp_guild', 'dkp_setting', 'dkp_named_value', 'dkp_pool', 'dkp_raid', 'dkp_attendance', 'dkp_kill', 'dkp_recheck', 'dkp_pending', 'dkp_ledger',
       // Order 29 (0023): kill rosters, auctions and bids, nudges, wishlists, the shop; and dkp_ledger rebuilt (override 1).
       'dkp_kill_member', 'dkp_auction', 'dkp_bid', 'dkp_nudge', 'dkp_wishlist', 'dkp_listing', 'dkp_purchase', 'dkp_ledger',
+      // Order 32 (0024): the Events module (the migration's header names each one's reason).
+      'event_guild', 'event_setting', 'event_class_role', 'event', 'event_signup', 'event_signup_history',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
@@ -50,6 +52,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'dkp_auction_by_raid', 'dkp_auction_live', 'dkp_auction_wins',
       'dkp_kill_by_raid', 'dkp_kill_member_by_member', 'dkp_ledger_auction_spend', 'dkp_ledger_balance', 'dkp_ledger_kill', 'dkp_ledger_purchase_spend', 'dkp_ledger_standby_once', 'dkp_listing_live',
       'dkp_purchase_by_listing', 'dkp_raid_by_pool', 'dkp_raid_by_time', 'dkp_raid_open', 'dkp_wishlist_by_item',
+      // Order 32 (0024): a member's changes in the last minute (the spam limit); upcoming events.
+      'event_history_by_member', 'event_upcoming',
       // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.
       'faction_changed', 'faction_post_dirty', 'faction_post_rendered',
       'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',

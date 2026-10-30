@@ -156,6 +156,8 @@ export const LISTS: Record<string, Lister> = {
   '/dkp shop add item': allItems,
   '/dkp wishlist add character': characters,
   '/dkp wishlist remove item': async ({ db, i, typed }) => asChoices(await ownWishlist(db, i.guild_id, i.member.user.id, typed)),
+  // Order 32: /event (a per-server definition, src/events/definition.ts). The class list is game_class's, cached.
+  '/event settings class': game('classes'),
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

@@ -74,6 +74,7 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
   // Order 27: DKP timers, after the member has the reply (one Durable Object request each).
   try {
     if (effects.dkpCancel) await timersOf(env, effects.dkpCancel).cancel();
+    if (effects.eventsCancel) await timersOf(env, effects.eventsCancel).cancelEvents();
     if (effects.dkpTimers?.items.length) await timersOf(env, effects.dkpTimers.guildId).schedule(effects.dkpTimers.guildId, effects.dkpTimers.items);
     if (effects.dkpDecay) await timersOf(env, effects.dkpDecay).ensureDecay(effects.dkpDecay);
   } catch (e) {

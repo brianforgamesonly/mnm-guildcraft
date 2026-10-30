@@ -36,6 +36,10 @@ import { loadDkp } from './dkp/state.ts';
 import { raidComponent } from './dkp/raid.ts';
 import { AUCTION_OPENS_MODAL, auctionComponent, auctionImmediate } from './dkp/auction.ts';
 import { shopComponent } from './dkp/shop.ts';
+import { EVENT_ROUTES, mayRunEvent } from './events/commands.ts';
+import { EVENT_COPY } from './events/copy.ts';
+import { ADD_EVENTS_PREFIX, addEventsButton, REMOVE_EVENTS_PREFIX, removeEventsButton } from './events/setup.ts';
+import { loadEvents } from './events/state.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type ModalComponent, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -79,7 +83,7 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
   // Order 16: craft requests. Each answers clearly where no request channel is set (src/requests.ts NO_REQUEST_CHANNEL).
   request: { access: 'member', run: craftRequest },
   // Order 27: the DKP page where DKP is on.
-  help: { access: 'open', run: async (c) => helpReply((await loadDkp(c.db, c.guild.id)).enabled) },
+  help: { access: 'open', run: async (c) => helpReply((await loadDkp(c.db, c.guild.id)).enabled, (await loadEvents(c.db, c.guild.id)).enabled) },
   'officer recipe-source': { access: 'officer', run: recipeSource },
   'officer recipe-fix': { access: 'officer', run: recipeOverride },
   'officer remove-member': { access: 'officer', run: officerRemoveMember },
@@ -96,13 +100,15 @@ const routeKey = (i: Interaction) => {
   return sub === undefined ? `${i.data?.name}` : `${i.data?.name} ${sub}`;
 };
 /** Order 27: /dkp's routes (src/dkp/commands.ts), kept apart from ROUTES as /dkp is kept apart from COMMANDS. */
-const routeOf = (i: Interaction): { search?: true } | undefined => ROUTES[routeKey(i)] ?? DKP_ROUTES[routeKey(i)];
+const routeOf = (i: Interaction): { search?: true } | undefined => ROUTES[routeKey(i)] ?? DKP_ROUTES[routeKey(i)] ?? EVENT_ROUTES[routeKey(i)];
 
 /**
  * Order 27: every DKP button and select starts with this. Each keeps working after DKP is removed, answering "DKP is off
  * on this server" (order 18: every sent custom_id stays handled); Add DKP and Remove DKP are routed before it.
  */
 export const DKP_PREFIX = 'dkp';
+/** Order 32: every Events button and select starts with this; each answers "off" while the module is off. */
+export const EVENT_PREFIX = 'ev';
 
 const ctxFor = (env: Env, guild: Guild, m: GuildMember, effects: Effects, i?: Interaction): Ctx => ({
   db: env.DB,
@@ -210,8 +216,33 @@ async function dkpImmediate(c: Ctx, id: string, values: string[]): Promise<Inter
   return (await auctionImmediate(c, id, values, d)) ?? ephemeral(STALE_FORM);
 }
 
+/** Order 32: /event's commands, as dkpCommand: the module must be on, then the route's own access, from this call's rights. */
+async function eventCommand(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
+  const { options } = subcommand(i);
+  const route = EVENT_ROUTES[routeKey(i)];
+  const guild = await ensureGuild(env.DB, env.DISCORD_BOT_TOKEN, i.guild_id!, ctx);
+  const m = i.member!;
+  const d = await loadEvents(env.DB, guild.id);
+  if (!d.enabled) return ephemeral(EVENT_COPY.off);
+  const passesGate = passesMemberGate(guild, m);
+  const c = ctxFor(env, guild, m, effects, i);
+  if (!mayRunEvent(c, route.access, d)) return ephemeral(route.access === 'admin' ? ADMIN_ONLY : EVENT_COPY.notRunner);
+  if (route.access === 'member' && !passesGate) return ephemeral(roleRequired(guild));
+  const isNew = passesGate ? (await touchMember(env.DB, guild.id, m)).isNew : false;
+  const reply = await route.run(c, options, d);
+  return isNew ? withWelcome(reply) : reply;
+}
+
+/** Order 32: an Events button or select (prefix ev, after Add and Remove Events module). */
+async function eventComponent(c: Ctx): Promise<MessageReply> {
+  const d = await loadEvents(c.db, c.guild.id);
+  if (!d.enabled) return ephemeral(EVENT_COPY.off);
+  return ephemeral(STALE_FORM);
+}
+
 async function command(i: Interaction, env: Env, ctx: WaitUntil, effects: Effects): Promise<MessageReply> {
   if (DKP_ROUTES[routeKey(i)]) return dkpCommand(i, env, ctx, effects);
+  if (EVENT_ROUTES[routeKey(i)]) return eventCommand(i, env, ctx, effects);
   const { options } = subcommand(i);
   const route = ROUTES[routeKey(i)]!;
   // Rights are re-read from this request (member.roles, member.permissions) every time.
@@ -244,13 +275,17 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   const c = ctxFor(env, guild, i.member!, effects, i);
   const id = i.data?.custom_id ?? '';
   // Order 18: /help's page buttons, open to anyone (as /help is).
-  if (id.startsWith(HELP_PREFIX)) return helpButton(id, (await loadDkp(env.DB, guild.id)).enabled);
+  if (id.startsWith(HELP_PREFIX)) return helpButton(id, (await loadDkp(env.DB, guild.id)).enabled, (await loadEvents(env.DB, guild.id)).enabled);
   // Order 19: Create GuildCraft channels, admins only, as /guildcraft setup is (rights from this press).
   if (id.startsWith(CREATE_CHANNELS_PREFIX)) return isAdmin(i.member!) ? createChannelsButton(c) : ephemeral(ADMIN_ONLY);
   // Order 27: Add DKP and Remove DKP, admins only, as Create GuildCraft channels; then every other DKP control.
   if (id.startsWith(ADD_DKP_PREFIX)) return isAdmin(i.member!) ? addDkpButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(REMOVE_DKP_PREFIX)) return isAdmin(i.member!) ? removeDkpButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(DKP_PREFIX)) return dkpComponent(c, id, i.data?.values ?? [], i.data?.components);
+  // Order 32: Add and Remove Events module, admins only; then every other Events control.
+  if (id.startsWith(ADD_EVENTS_PREFIX)) return isAdmin(i.member!) ? addEventsButton(c) : ephemeral(ADMIN_ONLY);
+  if (id.startsWith(REMOVE_EVENTS_PREFIX)) return isAdmin(i.member!) ? removeEventsButton(c) : ephemeral(ADMIN_ONLY);
+  if (id.startsWith(EVENT_PREFIX)) return eventComponent(c);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

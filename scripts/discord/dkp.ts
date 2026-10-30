@@ -6,23 +6,31 @@
 // a 200 if it does" (docs.discord.com/developers/interactions/application-commands, read 2026-10-29).
 import { DKP_COMMAND } from '../../src/dkp/definition.ts';
 import { DKP_ON_SQL, GUARD_PATH, signGuard, type EnsureResult, type GuardResult } from '../../src/dkp/guard.ts';
+import { EVENT_COMMAND } from '../../src/events/definition.ts';
 
 export { DKP_ON_SQL };
 
 export type Call = (method: string, path: string, body?: unknown) => Promise<{ status: number; text: string }>;
 
-/** Upserts /dkp on each server; returns one line per server for the log (no server ids: they are pseudonymised by index). */
-export async function upsertDkp(call: Call, appId: string, guildIds: string[]): Promise<{ lines: string[]; failed: number }> {
+/** Order 32: the servers whose Events module is on (event_guild), as DKP_ON_SQL. */
+export const EVENTS_ON_SQL = 'SELECT guild_id FROM event_guild WHERE enabled = 1 ORDER BY guild_id';
+
+/** Upserts one per-server command on each server; returns one line per server for the log (no server ids: pseudonymised by index). */
+async function upsert(call: Call, appId: string, guildIds: string[], command: { name: string }, what: string): Promise<{ lines: string[]; failed: number }> {
   const lines: string[] = [];
   let failed = 0;
   for (const [n, g] of guildIds.entries()) {
-    const r = await call('POST', `/applications/${appId}/guilds/${g}/commands`, DKP_COMMAND);
+    const r = await call('POST', `/applications/${appId}/guilds/${g}/commands`, command);
     const ok = r.status === 200 || r.status === 201;
     if (!ok) failed++;
-    lines.push(`/dkp on DKP server ${n + 1} of ${guildIds.length}: HTTP ${r.status}${ok ? '' : ` ${r.text.slice(0, 200)}`}`);
+    lines.push(`/${command.name} on ${what} server ${n + 1} of ${guildIds.length}: HTTP ${r.status}${ok ? '' : ` ${r.text.slice(0, 200)}`}`);
   }
   return { lines, failed };
 }
+
+export const upsertDkp = (call: Call, appId: string, guildIds: string[]) => upsert(call, appId, guildIds, DKP_COMMAND, 'DKP');
+/** Order 32: /event, the same step as /dkp (override 1). */
+export const upsertEvents = (call: Call, appId: string, guildIds: string[]) => upsert(call, appId, guildIds, EVENT_COMMAND, 'Events');
 
 /** The copy's live Worker address (workers.dev), from Cloudflare. */
 export async function workerUrl(worker: string, accountId: string, apiToken: string): Promise<string> {

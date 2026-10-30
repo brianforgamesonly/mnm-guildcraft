@@ -48,7 +48,8 @@ export const DKP_CALL_CAP = 4 + 1 + 1 + 1 + 8 + 8;
 /** The setup reply's DKP row: Add DKP while it is off, Remove DKP while it is on. */
 export const dkpButtons = (enabled: boolean) => row([enabled ? button(REMOVE_DKP_PREFIX, DKP_COPY.removeLabel, STYLE_DANGER) : button(ADD_DKP_PREFIX, DKP_COPY.addLabel, STYLE_PRIMARY)]);
 
-async function withLease(c: Ctx, run: (api: BotApi) => Promise<MessageReply>): Promise<MessageReply> {
+/** Order 32: Add and Remove Events module take the same lease. */
+export async function withLease(c: Ctx, run: (api: BotApi) => Promise<MessageReply>, cap = DKP_CALL_CAP): Promise<MessageReply> {
   if (!c.botToken || !c.applicationId) return ephemeral(CHANNELS_COPY.noToken);
   const at = Date.now();
   const lease = `${new Date(at + LEASE_MS).toISOString()}#${crypto.randomUUID().slice(0, 8)}`;
@@ -58,7 +59,7 @@ async function withLease(c: Ctx, run: (api: BotApi) => Promise<MessageReply>): P
     .bind(lease, c.guild.id, new Date(at).toISOString())
     .run();
   if (took.meta.changes !== 1) return ephemeral(CHANNELS_COPY.busy);
-  const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: DKP_CALL_CAP, deadline: at + 10_000 });
+  const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap, deadline: at + 10_000 });
   try {
     return await run(api);
   } finally {
