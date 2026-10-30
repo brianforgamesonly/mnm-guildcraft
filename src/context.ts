@@ -19,6 +19,8 @@ export interface Effects {
   dkpTimers?: { guildId: string; items: { key: string; due: number }[] };
   /** Order 27: cancel every DKP timer of this guild (Remove DKP). */
   dkpCancel?: string;
+  /** Order 30: ensure this guild's decay item (Add DKP), after the reply. */
+  dkpDecay?: string;
 }
 
 /** What every command handler gets: the caller, their guild and their rights, checked for this request. */

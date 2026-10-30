@@ -113,14 +113,14 @@ const acard: Handler = async (env, guildId, id, _due, _now, api) => {
   return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id), state.settings) };
 };
 
-/** Order 29, PR D: the decay item's key, seeded on Add DKP, and its week. */
+/** Order 29, PR D: the decay item's fixed key (order 30: DkpTimers.ensureDecay alone seeds it), and its week. */
 export const DECAY_KEY = 'decay:week';
 export const WEEK_MS = 7 * 86_400_000;
 
 /** Order 29, PR D: decay:week, once a week: idle balances lose the decay percent (src/dkp/ledger.ts decayStatement). */
 const decay: Handler = async (env, guildId, _id, _due, now) => {
   const state = await loadDkp(env.DB, guildId);
-  // DKP off: the item ends (Remove DKP clears every item anyway; Add DKP seeds it again).
+  // DKP off: the item ends (Remove DKP clears every item anyway; ensureDecay seeds it again).
   if (!state.enabled) return null;
   const s = state.settings;
   const at = new Date(now).toISOString();

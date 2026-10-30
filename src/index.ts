@@ -7,6 +7,7 @@ import { refreshAfterCommand, scheduled as runScheduled } from './board/refresh.
 import type { Effects } from './context.ts';
 import { ackFor, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
 import { countD1, isolateSnapshot, timingLine, type D1Call } from './telemetry.ts';
+import { GUARD_PATH, GUARD_PER_REQUEST, guardDecay, verifyGuard } from './dkp/guard.ts';
 import { timersOf } from './dkp/timers.ts';
 
 // Order 27 (override 5 of order 10): the DKP timer object's class, bound as DKP_TIMERS in each copy (wrangler.jsonc).
@@ -15,6 +16,21 @@ export { DkpTimers } from './dkp/timers.ts';
 const app = new Hono<{ Bindings: Env }>();
 
 app.get('/', (c) => c.text('mnm-guildcraft: Discord interactions endpoint'));
+
+// Order 30: the post-deploy step's way to the Durable Objects (src/dkp/guard.ts). Signed with the copy's bot token; counts only.
+app.post(GUARD_PATH, async (c) => {
+  const dry = c.req.query('dry') === '1';
+  const offset = Number(c.req.query('offset') ?? 0);
+  const valid =
+    !!c.env.DISCORD_BOT_TOKEN &&
+    Number.isInteger(offset) &&
+    offset >= 0 &&
+    (await verifyGuard(c.env.DISCORD_BOT_TOKEN, Number(c.req.header('X-Guard-Time')), dry, offset, c.req.header('X-Guard-Signature') ?? '', Date.now()));
+  if (!valid) return c.text('invalid request signature', 401);
+  const r = await guardDecay(c.env, (ids) => ids.slice(offset, offset + GUARD_PER_REQUEST), dry);
+  console.log(JSON.stringify({ gc: 'dkp-guard', trigger: 'route', dry, ...r }));
+  return c.json({ ...r, next: offset + GUARD_PER_REQUEST < r.guilds ? offset + GUARD_PER_REQUEST : null });
+});
 
 /** The answer when the immediate path throws: autocomplete gets no suggestions, anything else the polite error. */
 const fallback = (i: Interaction): InteractionReply =>
@@ -59,6 +75,7 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
   try {
     if (effects.dkpCancel) await timersOf(env, effects.dkpCancel).cancel();
     if (effects.dkpTimers?.items.length) await timersOf(env, effects.dkpTimers.guildId).schedule(effects.dkpTimers.guildId, effects.dkpTimers.items);
+    if (effects.dkpDecay) await timersOf(env, effects.dkpDecay).ensureDecay(effects.dkpDecay);
   } catch (e) {
     console.error('dkp timers failed', errText(e));
   }

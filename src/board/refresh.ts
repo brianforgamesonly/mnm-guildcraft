@@ -33,6 +33,7 @@ import { FACTION_SHOWN, FACTIONS, TRADESKILLS, type BoardKind, type BoardName } 
 import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, type BoardMessage, type LineMode } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
+import { guardDecay, isDecayGuardRun, rotate } from '../dkp/guard.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
 import { sweepFinished, sweepStarted } from '../heartbeat.ts';
@@ -764,6 +765,18 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
     }
     console.log(JSON.stringify({ ...line, d1_calls: counted.calls.length, discord_calls: budget.discord, calls: api.log.slice() }));
     before = { d1: counted.calls.length, discord: budget.discord, log: api.log.length };
+  }
+  // Order 30 (ITEM 4): in its own slot (09:00–09:14 UTC), first, so a busy board can't starve it: one D1 read, then one
+  // Durable Object request per DKP-on guild, each counted as a call. It logs only when there are guilds to check.
+  if (isDecayGuardRun(controller.scheduledTime)) {
+    try {
+      const r = await guardDecay({ ...env, DB: counted.db }, rotate(budgetLeft(budget) - 2, controller.scheduledTime)); // its read and the sweep's
+      budget.discord += r.checked;
+      if (r.checked) console.log(JSON.stringify({ gc: 'dkp-guard', trigger: 'cron', ...r }));
+    } catch (e) {
+      console.error('dkp decay guard failed', e instanceof Error ? e.message : String(e));
+    }
+    before = { d1: counted.calls.length, discord: budget.discord, log: api?.log.length ?? 0 };
   }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string; board: BoardName }>();

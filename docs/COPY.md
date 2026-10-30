@@ -1047,13 +1047,13 @@ Every string is in src/dkp/copy.ts (`DKP_COPY`), except the command and option d
 
 | Where | Text | Status |
 |---|---|---|
-| src/dkp/copy.ts:9, 10 | (setup buttons) Add DKP · Remove DKP | DRAFT |
-| src/dkp/copy.ts:11 | DKP is on. Standings and raid cards go in #GC-DKP. `/dkp` is now in this server's command list (reload Discord if you don't see it yet). | DRAFT |
+| src/dkp/copy.ts:9, 10 | (setup buttons) Add DKP module · Remove DKP module | DRAFT (order 30) |
+| src/dkp/copy.ts:11 | DKP module is on. Standings and raid cards go in #GC-DKP. `/dkp` is now in this server's command list (reload Discord if you don't see it yet). | DRAFT |
 | src/dkp/copy.ts:12, 13 | Kept #GC-DKP. · Created #GC-DKP: DKP standings, raid cards and changes. Only GuildCraft posts there. | DRAFT |
-| src/dkp/copy.ts:14 | Discord refused to change `/dkp` on this server (it answered \<status>). DKP is unchanged; press the button again to retry. | DRAFT |
-| src/dkp/copy.ts:15 | Could not create **GC-DKP** (Discord answered \<status>). DKP is still off; press **Add DKP** again to retry. | DRAFT |
-| src/dkp/copy.ts:16-17 | DKP is off. `/dkp` is removed from this server; every point and raid is kept, and **Add DKP** later resumes the same history. #GC-DKP is left as it is: keep it or delete it. | DRAFT |
-| src/dkp/copy.ts:18, 19 | The open raid was closed. · DKP is already off on this server. | DRAFT |
+| src/dkp/copy.ts:14 | Discord refused to change `/dkp` on this server (it answered \<status>). The DKP module is unchanged; press the button again to retry. | DRAFT (order 30) |
+| src/dkp/copy.ts:15 | Could not create **GC-DKP** (Discord answered \<status>). DKP module is still off; press **Add DKP module** again to retry. | DRAFT (order 30) |
+| src/dkp/copy.ts:16-17 | DKP module is off. `/dkp` is removed from this server; every point and raid is kept, and **Add DKP module** later resumes the same history. #GC-DKP is left as it is: keep it or delete it. | DRAFT (order 30) |
+| src/dkp/copy.ts:18, 19 | The open raid was closed. · DKP module is already off on this server. | DRAFT (order 30) |
 | src/dkp/copy.ts:5 | DKP is off on this server. | DRAFT |
 | src/dkp/copy.ts:6 | Only officers (or the role an admin named in `/dkp settings`) can run DKP. | DRAFT |
 | src/dkp/copy.ts:7, 8 | Nobody can change their own points. · You asked for this change, so another officer has to approve it. | DRAFT |
@@ -1146,3 +1146,11 @@ Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the com
 | src/board/kinds.ts:52 | (GC-Tradeskills post guidelines) Who in the guild can craft what: one post per tradeskill, ranked by skill level. GuildCraft writes and updates these posts. To get listed, use /me to add a character, then /skills. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests. | DRAFT |
 | src/board/kinds.ts:71 | (GC-Factions post guidelines) Which creatures raise or lower each faction: one post per faction, from the Monsters and Memories Wiki. GuildCraft writes and updates these posts. A missing or wrong creature is fixed on the wiki. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests. | DRAFT |
 | src/board/render.ts:155 | (both indexes, while a board fills) Still building: \<x> of \<n> posts so far. The rest appear within about \<n> minutes (or \<n> hours). Replaces the factions index's "\<n> more posts coming" line. | DRAFT |
+
+## Work order 30, PR B: "DKP module" wording (DRAFT)
+
+The rows above under Work order 27 carry the new wording. One line had no row:
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:38 | I can't post in GC-DKP right now, so nothing was changed. An admin can press **Add DKP module** in `/guildcraft setup` to restore it. | DRAFT |

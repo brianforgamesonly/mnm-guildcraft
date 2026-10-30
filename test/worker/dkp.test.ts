@@ -4,7 +4,9 @@
 import { env, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CATEGORY_NAME, CHANNELS_COPY, storedName } from '../../src/commands/channels.ts';
+import { PAGES, pageText } from '../../src/commands/help.ts';
 import { APPROVE_PREFIX, FULL_PAGE_PREFIX } from '../../src/dkp/commands.ts';
+import * as COPY from '../../src/dkp/copy.ts';
 import { DKP_COPY } from '../../src/dkp/copy.ts';
 import { DKP_COMMAND } from '../../src/dkp/definition.ts';
 import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
@@ -161,6 +163,29 @@ describe('Add DKP and Remove DKP (ITEM 1)', () => {
     expect(fake.channels.filter((c) => c.name === storedName(DKP_CHANNEL_NAME)).length).toBe(1);
     expect(fake.commands.length).toBe(1);
     expect(await one('SELECT balance_after FROM dkp_ledger')).toEqual({ balance_after: 5 });
+  });
+
+  it('order 30: no button, reply or help text says "Add DKP" or "Remove DKP" without "module"; the custom_ids stay', async () => {
+    const bare = /\b(add|remove) dkp\b(?! module)/i;
+    // Every copy object src/dkp/copy.ts exports, so a new one is covered. A function that wants other arguments is shown by its source.
+    const render = (v: unknown) => {
+      if (typeof v !== 'function') return v;
+      try {
+        return v('1', '1', '1', '1', '1', '1', '1');
+      } catch {
+        return String(v);
+      }
+    };
+    const texts = Object.values(COPY).flatMap((o) => (typeof o === 'object' ? Object.values(o as object).map(render) : [])).filter((v) => typeof v === 'string') as string[];
+    expect(texts.length).toBeGreaterThan(100);
+    expect(texts.filter((t) => bare.test(t))).toEqual([]);
+    expect(bare.test(JSON.stringify(DKP_COMMAND))).toBe(false);
+    expect(PAGES.filter((p) => bare.test(pageText(p.key)))).toEqual([]);
+    const labels = async () => (await send(rawCmd(admin, 'guildcraft', 'setup'), TOKEN)).data.components!.flatMap((r: any) => r.components).map((b: any) => [b.custom_id, b.label]);
+    expect(await labels()).toContainEqual([ADD_DKP_PREFIX, 'Add DKP module']);
+    await addDkp();
+    expect(await labels()).toContainEqual([REMOVE_DKP_PREFIX, 'Remove DKP module']);
+    expect([ADD_DKP_PREFIX, REMOVE_DKP_PREFIX]).toEqual(['dkpadd:', 'dkprm:']);
   });
 
   it('routes each new custom_id prefix (order 23), none opens a modal, and every DKP prefix shares one stem', () => {
