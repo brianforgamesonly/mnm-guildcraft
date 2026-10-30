@@ -23,6 +23,8 @@ export interface Effects {
   welcome?: boolean;
   /** Order 32: cancel every Events timer of this guild (Remove Events module). */
   eventsCancel?: string;
+  /** Order 33: these timer items go (a reminder no longer due). */
+  timersDrop?: { guildId: string; keys: string[] };
   /** Order 30: ensure this guild's decay item (Add DKP), after the reply. */
   dkpDecay?: string;
 }

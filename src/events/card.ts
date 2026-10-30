@@ -15,6 +15,7 @@ import { LIMIT_COLUMN, PREVIEW, ROLE_DEFAULTS, ROLES, TYPE_RULES, type Choice, t
 export const STATUS_PREFIX = 'evs:';
 export const CHANGE_CHARACTER_PREFIX = 'evcc:';
 export const CHANGE_ROLE_PREFIX = 'evcr:';
+export const CALENDAR_PREFIX = 'evcal:';
 
 export interface EventRow {
   id: number;
@@ -44,6 +45,7 @@ export interface EventRow {
   cancel_reason: string | null;
   lock_done_at: string | null;
   left_cursor: string | null;
+  reminded_start: string | null;
 }
 
 export interface SignupRow {
@@ -188,12 +190,12 @@ function header(e: EventRow, now: number): string {
     .join('\n');
 }
 
-/** The card's buttons: the type's statuses, then Change character and Change role where the type asks for them. */
+/** The card's buttons: the type's statuses, then Change character and Change role where the type asks for them, and Add to calendar. */
 export function cardButtons(e: Pick<EventRow, 'id' | 'type'>): unknown[] {
   const rule = TYPE_RULES[e.type];
   const statuses = rule.statuses.map((st) => button(`${STATUS_PREFIX}${e.id}:${st}`, actionLabel(st, e.type), st === 'signed_up' ? STYLE_PRIMARY : STYLE_SECONDARY));
   const changes = rule.character === 'required' ? [button(`${CHANGE_CHARACTER_PREFIX}${e.id}`, EVENT_COPY.changeCharacter), button(`${CHANGE_ROLE_PREFIX}${e.id}`, EVENT_COPY.changeRole)] : [];
-  return [row(statuses), ...(changes.length ? [row(changes)] : [])];
+  return [row(statuses), row([...changes, button(`${CALENDAR_PREFIX}${e.id}`, EVENT_COPY.addToCalendar)])];
 }
 
 /** The card's embed and buttons. Only an open event has buttons (a preview carries its own). */

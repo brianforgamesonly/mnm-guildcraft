@@ -88,6 +88,7 @@ function fixture(): string {
       `INSERT INTO event_setting (guild_id, key, value, set_at, set_by) VALUES ('${g}', 'lock_minutes', '${n}0', '${at}', '${u}')`,
       `INSERT INTO event_class_role (guild_id, class_code, role, set_at, set_by) VALUES ('${g}', 'WAR', 'tank', '${at}', '${u}')`,
       `INSERT INTO card_stale (guild_id, item, since, status) VALUES ('${g}', 'evcard:${n}', '${at}', 500)`,
+      `INSERT INTO event_member (guild_id, member_id, reminders_off) VALUES ('${g}', '${u}', 1)`,
       `INSERT INTO event (id, guild_id, type, title, start_at, duration_minutes, closes_at, status, posted_by, created_at) VALUES (${n}, '${g}', 'raid', 'Title${n}', '${at}', 180, '${at}', 'open', '${u}', '${at}')`,
       `INSERT INTO event_signup (event_id, guild_id, member_id, status, role, char_name, updated_at, changed_by) VALUES (${n}, '${g}', '${u}', 'signed_up', 'tank', 'Snap${n}', '${at}', '${u}')`,
       `INSERT INTO event_signup_history (event_id, guild_id, member_id, status, role, char_name, actor, at) VALUES (${n}, '${g}', '${u}', 'signed_up', 'tank', 'Hist${n}', '${u}', '${at}')`,

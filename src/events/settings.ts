@@ -4,8 +4,9 @@
 import { ROLE_DEFAULTS, ROLES, TYPE_DEFAULTS, TYPES, type EventType, type Role } from './types.ts';
 
 export const EVENT_SETTINGS = [
-  { key: 'lock_minutes', label: 'Sign-ups lock before start', default: 30, min: 0, max: 1440, unit: 'minutes' },
-  { key: 'close_hours', label: 'Event closes after start', default: 8, min: 1, max: 168, unit: 'hours' },
+  { key: 'lock_minutes', label: 'Sign-ups lock before start', default: 30, min: 0, max: 1440, unit: 'minutes', zero: 'never' },
+  { key: 'close_hours', label: 'Event closes after start', default: 8, min: 1, max: 168, unit: 'hours', zero: null },
+  { key: 'reminder_minutes', label: 'Reminder before start', default: 30, min: 0, max: 1440, unit: 'minutes', zero: 'off' },
 ] as const;
 
 export type NumberKey = (typeof EVENT_SETTINGS)[number]['key'];

@@ -12,5 +12,16 @@ export interface DueResult {
   /** Order 33: this card item drew nothing, so an out-of-date card stays flagged. */
   skip?: boolean;
 }
-/** `stale`: the sweep's redraw of an out-of-date card (src/dkp/stale.ts). */
-export type DueHandler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null, stale?: boolean) => Promise<DueResult | null>;
+/** About 40 external calls an invocation (order 5), D1 and Discord together; shared by every item one alarm runs. */
+export const TIMER_CALL_CAP = 40;
+
+/** What the object keeps for an item across its runs. */
+export interface ItemRun {
+  /** The sweep's redraw of an out-of-date card (src/dkp/stale.ts). */
+  stale?: boolean;
+  /** Order 33: how far a chunked send has got, as `save` left it. */
+  cursor?: string;
+  /** Stores the cursor at once, so a run that dies part-way never messages anyone twice. */
+  save?: (cursor: string) => Promise<void>;
+}
+export type DueHandler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null, run?: ItemRun) => Promise<DueResult | null>;

@@ -20,6 +20,7 @@ import { channelBits, PERMISSION_NAMES } from '../permissions.ts';
 import { EVENT_COPY } from './copy.ts';
 import { EVENT_COMMAND } from './definition.ts';
 import { loadEvents } from './state.ts';
+import { reminderAt } from './times.ts';
 
 export const ADD_EVENTS_PREFIX = 'evadd:';
 export const REMOVE_EVENTS_PREFIX = 'evrm:';
@@ -44,10 +45,31 @@ const saveStatement = (c: Ctx, s: { enabled: 0 | 1; channel: string | null; comm
     )
     .bind(c.guild.id, s.enabled, s.channel, s.command, now(), c.userId);
 
-/** Every open event's lock and close items. A lock already done is left out; a passed time runs at once. */
-export async function openEventItems(db: D1Database, guildId: string): Promise<{ key: string; due: number }[]> {
-  const { results } = await db.prepare("SELECT id, lock_at, closes_at, lock_done_at FROM event WHERE guild_id = ? AND status = 'open'").bind(guildId).all<{ id: number; lock_at: string | null; closes_at: string; lock_done_at: string | null }>();
-  return results.flatMap((e) => [...(e.lock_at && !e.lock_done_at ? [{ key: `evlock:${e.id}`, due: Date.parse(e.lock_at) }] : []), { key: `evclose:${e.id}`, due: Date.parse(e.closes_at) }]);
+/**
+ * Every open event's lock and close items, and its reminder. A lock already done is left out; a passed time runs at once,
+ * except a reminder: one whose time has passed is not sent (order 33).
+ */
+export async function openEventItems(db: D1Database, guildId: string, minutes: number): Promise<{ key: string; due: number }[]> {
+  const { results } = await db
+    .prepare("SELECT id, start_at, lock_at, closes_at, lock_done_at, reminded_start FROM event WHERE guild_id = ? AND status = 'open'")
+    .bind(guildId)
+    .all<{ id: number; start_at: string; lock_at: string | null; closes_at: string; lock_done_at: string | null; reminded_start: string | null }>();
+  return results.flatMap((e) => [...(e.lock_at && !e.lock_done_at ? [{ key: `evlock:${e.id}`, due: Date.parse(e.lock_at) }] : []), { key: `evclose:${e.id}`, due: Date.parse(e.closes_at) }, ...(reminderItem(e, minutes, Date.now()) ?? [])]);
+}
+
+/** An event's reminder item, or null when none is due: off on this server, already sent for this start, or its time has passed. */
+export function reminderItem(e: { id: number; start_at: string; reminded_start: string | null }, minutes: number, nowMs: number): { key: string; due: number; later: true }[] | null {
+  const at = reminderAt(e.start_at, minutes);
+  return at === null || at <= nowMs || e.reminded_start === e.start_at ? null : [{ key: `evremind:${e.id}`, due: at, later: true }];
+}
+
+/** Reminder before start changed: every open event's reminder moves, and one no longer due goes (0 removes them all). */
+export async function rearmReminders(db: D1Database, guildId: string, minutes: number, nowMs: number) {
+  const { results } = await db.prepare("SELECT id, start_at, reminded_start FROM event WHERE guild_id = ? AND status = 'open'").bind(guildId).all<{ id: number; start_at: string; reminded_start: string | null }>();
+  return {
+    items: results.flatMap((e) => reminderItem(e, minutes, nowMs) ?? []),
+    drop: results.filter((e) => !reminderItem(e, minutes, nowMs)).map((e) => `evremind:${e.id}`),
+  };
 }
 
 async function addEvents(c: Ctx, api: BotApi, appId: string): Promise<MessageReply> {
@@ -91,7 +113,7 @@ async function addEvents(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     return ephemeral([...lines, EVENT_COPY.commandFailed(cmd.status)].join('\n'));
   }
   await c.db.batch([saveStatement(c, { enabled: 1, channel: channel.id, command: cmd.body.id }), audit(c.db, g, c.userId, 'event.on', `channel:${channel.id}`, { enabled: state.enabled }, { enabled: true })]);
-  const items = await openEventItems(c.db, g);
+  const items = await openEventItems(c.db, g, state.settings.reminder_minutes);
   if (items.length) c.effects.dkpTimers = { guildId: g, items: [...(c.effects.dkpTimers?.items ?? []), ...items] };
   return ephemeral([...lines, EVENT_COPY.added(channel.id)].join('\n'));
 }

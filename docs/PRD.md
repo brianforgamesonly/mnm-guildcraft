@@ -811,11 +811,32 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 | Server time zone | America/New_York |
 | Sign-ups lock before start | 30 minutes |
 | Event closes after start | 8 hours |
+| Reminder before start | 30 minutes (0 = off) |
 | Who creates events (events_role) | the officer role |
 | Default sign-up role | none |
 | Role labels; Support on/off | Tank, Healer, DPS, Support; on |
 | Type labels | Raid, Group, Social, Other |
 | Class default roles | none |
+
+**Who gets which message** (order 33; approved by the owner on 2026-10-30). All are direct messages, sent in chunks by an Events due-list item, as wishlist nudges are.
+
+| Message | Goes to | When | Does "No reminders" stop it? |
+|---|---|---|---|
+| Reminder | Signed up, Tentative, Bench (not Left) | Reminder setting before start (default 30 minutes; 0 = off for the server) | Yes |
+| Promoted from the waitlist | That member | When it happens, including after the lock | No |
+| Time changed | Everyone on the roster, Waitlist included | When `/event edit` moves the start | No |
+| Cancelled | Everyone on the roster, Waitlist included | On `/event cancel` | No |
+
+- Content. Each message names the event and its start (`<t:…:F>`, `<t:…:R>`) and links to the card. A reminder adds the character and role the member signed up with. A cancellation adds the reason. Social and Other reminders leave out the character and role when there are none.
+- Opting out. The private reply to a member's first sign-up in the server says once that reminders will come, with a No reminders button. `/me` gains a Reminders: on/off toggle, beside Notices. The choice is stored per member per server.
+- Timing. If the reminder time has already passed when it is armed (at create, edit, Add or a settings change), no reminder is sent; a Time changed message covers an edit. A reminder is sent at most once per start time. Changing Reminder before start re-arms every open event, and 0 removes the reminders. A new start re-arms the reminder. A cancel removes it. Remove Events module removes them; Add re-arms them.
+- Members who left. At reminder time, recipients who have since left the server (a 404 on the member lookup, as at the lock) are marked Left, get nothing, and the waitlist promotes.
+
+**Add to calendar** (every event card; any member, any type). It is an ordinary button whose reply is private:
+
+- A Google Calendar link button, built from Google's event-template URL: title, start, end = start + duration, the raid zone (not time zone) as the location, and a link to the card. It stays within 512 characters, measured after URL-encoding. When it would be longer, the description is shortened first, then the title.
+- An attached .ics file, which Outlook and Apple Calendar open: VCALENDAR with VERSION:2.0, PRODID and METHOD:PUBLISH; one VEVENT with UID ev-\<id>-\<guild>@guildcraft, DTSTAMP, DTSTART and DTEND in UTC, SUMMARY, LOCATION and a URL to the card; CRLF line endings.
+- Nothing is served from a public web route. If the event is later moved or cancelled, the member's calendar entry doesn't change by itself; the time-changed or cancelled message tells them.
 
 **Data.** The events, sign-ups and history tables are in the per-guild export and the backup, and are never shown on another server.
 
@@ -829,3 +850,8 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 - A member changing role while waitlisted keeps their place, and moves up on that press if the new role has room.
 - A member marked frozen (status left) can still press Can't make it, which is never gated. The spam limit applies to it.
 - An officer's `/event roster` passes the lock and limits, but not the member role, the event's sign-up role or frozen, and the member must be in the server.
+
+**Departures from this section, named (order 33).**
+
+- If Discord refuses the .ics file on a private reply, the reply still goes, with the Google link and a line saying the file couldn't be attached. Discord's documents don't say whether a private reply needs Attach Files, and the install permissions don't include it (order 24, PR C).
+- A chunk is 10 recipients with the Left lookup and 15 without (or when the lock just did it), not the order's "about 13": the alarm's 40 calls hold D1 as well as Discord, so 9 calls are kept for a chunk's other work.

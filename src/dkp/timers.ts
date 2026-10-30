@@ -47,6 +47,8 @@ interface Item {
   stale?: boolean;
   /** Order 33: this card is flagged out of date, so a success clears the flag. */
   flagged?: boolean;
+  /** Order 33: how far a chunked send has got (src/events/dm.ts). */
+  cursor?: string;
 }
 
 export class DkpTimers extends DurableObject<Env> {
@@ -73,7 +75,7 @@ export class DkpTimers extends DurableObject<Env> {
         const stale = !!i.stale && (!was || !!was.stale);
         const flagged = !!(i.stale || was?.flagged);
         if (!was || i.later || due < was.due || i.key === this.running || flagged !== !!was.flagged || stale !== !!was.stale)
-          put[i.key] = { due: i.key === this.running ? Math.max(due, was!.due + 1) : was && !i.later ? Math.min(due, was.due) : due, ...(stale ? { stale } : {}), ...(flagged ? { flagged } : {}) };
+          put[i.key] = { due: i.key === this.running ? Math.max(due, was!.due + 1) : was && !i.later ? Math.min(due, was.due) : due, ...(stale ? { stale } : {}), ...(flagged ? { flagged } : {}), ...(was?.cursor !== undefined && !i.later ? { cursor: was.cursor } : {}) };
       }
       if (Object.keys(put).length) await s.put(put);
     }
@@ -183,7 +185,11 @@ export class DkpTimers extends DurableObject<Env> {
       let r: Awaited<ReturnType<typeof runDue>> = null;
       this.running = key;
       try {
-        r = guildId ? await runDue(env, guildId, key, item.due, now, api, item.stale) : null;
+        const save = async (cursor: string) => {
+          item.cursor = cursor;
+          await s.put(key, item);
+        };
+        r = guildId ? await runDue(env, guildId, key, item.due, now, api, { stale: item.stale, cursor: item.cursor, save }) : null;
         // Inside the try (review of PR A): this D1 wait lets a press in, and `running` must still send it a time of its own.
         if (api && guildId && paced(key) && item.flagged && !r?.skip) await this.unflag(env.DB, guildId, key);
       } catch (e) {
@@ -202,7 +208,7 @@ export class DkpTimers extends DurableObject<Env> {
         const tries = (item.tries ?? 0) + 1;
         // The sweep's redraw has one try: the next sweep is its retry.
         if (tries < MAX_TRIES && !item.stale) {
-          await s.put(key, { due: Date.now() + RETRY_MS, tries, ...flagged });
+          await s.put(key, { due: Date.now() + RETRY_MS, tries, ...flagged, ...(item.cursor === undefined ? {} : { cursor: item.cursor }) });
           continue;
         }
         if ((await s.get<Item>(key))?.due === item.due) await s.delete(key);
@@ -215,7 +221,7 @@ export class DkpTimers extends DurableObject<Env> {
         await s.put(paceKey(key), pace);
         console.log(JSON.stringify({ gc: 'dkp-card-edit', remaining: r.headers.remaining ?? null, reset_after: r.headers.resetAfter ?? null, retry_after: r.headers.retryAfter ?? null, gap_ms: pace.gap }));
       }
-      if (r?.again !== undefined) await s.put(key, { due: r.again });
+      if (r?.again !== undefined) await s.put(key, { due: r.again, ...(item.cursor === undefined ? {} : { cursor: item.cursor }) });
       // A change landed during this run: its edit is still to come.
       else if ((await s.get<Item>(key))?.due === item.due) await s.delete(key);
       if (r?.schedule?.length) await this.schedule(guildId!, r.schedule);

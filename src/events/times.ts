@@ -114,6 +114,9 @@ export function shortDate(ms: number, tz: string): string {
 /** Discord's local-time displays. */
 export const stamp = (ms: number, style: 'F' | 'R' | 'f' | 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 
+/** When the reminder for this start is due (null: reminders are off on this server). */
+export const reminderAt = (startAt: string, minutes: number) => (minutes ? Date.parse(startAt) - minutes * 60_000 : null);
+
 /** When an event locks (null: never) and closes, from its start and the settings at this moment. */
 export const lockAndClose = (startMs: number, s: { lock_minutes: number; close_hours: number }) => ({
   lock_at: s.lock_minutes ? new Date(startMs - s.lock_minutes * 60_000).toISOString() : null,

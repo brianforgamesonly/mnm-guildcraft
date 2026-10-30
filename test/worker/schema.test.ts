@@ -43,6 +43,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'event_guild', 'event_setting', 'event_class_role', 'event', 'event_signup', 'event_signup_history',
       // Order 33 (0025): cards awaiting a redraw (the migration's header names its reason).
       'card_stale',
+      // Order 33 (0026): a member's No reminders, and the first sign-up's note.
+      'event_member',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

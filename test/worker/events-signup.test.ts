@@ -261,7 +261,7 @@ describe('full: the waitlist or the bench, and promotion', () => {
     const { id, a, b } = await three({ ...RAID, healer: 1 });
     await signUp(id, ann, a, 'healer');
     const r = await signUp(id, bo, b, 'healer');
-    expect(r.data.content).toBe(EVENT_COPY.fullWaitlist);
+    expect(r.data.content).toContain(EVENT_COPY.fullWaitlist);
     expect(await row(id, bo)).toMatchObject({ status: 'waitlist', role: 'healer' });
   });
 
@@ -269,7 +269,7 @@ describe('full: the waitlist or the bench, and promotion', () => {
     const { id, a, b } = await three({ ...RAID, healer: 1, when_full: 'bench' });
     await signUp(id, ann, a, 'healer');
     const r = await signUp(id, bo, b, 'healer');
-    expect(r.data.content).toBe(EVENT_COPY.fullBench);
+    expect(r.data.content).toContain(EVENT_COPY.fullBench);
     expect(await row(id, bo)).toMatchObject({ status: 'bench', queued_at: null });
   });
 
@@ -492,7 +492,7 @@ describe('Left at the lock', () => {
     fake.gone.add(m1);
     await lockPassed(id);
     const r = await runItem('evlock', id);
-    expect(r).toMatchObject({ schedule: [{ key: `evcard:${id}` }] });
+    expect(r).toMatchObject({ schedule: [{ key: `evcard:${id}` }, { key: `evpromo:${id}.300000000000000000` }] });
     expect(await all('SELECT member_id, status FROM event_signup ORDER BY member_id')).toEqual([{ member_id: m1, status: 'left' }, { member_id: m2, status: 'signed_up' }, { member_id: '300000000000000000', status: 'signed_up' }]);
     expect(notices().at(-1)).toContain('left the server');
     expect(notices().at(-1)).toContain('moved up');

@@ -9,6 +9,7 @@ import type { EventState } from './state.ts';
 import { ROLES, TYPES, type Role } from './types.ts';
 import { cancelCommand, createCommand, editCommand, listCommand } from './manage.ts';
 import { rosterCommand } from './press.ts';
+import { rearmReminders } from './setup.ts';
 
 export type EventRun = (c: Ctx, opts: Option[], d: EventState) => Promise<MessageReply>;
 /** runner: isEventRunner · admin: Administrator or Manage Server · member: the member-role gate. */
@@ -112,6 +113,12 @@ async function settings(c: Ctx, opts: Option[], d: EventState): Promise<MessageR
   }
   notices.push(EVENT_COPY.changedBy(byName(c)));
   await c.db.batch(stmts);
+  const minutes = changes.find((x) => x.key === 'reminder_minutes');
+  if (minutes) {
+    const { items, drop } = await rearmReminders(c.db, g, Number(minutes.value), Date.now());
+    c.effects.dkpTimers = { guildId: g, items };
+    c.effects.timersDrop = { guildId: g, keys: drop };
+  }
   const api = eventApi(c, 1);
   try {
     // One message for the whole command: Discord's 2,000 characters hold every option's line.

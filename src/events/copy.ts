@@ -147,4 +147,22 @@ export const EVENT_COPY = {
   notOnRoster: "That member isn't on this event's roster.",
   alreadyOn: 'That member is already on the roster. Use `action: Move`.',
   noBench: "This event doesn't use the Bench.",
+  // Order 33: direct messages (each names the event, its start and the card; "\n<link>" only when the card has one)
+  dmStart: (full: string, rel: string) => `${full} (${rel})`,
+  dmReminder: (title: string, when: string, as: string | null, link: string | null) => [`Reminder: **${title}** starts ${when}.`, as ? `You're down as ${as}.` : null, link].filter(Boolean).join('\n'),
+  dmAs: (char: string | null, role: string | null) => [char, role].filter(Boolean).join(', ') || null,
+  dmPromoted: (title: string, when: string, link: string | null) => [`You've moved up from the Waitlist for **${title}**, so you're signed up. It starts ${when}.`, link].filter(Boolean).join('\n'),
+  dmMoved: (title: string, when: string, link: string | null) => [`**${title}** has a new time: ${when}.`, link].filter(Boolean).join('\n'),
+  dmCancelled: (title: string, when: string, reason: string, link: string | null) => [`**${title}**, due to start ${when}, is cancelled. Reason: ${reason}`, link].filter(Boolean).join('\n'),
+  // Order 33: opting out
+  reminderNote: "You'll get a direct message before events you sign up for. Press **No reminders** to stop those; `/me` turns them back on.",
+  noReminders: 'No reminders',
+  remindersOff: "Reminders are off for you on this server. `/me` turns them back on. You'll still hear if an event moves or is cancelled.",
+  // Order 33: Add to calendar
+  addToCalendar: 'Add to calendar',
+  googleCalendar: 'Google Calendar',
+  calendarHead: (title: string) => `**${title}**: use the Google Calendar button, or open the attached file in Outlook or Apple Calendar.`,
+  calendarNoFile: (title: string) => `**${title}**: use the Google Calendar button. I couldn't attach the calendar file here.`,
+  calendarStays: "If the event later moves or is cancelled, your calendar entry won't change by itself; GuildCraft sends you a direct message.",
+  leftLineReminder: (title: string, who: string) => `**${title}:** ${who} left the server. Found by the check at the reminder.`,
 };

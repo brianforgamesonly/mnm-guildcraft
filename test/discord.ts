@@ -63,7 +63,11 @@ export function spyOnFetch() {
       return botApi.handle(init?.method ?? 'GET', url.slice(DISCORD_API.length), init?.body instanceof FormData ? init.body : init?.body ? JSON.parse(String(init.body)) : undefined);
     if (url.startsWith(CDN) && cdn.handle) return cdn.handle(url);
     if (!url.startsWith(prefix)) return real(input, init);
-    const call = { method: init?.method ?? 'GET', url, token: url.slice(prefix.length).split('/')[1], body: init?.body ? JSON.parse(String(init.body)) : undefined };
+    // Order 33: a reply with files is a form: its JSON, plus each file's name, type and text under `uploaded`.
+    const form = init?.body instanceof FormData ? init.body : null;
+    const uploaded = form ? await Promise.all([...form.entries()].filter(([k]) => k.startsWith('files[')).map(async ([, f]) => ({ name: (f as File).name, type: (f as File).type, text: await (f as File).text() }))) : undefined;
+    const parsed = form ? JSON.parse(String(form.get('payload_json'))) : init?.body ? JSON.parse(String(init.body)) : undefined;
+    const call = { method: init?.method ?? 'GET', url, token: url.slice(prefix.length).split('/')[1], body: uploaded ? { ...parsed, uploaded } : parsed };
     webhookCalls.push(call);
     const status = webhook.status(call);
     if (status === 204) return new Response(null, { status });
