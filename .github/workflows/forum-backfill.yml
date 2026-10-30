@@ -1,0 +1,41 @@
+# Order 30 (ITEM 1): the one backfill of existing forums' post guidelines (scripts/forum/backfill.ts). It fills only an
+# empty field. Dry run first, then dev, then production; order 30's PR B removes this workflow and the script.
+# Dispatch only. Expected: <1 billed minute per run.
+name: forum-backfill
+on:
+  workflow_dispatch:
+    inputs:
+      copy:
+        description: 'Which copy'
+        type: choice
+        options: [dev, production]
+        default: dev
+      dry_run:
+        description: 'Read and print only; nothing is written'
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency: forum-backfill-${{ inputs.copy }}
+jobs:
+  backfill:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      GUILDCRAFT_COPY: ${{ inputs.copy }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Backfill (dry run = ${{ inputs.dry_run }})
+        env:
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+          # The copy's own secrets only, as register-commands.yml.
+          DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', inputs.copy == 'production' && 'PROD_' || '')] }}
+          DISCORD_APPLICATION_ID: ${{ secrets[format('{0}DISCORD_APPLICATION_ID', inputs.copy == 'production' && 'PROD_' || '')] }}
+        run: node scripts/forum/backfill.ts

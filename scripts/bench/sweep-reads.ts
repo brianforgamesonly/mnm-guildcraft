@@ -42,8 +42,8 @@ try {
       await db.batch([
         db
           .prepare(
-            `INSERT INTO guild (id, name, created_at, board_channel_id, board_index_thread_id, board_index_message_id, faction_board_channel_id, faction_index_thread_id, faction_index_message_id)
-             VALUES (?1, 'bench', '2026-10-28T00:00:00Z', 'c', 't', 'm', 'c', 't', 'm')`,
+            `INSERT INTO guild (id, name, created_at, board_channel_id, board_index_thread_id, board_index_message_id, board_index_hash, faction_board_channel_id, faction_index_thread_id, faction_index_message_id, faction_index_hash)
+             VALUES (?1, 'bench', '2026-10-28T00:00:00Z', 'c', 't', 'm', 'h', 'c', 't', 'm', 'h')`,
           )
           .bind(id),
         db.prepare(`INSERT INTO board_post (guild_id, tradeskill_id, thread_id, message_ids_json, dirty, last_rendered_at) SELECT ?1, id, 'p', '[]', 0, '9999' FROM tradeskill`).bind(id),

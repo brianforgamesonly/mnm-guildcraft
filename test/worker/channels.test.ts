@@ -3,7 +3,9 @@
 // sees the first one's work). Nothing reaches a real server.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { FACTIONS, TRADESKILLS } from '../../src/board/kinds.ts';
 import { CALL_CAP, CATEGORY_NAME, CHANNELS_COPY, FORUM_SORT_CREATION, LAYOUT, OFFICER_ALLOW, storedName } from '../../src/commands/channels.ts';
+import { planForum } from '../../scripts/forum/plan.ts';
 import { CREATE_CHANNELS_LABEL, CREATE_CHANNELS_PREFIX, setupButtons } from '../../src/commands/setup.ts';
 import { ADMIN_ONLY } from '../../src/interactions.ts';
 import {
@@ -102,6 +104,25 @@ const ow = (ch: FakeChannel, id: string) => ch.permission_overwrites.find((o) =>
 const bits = (...b: bigint[]) => String(b.reduce((x, y) => x | y, 0n));
 const ours = { emoji_id: EMOJI_ID, emoji_name: null };
 
+describe('order 30: forum defaults', () => {
+  it('a press on kept forums never sends guidelines, so an officer who changed or cleared them keeps that', async () => {
+    await setup();
+    fake.channels.push({ id: '700000000000009000', name: 'GuildCraft', type: GUILD_CATEGORY, parent_id: null, permission_overwrites: [], default_sort_order: null });
+    fake.channels.push({ id: '700000000000009001', name: 'gc-tradeskills', type: GUILD_FORUM, parent_id: '700000000000009000', permission_overwrites: [], default_sort_order: 0, default_reaction_emoji: ours });
+    await pressCreate();
+    expect(fake.calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ default_sort_order: FORUM_SORT_CREATION }]);
+  });
+
+  it('the backfill fills only an empty field, and offers nothing for a forum with both set', () => {
+    const emoji = { emoji_id: '1', emoji_name: null };
+    expect(planForum({ topic: null, default_reaction_emoji: null }, 'text', '1')).toEqual({ topic: 'text', default_reaction_emoji: emoji });
+    expect(planForum({ topic: '', default_reaction_emoji: emoji }, 'text', '1')).toEqual({ topic: 'text' });
+    expect(planForum({ topic: "An officer's own", default_reaction_emoji: null }, 'text', '1')).toEqual({ default_reaction_emoji: emoji });
+    expect(planForum({ topic: "An officer's own", default_reaction_emoji: null }, 'text', null)).toBeNull();
+    expect(planForum({ topic: "An officer's own", default_reaction_emoji: { emoji_id: null, emoji_name: '🔥' } }, 'text', '1')).toBeNull();
+  });
+});
+
 describe('Create GuildCraft channels', () => {
   it('the button is on /guildcraft setup, and on a save that leaves a channel unset; it is offered for exactly the layout\'s channels', async () => {
     const r = await setup();
@@ -146,6 +167,13 @@ describe('Create GuildCraft channels', () => {
     expect(ow(requests, APP_ID)!.allow).toBe(bits(VIEW_CHANNEL, READ_MESSAGE_HISTORY, MANAGE_THREADS, CREATE_PRIVATE_THREADS, SEND_MESSAGES_IN_THREADS));
     // No vault is created any more (order 24, explicit override 2).
     expect(fake.channels.some((c) => /vault/.test(c.name))).toBe(false);
+    // Order 30: each forum's post guidelines go in its create; a text channel carries none, and no extra call is made.
+    expect(creates().filter((c) => c.body.topic).map((c) => [c.body.name, c.body.topic])).toEqual([['GC-Tradeskills', TRADESKILLS.guidelines], ['GC-Factions', FACTIONS.guidelines]]);
+    expect(fake.calls.filter((c) => c.method === 'PATCH').length).toBe(0);
+    for (const b of [TRADESKILLS, FACTIONS]) {
+      expect(b.guidelines.length).toBeLessThanOrEqual(1024); // Create Guild Channel: "channel topic (0-1024 characters)"
+      expect(b.guidelines).toContain(LAYOUT.find((p) => p.key === 'request_channel_id')!.name);
+    }
 
     for (const ch of fake.channels.filter((c) => c.type !== GUILD_CATEGORY)) {
       expect(BigInt(ow(ch, GUILD)!.deny), ch.name).not.toBe(0n);

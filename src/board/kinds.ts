@@ -27,6 +27,11 @@ export interface BoardKind {
   nightly: boolean;
   /** The thread name of the pinned index post. */
   indexTitle: string;
+  /**
+   * Order 30: the forum's post guidelines (its `topic`). Set when GuildCraft creates the forum, and once by the backfill;
+   * never read or written after that, so an officer's edit or clear stands. Discord: "0-4096 characters" on a forum.
+   */
+  guidelines: string;
 }
 
 export const TRADESKILLS: BoardKind = {
@@ -42,6 +47,9 @@ export const TRADESKILLS: BoardKind = {
   key: 'tradeskill_id',
   nightly: true,
   indexTitle: 'Index: how to get listed',
+  // Order 30: member-facing copy, listed in docs/COPY.md.
+  guidelines:
+    "Who in the guild can craft what: one post per tradeskill, ranked by skill level. GuildCraft writes and updates these posts. To get listed, use /me to add a character, then /skills. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests.",
 };
 
 export const FACTIONS: BoardKind = {
@@ -58,6 +66,9 @@ export const FACTIONS: BoardKind = {
   nightly: false,
   // Order 24: the factions board's pinned post (docs/COPY.md).
   indexTitle: 'Index: how to read this board',
+  // Order 30: member-facing copy, listed in docs/COPY.md.
+  guidelines:
+    "Which creatures raise or lower each faction: one post per faction, from the Monsters and Memories Wiki. GuildCraft writes and updates these posts. A missing or wrong creature is fixed on the wiki. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests.",
 };
 
 /** In the order a run serves them: the tradeskill board keeps priority on the shared call budget (order 24, ITEM 2). */

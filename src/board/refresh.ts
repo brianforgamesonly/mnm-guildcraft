@@ -300,6 +300,10 @@ async function editPost(api: BotApi, post: BoardPostRow, skill: string, msgs: Bo
 
 /** Calls kept back for the index (edit + pin) and the final D1 write. */
 const RESERVE = 3;
+/** A sweep's calls before its first post: the heartbeat, the sweep query, the run's batch, the active threads. */
+const SWEEP_OVERHEAD = 4;
+/** Order 30: the posts a sweep can make (one call each), for the building line when this run made none to measure by. */
+export const postsPerSweep = (k: BoardKind) => BOARD_CALL_CAP - SWEEP_OVERHEAD - RESERVE - (k === FACTIONS ? FACTIONS_FLOOR : 0);
 
 /**
  * Refreshes one guild's board: missing posts are created (Z→A), dirty ones (all of them when `all`)
@@ -569,7 +573,8 @@ export async function refreshGuildBoard(
 
   // The index: created (and pinned) once, edited when its links or counts changed or any post was written.
   const wrote = r.created + r.edited + r.gone + r.retired > 0;
-  const idx = data.index((id) => threads.get(id) ?? null, nowMs, line);
+  // Order 30: the building line's pace is what this run really made (rate limits included), else what a sweep can make.
+  const idx = data.index((id) => threads.get(id) ?? null, nowMs, line, r.created || postsPerSweep(k));
   const idxHash = await contentHash(idx.hashable);
   let indexThread = data.guild.board_index_thread_id;
   let indexMessage = data.guild.board_index_message_id;
@@ -586,8 +591,11 @@ export async function refreshGuildBoard(
       else r.errors.push(`re-pin index: ${p.status} ${p.code ?? ''}`.trim());
     }
     if (indexThread && indexMessage && (wrote || idxHash !== indexHash)) {
-      if (!canCallIndex(1)) r.index = 'not_reached';
-      else {
+      if (!canCallIndex(1)) {
+        r.index = 'not_reached';
+        // Order 30: no saved hash asks the next sweep for this edit (SWEEP_SQL), so a finished board never keeps its building line.
+        indexHash = null;
+      } else {
         const e = await api.call('PATCH', `/channels/${indexThread}/messages/${indexMessage}`, body(idx.message));
         if (e.ok) {
           r.index = 'edited';
@@ -595,7 +603,9 @@ export async function refreshGuildBoard(
         } else if (e.code === UNKNOWN_CHANNEL || e.code === UNKNOWN_MESSAGE) indexThread = indexMessage = indexHash = null;
         else {
           r.index = 'failed';
-          indexHash = null;
+          // Order 30: a passing failure is owed to the next sweep (no saved hash). A refusal is not (review: no retry
+          // loop): it keeps a hash, so a lost forum stays idle, and the next post written tries the edit again.
+          indexHash = e.status === 0 || e.status === 429 || e.status >= 500 ? null : (indexHash ?? idxHash);
           r.errors.push(`edit index: ${e.status} ${e.code ?? ''}`.trim());
         }
       }
@@ -685,10 +695,11 @@ export const isNightly = (scheduledTime: number) => {
 /**
  * Boards with something to do, one row per guild and board, in one query (order 24: an idle sweep still makes two D1
  * calls, the heartbeat and this). The tradeskill boards come first (they keep priority on the budget):
- * - tradeskills: dirty or missing posts, no index, a rebuild in progress (every board, nightly);
+ * - tradeskills: dirty or missing posts, no index, an index edit still owed (order 30: no saved hash), a rebuild in
+ *   progress (every board, nightly);
  * - factions (order 24): dirty, stale (the import changed a faction after its post was rendered) or missing posts, no
- *   index, a rebuild in progress, or (order 25) a post to retire: its faction no longer shown, and changed or dirty
- *   since its last render. Never every board at night (FACTIONS.nightly).
+ *   index, an index edit still owed, a rebuild in progress, or (order 25) a post to retire: its faction no longer shown,
+ *   and changed or dirty since its last render. Never every board at night (FACTIONS.nightly).
  * Order 26: it runs 96 times a day per copy, so it answers from indexes (migrations/0020). Shown-and-dirty, shown-and-stale
  * and to-retire (not shown, and dirty or stale) together are "any post dirty or stale", whether its faction is shown or
  * not: one probe of faction_post_dirty, and the factions changed since the guild's oldest render (faction_changed) joined
@@ -696,11 +707,11 @@ export const isNightly = (scheduledTime: number) => {
  * one guild's two boards live on the real data: 1,202 rows read per run before, 629 after (scripts/bench/sweep-reads.ts).
  */
 export const SWEEP_SQL = `WITH shown(id) AS MATERIALIZED (SELECT f.id FROM faction f WHERE ${FACTION_SHOWN})
-SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_rebuild_since IS NOT NULL
+SELECT g.id, 'tradeskills' AS board FROM guild g WHERE g.board_channel_id IS NOT NULL AND (?1 = 1 OR g.board_index_message_id IS NULL OR g.board_index_hash IS NULL OR g.board_rebuild_since IS NOT NULL
   OR EXISTS (SELECT 1 FROM board_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
   OR (SELECT count(*) FROM board_post p WHERE p.guild_id = g.id) < (SELECT count(*) FROM tradeskill))
 UNION ALL
-SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT NULL AND (g.${FACTIONS.indexMessage} IS NULL OR g.${FACTIONS.rebuild} IS NOT NULL
+SELECT g.id, 'factions' AS board FROM guild g WHERE g.${FACTIONS.channel} IS NOT NULL AND (g.${FACTIONS.indexMessage} IS NULL OR g.${FACTIONS.indexHash} IS NULL OR g.${FACTIONS.rebuild} IS NOT NULL
   OR EXISTS (SELECT 1 FROM faction_post p WHERE p.guild_id = g.id AND p.dirty <> 0)
   OR EXISTS (SELECT 1 FROM faction f CROSS JOIN faction_post p ON p.guild_id = g.id AND p.faction_id = f.id
      WHERE f.changed_at > coalesce((SELECT q.last_rendered_at FROM faction_post q WHERE q.guild_id = g.id ORDER BY q.last_rendered_at LIMIT 1), '')

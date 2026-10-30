@@ -377,3 +377,14 @@ Order 29 is the DKP add-on, part 2: spending points (docs/PRD.md, "Order 29: spe
 - Who was at a kill is read only from dkp_kill_member, never from the ledger.
 - A zone's description is its page's lead text (the owner, 2026-10-29), read by one named function in scripts/wiki/parse.ts (`leadText`) and recorded beside TEMPLATE_FIELDS (`zoneDescription`). That function strips __NOTOC__, <br>, templates, files, references and markup.
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 30
+
+Order 30 clears four small items: forum post guidelines, a building line on boards, the "DKP module" wording and a guard on the weekly decay timer. Nothing earlier is overridden.
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1–2; PR B: ITEMs 3–4.
+- Forum defaults are set at creation and by one backfill, then never touched again. GuildCraft sets a forum's guidelines when it creates the forum, plus one backfill of forums that already exist (scripts/forum/backfill.ts: dry run, then the test copy, then production; it sets a field only if it's empty at that moment; PR B removes it). After that GuildCraft never reads or writes these fields, so an officer who changes or clears them keeps their choice.
+- Order 24's member-post denial on GuildCraft forums stands. The guidelines text says why.
+- The DKP switch is called the "DKP module" on its buttons, its confirmations and in help. No button, reply or help text uses "Add DKP" or "Remove DKP" unless the word "module" follows, because the bare phrase reads like awarding points.
+- A guild with DKP on always has exactly one decay item on its Durable Object. One idempotent function ensures it, and every path that can find it missing calls that function.
+- Failed runs: every one is listed in the FINAL (order 12).

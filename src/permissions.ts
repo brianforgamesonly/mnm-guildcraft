@@ -56,7 +56,7 @@ export const ROUTES: Route[] = [
   // guild can be allowed/denied" (Create Guild Channel), so every bit it sets is one the install link asks for.
   { method: 'GET', path: '/guilds/{}/channels', channel: null, needs: [], why: 'channel setup: the channels that already exist, to reuse them (Get Guild Channels: no permission stated)' },
   { method: 'POST', path: '/guilds/{}/channels', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: create the category and its channels, with their overwrites (Create Guild Channel: "Requires the MANAGE_CHANNELS permission"; it does not say whether overwrites also need MANAGE_ROLES, so the button requires both before any create)' },
-  { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order and (order 24) default reaction (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
+  { method: 'PATCH', path: '/channels/{}', channel: null, needs: [MANAGE_CHANNELS], why: 'channel setup: a reused forum\'s default sort order and (order 24) default reaction; order 30\'s one-off backfill of post guidelines (Modify Channel: "Requires the MANAGE_CHANNELS permission for the guild")' },
   // Order 24 (ITEM 3, read 2026-10-27): the server's GuildCraft emoji, the forums' default reaction.
   { method: 'GET', path: '/guilds/{}/emojis', channel: null, needs: [], why: 'emoji: find the server\'s guildcraft emoji (List Guild Emojis: no permission stated)' },
   { method: 'POST', path: '/guilds/{}/emojis', channel: null, needs: [CREATE_GUILD_EXPRESSIONS], why: 'emoji: create the guildcraft emoji once (Create Guild Emoji: "Requires the CREATE_GUILD_EXPRESSIONS permission")' },

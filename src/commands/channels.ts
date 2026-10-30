@@ -15,6 +15,7 @@
 // COMMUNITY feature the forum is not attempted.
 import type { Ctx } from '../context.ts';
 import { botApi, type BotApi } from '../board/api.ts';
+import { FACTIONS, TRADESKILLS } from '../board/kinds.ts';
 import {
   ADMINISTRATOR, CREATE_PRIVATE_THREADS, ephemeral, GUILD_CATEGORY, GUILD_FORUM, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, READ_MESSAGE_HISTORY, SEND_MESSAGES,
   SEND_MESSAGES_IN_THREADS, VIEW_CHANNEL, type MessageReply,
@@ -35,6 +36,8 @@ interface Planned {
   private: boolean;
   /** What it holds, one line in the reply. */
   purpose: string;
+  /** Order 30: a forum's post guidelines, sent only when the forum is created (never on a kept forum: officers' edits win). */
+  guidelines?: string;
 }
 
 /**
@@ -42,8 +45,8 @@ interface Planned {
  * store text and forum names lower-cased.
  */
 export const LAYOUT: Planned[] = [
-  { key: 'board_channel_id', kind: 'board', name: 'GC-Tradeskills', type: GUILD_FORUM, private: false, purpose: 'the tradeskills board: one post per tradeskill, listing who can craft it' },
-  { key: 'faction_board_channel_id', kind: 'factions', name: 'GC-Factions', type: GUILD_FORUM, private: false, purpose: 'the factions board: one post per faction, listing the creatures whose wiki page names it' },
+  { key: 'board_channel_id', kind: 'board', name: 'GC-Tradeskills', type: GUILD_FORUM, private: false, purpose: 'the tradeskills board: one post per tradeskill, listing who can craft it', guidelines: TRADESKILLS.guidelines },
+  { key: 'faction_board_channel_id', kind: 'factions', name: 'GC-Factions', type: GUILD_FORUM, private: false, purpose: 'the factions board: one post per faction, listing the creatures whose wiki page names it', guidelines: FACTIONS.guidelines },
   { key: 'request_channel_id', kind: 'requests', name: 'GC-Craft Requests', type: GUILD_TEXT, private: false, purpose: 'craft requests: one private thread per request' },
   { key: 'review_channel_id', kind: 'review', name: 'GC-Officer Review', type: GUILD_TEXT, private: true, purpose: 'officers only: member reports and departure notices' },
 ];
@@ -228,7 +231,7 @@ async function createChannels(c: Ctx, api: BotApi, botId: string): Promise<Messa
       type: p.type,
       parent_id: category!.id,
       permission_overwrites: overwritesFor(p, g, botId, c.guild.officer_role_id),
-      ...(p.type === GUILD_FORUM ? { default_sort_order: FORUM_SORT_CREATION, ...(emojiId ? { default_reaction_emoji: reactionOf(emojiId) } : {}) } : {}),
+      ...(p.type === GUILD_FORUM ? { default_sort_order: FORUM_SORT_CREATION, ...(p.guidelines ? { topic: p.guidelines } : {}), ...(emojiId ? { default_reaction_emoji: reactionOf(emojiId) } : {}) } : {}),
     });
     if (!made.ok) {
       console.error('channel setup: create refused', p.kind, JSON.stringify(api.log.at(-1)));
