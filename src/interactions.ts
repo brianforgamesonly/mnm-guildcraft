@@ -38,6 +38,7 @@ import { AUCTION_OPENS_MODAL, auctionComponent, auctionImmediate } from './dkp/a
 import { shopComponent } from './dkp/shop.ts';
 import { EVENT_ROUTES, mayRunEvent } from './events/commands.ts';
 import { EVENT_COPY } from './events/copy.ts';
+import { DROP_PREFIX, dropDraft, POST_PREFIX as EVENT_POST_PREFIX, postDraft, ROSTER_PAGE_PREFIX, rosterPageButton } from './events/manage.ts';
 import { ADD_EVENTS_PREFIX, addEventsButton, REMOVE_EVENTS_PREFIX, removeEventsButton } from './events/setup.ts';
 import { loadEvents } from './events/state.ts';
 import type { Ctx, Effects } from './context.ts';
@@ -234,9 +235,14 @@ async function eventCommand(i: Interaction, env: Env, ctx: WaitUntil, effects: E
 }
 
 /** Order 32: an Events button or select (prefix ev, after Add and Remove Events module). */
-async function eventComponent(c: Ctx): Promise<MessageReply> {
+async function eventComponent(c: Ctx, id: string): Promise<MessageReply> {
   const d = await loadEvents(c.db, c.guild.id);
   if (!d.enabled) return ephemeral(EVENT_COPY.off);
+  // The preview's Post and Cancel are the poster's; each re-checks what it needs.
+  if (id.startsWith(EVENT_POST_PREFIX)) return postDraft(c, id, d);
+  if (id.startsWith(DROP_PREFIX)) return dropDraft(c, id);
+  if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
+  if (id.startsWith(ROSTER_PAGE_PREFIX)) return rosterPageButton(c, id, d);
   return ephemeral(STALE_FORM);
 }
 
@@ -285,7 +291,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   // Order 32: Add and Remove Events module, admins only; then every other Events control.
   if (id.startsWith(ADD_EVENTS_PREFIX)) return isAdmin(i.member!) ? addEventsButton(c) : ephemeral(ADMIN_ONLY);
   if (id.startsWith(REMOVE_EVENTS_PREFIX)) return isAdmin(i.member!) ? removeEventsButton(c) : ephemeral(ADMIN_ONLY);
-  if (id.startsWith(EVENT_PREFIX)) return eventComponent(c);
+  if (id.startsWith(EVENT_PREFIX)) return eventComponent(c, id);
   // Officer buttons (order 7): rights come from this press; the member gate does not apply to officers' tools.
   if (id.startsWith(REMOVE_PREFIX)) return removeMemberButton(c, id);
   if (id.startsWith(NOTICE_PREFIX)) return noticeButton(c, id);

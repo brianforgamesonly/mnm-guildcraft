@@ -12,8 +12,21 @@ const STRING = 3;
 const INTEGER = 4;
 const BOOLEAN = 5;
 const ROLE = 8;
+const NUMBER = 10;
 
 export const EVENT_NAME = 'event';
+
+const TYPE_OPTION = (required: boolean) => ({ type: STRING, name: 'type', description: 'The kind of event', required, choices: TYPES.map((t) => ({ name: TYPE_DEFAULTS[t], value: t })) });
+const EVENT_OPTION = { type: STRING, name: 'event', description: 'The event: pick from the list', required: true, autocomplete: true, max_length: 100 };
+const FIELDS = [
+  { type: NUMBER, name: 'hours', description: 'How long it runs (default: 3 for a Raid, 2 otherwise)', min_value: 0.5, max_value: 24 },
+  { type: STRING, name: 'zone', description: 'The zone: pick from the list (a Raid needs one; a Social takes none)', autocomplete: true, max_length: 100 },
+  { type: STRING, name: 'description', description: 'A few words for the card', max_length: 1000 },
+  { type: INTEGER, name: 'capacity', description: 'How many can sign up in all', min_value: 0, max_value: 1000 },
+  ...ROLES.map((r) => ({ type: INTEGER, name: r, description: `${ROLE_DEFAULTS[r]} limit (Raid and Group)`, min_value: 0, max_value: 1000 })),
+  { type: STRING, name: 'when_full', description: 'Where a full event sends a member (default: the waitlist)', choices: [{ name: 'Waitlist', value: 'waitlist' }, { name: 'Bench', value: 'bench' }] },
+  { type: ROLE, name: 'signup_role', description: 'Only this role can sign up (default: the server setting)' },
+];
 
 export const EVENT_COMMAND = {
   name: EVENT_NAME,
@@ -21,6 +34,46 @@ export const EVENT_COMMAND = {
   type: 1,
   contexts: [0],
   options: [
+    {
+      type: SUBCOMMAND,
+      name: 'create',
+      description: 'Officers: set up an event; a private preview comes first, with Post and Cancel',
+      options: [
+        TYPE_OPTION(true),
+        { type: STRING, name: 'title', description: 'What the event is called', required: true, max_length: 100 },
+        { type: STRING, name: 'start', description: 'Like 2026-11-07 20:00, friday 20:00 or tomorrow 8pm, in the server time zone', required: true, max_length: 40 },
+        ...FIELDS,
+      ],
+    },
+    {
+      type: SUBCOMMAND,
+      name: 'edit',
+      description: 'Officers: change an open event; lowering a limit removes nobody',
+      options: [
+        EVENT_OPTION,
+        TYPE_OPTION(false),
+        { type: STRING, name: 'title', description: 'What the event is called', max_length: 100 },
+        { type: STRING, name: 'start', description: 'A new start; it moves the lock', max_length: 40 },
+        ...FIELDS,
+        { type: STRING, name: 'clear', description: 'Remove one value', choices: [{ name: 'Capacity', value: 'capacity' }, ...ROLES.map((r) => ({ name: `${ROLE_DEFAULTS[r]} limit`, value: r })), { name: 'Zone', value: 'zone' }, { name: 'Description', value: 'description' }, { name: 'Sign-up role', value: 'signup_role' }] },
+      ],
+    },
+    {
+      type: SUBCOMMAND,
+      name: 'cancel',
+      description: 'Officers: cancel an event, with a public reason',
+      options: [EVENT_OPTION, { type: STRING, name: 'reason', description: 'Why (shown publicly on the card)', required: true, max_length: 200 }],
+    },
+    {
+      type: SUBCOMMAND,
+      name: 'list',
+      description: 'Upcoming events, or one event\'s full roster (answers privately)',
+      options: [
+        { ...TYPE_OPTION(false), description: 'Only this type' },
+        { ...EVENT_OPTION, required: false, description: "One event: its full roster" },
+        { type: BOOLEAN, name: 'history', description: "Officers: that event's sign-up history" },
+      ],
+    },
     {
       type: SUBCOMMAND,
       name: 'settings',
@@ -45,4 +98,4 @@ export const EVENT_COMMAND = {
 export const EVENT_DEFINED_LIST = EVENT_COMMAND.options.map((o) => ({ cmd: `/${EVENT_NAME} ${o.name}`, command: EVENT_NAME, description: o.description as string }));
 export const EVENT_DEFINED = new Set(EVENT_DEFINED_LIST.map((d) => d.cmd));
 /** The PRD's /event commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). */
-export const EVENT_COMING: string[] = ['/event cancel', '/event create', '/event edit', '/event list', '/event roster'];
+export const EVENT_COMING: string[] = ['/event roster'];

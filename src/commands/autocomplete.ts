@@ -120,6 +120,19 @@ const dkpKills: Lister = async ({ db, i, typed }) => {
     .map((r) => ({ name: truncate(`${r.name} · ${r.at.slice(11, 19)} UTC · #${r.id}`, CHOICE_MAX), value: String(r.id) }));
 };
 
+/** Order 32: a server's open events, soonest first, by id. The member gate is inside the statement. */
+const openEvents: Lister = async ({ db, i, typed }) => {
+  const { results } = await db
+    .prepare(`SELECT id, title, start_at FROM event WHERE guild_id = ?1 AND status = 'open' AND ${SQL_PASSES_MEMBER_GATE} ORDER BY start_at LIMIT 100`)
+    .bind(i.guild_id, JSON.stringify(i.member.roles ?? []))
+    .all<{ id: number; title: string; start_at: string }>();
+  const q = typed.trim().toLowerCase();
+  return results
+    .filter((r) => !q || r.title.toLowerCase().includes(q))
+    .slice(0, 25)
+    .map((r) => ({ name: truncate(`${r.title} · ${r.start_at.slice(0, 16).replace('T', ' ')} UTC`, CHOICE_MAX), value: String(r.id) }));
+};
+
 /**
  * Order 18: each list is chosen by command and option ("/command [subcommand] option"), never by the option's name alone,
  * so /item name: (every item) and /request item: (items with a recipe) keep their own lists. Every autocomplete option in
@@ -158,6 +171,12 @@ export const LISTS: Record<string, Lister> = {
   '/dkp wishlist remove item': async ({ db, i, typed }) => asChoices(await ownWishlist(db, i.guild_id, i.member.user.id, typed)),
   // Order 32: /event (a per-server definition, src/events/definition.ts). The class list is game_class's, cached.
   '/event settings class': game('classes'),
+  // Order 32: this server's open events, which their cards already show to everyone. One statement per keystroke.
+  '/event create zone': game('zones'),
+  '/event edit zone': game('zones'),
+  '/event edit event': openEvents,
+  '/event cancel event': openEvents,
+  '/event list event': openEvents,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

@@ -7,12 +7,17 @@ import { EVENT_COPY } from './copy.ts';
 import { DEFAULT_TIME_ZONE, EVENT_SETTINGS, EVENTS_ROLE, eventSettingOf, roleLabelKey, SIGNUP_ROLE, SUPPORT_ON, TIME_ZONE, typeLabelKey, validTimeZone } from './settings.ts';
 import type { EventState } from './state.ts';
 import { ROLES, TYPES, type Role } from './types.ts';
+import { cancelCommand, createCommand, editCommand, listCommand } from './manage.ts';
 
 export type EventRun = (c: Ctx, opts: Option[], d: EventState) => Promise<MessageReply>;
 /** runner: isEventRunner · admin: Administrator or Manage Server · member: the member-role gate. */
 export type EventAccess = 'runner' | 'admin' | 'member';
 export const EVENT_ROUTES: Record<string, { access: EventAccess; run: EventRun }> = {
   'event settings': { access: 'admin', run: settings },
+  'event create': { access: 'runner', run: (c, o, d) => createCommand(c, o, d) },
+  'event edit': { access: 'runner', run: (c, o, d) => editCommand(c, o, d) },
+  'event cancel': { access: 'runner', run: (c, o, d) => cancelCommand(c, o, d) },
+  'event list': { access: 'member', run: (c, o, d) => listCommand(c, o, d) },
 };
 
 export const mayRunEvent = (c: Ctx, access: EventAccess, d: EventState) =>
@@ -92,7 +97,7 @@ async function settings(c: Ctx, opts: Option[], d: EventState): Promise<MessageR
         : c.db.prepare('INSERT INTO event_class_role (guild_id, class_code, role, set_at, set_by) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (guild_id, class_code) DO UPDATE SET role = ?3, set_at = ?4, set_by = ?5').bind(g, cls, role, at, c.userId),
       audit(c.db, g, c.userId, 'event.setting', `class:${cls}`, null, { role }),
     );
-    notices.push(EVENT_COPY.changed(EVENT_COPY.classRole(md(cls), role), role === 'none' ? EVENT_COPY.none : md(d.settings.role_labels[role]), byName(c)));
+    notices.push(EVENT_COPY.changed(EVENT_COPY.classRole(md(cls)), role === 'none' ? EVENT_COPY.none : md(d.settings.role_labels[role]), byName(c)));
   }
   await c.db.batch(stmts);
   const api = eventApi(c, 1);
