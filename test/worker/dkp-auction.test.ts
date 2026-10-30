@@ -473,6 +473,23 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect((await one<{ status: string }>("SELECT status FROM dkp_auction WHERE item_id = 7003")).status).toBe('open');
   });
 
+  it('review of PR C: a card Discord fails to take (503) puts the drop back in the queue, never cancels it; a refusal (403) cancels it', async () => {
+    const r = await nightWithKill([kestrel]);
+    const handle = botApi.handle!;
+    let status = 503;
+    botApi.handle = (m, p, b) => (m === 'POST' && /\/messages$/.test(p) && b?.embeds?.[1]?.title?.startsWith('Auction') ? json({ code: status === 403 ? 50013 : 0, message: 'x' }, status) : handle(m, p, b));
+    await auctionDrop(r);
+    expect(await auction()).toMatchObject({ status: 'queued', message_id: null });
+    botApi.handle = handle;
+    await HANDLERS.next(withToken, GUILD, String(r.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect((await auction()).status).toBe('open');
+    status = 403;
+    botApi.handle = (m, p, b) => (m === 'POST' && /\/messages$/.test(p) && b?.embeds?.[1]?.title?.startsWith('Auction') ? json({ code: 50013, message: 'Missing Permissions' }, 403) : handle(m, p, b));
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    expect((await auction()).status).toBe('cancelled');
+    botApi.handle = handle;
+  });
+
   it('order 29, PR C: the general auction: an item that expires unsold takes a record of what was done (public, kept, once)', async () => {
     await dkp(officer, 'auction', { item: 'Lantern', general: true });
     const a = await auction();

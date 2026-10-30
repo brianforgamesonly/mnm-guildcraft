@@ -246,34 +246,78 @@ export async function openAuction(db: D1Database, api: BotApi | null, guild: Gui
     .bind(at, id, guild.id)
     .first<{ id: number }>();
   if (!opened) return [];
-  const a = (await auctionById(db, guild.id, id))!;
-  const posted = api && channelId ? await postIn(api, channelId, await cardFor(db, guild, a, s)) : null;
-  if (!posted) {
-    await db.prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = 'bot', closed_at = ?2 WHERE id = ?3 AND status = 'open'").bind(A.cannotPost, at, id).run();
-    return [];
+  // Review of PR C: anything short of Discord refusing the card puts it back in the queue (an open auction with no card
+  // and no timer would hold the raid's queue for good); only a refusal (a 4xx with its code) cancels it.
+  const requeue = () => db.prepare("UPDATE dkp_auction SET status = 'queued', opened_at = NULL, closes_at = NULL WHERE id = ? AND status = 'open' AND message_id IS NULL").bind(id).run();
+  let r: Awaited<ReturnType<BotApi['call']>> | null = null;
+  try {
+    const a = (await auctionById(db, guild.id, id))!;
+    if (api && channelId) r = await api.call<{ id: string }>('POST', `/channels/${channelId}/messages`, { ...(await cardFor(db, guild, a, s)), allowed_mentions: NO_PINGS });
+    if (r?.ok) {
+      await db.prepare('UPDATE dkp_auction SET message_id = ? WHERE id = ?').bind((r.body as { id: string }).id, id).run();
+      return [
+        { key: `auction:${id}`, due: Date.parse(a.closes_at!) },
+        { key: `nudge:${id}`, due: nowMs },
+      ];
+    }
+  } catch (e) {
+    await requeue();
+    throw e;
   }
-  await db.prepare('UPDATE dkp_auction SET message_id = ? WHERE id = ?').bind(posted, id).run();
-  return [
-    { key: `auction:${id}`, due: Date.parse(a.closes_at!) },
-    { key: `nudge:${id}`, due: nowMs },
-  ];
+  if (!r || transient(r)) {
+    await requeue();
+    return a_retry(guild.id, id, nowMs);
+  }
+  await db.prepare("UPDATE dkp_auction SET status = 'cancelled', reason = ?1, cancelled_by = 'bot', closed_at = ?2 WHERE id = ?3 AND status = 'open'").bind(A.cannotPost, at, id).run();
+  return [];
 }
+
+/** A Discord answer worth trying again: skipped (budget, deadline, rate), no answer, 429, or a server error. */
+export const transient = (r: { ok: boolean; status: number; skipped?: string }) => !r.ok && (!!r.skipped || r.status === 0 || r.status === 429 || r.status >= 500);
+/** Calls opening an auction needs (its card's reads and the post): below this, the opening waits for a fresh run. */
+export const OPEN_NEEDS = 12;
+const RETRY_MS = 30_000;
+/** An opening that could not post: the raid's queue (or a general auction's own retry) tries again shortly. */
+const a_retry = (_guildId: string, id: number, nowMs: number) => [{ key: `reopen:${id}`, due: nowMs + RETRY_MS }];
 
 /**
  * The item queue (order 29, PR C): when a raid's auction closes (sold, unsold or cancelled), its next queued drop opens.
  * Returns the timer items to set. A card Discord refuses is cancelled, and the one after it is tried (at most 3).
  */
-export async function openNext(db: D1Database, api: BotApi | null, guild: Guild, channelId: string | null, raidId: number | null, nowMs: number, s?: Settings): Promise<{ key: string; due: number }[]> {
+export async function openNext(
+  db: D1Database,
+  api: BotApi | null,
+  guild: Guild,
+  channelId: string | null,
+  raidId: number | null,
+  nowMs: number,
+  s?: Settings,
+  /** Calls an opening needs: OPEN_NEEDS on the timer object (its budget counts D1); 1 in an interaction (Discord only). */
+  needs = OPEN_NEEDS,
+): Promise<{ key: string; due: number }[]> {
   if (raidId === null) return [];
   for (let tries = 0; tries < 3; tries++) {
+    // Review of PR C: only with the calls an opening needs; otherwise the next run (next:<raid>) opens it.
+    if (api && budgetLeft(api.budget) < needs) return [{ key: `next:${raidId}`, due: nowMs }];
     const next = await db.prepare("SELECT id FROM dkp_auction WHERE raid_id = ? AND guild_id = ? AND status = 'queued' ORDER BY id LIMIT 1").bind(raidId, guild.id).first<{ id: number }>();
     if (!next) return [];
     const items = await openAuction(db, api, guild, channelId, next.id, nowMs, s);
+    // A transient failure: the queue tries again shortly (next:<raid>), never cancels.
+    if (items.some((i) => i.key.startsWith('reopen:'))) return [{ key: `next:${raidId}`, due: nowMs + RETRY_MS }];
     if (items.length) return items;
-    // Not opened: another is open (it waits), or its card was refused (cancelled: try the next).
+    // Not opened: another is open (it waits), or Discord refused its card (cancelled: try the next).
     if ((await auctionById(db, guild.id, next.id))?.status !== 'cancelled') return [];
   }
   return [];
+}
+
+/** reopen:<id>: a general auction whose card could not post yet tries again (raid auctions retry through next:). */
+export async function reopen(db: D1Database, api: BotApi | null, guild: Guild, channelId: string | null, id: number, nowMs: number, s?: Settings) {
+  const a = await auctionById(db, guild.id, id);
+  if (!a || a.status !== 'queued') return [];
+  if (a.raid_id !== null) return openNext(db, api, guild, channelId, a.raid_id, nowMs, s);
+  if (api && budgetLeft(api.budget) < OPEN_NEEDS) return [{ key: `reopen:${id}`, due: nowMs }];
+  return openAuction(db, api, guild, channelId, id, nowMs, s);
 }
 
 /**
@@ -294,20 +338,25 @@ async function createAuctions(
       `INSERT INTO dkp_auction (guild_id, kind, raid_id, kill_id, from_auction, item_id, min_bid, seconds, status, created_by, created_at)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'queued', ?9, ?10 WHERE ?5 IS NULL OR NOT EXISTS (SELECT 1 FROM dkp_auction WHERE from_auction = ?5) RETURNING id`,
     );
-    const rows = await c.db.batch<{ id: number }>([
-      ...p.itemIds.map((itemId) => ins.bind(c.guild.id, p.kind, p.raidId, p.killId, p.fromAuction ?? null, itemId, p.min, p.seconds, c.userId, at)),
-      audit(c.db, c.guild.id, c.userId, 'dkp.auction.create', `raid:${p.raidId ?? 'general'}`, null, { kind: p.kind, items: p.itemIds, min: p.min, seconds: p.seconds }),
-    ]);
-    const ids = rows.slice(0, p.itemIds.length).flatMap((r) => r.results.map((x) => x.id));
+    const rows = await c.db.batch<{ id: number }>(p.itemIds.map((itemId) => ins.bind(c.guild.id, p.kind, p.raidId, p.killId, p.fromAuction ?? null, itemId, p.min, p.seconds, c.userId, at)));
+    const ids = rows.flatMap((r) => r.results.map((x) => x.id));
     if (!ids.length) return ephemeral(A.alreadyPosted);
-    const first = ids[0];
-    const items = p.kind === 'raid' ? await openNext(c.db, api, c.guild, d.channel_id, p.raidId, Date.now(), d.settings) : await openAuction(c.db, api, c.guild, d.channel_id, first, Date.now(), d.settings);
+    // The audit row only for what was created (review of PR C).
+    await audit(c.db, c.guild.id, c.userId, 'dkp.auction.create', `raid:${p.raidId ?? 'general'}`, null, { kind: p.kind, auctions: ids, items: p.itemIds, min: p.min, seconds: p.seconds }).run();
+    const items = p.kind === 'raid' ? await openNext(c.db, api, c.guild, d.channel_id, p.raidId, Date.now(), d.settings, 1) : await openAuction(c.db, api, c.guild, d.channel_id, ids[0], Date.now(), d.settings);
     schedule(c, items);
-    const a = (await auctionById(c.db, c.guild.id, first))!;
-    if (a.status === 'open') return ephemeral(ids.length > 1 ? `${A.opened(a.item_name, link(c.guild.id, d.channel_id, a.message_id))}\n${Q.queuedMany(ids.length - 1)}` : A.opened(a.item_name, link(c.guild.id, d.channel_id, a.message_id)));
-    if (a.status === 'cancelled') return ephemeral(A.cannotPost);
-    const ahead = await c.db.prepare("SELECT count(*) AS n FROM dkp_auction WHERE raid_id = ? AND status IN ('open', 'queued') AND id < ?").bind(p.raidId, first).first<{ n: number }>();
-    return ephemeral(ids.length > 1 ? Q.queuedMany(ids.length) : Q.queued(a.item_name, ahead?.n ?? 1));
+    // The reply names what opened (any of these: a refused first card lets the next open), else what waits.
+    const { results: now_ } = await c.db.prepare('SELECT id, status FROM dkp_auction WHERE id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ids)).all<{ id: number; status: string }>();
+    const opened = now_.find((x) => x.status === 'open');
+    const waiting = now_.filter((x) => x.status === 'queued').length;
+    if (opened) {
+      const a = (await auctionById(c.db, c.guild.id, opened.id))!;
+      return ephemeral([A.opened(a.item_name, link(c.guild.id, d.channel_id, a.message_id)), ...(waiting ? [Q.queuedMany(waiting)] : [])].join('\n'));
+    }
+    if (!waiting) return ephemeral(A.cannotPost);
+    const first = (await auctionById(c.db, c.guild.id, ids[0]))!;
+    const ahead = await c.db.prepare("SELECT count(*) AS n FROM dkp_auction WHERE raid_id = ? AND status IN ('open', 'queued') AND id < ?").bind(p.raidId, ids[0]).first<{ n: number }>();
+    return ephemeral(waiting > 1 ? Q.queuedMany(waiting) : Q.queued(first.item_name, Math.max(1, ahead?.n ?? 1)));
   } finally {
     spent(c, api);
   }
@@ -606,7 +655,7 @@ async function cancelSubmitted(c: Ctx, d: DkpState, id: number, components: Moda
       await postIn(api, d.channel_id, { content: A.cancelled(a.item_name, by(c), reason, link(c.guild.id, d.channel_id, a.message_id)) });
     }
     // The item queue: the raid's next drop opens.
-    schedule(c, await openNext(c.db, api, c.guild, d.channel_id, a.raid_id, Date.now(), d.settings));
+    schedule(c, await openNext(c.db, api, c.guild, d.channel_id, a.raid_id, Date.now(), d.settings, 1));
   } finally {
     spent(c, api);
   }
@@ -625,13 +674,13 @@ async function recordSubmitted(c: Ctx, d: DkpState, id: number, components: Moda
   if (!runner(c, d)) return ephemeral(A.notRunner);
   const text = (modalValues(components).get('disposal') ?? '').trim();
   if (!text) return ephemeral(RAID_COPY.reason);
-  const [res] = await c.db.batch([
-    c.db
-      .prepare("UPDATE dkp_auction SET disposal = ?1, disposal_by = ?2, disposal_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND kind = 'general' AND status = 'unsold' AND disposal IS NULL")
-      .bind(text, c.userId, now(), id, c.guild.id),
-    audit(c.db, c.guild.id, c.userId, 'dkp.auction.disposal', `auction:${id}`, null, { recorded: true }),
-  ]);
+  const res = await c.db
+    .prepare("UPDATE dkp_auction SET disposal = ?1, disposal_by = ?2, disposal_at = ?3 WHERE id = ?4 AND guild_id = ?5 AND kind = 'general' AND status = 'unsold' AND disposal IS NULL")
+    .bind(text, c.userId, now(), id, c.guild.id)
+    .run();
   if (!res.meta.changes) return ephemeral(Q.notRecordable);
+  // The audit row only for a record made (review of PR C).
+  await audit(c.db, c.guild.id, c.userId, 'dkp.auction.disposal', `auction:${id}`, null, { recorded: true }).run();
   const a = (await auctionById(c.db, c.guild.id, id))!;
   const api = apiFor(c);
   try {
@@ -660,21 +709,22 @@ export async function nudge(db: D1Database, api: BotApi | null, guild: Guild, ch
   if (!a || a.status !== 'open' || !api || !channelId || !a.message_id) return null;
   const done = new Set((await db.prepare('SELECT member_id FROM dkp_nudge WHERE auction_id = ?').bind(id).all<{ member_id: string }>()).results.map((r) => r.member_id));
   const todo = (await eligibleWishers(db, guild.id, a, nowMs, s)).filter((m) => !done.has(m));
-  const results: [string, 'sent' | 'refused' | 'failed'][] = [];
   const url = link(guild.id, channelId, a.message_id)!;
+  const at = new Date(nowMs).toISOString();
+  const record = db.prepare('INSERT INTO dkp_nudge (auction_id, member_id, result, at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING');
+  let handled = 0;
   for (const member of todo) {
-    // Two calls for this member, and one D1 batch to record the chunk.
-    if (budgetLeft(api.budget) < 3) break;
+    // Two calls for this member and one to record it, right after its send (review of PR C: a run that dies part-way
+    // never messages anyone twice).
+    if (budgetLeft(api.budget) < 4) break;
     const dm = await api.call<{ id: string }>('POST', '/users/@me/channels', { recipient_id: member });
     const sent = dm.ok ? await api.call('POST', `/channels/${dm.body.id}/messages`, { content: Q.nudge(a.item_name, url, unix(a.closes_at!)), allowed_mentions: NO_PINGS }) : dm;
-    results.push([member, sent.ok ? 'sent' : sent.code === CANNOT_DM ? 'refused' : 'failed']);
+    // A transient failure (skipped, no answer, 429, 5xx) is tried again later, unrecorded; a refusal or another 4xx is final.
+    if (transient(sent)) return { again: nowMs + RETRY_MS };
+    await record.bind(id, member, sent.ok ? 'sent' : sent.code === CANNOT_DM ? 'refused' : 'failed', at).run();
+    handled++;
   }
-  if (results.length) {
-    const at = new Date(nowMs).toISOString();
-    const ins = db.prepare('INSERT INTO dkp_nudge (auction_id, member_id, result, at) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING');
-    await db.batch(results.map(([m, r]) => ins.bind(id, m, r, at)));
-  }
-  return results.length < todo.length ? { again: nowMs } : null;
+  return handled < todo.length ? { again: nowMs } : null;
 }
 /** Discord's JSON error code 50007, "Cannot send messages to this user" (docs.discord.com/developers/topics/opcodes-and-status-codes). */
 export const CANNOT_DM = 50007;
