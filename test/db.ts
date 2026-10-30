@@ -33,7 +33,7 @@ export const dkpTriggerNames = () => DKP_TRIGGERS.map((t) => t.name);
 export async function reset(tradeskills: string[] = ['Alchemy', 'Blacksmithing', 'Brewing', 'Fletching', 'Tailoring'], classes: [string, number][] = [['CLR', 1140], ['SHD', 1498], ['WIZ', 342], ['OLD', 0]]) {
   await clearDkp();
   await env.DB.batch(
-    ['event_signup_history', 'event_signup', 'event', 'event_class_role', 'event_setting', 'event_guild', 'faction_post', 'npc_faction', 'faction_quest', 'faction', 'craft_request_item', 'craft_request', 'craft_notify', 'audit_log', 'recipe_correction_component', 'recipe_correction', 'recipe_report', 'item_image', 'character_recipe', 'character_skill', 'character', 'member', 'guild', 'board_post', 'recipe_component', 'recipe', 'tradeskill', 'game_class', 'sweep_run'].map((t) =>
+    ['card_stale', 'event_signup_history', 'event_signup', 'event', 'event_class_role', 'event_setting', 'event_guild', 'faction_post', 'npc_faction', 'faction_quest', 'faction', 'craft_request_item', 'craft_request', 'craft_notify', 'audit_log', 'recipe_correction_component', 'recipe_correction', 'recipe_report', 'item_image', 'character_recipe', 'character_skill', 'character', 'member', 'guild', 'board_post', 'recipe_component', 'recipe', 'tradeskill', 'game_class', 'sweep_run'].map((t) =>
       env.DB.prepare(`DELETE FROM ${t}`),
     ),
   );

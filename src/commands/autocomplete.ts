@@ -16,6 +16,8 @@ import { DKP_COPY } from '../dkp/copy.ts';
 import { OPEN_RAID_CREATURES_SQL, zoneCreatures } from '../dkp/creatures.ts';
 import { POOL_GUILD } from '../dkp/ledger.ts';
 import { ownWishlist } from '../dkp/wishlist.ts';
+import { eventSettingsOf, TIME_ZONE } from '../events/settings.ts';
+import { shortDate } from '../events/times.ts';
 import { zoneKey } from '../zone/names.ts';
 
 const CHOICE_MAX = 100;
@@ -105,19 +107,26 @@ const dkpOpenRaidCreatures: Lister = async ({ db, i, typed }) => {
   const names = (await db.prepare(OPEN_RAID_CREATURES_SQL).bind(i.guild_id).all<{ name: string }>()).results.map((r) => r.name);
   return factionChoices(names, typed.slice(0, 100));
 };
+/**
+ * Order 33: UTC is never shown. An autocomplete can't render <t:…>, so a time is in the server's named zone, read inside the
+ * list's own statement (one statement per keystroke); a server that never set one has the default.
+ */
+const SQL_TIME_ZONE = `(SELECT s.value FROM event_setting s WHERE s.guild_id = ?1 AND s.key = '${TIME_ZONE}')`;
+const serverTime = (at: string, tz: string | null) => shortDate(Date.parse(at), eventSettingsOf({ [TIME_ZONE]: tz ?? '' }).time_zone);
+
 /** Order 27: /dkp correct kill: the latest raid's kills, newest first, by id. One statement. */
 const dkpKills: Lister = async ({ db, i, typed }) => {
   const { results } = await db
     .prepare(
-      `SELECT k.id, coalesce(k.name, 'Flat payout') AS name, k.at FROM dkp_kill k WHERE k.raid_id = (SELECT id FROM dkp_raid WHERE guild_id = ?1 ORDER BY closed_at IS NULL DESC, id DESC LIMIT 1) ORDER BY k.id DESC LIMIT 100`,
+      `SELECT k.id, coalesce(k.name, 'Flat payout') AS name, k.at, ${SQL_TIME_ZONE} AS tz FROM dkp_kill k WHERE k.raid_id = (SELECT id FROM dkp_raid WHERE guild_id = ?1 ORDER BY closed_at IS NULL DESC, id DESC LIMIT 1) ORDER BY k.id DESC LIMIT 100`,
     )
     .bind(i.guild_id)
-    .all<{ id: number; name: string; at: string }>();
+    .all<{ id: number; name: string; at: string; tz: string | null }>();
   const q = typed.trim().toLowerCase();
   return results
     .filter((r) => !q || r.name.toLowerCase().includes(q) || String(r.id) === q)
     .slice(0, 25)
-    .map((r) => ({ name: truncate(`${r.name} · ${r.at.slice(11, 19)} UTC · #${r.id}`, CHOICE_MAX), value: String(r.id) }));
+    .map((r) => ({ name: truncate(`${r.name} · ${serverTime(r.at, r.tz)} · #${r.id}`, CHOICE_MAX), value: String(r.id) }));
 };
 
 /** Whoever may run events, from src/access.ts isEventRunner's two rules: admins and officers, or the events_role setting's role. */
@@ -125,14 +134,18 @@ const SQL_RUNS_EVENTS = `(${SQL_IS_OFFICER} OR EXISTS (SELECT 1 FROM event_setti
 /** Order 32: a server's open events, soonest first, by id. Who may see them is inside the statement: the route's own rule. */
 const openEvents = (gate: 'member' | 'runner'): Lister => async ({ db, i, typed }) => {
   const { results } = await db
-    .prepare(`SELECT id, title, start_at FROM event WHERE guild_id = ?1 AND status = 'open' AND (?3 = ?3) AND ${gate === 'member' ? SQL_PASSES_MEMBER_GATE : SQL_RUNS_EVENTS} ORDER BY start_at LIMIT 100`)
+    .prepare(`SELECT id, title, start_at, ${SQL_TIME_ZONE} AS tz FROM event WHERE guild_id = ?1 AND status = 'open' AND (?3 = ?3) AND ${gate === 'member' ? SQL_PASSES_MEMBER_GATE : SQL_RUNS_EVENTS} ORDER BY start_at LIMIT 100`)
     .bind(...sqlAccessParams(i.guild_id, i.member))
-    .all<{ id: number; title: string; start_at: string }>();
+    .all<{ id: number; title: string; start_at: string; tz: string | null }>();
   const q = typed.trim().toLowerCase();
   return results
     .filter((r) => !q || r.title.toLowerCase().includes(q))
     .slice(0, 25)
-    .map((r) => ({ name: truncate(`${r.title} · ${r.start_at.slice(0, 16).replace('T', ' ')} UTC`, CHOICE_MAX), value: String(r.id) }));
+    .map((r) => {
+      // The time always shows: a long title gives way to it.
+      const when = ` · ${serverTime(r.start_at, r.tz)}`;
+      return { name: `${truncate(r.title, CHOICE_MAX - when.length)}${when}`, value: String(r.id) };
+    });
 };
 
 /** Order 32: /event roster character: the characters of the member: option, for whoever runs events. One statement. */

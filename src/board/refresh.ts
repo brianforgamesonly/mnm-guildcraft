@@ -34,6 +34,7 @@ import { boardInOrder, snowflakeAt, snowflakeMs } from './order.ts';
 import { contentHash, type BoardMessage, type LineMode } from './render.ts';
 import { isDepartureRun, runDepartures } from '../departures.ts';
 import { guardDecay, isDecayGuardRun, rotate } from '../dkp/guard.ts';
+import { STALE_GUILDS, sweepStale } from '../dkp/stale.ts';
 import { usageAlerts } from '../usage.ts';
 import { sweepRequests } from '../requests.ts';
 import { sweepFinished, sweepStarted } from '../heartbeat.ts';
@@ -301,8 +302,10 @@ async function editPost(api: BotApi, post: BoardPostRow, skill: string, msgs: Bo
 
 /** Calls kept back for the index (edit + pin) and the final D1 write. */
 const RESERVE = 3;
-/** A sweep's calls before its first post: the heartbeat, the sweep query, the run's batch, the active threads. */
-const SWEEP_OVERHEAD = 4;
+/** A sweep's calls before its first post: the heartbeat, out-of-date cards, the sweep query, the run's batch, the active threads. */
+const SWEEP_OVERHEAD = 5;
+/** Order 33: the guilds with out-of-date cards take turns by the sweep, not by the day. */
+const SWEEP_PERIOD_MS = 900_000;
 /** Order 30: the posts a sweep can make (one call each), for the building line when this run made none to measure by. */
 export const postsPerSweep = (k: BoardKind) => BOARD_CALL_CAP - SWEEP_OVERHEAD - RESERVE - (k === FACTIONS ? FACTIONS_FLOOR : 0);
 
@@ -694,8 +697,8 @@ export const isNightly = (scheduledTime: number) => {
 };
 
 /**
- * Boards with something to do, one row per guild and board, in one query (order 24: an idle sweep still makes two D1
- * calls, the heartbeat and this). The tradeskill boards come first (they keep priority on the budget):
+ * Boards with something to do, one row per guild and board, in one query (an idle sweep makes three D1 calls: the
+ * heartbeat, out-of-date cards and this). The tradeskill boards come first (they keep priority on the budget):
  * - tradeskills: dirty or missing posts, no index, an index edit still owed (order 30: no saved hash), a rebuild in
  *   progress (every board, nightly);
  * - factions (order 24): dirty, stale (the import changed a faction after its post was rendered) or missing posts, no
@@ -777,6 +780,15 @@ export async function scheduled(controller: { scheduledTime: number; cron?: stri
       console.error('dkp decay guard failed', e instanceof Error ? e.message : String(e));
     }
     before = { d1: counted.calls.length, discord: budget.discord, log: api?.log.length ?? 0 };
+  }
+  // Order 33: out-of-date cards. One D1 read; one Durable Object request per guild with a flag, each counted as a call, and
+  // no Discord call here: each guild's object redraws its own cards, on its own invocations.
+  try {
+    const r = await sweepStale({ ...env, DB: counted.db }, rotate(Math.max(0, Math.min(STALE_GUILDS, budgetLeft(budget) - 2)), controller.scheduledTime, SWEEP_PERIOD_MS));
+    budget.discord += r.asked;
+    if (r.cards) console.log(JSON.stringify({ gc: 'stale-cards', ...r }));
+  } catch (e) {
+    console.error('stale card sweep failed', e instanceof Error ? e.message : String(e));
   }
   try {
     const { results } = await counted.db.prepare(SWEEP_SQL).bind(nightly ? 1 : 0).all<{ id: string; board: BoardName }>();

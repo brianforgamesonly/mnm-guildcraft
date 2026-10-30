@@ -41,6 +41,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'dkp_kill_member', 'dkp_auction', 'dkp_bid', 'dkp_nudge', 'dkp_wishlist', 'dkp_listing', 'dkp_purchase', 'dkp_ledger',
       // Order 32 (0024): the Events module (the migration's header names each one's reason).
       'event_guild', 'event_setting', 'event_class_role', 'event', 'event_signup', 'event_signup_history',
+      // Order 33 (0025): cards awaiting a redraw (the migration's header names its reason).
+      'card_stale',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

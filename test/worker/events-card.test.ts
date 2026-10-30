@@ -214,8 +214,8 @@ describe('/event create and its preview', () => {
 describe('each type\'s buttons (every one a member can press)', () => {
   it('derives statuses from the type; only Raid and Group ask for a character and a role', () => {
     const labels = (type: (typeof TYPES)[number]) => (cardButtons({ id: 1, type }) as any[]).flatMap((r) => r.components.map((b: any) => b.label));
-    expect(labels('raid')).toEqual(['Signed up', 'Tentative', 'Bench', "Can't make it", 'Change character', 'Change role']);
-    expect(labels('group')).toEqual(['Signed up', 'Tentative', "Can't make it", 'Change character', 'Change role']);
+    expect(labels('raid')).toEqual(['Sign up', 'Tentative', 'Bench', "Can't make it", 'Change character', 'Change role']);
+    expect(labels('group')).toEqual(['Sign up', 'Tentative', "Can't make it", 'Change character', 'Change role']);
     expect(labels('social')).toEqual(['Going', 'Maybe', "Can't make it"]);
     expect(labels('other')).toEqual(['Going', 'Maybe', "Can't make it"]);
     for (const t of TYPES) expect((cardButtons({ id: 1, type: t }) as any[]).flatMap((r) => r.components.map((b: any) => b.custom_id)).every((c: string) => c.startsWith('ev'))).toBe(true);
@@ -365,7 +365,7 @@ describe('review of PR B', () => {
     const id = await posted(raid);
     const handle = botApi.handle!;
     botApi.handle = (m, p, b) => (m === 'PATCH' ? json({ message: 'oops', code: 0 }, 500) : handle(m, p, b));
-    await expect(draw(id)).rejects.toThrow('event card edit failed');
+    await expect(draw(id)).rejects.toThrow('card edit refused: 500');
     botApi.handle = handle;
     fake.messages = [];
     await draw(id);

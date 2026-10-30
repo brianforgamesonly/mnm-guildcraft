@@ -5,6 +5,7 @@
 import type { Env } from '../env.ts';
 import { UNKNOWN_MESSAGE, type BotApi } from '../board/api.ts';
 import { button, EMBED_LIMITS, md, memberTag, NO_PINGS, row, STYLE_PRIMARY, STYLE_SECONDARY, type Embed } from '../discord.ts';
+import { cardRefused } from '../dkp/stale.ts';
 import { EVENT_COPY } from './copy.ts';
 import type { EventSettings } from './settings.ts';
 import type { EventState } from './state.ts';
@@ -38,6 +39,7 @@ export interface EventRow {
   message_id: string | null;
   posted_by: string;
   poster_name?: string | null;
+  canceller_name?: string | null;
   cancelled_by: string | null;
   cancel_reason: string | null;
   lock_done_at: string | null;
@@ -55,8 +57,9 @@ export interface SignupRow {
   name: string;
 }
 
-const EVENT_SQL = `SELECT e.*, z.name AS zone_name, m.display_name AS poster_name FROM event e LEFT JOIN zone z ON z.key = e.zone_key
-  LEFT JOIN member m ON m.guild_id = e.guild_id AND m.discord_user_id = e.posted_by WHERE e.id = ?1 AND e.guild_id = ?2`;
+const EVENT_SQL = `SELECT e.*, z.name AS zone_name, m.display_name AS poster_name, x.display_name AS canceller_name FROM event e LEFT JOIN zone z ON z.key = e.zone_key
+  LEFT JOIN member m ON m.guild_id = e.guild_id AND m.discord_user_id = e.posted_by
+  LEFT JOIN member x ON x.guild_id = e.guild_id AND x.discord_user_id = e.cancelled_by WHERE e.id = ?1 AND e.guild_id = ?2`;
 export const loadEvent = (db: D1Database, guildId: string, id: number) => db.prepare(EVENT_SQL).bind(id, guildId).first<EventRow>();
 
 const SIGNUPS_SQL = `SELECT s.member_id, s.status, s.role, s.char_name, s.char_class, s.char_level, s.queued_at, coalesce(m.display_name, s.member_id) AS name
@@ -72,6 +75,9 @@ export function statusLabel(status: Choice | 'waitlist', type: EventType): strin
   const casual = TYPE_RULES[type].casual;
   return status === 'signed_up' ? (casual ? EVENT_COPY.going : EVENT_COPY.signedUp) : status === 'tentative' ? (casual ? EVENT_COPY.maybe : EVENT_COPY.tentative) : status === 'bench' ? EVENT_COPY.bench : status === 'waitlist' ? EVENT_COPY.waitlist : EVENT_COPY.cantMakeIt;
 }
+
+/** Order 33: buttons name actions. Only Signed up changes; every other label is the status's own. */
+export const actionLabel = (status: Choice, type: EventType) => (status === 'signed_up' && !TYPE_RULES[type].casual ? EVENT_COPY.signUp : statusLabel(status, type));
 
 /** Name · Cls 32 · @member, each part only where it is known. A sign-up without a character is the mention alone. */
 export function rosterLine(s: SignupRow): string {
@@ -171,7 +177,7 @@ function header(e: EventRow, now: number): string {
   const lock = e.lock_at ? Date.parse(e.lock_at) : null;
   const zone = e.zone_key ? md(e.zone_name ?? e.zone_key) : null;
   return [
-    e.status === 'cancelled' ? EVENT_COPY.cancelledLine(md(e.cancel_reason ?? '')) : e.status === 'closed' ? EVENT_COPY.closedLine : null,
+    e.status === 'cancelled' ? EVENT_COPY.cancelledLine(memberTag(e.cancelled_by ?? '', e.canceller_name ?? e.cancelled_by ?? ''), e.cancel_reason ?? '') : e.status === 'closed' ? EVENT_COPY.closedLine : null,
     `${stamp(start, 'F')} (${stamp(start, 'R')})`,
     [EVENT_COPY.duration(hours), zone, EVENT_COPY.posted(memberTag(e.posted_by, e.poster_name ?? e.posted_by))].filter(Boolean).join(' · '),
     e.status === 'open' || e.status === PREVIEW ? (lock === null ? EVENT_COPY.noLock : lock <= now ? EVENT_COPY.locked(stamp(lock, 'f')) : EVENT_COPY.locks(stamp(lock, 'f'), stamp(lock, 'R'))) : null,
@@ -185,7 +191,7 @@ function header(e: EventRow, now: number): string {
 /** The card's buttons: the type's statuses, then Change character and Change role where the type asks for them. */
 export function cardButtons(e: Pick<EventRow, 'id' | 'type'>): unknown[] {
   const rule = TYPE_RULES[e.type];
-  const statuses = rule.statuses.map((st) => button(`${STATUS_PREFIX}${e.id}:${st}`, statusLabel(st, e.type), st === 'signed_up' ? STYLE_PRIMARY : STYLE_SECONDARY));
+  const statuses = rule.statuses.map((st) => button(`${STATUS_PREFIX}${e.id}:${st}`, actionLabel(st, e.type), st === 'signed_up' ? STYLE_PRIMARY : STYLE_SECONDARY));
   const changes = rule.character === 'required' ? [button(`${CHANGE_CHARACTER_PREFIX}${e.id}`, EVENT_COPY.changeCharacter), button(`${CHANGE_ROLE_PREFIX}${e.id}`, EVENT_COPY.changeRole)] : [];
   return [row(statuses), ...(changes.length ? [row(changes)] : [])];
 }
@@ -206,10 +212,11 @@ export function cardMessage(e: EventRow, signups: SignupRow[], s: EventSettings,
 export const messageLink = (guildId: string, channelId: string, messageId: string) => `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;
 
 /**
- * evcard:<id>: the card, edited in place; posted again if Discord no longer has it. Returns the edit's rate-limit headers,
- * for the pace of the next one (src/dkp/pace.ts).
+ * evcard:<id>: the card, edited in place. Returns the edit's rate-limit headers, for the pace of the next one
+ * (src/dkp/pace.ts). A change to the event posts the card again if Discord no longer has it (`repost`); the sweep's redraw
+ * never posts: 10008 stops there and is recorded (order 33), since a card someone deleted shouldn't return unasked.
  */
-export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, state: EventState, id: number, now: number) {
+export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, state: EventState, id: number, now: number, repost = true) {
   const e = await loadEvent(env.DB, guildId, id);
   if (!e || e.status === PREVIEW || !state.channel_id) return null;
   const m = cardMessage(e, await loadSignups(env.DB, id), state.settings, now);
@@ -221,10 +228,16 @@ export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: st
     const last = api.log.at(-1);
     return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
   }
-  // A throw leaves the item for the object's retries: this edit may be the only one a cancelled or closed card gets.
-  if (r.code !== UNKNOWN_MESSAGE) throw new Error(`event card edit failed: ${r.status}`);
+  // A throw leaves the item for the object's retries, then the sweep: this edit may be the only one a cancelled card gets.
+  if (r.code !== UNKNOWN_MESSAGE || !repost) {
+    await cardRefused(env.DB, guildId, `evcard:${id}`, r);
+    return null;
+  }
   const posted = await api.call<{ id: string }>('POST', `/channels/${state.channel_id}/messages`, body);
-  if (!posted.ok) throw new Error(`event card post failed: ${posted.status}`);
+  if (!posted.ok) {
+    await cardRefused(env.DB, guildId, `evcard:${id}`, posted);
+    return null;
+  }
   await env.DB.prepare('UPDATE event SET message_id = ? WHERE id = ?').bind(posted.body.id, id).run();
   return null;
 }

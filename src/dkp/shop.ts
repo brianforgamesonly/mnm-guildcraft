@@ -18,7 +18,8 @@ import { button, ephemeral, memberTag, optInt, optString, row, STYLE_DANGER, STY
 import type { DkpRun } from './commands.ts';
 import { DKP_COPY, SHOP_COPY as S } from './copy.ts';
 import { balanceSql, dkpRead, POOL_GUILD, purchaseSpendStatement } from './ledger.ts';
-import { editIn, postIn, refreshStandings, type Message } from './messages.ts';
+import type { Guild } from '../access.ts';
+import { editCard, editCardItem, postIn, refreshStandings, type Message } from './messages.ts';
 import type { DkpState } from './state.ts';
 
 export const BUY_PREFIX = 'dkpbuy:';
@@ -65,12 +66,19 @@ export function listingMessage(l: Listing, item: Embed | null, closedByName: str
   };
 }
 
-async function cardFor(c: Ctx, l: Listing): Promise<Message> {
+async function cardFor(c: Pick<Ctx, 'db' | 'guild'>, l: Listing): Promise<Message> {
   const [card, closer] = await Promise.all([
     itemCard({ db: c.db, guild: c.guild }, l.item_id),
     l.closed_by ? c.db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(c.guild.id, l.closed_by).first<{ display_name: string }>() : Promise.resolve(null),
   ]);
   return listingMessage(l, card?.embeds[0] ?? null, closer?.display_name ?? null);
+}
+
+/** Order 33: scard:<listing id> on the timer object: the sweep's redraw of a listing Discord refused. */
+export async function renderListing(db: D1Database, api: BotApi, guild: Guild, channelId: string, id: number) {
+  const l = await listingById(db, guild.id, id);
+  if (!l?.message_id) return null;
+  return editCardItem(db, api, guild.id, `scard:${id}`, channelId, l.message_id, await cardFor({ db, guild }, l));
 }
 
 /** /dkp shop add item: price: quantity: per_member: (officers). */
@@ -139,7 +147,7 @@ async function buy(c: Ctx, d: DkpState, id: number): Promise<MessageReply> {
   try {
     if (api && d.channel_id) {
       const fresh = (await listingById(c.db, c.guild.id, id))!;
-      if (fresh.message_id) await editIn(api, d.channel_id, fresh.message_id, await cardFor(c, fresh));
+      if (fresh.message_id) await editCard(c.db, api, c.guild.id, `scard:${id}`, d.channel_id, fresh.message_id, await cardFor(c, fresh));
       await postIn(api, d.channel_id, { content: S.purchaseLine(by(c), l.item_name, l.price) });
       await refreshStandings(c.db, api, c.guild.id, d.channel_id, [POOL_GUILD]);
     }
@@ -157,7 +165,7 @@ async function closeListing(c: Ctx, d: DkpState, id: number): Promise<MessageRep
   const l = (await listingById(c.db, c.guild.id, id))!;
   const api = apiFor(c);
   try {
-    if (api && d.channel_id && l.message_id) await editIn(api, d.channel_id, l.message_id, await cardFor(c, l));
+    if (api && d.channel_id && l.message_id) await editCard(c.db, api, c.guild.id, `scard:${id}`, d.channel_id, l.message_id, await cardFor(c, l));
   } finally {
     spent(c, api);
   }

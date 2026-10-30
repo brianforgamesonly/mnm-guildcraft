@@ -41,7 +41,7 @@ const PLAN = { kind: 'dkp', type: GUILD_TEXT, private: false } as const;
 export const DKP_NEEDS = MANAGE_CHANNELS | MANAGE_ROLES | VIEW_CHANNEL | SEND_MESSAGES | SEND_MESSAGES_IN_THREADS | CREATE_PRIVATE_THREADS | channelBits('dkp');
 /**
  * 4 reads, the category, the channel, the command, and the standings (the guild pool and each pool already used, up to 8).
- * Order 29: Remove DKP also edits each open auction's card (up to 8; a ninth stays as it was, its buttons answering "off").
+ * Order 29: Remove DKP also edits each open auction's card (up to 8; a ninth is flagged for the sweep, its buttons answering "off" until then).
  */
 export const DKP_CALL_CAP = 4 + 1 + 1 + 1 + 8 + 8;
 
@@ -67,6 +67,14 @@ export async function withLease(c: Ctx, run: (api: BotApi) => Promise<MessageRep
     await c.db.prepare('UPDATE guild SET channel_setup_lock_until = NULL WHERE id = ? AND channel_setup_lock_until = ?').bind(c.guild.id, lease).run();
   }
 }
+
+/**
+ * Order 33: what a refused Add saves, for DKP and Events alike: the channel, so a retry keeps it. The update can't name the
+ * switch or the command, so a refusal can't turn a module off (a typed `enabled: 0` here did, on a second Add DKP module).
+ * A first Add has no row: it is off.
+ */
+export const keepChannel = (c: Ctx, table: 'dkp_guild' | 'event_guild', channel: string) =>
+  c.db.prepare(`INSERT INTO ${table} (guild_id, enabled, channel_id, changed_at, changed_by) VALUES (?1, 0, ?2, ?3, ?4) ON CONFLICT (guild_id) DO UPDATE SET channel_id = ?2`).bind(c.guild.id, channel, now(), c.userId);
 
 /** dkpadd: */
 export const addDkpButton = (c: Ctx): Promise<MessageReply> => withLease(c, (api) => addDkp(c, api, c.applicationId!));
@@ -109,8 +117,7 @@ async function addDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageReply>
   }
   const cmd = await api.call<{ id: string }>('POST', `/applications/${appId}/guilds/${g}/commands`, DKP_COMMAND);
   if (!cmd.ok) {
-    // The channel is saved (DKP stays off), so a retry keeps it.
-    await saveState(c, { enabled: 0, channel: channel.id, command: state.command_id });
+    await keepChannel(c, 'dkp_guild', channel.id).run();
     return ephemeral([...lines, DKP_COPY.commandFailed(cmd.status)].join('\n'));
   }
   await c.db.batch([
@@ -133,7 +140,6 @@ const saveStatements = (c: Ctx, s: { enabled: 0 | 1; channel: string | null; com
     )
     .bind(c.guild.id, s.enabled, s.channel, s.command, now(), c.userId),
 ];
-const saveState = (c: Ctx, s: Parameters<typeof saveStatements>[1]) => c.db.batch(saveStatements(c, s));
 
 /** Closes the open raid (Remove DKP); its timers are cancelled after the reply (Effects.dkpCancel). */
 export const closeOpenRaid = (db: D1Database, guildId: string, by: string, reason: 'officer' | 'auto' | 'removed') =>

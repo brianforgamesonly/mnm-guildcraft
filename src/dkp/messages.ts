@@ -5,6 +5,7 @@ import { budgetLeft, UNKNOWN_MESSAGE, type BotApi } from '../board/api.ts';
 import { button, memberTag, NO_PINGS, row, truncate, type Embed } from '../discord.ts';
 import { DKP_COPY } from './copy.ts';
 import { dkpRead, POOL_GUILD, type Standing } from './ledger.ts';
+import { CardEditRefused, cardRefused, markStale } from './stale.ts';
 
 export interface Message {
   content?: string;
@@ -22,6 +23,34 @@ export async function postIn(api: BotApi, channelId: string, m: Message): Promis
 export async function editIn(api: BotApi, channelId: string, messageId: string, m: Message): Promise<'ok' | 'gone' | 'failed'> {
   const r = await api.call('PATCH', `/channels/${channelId}/messages/${messageId}`, { ...m, allowed_mentions: NO_PINGS });
   return r.ok ? 'ok' : r.code === UNKNOWN_MESSAGE ? 'gone' : 'failed';
+}
+
+/**
+ * Order 33: a card edited outside a timer item (a press, a close). A refused edit marks it out of date for the sweep, or
+ * stops it where Discord says it can't be edited. 'gone' means nothing more can be done for this card.
+ */
+export async function editCard(db: D1Database, api: BotApi, guildId: string, item: string, channelId: string, messageId: string, m: Message): Promise<'ok' | 'gone' | 'failed'> {
+  const r = await api.call('PATCH', `/channels/${channelId}/messages/${messageId}`, { ...m, allowed_mentions: NO_PINGS });
+  if (r.ok) return 'ok';
+  try {
+    await cardRefused(db, guildId, item, r);
+    return 'gone';
+  } catch (e) {
+    if (!(e instanceof CardEditRefused)) throw e;
+    await markStale(db, guildId, item, r).run();
+    return 'failed';
+  }
+}
+
+/** Order 33: a card edited by its timer item. A refused edit throws, so the object retries it (src/dkp/timers.ts). */
+export async function editCardItem(db: D1Database, api: BotApi, guildId: string, item: string, channelId: string, messageId: string, m: Message) {
+  const r = await api.call('PATCH', `/channels/${channelId}/messages/${messageId}`, { ...m, allowed_mentions: NO_PINGS });
+  if (!r.ok) {
+    await cardRefused(db, guildId, item, r);
+    return null;
+  }
+  const last = api.log.at(-1);
+  return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
 }
 
 /** A pool's name: the guild pool, or its zone's name (the key when the zone is gone). */

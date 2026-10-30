@@ -7,6 +7,7 @@ import { decayStatement } from './ledger.ts';
 import { editIn } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
 import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
+import { renderListing } from './shop.ts';
 import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
 import type { DueHandler, DueResult } from './due-types.ts';
@@ -108,6 +109,13 @@ const acard: Handler = async (env, guildId, id, _due, _now, api) => {
   return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id), state.settings) };
 };
 
+/** Order 33: scard:<listing id>, a shop listing's card. Only the sweep asks for it: a press edits the card itself. */
+const scard: Handler = async (env, guildId, id, _due, _now, api) => {
+  const [state, guild] = await Promise.all([loadDkp(env.DB, guildId), loadGuild(env.DB, guildId)]);
+  if (!api || !state.channel_id || !guild) return null;
+  return { headers: await renderListing(env.DB, api, guild, state.channel_id, Number(id)) };
+};
+
 /** Order 29, PR D: the decay item's fixed key (order 30: DkpTimers.ensureDecay alone seeds it), and its week. */
 export const DECAY_KEY = 'decay:week';
 export const WEEK_MS = 7 * 86_400_000;
@@ -130,7 +138,7 @@ const decay: Handler = async (env, guildId, _id, _due, now) => {
 };
 
 /** DKP's handlers by item kind. */
-export const DKP_HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, decay };
+export const DKP_HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, scard, decay };
 /** The handlers by item kind ("kind:id"). Order 32: the Events module's items share the guild's due-list. */
 export const HANDLERS: Record<string, Handler> = { ...DKP_HANDLERS, ...EVENT_HANDLERS };
 
@@ -138,12 +146,12 @@ export const HANDLERS: Record<string, Handler> = { ...DKP_HANDLERS, ...EVENT_HAN
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>
   env.DISCORD_BOT_TOKEN ? botApi(env.DISCORD_BOT_TOKEN, { d1, discord: 0, cap: TIMER_CALL_CAP, deadline: now + 20_000 }) : null;
 
-export async function runDue(env: Env, guildId: string, key: string, due: number, now: number, api: BotApi | null): Promise<DueResult | null> {
+export async function runDue(env: Env, guildId: string, key: string, due: number, now: number, api: BotApi | null, stale = false): Promise<DueResult | null> {
   const [kind, id] = key.split(':');
   const h = HANDLERS[kind];
   if (!h) {
     console.error('dkp timer: unknown item', key);
     return null;
   }
-  return h(env, guildId, id, due, now, api);
+  return h(env, guildId, id, due, now, api, stale);
 }

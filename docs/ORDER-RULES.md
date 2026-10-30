@@ -433,3 +433,27 @@ Order 32 is the Events module, part 1 (docs/PRD.md, "Events module"; the owner a
 - Roles and types are stored as fixed keys. Admins rename only their labels.
 - Direct messages of any kind are not in order 32: they are part 2, which brings the ping override.
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 33
+
+Order 33 is the Events module, part 2 (docs/PRD.md, "Events module"; the owner approved its specification on 2026-10-30). Its explicit overrides each quote the earlier rule in full.
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 0–1; PR B: ITEMs 2–3.
+- Override 1, of order 16's "Order 16's explicit override 2: members are shown as Discord user mentions (`<@id>`, src/discord.ts `memberTag`), always sent with `allowed_mentions` that pings nobody. Every create and every edit sends `allowed_mentions` explicitly (Discord re-parses an edit without it with default allowances). The only pings permitted: a request thread's first message pings the crafters it adds; a claim message pings the requester; a Done or Cancel message pings the other party.", of order 27's override 9 ("DKP messages ping nobody. Every create and every edit uses memberTag, with allowed_mentions set to ping no one."), and of order 32's override 6 ("Events messages ping nobody. Every GC-Events post and edit sets `allowed_mentions: {parse: []}`.").
+  - Events may send direct messages to members on that event's roster: a reminder, a promotion, a time change and a cancellation (docs/PRD.md, "Who gets which message").
+  - A refused direct message (50007) is skipped silently and counted.
+  - No channel message pings anyone. `allowed_mentions` stays empty everywhere.
+  - A direct message carries only that event's card data and the recipient's own sign-up.
+- Override 2, of order 32's "Direct messages of any kind are not in order 32: they are part 2, which brings the ping override." That exclusion ends here.
+- Override 3, of order 32's "Direct messages are part 2: a promoted member sees it on the card, and privately if it happened on their own press." (src/events/press.ts at d0da30b, lines 4–5). A promoted member now gets a direct message, unless the promotion came from their own press; then the private reply is enough.
+- The roster means Signed up, Tentative, Bench and Waitlist. It excludes Can't make it and Left.
+- Lock and reminder due together: the lock goes first, and the reminder reuses that run's Left result instead of a second lookup. Recipients are worked out after any promotion, so a promoted member gets both messages.
+- Buttons name actions. Only "Signed up" changes, to Sign up. Tentative, Bench, Can't make it, Going and Maybe stay as the specification lists them. The status keeps its name on the roster.
+- Every time a member sees is in their own time zone (Discord `<t:…>`), or in the server's named time zone where Discord can't render one (autocomplete). UTC is never shown. The .ics text and Google's `dates=` parameter are exempt, because they must be in UTC. The operator's dev-only usage line is not member-facing (order 11). test/worker/order33-cards.test.ts scans every string in src, each exception named.
+- A card that couldn't be updated is put right later. It is marked out of date (`card_stale`, src/dkp/stale.ts) and redrawn by the next sweep until Discord accepts it, for DKP and Events cards alike.
+  - Out-of-date cards are a flag queried by the cron, which costs 0 Discord calls when none are out of date.
+  - Each guild's Durable Object does its own redraws, so no single run approaches the 50-subrequest limit. This adds to order 30's override 1: the cron also calls the object's `schedule`, only for a guild with a flag.
+  - 10003, 10008 and 50001 stop the retries and are recorded (audit action `card.stopped`). A 429 waits for retry_after.
+  - The sweep's redraw only edits. Order 32's "posted again if Discord no longer has it" stands for a change to the event (an `evcard:` item), never for the sweep: a card someone deleted doesn't come back unasked.
+- Remove module never switches a module off by mistake. A refused Add or Remove leaves the state exactly as it was, for DKP and Events. A refused Add saves only the channel it kept or made, through a statement that can't name the switch (src/dkp/setup.ts `keepChannel`).
+- Failed runs: every one is listed in the FINAL (order 12).

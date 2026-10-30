@@ -102,6 +102,15 @@ export function parseStart(typed: string, tz: string, nowMs: number): { at: numb
 
 /** The full date in the server's zone: "Saturday, October 31, 2026 at 8:00 PM EDT". */
 export const fullDate = (ms: number, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).format(ms);
+/**
+ * Order 33: a time in the server's named zone, for where Discord can't render <t:…> (autocomplete): "Sat Oct 31, 8:00 PM EDT".
+ * Autocomplete choices are plain text ("name: 1-100 character choice name"), so a stamp would show as its raw text.
+ */
+export function shortDate(ms: number, tz: string): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }).formatToParts(ms);
+  const get = (t: string) => parts.find((p) => p.type === t)!.value;
+  return `${get('weekday')} ${get('month')} ${get('day')}, ${get('hour')}:${get('minute')} ${get('dayPeriod')} ${get('timeZoneName')}`;
+}
 /** Discord's local-time displays. */
 export const stamp = (ms: number, style: 'F' | 'R' | 'f' | 't') => `<t:${Math.floor(ms / 1000)}:${style}>`;
 

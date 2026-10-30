@@ -177,9 +177,9 @@ describe('refresh paths', () => {
     expect(await count('board_post', 'dirty <> 0')).toBe(0);
   });
 
-  it('a sweep with nothing dirty makes two D1 queries (the heartbeat and its own) and no Discord calls', async () => {
+  it('a sweep with nothing dirty makes three D1 queries (the heartbeat, out-of-date cards and its own) and no Discord calls', async () => {
     const run = await runCron();
-    expect(run).toMatchObject({ guilds: 0, d1_calls: 2, discord_calls: 0 });
+    expect(run).toMatchObject({ guilds: 0, d1_calls: 3, discord_calls: 0 });
     expect(run.first_query_ms).toBeTypeOf('number');
     expect(run.heartbeat_ms).toBeTypeOf('number');
     expect(run).toHaveProperty('isolate_first_request');

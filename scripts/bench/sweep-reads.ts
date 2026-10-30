@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { SWEEP_SQL } from '../../src/board/refresh.ts';
 import { FACTION_SHOWN } from '../../src/board/kinds.ts';
+import { STALE_SQL } from '../../src/dkp/stale.ts';
 
 const { values: args } = parseArgs({ options: { guilds: { type: 'string', default: '1,10' } } });
 const { getPlatformProxy } = await import('wrangler');
@@ -54,6 +55,9 @@ try {
     }
     const r = await idle();
     console.log(`${count} guild(s) with both boards live and idle: SWEEP_SQL reads ${r.rowsRead} rows per cron run (${r.rows} boards to do); × 96 runs = ${r.rowsRead * 96} a day per copy`);
+    // Order 33: the out-of-date cards read, the cron's other "anything to do?" query, with nothing out of date.
+    const stale = await db.prepare(STALE_SQL).all();
+    console.log(`${count} guild(s), no card out of date: STALE_SQL reads ${stale.meta.rows_read} rows per cron run (${stale.results.length} cards to do); × 96 runs = ${stale.meta.rows_read * 96} a day per copy`);
   }
   // Where they go: each half of the UNION alone, and the plan SQLite chose.
   const [, cte, body] = /^(WITH [^\n]*\n)?([\s\S]*)$/.exec(SWEEP_SQL)!;
