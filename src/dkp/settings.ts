@@ -19,7 +19,7 @@ export const SETTINGS = [
   { key: 'guild_points', label: 'Guild points per kill or flat payout', default: 2, min: 0, max: 1000, unit: 'points' },
   // Order 29 (override 2): 200, from 100; a server that never changed it gets 200 at once.
   { key: 'cap', label: 'Pool cap', default: 200, min: 1, max: 100000, unit: 'points' },
-  { key: 'check_seconds', label: 'Check-again window', default: 300, min: 30, max: 3600, unit: 'seconds' },
+  { key: 'check_seconds', label: 'Kill roll call window', default: 300, min: 30, max: 3600, unit: 'seconds' },
   { key: 'second_officer_over', label: 'Second officer needed over', default: 20, min: 0, max: 100000, unit: 'points' },
   { key: 'approval_hours', label: 'Approval lapses after', default: 24, min: 1, max: 168, unit: 'hours' },
   { key: 'auto_close_hours', label: 'Raid auto-closes after', default: 8, min: 1, max: 24, unit: 'hours' },

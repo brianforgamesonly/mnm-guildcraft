@@ -12,7 +12,7 @@ import { FULL_PAGE, FULL_STANDINGS_PREFIX, poolNames, postIn, refreshStandings, 
 import { RUNNER_ROLE, settingOf, SETTINGS } from './settings.ts';
 import type { DkpState } from './state.ts';
 import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand } from './raid.ts';
-import { auctionCommand } from './auction.ts';
+import { auctionCommand, cancelCommand } from './auction.ts';
 import { wishlistAdd, wishlistRemove, wishlistShow } from './wishlist.ts';
 import { shopAdd } from './shop.ts';
 
@@ -35,6 +35,8 @@ export const DKP_ROUTES: Record<string, { access: 'runner' | 'admin' | 'member';
   'dkp history': { access: 'member', run: (c, o, d) => historyCommand(c, o, d) },
   // Order 29, PR B: auctions.
   'dkp auction': { access: 'runner', run: (c, o, d) => auctionCommand(c, o, d) },
+  // Order 31: cancelling moved from the card's button to a command.
+  'dkp cancel': { access: 'runner', run: (c, o, d) => cancelCommand(c, o, d) },
   // Order 29, PR C: wishlists (a subcommand group: "wishlist add", src/discord.ts subcommand).
   'dkp wishlist add': { access: 'member', run: (c, o, d) => wishlistAdd(c, o, d) },
   'dkp wishlist remove': { access: 'member', run: (c, o, d) => wishlistRemove(c, o, d) },

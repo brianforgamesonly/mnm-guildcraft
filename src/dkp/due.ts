@@ -39,7 +39,7 @@ const lapse: Handler = async (env, guildId, id, _due, now, api) => {
   return null;
 };
 
-/** check:<kill id>: the Check again window closes; then the card shows it. */
+/** check:<kill id>: the Kill roll call window closes; then the card shows it. */
 const check: Handler = async (env, guildId, id, _due, now) => {
   const r = await closeCheck(env.DB, guildId, Number(id), now);
   if (r === null) return null;

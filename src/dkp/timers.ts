@@ -5,7 +5,7 @@
 // is idempotent: it acts only while D1 still says the item is due (src/dkp/due.ts). It never writes sweep_run and never
 // touches the health check. Order 30: the cron's daily slot calls ensureDecay here (src/dkp/guard.ts), and nothing else.
 //
-// Items: lapse:<pending id> (an approval's lapse), check:<kill id> (a Check again window), close:<raid id> (auto-close),
+// Items: lapse:<pending id> (an approval's lapse), check:<kill id> (a Kill roll call window), close:<raid id> (auto-close),
 // render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Order 29:
 // auction:<id> (an auction closes, by its timer only), acard:<id> (an auction card's coalesced, paced edit). Keys starting
 // with "!" are the object's own state (its guild, each card's pace), never items.

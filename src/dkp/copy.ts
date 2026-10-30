@@ -78,7 +78,6 @@ export const AUCTION_COPY = {
   closes: (t: number) => `Closes <t:${t}:R> (<t:${t}:t>), by its timer only.`,
   bidders: (n: number) => `**${plural(n, 'bidder')}** so far. Bids are sealed until it closes: nobody sees them, officers included.`,
   bid: 'Bid',
-  cancel: 'Cancel auction',
   postGeneral: 'Post to general auction',
   // bidding
   bidTitle: (item: string) => truncate(`Bid: ${item}`, 45),
@@ -115,6 +114,14 @@ export const AUCTION_COPY = {
   cancelled: (item: string, by: string, reason: string, link: string | null) => `**Auction cancelled: ${md(item)}.** By ${by}. Reason: ${md(reason)}${link ? ` ${link}` : ''}`,
   cancelledReply: 'Cancelled. The bids are revealed on the card.',
   ownBid: "You've bid in this auction, so another officer has to cancel it.",
+  // /dkp cancel (order 31): a choice is plain text, at most 100 characters; the item name is cut first.
+  pickAuction: 'Pick an auction from the list.',
+  notOpen: "That auction isn't open.",
+  generalChoice: 'general',
+  choice: (item: string, where: string, left: string) => {
+    const tail = ` · ${where} · closes in ${left}`;
+    return truncate(`${truncate(item, Math.max(1, 100 - tail.length))}${tail}`, 100);
+  },
   removedReason: 'DKP removed',
   notRunner: DKP_COPY.notRunner,
   // the general auction
@@ -206,11 +213,11 @@ export const RAID_COPY = {
   standbyHead: (n: number) => `On **Standby** (${n}): they earn the standby value once, when the raid closes.`,
   noCreatures: "GuildCraft's data lists no creatures in this zone: use `/dkp kill named:` and type the name.",
   flatName: 'Flat payout',
-  checkOpen: (due: number) => ` · Check again: tap **Present** by <t:${due}:T>`,
-  checkClosed: (closed: number, due: number) => ` · Check again closed <t:${closed}:T> (due <t:${due}:T>)`,
+  checkOpen: (due: number) => ` · Kill roll call: tap **Present** by <t:${due}:T>`,
+  checkClosed: (closed: number, due: number) => ` · Kill roll call closed <t:${closed}:T> (due <t:${due}:T>)`,
   whoHere: "Who's here",
   whoEarned: 'Who earned',
-  checkAgain: 'Check again',
+  checkAgain: 'Kill roll call',
   payAttendance: 'Pay attendance',
   close: 'Close raid',
   namedKilled: 'Named killed…',
@@ -231,9 +238,10 @@ export const RAID_COPY = {
   raidClosed: 'This raid is closed.',
   noKill: 'That raid has no kills yet.',
   earnedHead: (name: string, n: number) => `**${md(name)}**: ${plural(n, 'member')} earned it.`,
-  checkAlready: 'Check again has already run on the latest kill.',
-  checkStarted: (name: string, seconds: number) => `Check again on **${md(name)}**: members it paid have ${seconds} seconds to tap **Present**.`,
-  checkReason: 'Did not tap Present for Check again',
+  checkAlready: 'A kill roll call has already run on the latest kill.',
+  checkStarted: (name: string, seconds: number) => `Kill roll call on **${md(name)}**: members it paid have ${seconds % 60 ? plural(seconds, 'second') : plural(seconds / 60, 'minute')} to tap **Present**.`,
+  /** New rows only (order 31): rows already written keep their stored text. Nothing reads this text back. */
+  checkReason: 'Did not tap Present for the kill roll call',
   closedReply: 'Raid closed. The summary and standings are posted.',
   summary: (zone: string, kills: number, members: number, points: number, reason: 'officer' | 'auto', standby = 0) =>
     `**Raid closed${reason === 'auto' ? ' by itself' : ''}: ${md(zone)}.** ${plural(kills, 'payout')}, ${plural(members, 'member')} earned, ${points} raid points in all${standby ? ` (${plural(standby, 'member')} on Standby paid the standby value)` : ''}.`,

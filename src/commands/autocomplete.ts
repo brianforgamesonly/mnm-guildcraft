@@ -11,6 +11,7 @@ import { SQL_IS_OFFICER, SQL_PASSES_MEMBER_GATE, sqlAccessParams } from '../acce
 import { focused, matchChoices, optString, subcommand, truncate, type Choice, type Interaction, type Option } from '../discord.ts';
 import { gameList, type GameList } from '../gamedata.ts';
 import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
+import { openAuctionChoices } from '../dkp/auction.ts';
 import { DKP_COPY } from '../dkp/copy.ts';
 import { OPEN_RAID_CREATURES_SQL, zoneCreatures } from '../dkp/creatures.ts';
 import { POOL_GUILD } from '../dkp/ledger.ts';
@@ -148,6 +149,8 @@ export const LISTS: Record<string, Lister> = {
   '/dkp history pool': dkpPools,
   // Order 29: any item, as /item name lists them (one statement per keystroke: the cached item list).
   '/dkp auction item': allItems,
+  // Order 31: this server's open auctions, which their cards already show to everyone. One statement per keystroke.
+  '/dkp cancel auction': ({ db, i, typed }) => openAuctionChoices(db, i.guild_id, typed, Date.now()),
   // Order 29, PR C: wishlists (a subcommand group's subcommand: "wishlist add").
   '/dkp wishlist add item': allItems,
   '/dkp shop add item': allItems,
