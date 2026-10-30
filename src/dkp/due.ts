@@ -5,7 +5,7 @@ import type { Env } from '../env.ts';
 import { DKP_COPY } from './copy.ts';
 import { editIn } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
-import { announceResult, closeAuction, renderAuction } from './auction.ts';
+import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
 import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
 
@@ -68,8 +68,11 @@ const auction: Handler = async (env, guildId, id, _due, now, api) => {
   const r = await closeAuction(env.DB, api, guild, Number(id), now, state.settings);
   if (r === null) return null;
   if ('again' in r) return { again: r.again };
-  // The result is its own item (review of PR B: it retries on its own); a raid auction's shows on its raid card too.
-  return { schedule: [{ key: `result:${id}`, due: now }, ...(r.closed.raid_id ? [{ key: `render:${r.closed.raid_id}`, due: now }] : [])] };
+  // The result is its own item (review of PR B: it retries on its own); a raid auction's shows on its raid card (Won
+  // tonight), and the raid's next queued drop opens (order 29, PR C: the item queue), each its own item too.
+  const raid = r.closed.raid_id;
+  // next: a moment later, so the result line posts before the next drop's card (review of PR C: same-time items run A→Z).
+  return { schedule: [{ key: `result:${id}`, due: now }, ...(raid ? [{ key: `render:${raid}`, due: now }, { key: `next:${raid}`, due: now + 1 }] : [])] };
 };
 
 /** Order 29: result:<id>, a closed auction's card, line and standings. */
@@ -79,15 +82,38 @@ const result: Handler = async (env, guildId, id, _due, now, api) => {
   return announceResult(env.DB, api, guild, state.channel_id, Number(id), now);
 };
 
+/** Order 29, PR C: next:<raid id>, the raid's next queued drop opens (its card, its timer, its nudges). */
+const next: Handler = async (env, guildId, id, _due, now, api) => {
+  const [state, guild] = await Promise.all([loadDkp(env.DB, guildId), loadGuild(env.DB, guildId)]);
+  if (!state.enabled || !guild) return null;
+  const items = await openNext(env.DB, api, guild, state.channel_id, Number(id), now, state.settings);
+  return items.length ? { schedule: [...items, { key: `render:${id}`, due: now }] } : null;
+};
+
+/** Order 29, PR C (review): reopen:<auction id>, an opening whose card could not post yet tries again. */
+const reopenItem: Handler = async (env, guildId, id, _due, now, api) => {
+  const [state, guild] = await Promise.all([loadDkp(env.DB, guildId), loadGuild(env.DB, guildId)]);
+  if (!state.enabled || !guild) return null;
+  const items = await reopen(env.DB, api, guild, state.channel_id, Number(id), now, state.settings);
+  return items.length ? { schedule: items } : null;
+};
+
+/** Order 29, PR C: nudge:<auction id>, wishlist direct messages in chunks, rescheduled until done. */
+const nudgeItem: Handler = async (env, guildId, id, _due, now, api) => {
+  const [state, guild] = await Promise.all([loadDkp(env.DB, guildId), loadGuild(env.DB, guildId)]);
+  if (!state.enabled || !guild) return null;
+  return nudge(env.DB, api, guild, state.channel_id, Number(id), now, state.settings);
+};
+
 /** Order 29: acard:<id>, an auction card edited in place (its bidder count), paced as the raid card is. */
 const acard: Handler = async (env, guildId, id, _due, _now, api) => {
   const state = await loadDkp(env.DB, guildId);
   if (!api || !state.channel_id) return null;
-  return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id)) };
+  return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id), state.settings) };
 };
 
 /** The handlers by item kind ("kind:id"). */
-export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, acard };
+export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard };
 
 /** The calls one alarm's items share (the alarm is one invocation). */
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>

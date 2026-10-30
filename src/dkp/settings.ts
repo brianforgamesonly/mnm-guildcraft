@@ -29,6 +29,7 @@ export const SETTINGS = [
   { key: 'new_member_kills', label: 'New-member wait (kills in that pool)', default: 3, min: 0, max: 1000, unit: 'kills' },
   { key: 'raid_auction_seconds', label: 'Raid auction length', default: 180, min: 30, max: 3600, unit: 'seconds' },
   { key: 'general_auction_hours', label: 'General auction length', default: 24, min: 1, max: 168, unit: 'hours' },
+  { key: 'wishlist_size', label: 'Wishlist size', default: 30, min: 1, max: 100, unit: 'items' },
 ] as const satisfies readonly NumberSetting[];
 
 export type SettingKey = (typeof SETTINGS)[number]['key'];

@@ -1116,3 +1116,15 @@ Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the com
 | src/dkp/copy.ts:115-121 | (cancel form) Cancel this auction · Why (shown publicly; it reveals the bids) · **Cancelled** by \<officer>. Reason: \<reason> · (GC-DKP) **Auction cancelled: \<item>.** By \<officer>. Reason: \<reason> \<link> · Cancelled. The bids are revealed on the card. · You've bid in this auction, so another officer has to cancel it. · DKP removed | DRAFT |
 | src/dkp/copy.ts:123-125 | Posted to the general auction. \<link> · It is already in the general auction. · Only an auction that closed with no bids can be posted to the general auction. | DRAFT |
 | src/dkp/definition.ts | `auction` Officers: auction an item (sealed bids; the bot closes it on time and sets the price); item, minimum, minutes, general | DRAFT |
+
+## Work order 29, PR C: the item queue, Won tonight, the general auction's record, wishlists (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:128-132 | Queued: **\<item>** opens when the \<n> auctions ahead of it close. · Queued \<n> drops: each auction opens as the one before it closes. · (raid card) **Won tonight:** · \<item> → \<member>, \<n> points · \<n> drops queued for auction. | DRAFT |
+| src/dkp/copy.ts:133-140 | Record what was done · (form) What was done with the item · What was done (shown publicly) · **What was done:** \<text> (recorded by \<officer>) · (GC-DKP) **Unsold: \<item>.** What was done: \<text>. Recorded by \<officer>. · Recorded. It is posted in GC-DKP. · Only a general auction that closed unsold takes a record, once. | DRAFT |
+| src/dkp/copy.ts:141 | (auction card) Wanted by \<n> eligible members (on their wishlists). | DRAFT |
+| src/dkp/copy.ts:142 | (direct message) From your GuildCraft wishlist: **\<item>** is up for auction: \<link> / It closes \<relative>. You get these because you added it to your wishlist; `/dkp wishlist remove` stops them. | DRAFT |
+| src/dkp/copy.ts:147-155 | There is no item called **\<typed>**. Pick one from the list. · Your wishlist already holds \<n> items, the most it can. Remove one first. · Added **\<item>** for \<character> to your wishlist (\<n> of \<max>). · When an auction opens for it and you may bid, GuildCraft sends you a direct message with a link. That's your opt-in; remove the item to stop it. · Removed **\<item>** from your wishlist. · **\<item>** is not on your wishlist. · \<name>'s wishlist (\<n> of \<max>) · \<item> · for \<character> · Nothing on it yet. Members add items with `/dkp wishlist add`. | DRAFT |
+| src/dkp/definition.ts | `wishlist` Wishlists, public in this server (adding an item opts you in to a direct message); `add`, `remove`, `show` and their options | DRAFT |
+| src/dkp/settings.ts | (setting label) Wishlist size | DRAFT |

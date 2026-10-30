@@ -5,8 +5,9 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { storedName } from '../../src/commands/channels.ts';
 import {
   AUCTION_DROP_PREFIX, AUCTION_OPENS_MODAL, AUCTION_PREFIXES, BID_MODAL_PREFIX, BID_PREFIX, CANCEL_MODAL_PREFIX, CANCEL_PREFIX, decide, DROP_MODAL_PREFIX, DROP_SELECT_PREFIX, POST_GENERAL_PREFIX,
+  RECORD_MODAL_PREFIX, RECORD_PREFIX,
 } from '../../src/dkp/auction.ts';
-import { AUCTION_COPY, DKP_COPY } from '../../src/dkp/copy.ts';
+import { AUCTION_COPY, DKP_COPY, QUEUE_COPY, WISHLIST_COPY } from '../../src/dkp/copy.ts';
 import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
 import { bidRefusal } from '../../src/dkp/eligible.ts';
 import { POOL_GUILD } from '../../src/dkp/ledger.ts';
@@ -31,7 +32,7 @@ const pip = as('100000000000000005', { roles: [MEMBER_ROLE], global_name: 'Pip' 
 const wren = as('100000000000000006', { roles: [MEMBER_ROLE], global_name: 'Wren' });
 
 interface Msg { id: string; channel: string; body: any }
-const fake = { channels: [] as any[], messages: [] as Msg[], commands: [] as { id: string; name: string }[], next: 1 };
+const fake = { channels: [] as any[], messages: [] as Msg[], commands: [] as { id: string; name: string }[], dms: [] as { to: string; body: any }[], next: 1 };
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { 'Content-Type': 'application/json' } });
 const withToken = { ...env, DISCORD_BOT_TOKEN: 'test-bot-token' } as never;
 const ROBE = 7001;
@@ -52,7 +53,7 @@ beforeEach(async () => {
     ),
     env.DB.prepare("INSERT INTO item (id, name, name_key, imported_at) VALUES (7001, 'Fungal Robe', 'fungal robe', ?), (7002, 'Black Mushroom', 'black mushroom', ?), (7003, 'Lantern', 'lantern', ?)").bind(at, at, at),
   ]);
-  Object.assign(fake, { channels: [], messages: [], commands: [], next: 1 });
+  Object.assign(fake, { channels: [], messages: [], commands: [], dms: [], next: 1 });
   botApi.handle = (method, path, body) => {
     const id = () => `70000000000000${String(fake.next++).padStart(4, '0')}`;
     if (method === 'GET' && path === `/guilds/${GUILD}/channels`) return json(fake.channels);
@@ -72,6 +73,14 @@ beforeEach(async () => {
       const m = { id: id(), channel: post[1], body };
       fake.messages.push(m);
       return json({ id: m.id });
+    }
+    // Order 29, PR C: direct messages. Pip refuses them (Discord's 50007 on the send).
+    if (method === 'POST' && path === '/users/@me/channels') return json({ id: `dm${body.recipient_id}` });
+    const dm = path.match(/^\/channels\/dm(\d+)\/messages$/);
+    if (method === 'POST' && dm) {
+      if (dm[1] === pip.user.id) return json({ code: 50007, message: 'Cannot send messages to this user' }, 403);
+      fake.dms.push({ to: dm[1], body });
+      return json({ id: id() });
     }
     const patch = path.match(/^\/channels\/(\d+)\/messages\/(\d+)$/);
     if (method === 'PATCH' && patch) {
@@ -136,7 +145,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     // Not An Item has no item row: only the two matches, A→Z.
     expect(sel.options.map((o: any) => o.label)).toEqual(['Black Mushroom', 'Fungal Robe']);
     expect(form.type).toBe(9);
-    expect(form.data.custom_id).toBe(`${DROP_MODAL_PREFIX}${(await one<{ id: number }>('SELECT max(id) AS id FROM dkp_kill')).id}:${ROBE}`);
+    expect(form.data.custom_id).toBe(`${DROP_MODAL_PREFIX}${(await one<{ id: number }>('SELECT max(id) AS id FROM dkp_kill')).id}:${ROBE.toString(36)}.`);
     expect(done.data.content).toMatch(/^Auction open: \*\*Fungal Robe\*\*\./);
     const a = await auction();
     expect(a.status).toBe('open');
@@ -437,15 +446,133 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect(await HANDLERS.result(withToken, GUILD, String(a.id), due, due + 2, spentApi)).toEqual({ again: due + 2 });
   });
 
+  it('order 29, PR C: the item queue: two drops picked, the second opens as the first closes; Won tonight on the raid card', async () => {
+    const r = await nightWithKill([kestrel]);
+    await give(kestrel, 50);
+    const pick = await pressAs(officer, `${AUCTION_DROP_PREFIX}${r.id}`);
+    const sel = pick.data.components![0].components[0];
+    expect(sel.max_values).toBe(2);
+    const form = await send(select(officer, sel.custom_id, [String(ROBE), String(MUSHROOM)]), TOKEN);
+    const done = await send(submit(officer, form.data.custom_id!, { minimum: '3', minutes: '3' }), TOKEN);
+    expect(done.data.content).toContain(QUEUE_COPY.queuedMany(1));
+    const rows = await all<{ id: number; item_id: number; status: string }>('SELECT id, item_id, status FROM dkp_auction ORDER BY id');
+    expect(rows.map((x) => [x.item_id, x.status])).toEqual([[ROBE, 'open'], [MUSHROOM, 'queued']]);
+    // A /dkp auction while one is open joins the queue too.
+    expect((await dkp(officer, 'auction', { item: 'Lantern' })).data.content).toBe(QUEUE_COPY.queued('Lantern', 2));
+    await bid(kestrel, rows[0].id, '9');
+    await closeAt(rows[0].id);
+    await HANDLERS.next(withToken, GUILD, String(r.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect((await one<{ status: string }>('SELECT status FROM dkp_auction WHERE id = ?', rows[1].id)).status).toBe('open');
+    expect((await one<{ status: string }>("SELECT status FROM dkp_auction WHERE item_id = 7003")).status).toBe('queued');
+    await HANDLERS.render(withToken, GUILD, String(r.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    const raidCard = cardOf(r.message_id).embeds[0].description;
+    expect(raidCard).toContain(`${QUEUE_COPY.wonTonight}\n${QUEUE_COPY.wonLine('Fungal Robe', `<@${kestrel.user.id}> (Kestrel)`, 3)}`);
+    expect(raidCard).toContain(QUEUE_COPY.upNext(1));
+    // A cancel opens the next one as well.
+    await send(submit(officerB, `${CANCEL_MODAL_PREFIX}${rows[1].id}`, { reason: 'duplicate' }), TOKEN);
+    expect((await one<{ status: string }>("SELECT status FROM dkp_auction WHERE item_id = 7003")).status).toBe('open');
+  });
+
+  it('review of PR C: a card Discord fails to take (503) puts the drop back in the queue, never cancels it; a refusal (403) cancels it', async () => {
+    const r = await nightWithKill([kestrel]);
+    const handle = botApi.handle!;
+    let status = 503;
+    botApi.handle = (m, p, b) => (m === 'POST' && /\/messages$/.test(p) && b?.embeds?.[1]?.title?.startsWith('Auction') ? json({ code: status === 403 ? 50013 : 0, message: 'x' }, status) : handle(m, p, b));
+    await auctionDrop(r);
+    expect(await auction()).toMatchObject({ status: 'queued', message_id: null });
+    botApi.handle = handle;
+    await HANDLERS.next(withToken, GUILD, String(r.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect((await auction()).status).toBe('open');
+    status = 403;
+    botApi.handle = (m, p, b) => (m === 'POST' && /\/messages$/.test(p) && b?.embeds?.[1]?.title?.startsWith('Auction') ? json({ code: 50013, message: 'Missing Permissions' }, 403) : handle(m, p, b));
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    expect((await auction()).status).toBe('cancelled');
+    botApi.handle = handle;
+  });
+
+  it('order 29, PR C: the general auction: an item that expires unsold takes a record of what was done (public, kept, once)', async () => {
+    await dkp(officer, 'auction', { item: 'Lantern', general: true });
+    const a = await auction();
+    await closeAt(a.id);
+    const card = cardOf(a.message_id);
+    expect(card.components[0].components[0].custom_id).toBe(`${RECORD_PREFIX}${a.id}`);
+    expect((await pressAs(officer, `${RECORD_PREFIX}${a.id}`)).type).toBe(9);
+    expect((await pressAs(kestrel, `${RECORD_PREFIX}${a.id}`)).data.content).toBe(DKP_COPY.notRunner);
+    expect((await send(submit(officer, `${RECORD_MODAL_PREFIX}${a.id}`, { disposal: 'Given to the guild bank' }), TOKEN)).data.content).toBe(QUEUE_COPY.recorded);
+    expect(await one('SELECT disposal, disposal_by FROM dkp_auction WHERE id = ?', a.id)).toEqual({ disposal: 'Given to the guild bank', disposal_by: officer.user.id });
+    expect(cardOf(a.message_id).embeds[1].description).toContain('**What was done:** Given to the guild bank');
+    expect(cardOf(a.message_id).components).toEqual([]);
+    expect(fake.messages.some((m) => m.body.content === QUEUE_COPY.disposalLine('Lantern', 'Given to the guild bank', `<@${officer.user.id}> (Officer)`))).toBe(true);
+    expect((await send(submit(officerB, `${RECORD_MODAL_PREFIX}${a.id}`, { disposal: 'again' }), TOKEN)).data.content).toBe(QUEUE_COPY.notRecordable);
+  });
+
   it('routes each new custom_id prefix (order 23): Bid, Cancel auction and the drop select open a form at once; the rest defer', () => {
     for (const p of AUCTION_PREFIXES) {
       expect(p.startsWith(DKP_PREFIX), p).toBe(true);
       const modal = AUCTION_OPENS_MODAL.includes(p);
       expect(OPENS_MODAL.some((m) => p.startsWith(m)), p).toBe(modal);
-      if (![DROP_MODAL_PREFIX, BID_MODAL_PREFIX, CANCEL_MODAL_PREFIX].includes(p)) expect(planFor(press(kestrel, `${p}1`) as never), p).toMatchObject({ defer: !modal });
+      if (![DROP_MODAL_PREFIX, BID_MODAL_PREFIX, CANCEL_MODAL_PREFIX, RECORD_MODAL_PREFIX].includes(p)) expect(planFor(press(kestrel, `${p}1`) as never), p).toMatchObject({ defer: !modal });
     }
     expect(new Set(AUCTION_PREFIXES).size).toBe(AUCTION_PREFIXES.length);
     expect(storedName(DKP_CHANNEL_NAME)).toBeTruthy();
     void all;
+  });
+});
+
+/** /dkp wishlist <sub> as Discord sends a subcommand group. */
+const wish = (m: Member, sub: string, options: Record<string, unknown> = {}) =>
+  send({ type: 2, guild_id: GUILD, member: m, data: { name: 'dkp', options: [{ type: 2, name: 'wishlist', options: [{ type: 1, name: sub, options: Object.entries(options).map(([name, value]) => ({ type: name === 'member' ? 6 : 3, name, value })) }] }] } }, TOKEN);
+
+describe('wishlists (order 29, ITEM 6)', () => {
+  it('add (with the opt-in said), remove, show (public in the server); at most the wishlist size', async () => {
+    const added = await wish(kestrel, 'add', { item: 'Fungal Robe', character: 'Alyra' });
+    expect(added.data.content).toBe(`${WISHLIST_COPY.added('Fungal Robe', 'Alyra', 1, 30)}\n${WISHLIST_COPY.optIn}`);
+    expect((await wish(kestrel, 'add', { item: 'No Such Thing' })).data.content).toBe(WISHLIST_COPY.noItem('No Such Thing'));
+    await setting('wishlist_size', 2);
+    await wish(kestrel, 'add', { item: 'Lantern' });
+    expect((await wish(kestrel, 'add', { item: 'Black Mushroom' })).data.content).toBe(WISHLIST_COPY.full(2));
+    // Another member reads it: wishlists are public within the server.
+    const shown = await wish(pip, 'show', { member: kestrel.user.id });
+    expect(shown.data.embeds![0].title).toBe(WISHLIST_COPY.title('Kestrel', 2, 2));
+    expect(shown.data.embeds![0].description).toContain(WISHLIST_COPY.line('Fungal Robe', 'Alyra'));
+    expect((await wish(kestrel, 'remove', { item: 'Lantern' })).data.content).toBe(WISHLIST_COPY.removed('Lantern'));
+    expect((await wish(kestrel, 'remove', { item: 'Lantern' })).data.content).toBe(WISHLIST_COPY.notListed('Lantern'));
+    expect(await count('dkp_wishlist')).toBe(1);
+  });
+
+  it('nudges: a direct message (a link, no Bid button) to each eligible wisher when the auction opens; a refusal (50007) is skipped and counted; never twice; the card says "wanted by N eligible"', async () => {
+    const r = await nightWithKill([kestrel, pip]);
+    for (const m of [kestrel, pip, wren]) await wish(m, 'add', { item: 'Fungal Robe' });
+    await auctionDrop(r);
+    const a = await auction();
+    // (The object ran its own due nudge: its env here has no bot token, so it sent nothing; the handler runs below.)
+    expect(await HANDLERS.nudge(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0))).toBe(null);
+    // Wren was at no kill of this raid: not eligible, no message. Pip refuses direct messages.
+    expect(await all('SELECT member_id, result FROM dkp_nudge ORDER BY member_id')).toEqual([
+      { member_id: kestrel.user.id, result: 'sent' },
+      { member_id: pip.user.id, result: 'refused' },
+    ]);
+    expect(fake.dms.map((x) => x.to)).toEqual([kestrel.user.id]);
+    const dm = fake.dms[0].body;
+    expect(dm.content).toContain(`https://discord.com/channels/${GUILD}/`);
+    expect(dm.components).toBeUndefined();
+    expect(dm.allowed_mentions).toEqual({ parse: [] });
+    await HANDLERS.nudge(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect(fake.dms.length).toBe(1);
+    await HANDLERS.acard(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
+    expect(cardOf(a.message_id).embeds[1].description).toContain(QUEUE_COPY.wanted(2));
+  });
+
+  it('nudges go out in chunks inside the invocation\'s calls, and the item runs again until done', async () => {
+    const r = await nightWithKill([kestrel, wren]);
+    for (const m of [kestrel, wren]) await wish(m, 'add', { item: 'Fungal Robe' });
+    await auctionDrop(r);
+    const a = await auction();
+    // 40 calls, 36 spent before: room for one member's two calls and the chunk's record, not a second member.
+    const tight = timerApi(withToken, Date.now(), () => 36);
+    expect(await HANDLERS.nudge(withToken, GUILD, String(a.id), 0, 1234, tight)).toEqual({ again: 1234 });
+    expect(await count('dkp_nudge')).toBe(1);
+    expect(await HANDLERS.nudge(withToken, GUILD, String(a.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0))).toBe(null);
+    expect(await count('dkp_nudge')).toBe(2);
   });
 });

@@ -97,9 +97,20 @@ describe('the new definitions (order 18)', () => {
 });
 
 describe('autocomplete, keyed by command and option', () => {
+  type Opt = { type: number; name: string; autocomplete?: boolean; options?: readonly Opt[] };
+  // Order 29: a subcommand group's subcommands are "group sub" (src/discord.ts subcommand).
+  const subOptions = (cmd: string, sub: string, o: Opt) => (o.options ?? []).filter((p) => p.autocomplete).map((p) => listKey(cmd, sub, p.name));
   const autocompleteOptions = (list: readonly object[]) =>
-    (list as readonly { name: string; options?: readonly { type: number; name: string; autocomplete?: boolean; options?: readonly { name: string; autocomplete?: boolean }[] }[] }[]).flatMap((c) =>
-      (c.options ?? []).flatMap((o) => (o.type === SUBCOMMAND ? (o.options ?? []).filter((p) => p.autocomplete).map((p) => listKey(c.name, o.name, p.name)) : o.autocomplete ? [listKey(c.name, undefined, o.name)] : [])),
+    (list as readonly { name: string; options?: readonly Opt[] }[]).flatMap((c) =>
+      (c.options ?? []).flatMap((o) =>
+        o.type === SUBCOMMAND
+          ? subOptions(c.name, o.name, o)
+          : o.type === 2
+            ? (o.options ?? []).flatMap((s) => subOptions(c.name, `${o.name} ${s.name}`, s))
+            : o.autocomplete
+              ? [listKey(c.name, undefined, o.name)]
+              : [],
+      ),
     );
   it('every autocomplete option in both lists has a list, and every list names one (derived both ways)', () => {
     // Order 27: /dkp's per-server definition has its lists too.

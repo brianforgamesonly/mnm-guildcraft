@@ -205,6 +205,11 @@ export const choices = (list: Choice[]): InteractionReply => ({
 export function subcommand(i: Interaction): { name: string | undefined; options: Option[] } {
   const sub = i.data?.options?.[0];
   if (sub && sub.type !== SUBCOMMAND_OPTION && sub.type !== SUBCOMMAND_GROUP_OPTION) return { name: undefined, options: i.data?.options ?? [] };
+  // Order 29: a subcommand group's subcommand is "group sub" (/dkp wishlist add), with that subcommand's options.
+  if (sub?.type === SUBCOMMAND_GROUP_OPTION) {
+    const inner = sub.options?.[0];
+    return { name: inner ? `${sub.name} ${inner.name}` : sub.name, options: inner?.options ?? [] };
+  }
   return { name: sub?.name, options: sub?.options ?? [] };
 }
 /** Application command option types SUB_COMMAND and SUB_COMMAND_GROUP. */

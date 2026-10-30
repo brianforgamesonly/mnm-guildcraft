@@ -123,6 +123,38 @@ export const AUCTION_COPY = {
   notUnsold: 'Only an auction that closed with no bids can be posted to the general auction.',
 } as const;
 
+/** Order 29, PR C: the item queue, Won tonight, the general auction's record, wishlist nudges. */
+export const QUEUE_COPY = {
+  queued: (item: string, ahead: number) => `Queued: **${md(item)}** opens when the ${plural(ahead, 'auction')} ahead of it ${ahead === 1 ? 'closes' : 'close'}.`,
+  queuedMany: (n: number) => `Queued ${plural(n, 'drop')}: each auction opens as the one before it closes.`,
+  wonTonight: '**Won tonight:**',
+  wonLine: (item: string, winner: string, price: number) => `${md(item)} → ${winner}, ${price} points`,
+  upNext: (n: number) => `${plural(n, 'drop')} queued for auction.`,
+  record: 'Record what was done',
+  recordTitle: 'What was done with the item',
+  recordLabel: 'What was done (shown publicly)',
+  disposal: (text: string, by: string) => `**What was done:** ${md(text)} (recorded by ${by})`,
+  disposalLine: (item: string, text: string, by: string) => `**Unsold: ${md(item)}.** What was done: ${md(text)}. Recorded by ${by}.`,
+  recorded: 'Recorded. It is posted in GC-DKP.',
+  notRecordable: 'Only a general auction that closed unsold takes a record, once.',
+  wanted: (n: number) => `Wanted by ${plural(n, 'eligible member')} (on their wishlists).`,
+  nudge: (item: string, link: string, closes: number) =>
+    `From your GuildCraft wishlist: **${md(item)}** is up for auction: ${link}\nIt closes <t:${closes}:R>. You get these because you added it to your wishlist; \`/dkp wishlist remove\` stops them.`,
+} as const;
+
+/** Order 29, PR C: wishlists. */
+export const WISHLIST_COPY = {
+  noItem: (typed: string) => `There is no item called **${md(typed)}**. Pick one from the list.`,
+  full: (max: number) => `Your wishlist already holds ${plural(max, 'item')}, the most it can. Remove one first.`,
+  added: (item: string, character: string | null, n: number, max: number) => `Added **${md(item)}**${character ? ` for ${md(character)}` : ''} to your wishlist (${n} of ${max}).`,
+  optIn: "When an auction opens for it and you may bid, GuildCraft sends you a direct message with a link. That's your opt-in; remove the item to stop it.",
+  removed: (item: string) => `Removed **${md(item)}** from your wishlist.`,
+  notListed: (typed: string) => `**${md(typed)}** is not on your wishlist.`,
+  title: (name: string, n: number, max: number) => `${name}'s wishlist (${n} of ${max})`,
+  line: (item: string, character: string | null) => `${md(item)}${character ? ` · for ${md(character)}` : ''}`,
+  empty: 'Nothing on it yet. Members add items with `/dkp wishlist add`.',
+} as const;
+
 /** Order 27, PR B: raid nights, history and /me. */
 export const RAID_COPY = {
   notRunner: DKP_COPY.notRunner,
