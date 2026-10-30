@@ -36,6 +36,12 @@ export const TEMPLATE_FIELDS = {
   },
   zoneTemplate: 'ZoneDetails',
   zone: { level: 'level', adjacent: 'adjacentzones' },
+  /**
+   * Order 29 (the owner, 2026-10-29: "Yes"): a zone's description is its page's lead text, not a template field: the prose
+   * before the first heading or table, with __NOTOC__, <br>, templates, files, references and markup removed; NULL when
+   * nothing is left. Read by leadText, below.
+   */
+  zoneDescription: 'lead text',
   /** Quest pages: the reward lines are the bullets under a level-2 heading that starts with "Reward". */
   questRewardHeading: /^reward/i,
 } as const;
@@ -77,6 +83,56 @@ export function plain(s: string | undefined | null, opts: { target?: boolean } =
 export const text = (s: string | undefined | null): string | null => plain(s) || null;
 /** A value that still holds a template after parsing: its text is not read (NULL, counted). */
 export const hasTemplate = (s: string) => s.includes('{{');
+
+/** `s` without each `open`…`close` span, nested ones included (an unclosed span runs to the end). */
+function withoutSpans(s: string, open: string, close: string, starts: (at: number) => boolean = () => true): string {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    if (s.startsWith(open, i) && starts(i)) {
+      let depth = 0;
+      let j = i;
+      while (j < s.length) {
+        if (s.startsWith(open, j)) (depth++, (j += open.length));
+        else if (s.startsWith(close, j)) {
+          depth--;
+          j += close.length;
+          if (!depth) break;
+        } else j++;
+      }
+      // An unclosed span is not markup: the rest stays as text (review of PR A).
+      if (depth) return out + s.slice(i);
+      i = j;
+      continue;
+    }
+    out += s[i++];
+  }
+  return out;
+}
+
+/** A link into a namespace that shows no prose: a file, an image or a category (its caption is not lead text). */
+const NON_PROSE_LINK = /^\[\[\s*:?\s*(file|image|media|category)\s*:/i;
+
+/**
+ * Order 29 (TEMPLATE_FIELDS.zoneDescription): a zone page's lead text. Templates (nested) come out first, so a template
+ * spanning lines never cuts the lead; then the lead ends at the first heading line (== … ==) or table ({|); then files,
+ * images and categories (with their captions), __NOTOC__-style magic words and <br> go, and plain() removes references,
+ * tags, link markup, entities and bold/italic quotes. NULL when nothing is left (never guessed).
+ */
+export function leadText(page: string): string | null {
+  // Comments first (a commented-out heading or table never cuts the lead); an external link [url label] is its label.
+  const noComments = page.replace(/<!--[\s\S]*?(-->|$)/g, '').replace(/(?<!\[)\[(?:https?:)?\/\/[^\s\]]+\s*([^\]]*)\]/g, '$1');
+  const noTemplates = withoutSpans(noComments, '{{', '}}');
+  const lines = noTemplates.split('\n');
+  // A table starts with "{|"; a line starting "|" is table markup too (a stray "|}" on Blind Midden's page).
+  const end = lines.findIndex((l) => /^\s*=+[^=].*=+\s*$/.test(l) || /^\s*(\{\||\|)/.test(l));
+  // List markers (* # : ;) at a line's start are markup; the line's text stays.
+  const lead = (end < 0 ? lines : lines.slice(0, end)).map((l) => l.replace(/^\s*[*#:;]+\s*/, '')).join('\n');
+  const prose = withoutSpans(lead, '[[', ']]', (at) => NON_PROSE_LINK.test(lead.slice(at, at + 40)))
+    .replace(/__[A-Z]+__/g, ' ')
+    .replace(/<br\s*\/?>/gi, ' ');
+  return text(prose);
+}
 
 /** The labels of a value's links, in order. */
 export const links = (s: string | undefined | null): string[] =>
@@ -145,6 +201,8 @@ export function templates(page: string, name: string): Record<string, string>[] 
 export interface WikiZone {
   name: string;
   level: string | null;
+  /** Order 29: the page's lead text (leadText); NULL when it has none. */
+  description: string | null;
   adjacent: string[];
   url: string;
 }
@@ -310,7 +368,7 @@ export function parseSnapshot(snap: WikiSnapshot): WikiParse {
     }
     const adjRaw = b[F.zone.adjacent];
     const adjacent = links(adjRaw).length ? links(adjRaw) : (adjRaw ?? '').split('\n').map((l) => plain(l.replace(/^\*+/, ''))).filter((x) => x !== '');
-    zones.push({ name: title, level: text(b[F.zone.level])?.replace(/^-/, '').trim() || null, adjacent: [...new Set(adjacent)], url: wikiPageUrl(title) });
+    zones.push({ name: title, level: text(b[F.zone.level])?.replace(/^-/, '').trim() || null, description: leadText(page.content), adjacent: [...new Set(adjacent)], url: wikiPageUrl(title) });
   }
 
   const quests: WikiQuest[] = [];

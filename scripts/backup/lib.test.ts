@@ -8,7 +8,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { copies } from '../copies.ts';
 import { IMPORT_TABLES } from '../import/core.ts';
-import { backupDir, checkBounds, countSql, expiryAlarms, expiryState, loadAndCount, MUST_HOLD_ROWS, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
+import { backupDir, checkBounds, countSql, expiryAlarms, expiryState, loadAndCount, migrationCheck, MUST_HOLD_ROWS, prune, TABLES_SQL, VIRTUAL_SQL } from './lib.ts';
 
 test('prune keeps the last 30 dailies and the first file of each month', () => {
   const dates: string[] = [];
@@ -61,6 +61,37 @@ test('order 10: the copies are wrangler.jsonc environments; each marks itself an
   for (const c of all) assert.match(c.databaseId(), /^[0-9a-f-]{36}$/, c.name);
   assert.equal(new Set(all.map((c) => c.databaseId())).size, all.length);
   assert.equal(backupDir('production'), 'backups/production');
+});
+
+test('order 29: the migration check migrates a scratch copy made before 0023 and proves its ledger unchanged', () => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '../../migrations');
+  const before = readdirSync(dir).filter((f) => f.endsWith('.sql') && f < '0023').sort();
+  const at = '2026-10-28T20:00:00Z';
+  const g = '911111111111111111';
+  const u = '911111111111111112';
+  const dump = [
+    ...before.map((f) => readFileSync(join(dir, f), 'utf8')),
+    'CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);',
+    ...before.map((f) => `INSERT INTO d1_migrations (name) VALUES ('${f}');`),
+    `INSERT INTO guild (id, name, created_at) VALUES ('${g}', 'G', '${at}');`,
+    `INSERT INTO dkp_raid (id, guild_id, pool, mode, opened_by, opened_at, closes_at) VALUES (1, '${g}', 'z', 'named', '${u}', '${at}', '${at}');`,
+    `INSERT INTO dkp_kill (id, raid_id, name, points, guild_points, at, by) VALUES (1, 1, 'N', 10, 2, '${at}', '${u}');`,
+    `INSERT INTO dkp_ledger (id, guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, actor, at) VALUES (1, '${g}', '${u}', 'z', 10, 0, 10, 'kill', 1, 1, 'bot', '${at}'), (2, '${g}', '${u}', 'guild', 2, 0, 2, 'kill', 1, 1, 'bot', '${at}');`,
+    `INSERT INTO dkp_ledger (id, guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at) VALUES (3, '${g}', '${u}', 'z', -10, 0, 0, 'correction', 1, 1, 1, 'r', '${u}', '${at}');`,
+  ].join('\n');
+  const work = mkdtempSync(join(tmpdir(), 'migration-check-'));
+  try {
+    writeFileSync(join(work, 'dump.sql'), dump);
+    loadAndCount(join(work, 'd1'), join(work, 'dump.sql'));
+    const check = migrationCheck(join(work, 'd1'));
+    assert.deepEqual(check.applied, readdirSync(dir).filter((f) => f.endsWith('.sql') && f >= '0023').sort());
+    assert.equal(check.match, true);
+    assert.equal(check.before.rows, 3);
+    // The member's kill row is reversed: no roster row for them (net of corrections).
+    assert.deepEqual([check.new_rows, check.roster_rows, check.kills, check.triggers], [0, 0, 1, 2]);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 });
 
 test('order 10: the token-expiry warning never fires for the owner\'s "no expiry" note', () => {

@@ -103,7 +103,8 @@ function wikiRows(snap: WikiSnapshot): SourceRows {
     registry: 'wiki:zones',
     adjacentSource: 'wiki:adjacent',
     npcSource: 'wiki:npcs',
-    zones: p.zones.map((z) => ({ name: z.name, level: z.level, description: null, adjacent: z.adjacent, url: z.url, mapFile: null, map: null })),
+    // Order 29: the description is the page's lead text (scripts/wiki/parse.ts leadText).
+    zones: p.zones.map((z) => ({ name: z.name, level: z.level, description: z.description, adjacent: z.adjacent, url: z.url, mapFile: null, map: null })),
     npcs: p.npcs.map((n) => ({
       name: n.name,
       // Order 28b's correction 1 of override 6: a block's zone text is split exactly as Mo Betta's was.

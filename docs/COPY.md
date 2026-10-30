@@ -1086,3 +1086,17 @@ Replaces the order 17 rows above for the zone card's footer, its "Not recorded y
 | README.md, Credits | Zone, NPC and quest data … read nightly from the Monsters and Memories Wiki itself … CC BY-SA 4.0 … Each page's history on the wiki lists its authors. (Mo Betta's line removed) | DRAFT |
 | docs/SELF-HOSTING.md, Step 10 | The zones, NPCs and quests come from the Monsters and Memories Wiki (CC BY-SA 4.0), read by the import's first job … | DRAFT |
 | docs/LAUNCH-GUIDE.md:82 | The data comes from the Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0), MnM Atlas and mnm-tools … | DRAFT |
+
+## Work order 29, PR A: standby once, the cap, the closed card, zone descriptions (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:74, 75 | (a closed raid card with no lines) No kills were recorded. · No payout was made. | DRAFT |
+| src/dkp/copy.ts:77 | (kill line) · \<n> on Standby | DRAFT |
+| src/dkp/copy.ts:78 | (after Recorded / Paid) On Standby: \<n> members, paid the standby value once, when the raid closes. | DRAFT |
+| src/dkp/copy.ts:79 | (Who earned) On **Standby** (\<n>): they earn the standby value once, when the raid closes. | DRAFT |
+| src/dkp/copy.ts:111-112 | (summary, added) … (\<n> members on Standby paid the standby value) | DRAFT |
+| src/dkp/copy.ts:115 | You're on **Standby**: you earn the standby value once, when the raid closes, if you're on Standby for at least one kill. | DRAFT |
+| src/dkp/copy.ts:117 | (a raid opened before order 29) You're on **Standby**: you earn every kill from now on until you tap **Leaving**. | DRAFT |
+| src/dkp/settings.ts:18 | (setting label) Standby value | DRAFT |
+| src/zone/card.ts:253 | (zone card, under the levels) the wiki page's lead text, first line, up to 200 characters (wiki text, CC BY-SA 4.0; not GuildCraft copy) | DRAFT |

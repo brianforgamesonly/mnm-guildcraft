@@ -1,5 +1,6 @@
 import { env } from 'cloudflare:test';
-import dkpMigration from '../migrations/0021_dkp.sql?raw';
+// Order 29: 0023 rebuilt the ledger and recreated its triggers; the newest migration's text is the one in force.
+import dkpMigration from '../migrations/0023_dkp_auctions.sql?raw';
 
 export const one = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).first<T>())!;
 export const all = async <T>(sql: string, ...binds: unknown[]) => (await env.DB.prepare(sql).bind(...binds).all<T>()).results;
@@ -19,7 +20,10 @@ const DKP_TRIGGERS = [...dkpMigration.matchAll(/CREATE TRIGGER (\w+)[^;]*;[^;]*E
 export async function clearDkp() {
   await env.DB.batch([
     ...DKP_TRIGGERS.map((t) => env.DB.prepare(`DROP TRIGGER IF EXISTS ${t.name}`)),
-    ...['dkp_ledger', 'dkp_pending', 'dkp_recheck', 'dkp_kill', 'dkp_attendance', 'dkp_raid', 'dkp_pool', 'dkp_named_value', 'dkp_setting', 'dkp_guild'].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
+    ...[
+      'dkp_ledger', 'dkp_purchase', 'dkp_listing', 'dkp_nudge', 'dkp_bid', 'dkp_wishlist', 'dkp_auction', 'dkp_kill_member', 'dkp_pending', 'dkp_recheck', 'dkp_kill', 'dkp_attendance', 'dkp_raid', 'dkp_pool',
+      'dkp_named_value', 'dkp_setting', 'dkp_guild',
+    ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     ...DKP_TRIGGERS.map((t) => env.DB.prepare(t.sql)),
   ]);
 }

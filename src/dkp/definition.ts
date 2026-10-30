@@ -92,5 +92,8 @@ export const DKP_COMMAND = {
 /** "/dkp sub" with its description, as /help lists it (order 27: only where DKP is on). */
 export const DKP_DEFINED_LIST = DKP_COMMAND.options.map((o) => ({ cmd: `/${DKP_NAME} ${o.name}`, command: DKP_NAME, description: o.description as string }));
 export const DKP_DEFINED = new Set(DKP_DEFINED_LIST.map((d) => d.cmd));
-/** The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md): none. */
-export const DKP_COMING: string[] = [];
+/**
+ * The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). Order 29: each
+ * leaves this list in the pull request that builds it (auction in PR B, wishlist in PR C, shop in PR D).
+ */
+export const DKP_COMING: string[] = ['/dkp auction', '/dkp wishlist', '/dkp shop'];

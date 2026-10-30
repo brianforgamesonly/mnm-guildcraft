@@ -191,11 +191,11 @@ describe('the ledger (ITEM 2)', () => {
     for (const c of fake.calls.filter((c) => /\/messages/.test(c.path) && c.method !== 'GET')) expect(c.body.allowed_mentions, c.path).toEqual({ parse: [] });
   });
 
-  it('caps a positive amount against the pool cap and keeps the cut; a negative one is never cut', async () => {
+  it('caps a positive amount against the pool cap (order 29: 200 by default) and keeps the cut; a negative one is never cut', async () => {
     await env.DB.prepare("INSERT INTO dkp_setting (guild_id, key, value, set_at, set_by) VALUES (?, 'second_officer_over', '1000', 'x', 'x')").bind(GUILD).run();
-    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: 150, reason: 'big' });
-    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: -130, reason: 'oops' });
-    expect((await ledger()).map((l) => [l.amount, l.cut, l.balance_after])).toEqual([[100, 50, 100], [-130, 0, -30]]);
+    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: 250, reason: 'big' });
+    await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: -230, reason: 'oops' });
+    expect((await ledger()).map((l) => [l.amount, l.cut, l.balance_after])).toEqual([[200, 50, 200], [-230, 0, -30]]);
   });
 
   it('over the threshold: an approval card; the asker and the member cannot approve; another officer can, once; it lapses on its timer', async () => {
@@ -288,7 +288,7 @@ describe('the ledger (ITEM 2)', () => {
     expect((await dkp(admin, 'settings', { setting: 'cap', value: 50 })).data.content).toBe(DKP_COPY.settingSaved);
     expect(fake.messages.some((m) => m.body.content?.startsWith('**DKP setting changed:** Pool cap is now 50 points'))).toBe(true);
     const shown = (await dkp(admin, 'settings')).data.content!;
-    expect(shown).toContain('Pool cap: **50** points (default 100)');
+    expect(shown).toContain('Pool cap: **50** points (default 200)');
     const RAID_LEAD = '600000000000000009';
     await dkp(admin, 'settings', { runner_role: RAID_LEAD });
     expect((await dkp(officerA, 'adjust', { member: X, pool: POOL_GUILD, points: 3, reason: 'x' })).data.content).toBe(DKP_COPY.notRunner);

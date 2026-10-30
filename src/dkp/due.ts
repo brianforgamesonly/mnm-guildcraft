@@ -48,7 +48,7 @@ const check: Handler = async (env, guildId, id, _due, now) => {
 const close: Handler = async (env, guildId, id, _due, now, api) => {
   const state = await loadDkp(env.DB, guildId);
   if (!state.enabled) return null;
-  await closeRaid(env.DB, api, guildId, state.channel_id, Number(id), 'bot', 'auto', now);
+  await closeRaid(env.DB, api, guildId, state.channel_id, Number(id), 'bot', 'auto', now, state.settings);
   return null;
 };
 

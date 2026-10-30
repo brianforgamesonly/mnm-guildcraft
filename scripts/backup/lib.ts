@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { BACKUP_TOKEN_EXPIRY_NOTE } from '../../src/limits.ts';
 import { IMPORT_TABLES } from '../import/core.ts';
+import { AFTER_SQL, LEDGER_PROOF_SQL, proofText } from './ledger-proof.ts';
 
 /** The private backup repository: <the owner of this repository>/mnm-guildcraft-backup, so a fork backs up to its own. */
 export const BACKUP_REPO = `${process.env.GITHUB_REPOSITORY_OWNER || 'brianforgamesonly'}/mnm-guildcraft-backup`;
@@ -68,6 +69,25 @@ export function localQuery<T>(dir: string, sql: string): T[] {
   const out = wrangler(['d1', 'execute', DATABASE, '--local', '--env', 'dev', '--persist-to', dir, '--json', '--command', sql], true);
   const parsed = JSON.parse(out.slice(out.indexOf('['))) as { results: T[] }[];
   return parsed[0]?.results ?? [];
+}
+
+/**
+ * Order 29 (override 1): applies this checkout's pending migrations to a scratch local D1 (a copy of live data) and proves
+ * the ledger unchanged: its row count and a SHA-256 of every column 0021 made, before and after (scripts/backup/
+ * ledger-proof.ts). Returns counts and hashes only, never a row.
+ */
+export function migrationCheck(dir: string) {
+  const proof = () => {
+    const rows = localQuery<Record<string, unknown>>(dir, LEDGER_PROOF_SQL);
+    return { rows: rows.length, sha256: createHash('sha256').update(proofText(rows)).digest('hex') };
+  };
+  const names = () => localQuery<{ name: string }>(dir, 'SELECT name FROM d1_migrations ORDER BY id').map((r) => r.name);
+  const had = names();
+  const before = proof();
+  wrangler(['d1', 'migrations', 'apply', DATABASE, '--local', '--env', 'dev', '--persist-to', dir], true);
+  const after = proof();
+  const [counts] = localQuery<{ new_rows: number; roster_rows: number; roster_kills: number; kills: number; roster_with_state: number; kill_ledger_rows: number; missing_rosters: number; triggers: number }>(dir, AFTER_SQL);
+  return { applied: names().filter((n) => !had.includes(n)), before, after, match: before.rows === after.rows && before.sha256 === after.sha256, ...counts };
 }
 
 /** Loads a dump into an empty scratch local D1 and counts each table it created. */

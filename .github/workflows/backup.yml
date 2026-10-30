@@ -39,6 +39,12 @@ on:
         description: 'Run only the restore test (latest backup → scratch local D1 → its manifest)'
         type: boolean
         default: false
+      # Order 29 (override 1): the dry run of a migration on a copy of the live data. With dry_run, the scratch copy is
+      # migrated with this commit's pending migrations; the ledger's row count and SHA-256 must match before and after.
+      migration_check:
+        description: 'With dry run: apply pending migrations to the scratch copy and prove the ledger unchanged'
+        type: boolean
+        default: false
       copy:
         description: 'Which copy'
         type: choice
@@ -96,7 +102,7 @@ jobs:
       - run: npm ci
       - name: Back up (dry run = ${{ inputs.dry_run == true }})
         id: backup
-        run: node scripts/backup/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: node scripts/backup/run.ts ${{ inputs.dry_run == true && '--dry-run' || '' }} ${{ inputs.dry_run == true && inputs.migration_check == true && '--migration-check' || '' }}
       - name: Token expiry warning (after the push; never stops a backup)
         if: always() && steps.backup.outputs.expiry_alarm == '1'
         env:

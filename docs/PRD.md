@@ -644,7 +644,7 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
   - A zone with no creatures shows no select menu; the card says to use `/dkp kill`.
   - The same named recorded twice within 2 minutes asks the officer to confirm it was a respawn. Otherwise each record is a kill.
 - *Payout.*
-  - Everyone Present or Standby at that moment earns the named's raid points and the guild points.
+  - Everyone Present at that moment earns the named's raid points and the guild points. Order 29: everyone Standby at that moment goes on the kill's roster and earns the standby value once, at close (below); a raid opened before order 29 keeps the old rule (Standby earned each kill).
   - The kill line on the card shows the named, the points, how many earned, and the changes against the previous kill (for example +Kestrel −Pip).
   - Who earned answers privately with the full list.
 - *Check again* (officer, per kill).
@@ -654,7 +654,7 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 - *Corrections.*
   - An officer adds or removes a member on a kill, or on the whole raid. The reason is required and shown.
   - A correction whose total is over 20 points needs a second officer, as adjustments do.
-- *Flat mode.* There is no Named killed. Pay attendance pays the flat value once, to everyone Present or Standby at that moment.
+- *Flat mode.* There is no Named killed. Pay attendance pays the flat value once, to everyone Present at that moment; Standby at that moment earns the standby value once, at close (order 29).
 - *Closing.*
   - Close raid posts the night's summary and refreshes the standings.
   - A raid nobody closes closes itself after 8 hours.
@@ -681,7 +681,16 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 | Raid points per named kill | 10 |
 | Flat raid value | 30 |
 | Guild points per kill or flat payout | 2 |
-| Pool cap | 100 |
+| Pool cap | 200 (order 29; it was 100) |
+| Standby value (order 29) | 30 |
+| Wins per raid (order 29) | 2 |
+| Wins per 7 days (order 29) | 4 |
+| New-member wait (order 29) | 3 kills in that pool |
+| Raid auction length (order 29) | 180 seconds |
+| General auction length (order 29) | 24 hours |
+| Decay after (order 29) | 180 idle days |
+| Decay per week (order 29) | 10% |
+| Wishlist size (order 29) | 30 items |
 | Check-again window | 300 seconds |
 | Second officer needed | over 20 points |
 | Approval lapses after | 24 hours |
@@ -695,7 +704,25 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 - `/dkp history member: pool:` answers privately: ledger rows, newest first, paged.
 - `/me` shows balances per pool and 30-day attendance, where DKP is on.
 
-**Order 28.** Auctions (sealed bids, present-to-bid, win limits, the new-member wait), wishlists, the item queue, the shop, decay, the voice check, the Discord-event link, and deleting history with an export.
+**Order 29: spending points** (approved by the owner on 2026-10-29, 16:08 and 16:12 ET). The bot decides every auction: bids stay hidden from everyone until close, closing is by timer only, and the price is computed. Every spend, refund, standby payout and decay is a ledger row; balances stay derived.
+
+- *Standby* (raids opened from order 29 on). A member who is Standby at one or more kills (or at a flat raid's Pay attendance) earns the standby value once (its own setting, default 30), paid when the raid closes, with the guild points for that payout. The raid closes this way however it closes: an officer, auto-close, or Remove DKP. Mixed attendance: the per-kill points for the Present kills, plus the standby value once. Removing a member's last Standby kill before close means no standby pay; after close, a correction row reverses the standby row. The pool cap applies.
+- *Cap.* The default is 200. A server's admin can set it to anything in `/dkp settings`; servers that never changed it get 200 at once.
+- *Who was at a kill* is the kill's roster (who was Present or Standby), written with the kill and updated by Check again and corrections.
+- *Raid auctions.*
+  - Starting one: from the raid card, **Auction a drop** offers the latest kill's known loot (the named's loot names matched to items, at most 25), or `/dkp auction item:` picks any item. A raid auction needs an open raid; with none, the reply points to the general auction. The officer can set a minimum bid (default 1) and a duration (default 3 minutes). The card shows the item's stats (the `/item` card).
+  - Who may bid: a member Present or Standby at one or more kills of that raid (points belong to the member, so the item can go to any of their characters), under the win limits (2 per raid, 4 in any 7 days; general-auction wins count only toward the 7 days; shop purchases toward neither), past the new-member wait (3 kills, Present or Standby, in that raid zone's pool, ever), and not frozen. One function decides this.
+  - Bidding: **Bid** opens a form for an amount: a whole number, at least the minimum, at most the member's balance in that raid's pool. A bid counts only if it arrives before the close time by the server's clock. While the auction is open a member can raise, lower or withdraw their bid. Nobody sees any bid, officers included; the card shows only the number of bidders.
+  - Closing: on the timer only, with no extension. Every bid is checked again against the bidder's balance; one that can no longer be paid is dropped, and the result says so. The price is the second-highest valid bid + 1, never more than the winner's own bid; a lone bidder pays the minimum. A tie goes to the higher 30-day attendance in that pool, then to the earlier bid. The winner's points come off as a spend row. The result is posted with every bid revealed (members shown, nobody pinged) and the price.
+  - Cancel: an officer can cancel an open auction unless they have bid in it. The reason is required; the cancellation is public and reveals the bids. There's no spend.
+  - An auction open when its raid closes runs to its timer. Remove DKP cancels every open auction ("DKP removed", bids revealed) before the timers are cleared. An auction with no bids offers **Post to general auction**.
+- *The general auction.* An officer posts any item, or one that went unsold, for guild points. Every active member may bid: no presence rule and no new-member wait, but the win limits count. The same sealed bids, price rule and timer, 24 hours by default. If it expires unsold, the officer records what was done with the item (free text, public), and the record is kept.
+- *The item queue.* From the raid card, an officer can queue several drops: each auction opens as the one before it closes. The raid card keeps a Won tonight list (item, winner, price).
+- *Wishlists.* `/dkp wishlist add item: character:`, `/dkp wishlist remove item:` and `/dkp wishlist show member:`. Wishlists are public within the server, at most 30 items each. Adding an item is the member's opt-in to a direct message: when an auction opens for it, every eligible member who wishes for it gets one (a link to the auction card, not a Bid button), and the card shows "wanted by N eligible". A member who refuses direct messages is skipped and counted.
+- *The shop* (fixed prices, guild points). `/dkp shop add item: price: quantity: per_member:` posts a listing with **Buy**: first come, first served; each purchase is a spend row and is posted. Officers can't buy from a listing they posted. An officer can close a listing early.
+- *Decay.* Once a week, any pool balance whose member has had no ledger row other than decay in that pool for 180 days loses 10% (rounded down, at least 1 while the balance is above 0), as a decay row by the bot. It stops as soon as the member earns or spends in that pool again. Frozen members decay too.
+
+**Not built yet:** the voice check, the Discord-event link, and deleting history with an export.
 
 **Departures from this section, named (order 27).**
 

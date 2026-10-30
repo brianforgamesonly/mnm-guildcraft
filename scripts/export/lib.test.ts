@@ -74,6 +74,15 @@ function fixture(): string {
       `INSERT INTO dkp_recheck (kill_id, member_id, at) VALUES (${n}, '${u}', '${at}')`,
       `INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, reason, asked_by, asked_at, due_at) VALUES ('${g}', 'adjust', '${u}', 'guild', 30, 'Reason${n}', '${u}', '${at}', '${at}')`,
       `INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, reason, actor, at) VALUES ('${g}', '${u}', 'z', 10, 0, 10, 'kill', ${n}, ${n}, 'Ledger${n}', 'bot', '${at}')`,
+      // Order 29: kill rosters, auctions (bids and nudges are children), wishlists, the shop (purchases are children).
+      `INSERT INTO dkp_kill_member (kill_id, member_id, state) VALUES (${n}, '${u}', 'present')`,
+      `INSERT INTO dkp_auction (id, guild_id, kind, raid_id, kill_id, item_id, min_bid, seconds, status, created_by, created_at, reason) VALUES (${n}, '${g}', 'raid', ${n}, ${n}, 2, 1, 180, 'cancelled', '${u}', '${at}', 'Cancel${n}')`,
+      `INSERT INTO dkp_bid (auction_id, member_id, amount, at) VALUES (${n}, '${u}', ${n}, '${at}')`,
+      `INSERT INTO dkp_nudge (auction_id, member_id, result, at) VALUES (${n}, '${u}', 'sent', '${at}')`,
+      `INSERT INTO dkp_wishlist (guild_id, member_id, item_id, character, added_at) VALUES ('${g}', '${u}', 2, 'Wisher${n}', '${at}')`,
+      `INSERT INTO dkp_listing (id, guild_id, item_id, price, quantity, per_member, posted_by, posted_at) VALUES (${n}, '${g}', 1, 5, 2, 1, '${u}', '${at}')`,
+      `INSERT INTO dkp_purchase (id, listing_id, member_id, at) VALUES (${n}, ${n}, '${u}9', '${at}')`,
+      `INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, purchase_id, reason, actor, at) VALUES ('${g}', '${u}9', 'guild', -5, 0, -5, 'spend', ${n}, 'Spend${n}', 'bot', '${at}')`,
     );
   }
   return `${schema()}\n${rows.map((r) => `${r};`).join('\n')}\n`;
@@ -116,11 +125,13 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
     for (const g of [A, B]) assert.ok(Number((full.prepare(`SELECT count(*) AS n FROM "${t.name}" WHERE guild_id = ?`).get(g) as { n: number }).n) > 0, `${t.name} has no row for ${g}`);
   }
   const out = guildDump(sql, A, IMPORT_WRITES);
-  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2', 'Reason2', 'Ledger2', 'Named2', 'dkpch2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2', 'Reason2', 'Ledger2', 'Named2', 'dkpch2', 'Cancel2', 'Wisher2', 'Spend2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  // Order 29: an auction's bids and nudges, and a listing's purchases, come with them.
+  assert.deepEqual([out.counts.dkp_kill_member, out.counts.dkp_auction, out.counts.dkp_bid, out.counts.dkp_nudge, out.counts.dkp_wishlist, out.counts.dkp_listing, out.counts.dkp_purchase, out.counts.dkp_ledger], [1, 1, 1, 1, 1, 1, 1, 2]);
   // Order 16: the request's items come with it, by their parent.
   assert.equal(out.counts.craft_request_item, 1);
   // Order 27: a raid's attendance and kills come with it, and a kill's rechecks with the kill.
-  assert.deepEqual([out.counts.dkp_attendance, out.counts.dkp_kill, out.counts.dkp_recheck, out.counts.dkp_ledger], [1, 1, 1, 1]);
+  assert.deepEqual([out.counts.dkp_attendance, out.counts.dkp_kill, out.counts.dkp_recheck], [1, 1, 1]);
   for (const mine of [A, 'Char1', 'Departed1', 'Faction1', 'thread1', 'private1', 'member.left']) assert.ok(out.sql.includes(mine), `A's ${mine} missing`);
   const c = out.counts;
   assert.deepEqual(
