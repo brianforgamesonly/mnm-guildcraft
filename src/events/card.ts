@@ -167,7 +167,7 @@ export function layoutRoster(header: string, sections: Section[], reserved: numb
 
 function header(e: EventRow, now: number): string {
   const start = Date.parse(e.start_at);
-  const hours = e.duration_minutes / 60;
+  const hours = Math.round((e.duration_minutes / 60) * 100) / 100;
   const lock = e.lock_at ? Date.parse(e.lock_at) : null;
   const zone = e.zone_key ? md(e.zone_name ?? e.zone_key) : null;
   return [
@@ -214,12 +214,17 @@ export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: st
   if (!e || e.status === PREVIEW || !state.channel_id) return null;
   const m = cardMessage(e, await loadSignups(env.DB, id), state.settings, now);
   const body = { ...m, allowed_mentions: NO_PINGS };
-  if (e.message_id) {
-    const r = await api.call('PATCH', `/channels/${state.channel_id}/messages/${e.message_id}`, body);
+  // Post is still saving the card's id: posting here would make a second card.
+  if (!e.message_id) return null;
+  const r = await api.call('PATCH', `/channels/${state.channel_id}/messages/${e.message_id}`, body);
+  if (r.ok) {
     const last = api.log.at(-1);
-    if (r.ok || r.code !== UNKNOWN_MESSAGE) return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
+    return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
   }
+  // A throw leaves the item for the object's retries: this edit may be the only one a cancelled or closed card gets.
+  if (r.code !== UNKNOWN_MESSAGE) throw new Error(`event card edit failed: ${r.status}`);
   const posted = await api.call<{ id: string }>('POST', `/channels/${state.channel_id}/messages`, body);
-  if (posted.ok) await env.DB.prepare('UPDATE event SET message_id = ? WHERE id = ?').bind(posted.body.id, id).run();
+  if (!posted.ok) throw new Error(`event card post failed: ${posted.status}`);
+  await env.DB.prepare('UPDATE event SET message_id = ? WHERE id = ?').bind(posted.body.id, id).run();
   return null;
 }

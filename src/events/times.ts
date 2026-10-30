@@ -96,8 +96,8 @@ export function parseStart(typed: string, tz: string, nowMs: number): { at: numb
   const dow = WEEKDAYS.findIndex((w) => w === word || w.slice(0, 3) === word);
   if (dow < 0) return { error: 'format' };
   const ahead = (dow - today.dow + 7) % 7;
-  const first = on(ahead);
-  return check(first !== null && first <= nowMs ? on(ahead + 7) : first);
+  const gone = ahead === 0 && (clock.h < today.h || (clock.h === today.h && clock.min <= today.min));
+  return check(on(gone ? 7 : ahead));
 }
 
 /** The full date in the server's zone: "Saturday, October 31, 2026 at 8:00 PM EDT". */

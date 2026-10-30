@@ -120,11 +120,13 @@ const dkpKills: Lister = async ({ db, i, typed }) => {
     .map((r) => ({ name: truncate(`${r.name} · ${r.at.slice(11, 19)} UTC · #${r.id}`, CHOICE_MAX), value: String(r.id) }));
 };
 
-/** Order 32: a server's open events, soonest first, by id. The member gate is inside the statement. */
-const openEvents: Lister = async ({ db, i, typed }) => {
+/** Whoever may run events, from src/access.ts isEventRunner's two rules: admins and officers, or the events_role setting's role. */
+const SQL_RUNS_EVENTS = `(${SQL_IS_OFFICER} OR EXISTS (SELECT 1 FROM event_setting s WHERE s.guild_id = ?1 AND s.key = 'events_role' AND s.value IN (SELECT value FROM json_each(?2))))`;
+/** Order 32: a server's open events, soonest first, by id. Who may see them is inside the statement: the route's own rule. */
+const openEvents = (gate: 'member' | 'runner'): Lister => async ({ db, i, typed }) => {
   const { results } = await db
-    .prepare(`SELECT id, title, start_at FROM event WHERE guild_id = ?1 AND status = 'open' AND ${SQL_PASSES_MEMBER_GATE} ORDER BY start_at LIMIT 100`)
-    .bind(i.guild_id, JSON.stringify(i.member.roles ?? []))
+    .prepare(`SELECT id, title, start_at FROM event WHERE guild_id = ?1 AND status = 'open' AND (?3 = ?3) AND ${gate === 'member' ? SQL_PASSES_MEMBER_GATE : SQL_RUNS_EVENTS} ORDER BY start_at LIMIT 100`)
+    .bind(...sqlAccessParams(i.guild_id, i.member))
     .all<{ id: number; title: string; start_at: string }>();
   const q = typed.trim().toLowerCase();
   return results
@@ -174,10 +176,10 @@ export const LISTS: Record<string, Lister> = {
   // Order 32: this server's open events, which their cards already show to everyone. One statement per keystroke.
   '/event create zone': game('zones'),
   '/event edit zone': game('zones'),
-  '/event edit event': openEvents,
-  '/event cancel event': openEvents,
-  '/event list event': openEvents,
-  '/event roster event': openEvents,
+  '/event edit event': openEvents('runner'),
+  '/event cancel event': openEvents('runner'),
+  '/event list event': openEvents('member'),
+  '/event roster event': openEvents('runner'),
   '/event roster character': characters,
 };
 
