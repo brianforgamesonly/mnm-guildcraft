@@ -240,8 +240,8 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   const P = ZONE_COPY.missingParts;
   const missing = [
     ...(z.level ? [] : [P.level]),
-    // Order 28b, PR D: no zone source records a description since Mo Betta left (the wiki's {{ZoneDetails}} has no such
-    // field), so a missing one is not reported as "not recorded yet"; a stored one is still shown.
+    // Order 29: the description is the wiki page's lead text (scripts/wiki/parse.ts leadText), shown under the levels when
+    // the page has one. Many pages have none, so a missing one is still not reported as "not recorded yet".
     ...(d.creatures.length ? [] : [P.creatures]),
     // No map is already said, with the atlas link when there is one, in the Map field above.
   ];

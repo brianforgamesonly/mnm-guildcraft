@@ -19,8 +19,11 @@ import { zoneKey } from '../zone/names.ts';
 import { RAID_COPY } from './copy.ts';
 import { zoneCreatures, type Creature } from './creatures.ts';
 import { askApproval, type DkpRun } from './commands.ts';
-import { historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, type LedgerRow } from './ledger.ts';
+import {
+  historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, rosterAddStatement, rosterRemoveStatement, standbyReverseStatement, standbyStatement, type LedgerRow,
+} from './ledger.ts';
 import { editIn, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import type { Settings } from './settings.ts';
 import type { DkpState } from './state.ts';
 
 export const PRESENT_PREFIX = 'dkpp:';
@@ -55,8 +58,10 @@ interface Raid {
   closes_at: string;
   closed_at: string | null;
   close_reason: string | null;
+  /** Order 29: 1 when Standby earns the standby value once, at close; 0 for raids opened before (Standby earns each kill). */
+  standby_once: number;
 }
-const RAID_COLS = 'id, guild_id, pool, mode, message_id, opened_at, closes_at, closed_at, close_reason';
+const RAID_COLS = 'id, guild_id, pool, mode, message_id, opened_at, closes_at, closed_at, close_reason, standby_once';
 const openRaid = (db: D1Database, guildId: string) => db.prepare(`SELECT ${RAID_COLS} FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL`).bind(guildId).first<Raid>();
 const raidById = (db: D1Database, guildId: string, id: number) => db.prepare(`SELECT ${RAID_COLS} FROM dkp_raid WHERE guild_id = ? AND id = ?`).bind(guildId, id).first<Raid>();
 const unix = (iso: string) => Math.floor(Date.parse(iso) / 1000);
@@ -72,14 +77,24 @@ const rerender = (c: Ctx, raidId: number) => {
 
 // ---------------------------------------------------------------- the card
 
+/** A member on a kill's roster (order 29: dkp_kill_member). state null: recorded before order 29 (unknown; they earned it). */
+export interface AtKill {
+  member_id: string;
+  name: string;
+  state: 'present' | 'standby' | null;
+}
 interface CardData {
   raid: Raid;
   zone: string;
   people: { member_id: string; name: string; state: string; status: string }[];
   kills: { id: number; name: string | null; points: number; at: string; check_due: string | null; check_closed_at: string | null }[];
-  earned: Map<number, { member_id: string; name: string }[]>;
+  /** Who was at each kill, from its roster (never from the ledger). */
+  earned: Map<number, AtKill[]>;
   creatures: Creature[];
 }
+
+/** Whether a member on a kill's roster earned that kill's points (order 29: Standby earns once, at close, instead). */
+export const earnedKill = (raid: Pick<Raid, 'standby_once'>, a: Pick<AtKill, 'state'>) => !(raid.standby_once === 1 && a.state === 'standby');
 
 async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
   const [zone, people, kills, earned] = await db.batch<Record<string, unknown>>([
@@ -91,17 +106,17 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
       )
       .bind(raid.guild_id, raid.id),
     db.prepare('SELECT id, name, points, at, check_due, check_closed_at FROM dkp_kill WHERE raid_id = ? ORDER BY id').bind(raid.id),
-    // Who earned each kill: asked amounts in the raid pool summing above zero (corrections and Check again included).
+    // Order 29: who was at each kill, from its roster (corrections and Check again keep it current), never the ledger.
     db
       .prepare(
-        `SELECT l.kill_id, l.member_id, coalesce(m.display_name, l.member_id) AS name FROM dkp_ledger l
-         LEFT JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = l.member_id
-         WHERE l.raid_id = ?2 AND l.pool = ?3 AND l.kill_id IS NOT NULL GROUP BY l.kill_id, l.member_id HAVING sum(l.amount + l.cut) > 0 ORDER BY lower(name)`,
+        `SELECT km.kill_id, km.member_id, coalesce(m.display_name, km.member_id) AS name, km.state FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id
+         LEFT JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = km.member_id
+         WHERE k.raid_id = ?2 ORDER BY lower(name)`,
       )
-      .bind(raid.guild_id, raid.id, raid.pool),
+      .bind(raid.guild_id, raid.id),
   ]);
-  const byKill = new Map<number, { member_id: string; name: string }[]>();
-  for (const r of earned.results as { kill_id: number; member_id: string; name: string }[]) byKill.set(r.kill_id, [...(byKill.get(r.kill_id) ?? []), { member_id: r.member_id, name: r.name }]);
+  const byKill = new Map<number, AtKill[]>();
+  for (const r of earned.results as unknown as (AtKill & { kill_id: number })[]) byKill.set(r.kill_id, [...(byKill.get(r.kill_id) ?? []), { member_id: r.member_id, name: r.name, state: r.state }]);
   return {
     raid,
     zone: (zone.results[0] as { name?: string } | undefined)?.name ?? raid.pool,
@@ -112,19 +127,27 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
   };
 }
 
-/** One kill's line: time, named, points, how many earned, changes against the kill before it, Check again's state. */
-export function killLine(k: CardData['kills'][number], earned: { member_id: string; name: string }[], before: { member_id: string; name: string }[] | null): string {
-  const ids = new Set(earned.map((e) => e.member_id));
+/**
+ * One kill's line: time, named, points, how many earned (order 29: and how many were on Standby, who earn once at close),
+ * changes against the kill before it (who was at it), Check again's state.
+ */
+export function killLine(k: CardData['kills'][number], at: AtKill[], before: AtKill[] | null, raid: Pick<Raid, 'standby_once'> = { standby_once: 0 }): string {
+  const ids = new Set(at.map((e) => e.member_id));
   const was = new Set((before ?? []).map((e) => e.member_id));
   const diff = before
-    ? [...earned.filter((e) => !was.has(e.member_id)).map((e) => `+${md(e.name)}`), ...(before ?? []).filter((e) => !ids.has(e.member_id)).map((e) => `−${md(e.name)}`)]
+    ? [...at.filter((e) => !was.has(e.member_id)).map((e) => `+${md(e.name)}`), ...(before ?? []).filter((e) => !ids.has(e.member_id)).map((e) => `−${md(e.name)}`)]
     : [];
+  const earned = at.filter((e) => earnedKill(raid, e)).length;
+  const standby = at.length - earned;
   const check = k.check_due
     ? k.check_closed_at
       ? RAID_COPY.checkClosed(unix(k.check_closed_at), unix(k.check_due))
       : RAID_COPY.checkOpen(unix(k.check_due))
     : '';
-  return truncate(`<t:${unix(k.at)}:T> **${md(k.name ?? RAID_COPY.flatName)}** · ${k.points} pts · ${plural(earned.length, 'earned', 'earned')}${diff.length ? ` · ${truncate(diff.join(' '), 300)}` : ''}${check}`, 1000);
+  return truncate(
+    `<t:${unix(k.at)}:T> **${md(k.name ?? RAID_COPY.flatName)}** · ${k.points} pts · ${plural(earned, 'earned', 'earned')}${standby ? ` · ${RAID_COPY.onStandby(standby)}` : ''}${diff.length ? ` · ${truncate(diff.join(' '), 300)}` : ''}${check}`,
+    1000,
+  );
 }
 
 export function cardMessage(d: CardData, guildId: string): Message {
@@ -136,8 +159,10 @@ export function cardMessage(d: CardData, guildId: string): Message {
   const shown = d.kills.slice(-KILLS_SHOWN);
   const lines = shown.map((k) => {
     const i = d.kills.indexOf(k);
-    return killLine(k, d.earned.get(k.id) ?? [], i > 0 ? (d.earned.get(d.kills[i - 1].id) ?? []) : null);
+    return killLine(k, d.earned.get(k.id) ?? [], i > 0 ? (d.earned.get(d.kills[i - 1].id) ?? []) : null, raid);
   });
+  // Order 29 (ITEM 2): a closed card no longer tells an officer to pick Named killed below.
+  const none = raid.closed_at ? (raid.mode === 'named' ? RAID_COPY.noKillsClosed : RAID_COPY.noPayoutsClosed) : raid.mode === 'named' ? RAID_COPY.noKills : RAID_COPY.noPayouts;
   const embed: Embed = {
     title: truncate(RAID_COPY.title(d.zone, raid.mode), 256),
     description: truncate(
@@ -148,7 +173,7 @@ export function cardMessage(d: CardData, guildId: string): Message {
         `**${RAID_COPY.standby}** (${standby.length}): ${names(standby)}`,
         '',
         ...(d.kills.length > shown.length ? [RAID_COPY.earlier(d.kills.length - shown.length)] : []),
-        ...(lines.length ? lines : [raid.mode === 'named' ? RAID_COPY.noKills : RAID_COPY.noPayouts]),
+        ...(lines.length ? lines : [none]),
         ...(raid.mode === 'named' && !raid.closed_at && !d.creatures.length ? ['', RAID_COPY.noCreatures] : []),
       ].join('\n'),
       4096,
@@ -199,7 +224,8 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
   let raid: Raid | null;
   try {
     raid = await c.db
-      .prepare(`INSERT INTO dkp_raid (guild_id, pool, mode, opened_by, opened_at, closes_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING ${RAID_COLS}`)
+      // Order 29 (override 2): raids opened from now on pay Standby once, at close.
+      .prepare(`INSERT INTO dkp_raid (guild_id, pool, mode, opened_by, opened_at, closes_at, standby_once) VALUES (?, ?, ?, ?, ?, ?, 1) RETURNING ${RAID_COLS}`)
       .bind(c.guild.id, zone.key, mode, c.userId, at, closes)
       .first<Raid>();
   } catch {
@@ -225,7 +251,11 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
   }
 };
 
-/** Records a kill (or, name null, a flat payout) in the open raid: pays everyone Present or Standby, not frozen, now. */
+/**
+ * Records a kill (or, name null, a flat payout) in the open raid: everyone Present or Standby, not frozen, now, goes on its
+ * roster (order 29), in the same batch as its ledger rows. Present earns the kill; Standby earns it too only in a raid
+ * opened before order 29 (standby_once 0); otherwise Standby earns the standby value once, at close.
+ */
 async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, confirmed: boolean): Promise<MessageReply> {
   const at = now();
   if (name !== null && !confirmed) {
@@ -244,12 +274,13 @@ async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, 
       : ((await c.db.prepare('SELECT points FROM dkp_named_value WHERE guild_id = ? AND zone_key = ? AND name = ?').bind(c.guild.id, raid.pool, name).first<{ points: number }>())?.points ?? s.kill_points);
   const { results } = await c.db
     .prepare(
-      `SELECT a.member_id FROM dkp_attendance a JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = a.member_id
+      `SELECT a.member_id, a.state FROM dkp_attendance a JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = a.member_id
        WHERE a.raid_id = ?2 AND a.state IN ('present', 'standby') AND m.status = 'active'`,
     )
     .bind(c.guild.id, raid.id)
-    .all<{ member_id: string }>();
-  const earners = results.map((r) => r.member_id);
+    .all<{ member_id: string; state: 'present' | 'standby' }>();
+  const earners = results.filter((r) => earnedKill(raid, r)).map((r) => r.member_id);
+  const standby = results.length - earners.length;
   // Only into a raid still open (review of PR B: a press racing Close records nothing).
   const kill = await c.db
     .prepare('INSERT INTO dkp_kill (raid_id, name, points, guild_points, at, by) SELECT ?1, ?2, ?3, ?4, ?5, ?6 WHERE EXISTS (SELECT 1 FROM dkp_raid WHERE id = ?1 AND closed_at IS NULL) RETURNING id')
@@ -257,13 +288,19 @@ async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, 
     .first<{ id: number }>();
   if (!kill) return ephemeral(RAID_COPY.raidClosed);
   const kind = name === null ? 'flat' : 'kill';
-  if (earners.length)
+  if (results.length)
     await c.db.batch([
-      payStatement(c.db, { guildId: c.guild.id, pool: raid.pool, members: earners, asked: points, cap: s.cap, kind, raidId: raid.id, killId: kill!.id, actor: 'bot', at }),
-      payStatement(c.db, { guildId: c.guild.id, pool: POOL_GUILD, members: earners, asked: s.guild_points, cap: s.cap, kind, raidId: raid.id, killId: kill!.id, actor: 'bot', at }),
+      rosterAddStatement(c.db, kill!.id, results),
+      ...(earners.length
+        ? [
+            payStatement(c.db, { guildId: c.guild.id, pool: raid.pool, members: earners, asked: points, cap: s.cap, kind, raidId: raid.id, killId: kill!.id, actor: 'bot', at }),
+            payStatement(c.db, { guildId: c.guild.id, pool: POOL_GUILD, members: earners, asked: s.guild_points, cap: s.cap, kind, raidId: raid.id, killId: kill!.id, actor: 'bot', at }),
+          ]
+        : []),
     ]);
   rerender(c, raid.id);
-  return ephemeral(name === null ? RAID_COPY.paid(points, earners.length) : RAID_COPY.killed(name, points, earners.length));
+  const reply = name === null ? RAID_COPY.paid(points, earners.length) : RAID_COPY.killed(name, points, earners.length);
+  return ephemeral(standby ? `${reply} ${RAID_COPY.standbyLater(standby)}` : reply);
 }
 
 export const killCommand: DkpRun = async (c, opts, d) => {
@@ -287,27 +324,40 @@ async function correctionScope(c: Ctx, killId: number | undefined) {
 }
 
 /**
- * A correction's statements: removal reverses what each kill paid; an add re-pays each kill, capped against the cap now.
- * Once-only by their own conditions (a reversal needs the member credited, a re-add needs them not), so an approval batches
- * them with its status change.
+ * A correction's statements (order 29: who was at a kill is its roster, never the ledger): removal takes the member off
+ * each kill they are on and reverses what it paid; an add puts them on each kill they are not on (as Present) and re-pays
+ * it, capped against the cap now. After close, a removal that leaves no Standby kill reverses the standby payout. Once-only
+ * by their own conditions, so an approval batches them with its status change (each is gated on that approval).
  */
 export async function correctionStatements(db: D1Database, guildId: string, cap: number, k: { member: string; action: 'add' | 'remove'; raidId: number; killId: number | null; reason: string; actor: string; at: string; approvedPending?: number }) {
-  const { results: kills } = await db
-    .prepare('SELECT id, points, guild_points FROM dkp_kill WHERE raid_id = ? AND (?2 IS NULL OR id = ?2) ORDER BY id')
-    .bind(k.raidId, k.killId)
-    .all<{ id: number; points: number; guild_points: number }>();
-  const raid = await db.prepare('SELECT pool FROM dkp_raid WHERE id = ?').bind(k.raidId).first<{ pool: string }>();
+  const [{ results: kills }, { results: on }] = await db.batch<Record<string, unknown>>([
+    db.prepare('SELECT id, points, guild_points FROM dkp_kill WHERE raid_id = ? AND (?2 IS NULL OR id = ?2) ORDER BY id').bind(k.raidId, k.killId),
+    db.prepare('SELECT km.kill_id FROM dkp_kill_member km JOIN dkp_kill kk ON kk.id = km.kill_id WHERE kk.raid_id = ? AND km.member_id = ?').bind(k.raidId, k.member),
+  ]);
+  const raid = await db.prepare('SELECT pool, standby_once FROM dkp_raid WHERE id = ?').bind(k.raidId).first<{ pool: string; standby_once: number }>();
+  const onKill = new Set((on as { kill_id: number }[]).map((r) => r.kill_id));
   const at = k.at;
-  return kills.flatMap((kill) =>
-    [
+  const gate = k.approvedPending !== undefined ? { id: k.approvedPending, actor: k.actor, at } : undefined;
+  const out: D1PreparedStatement[] = [];
+  for (const kill of kills as { id: number; points: number; guild_points: number }[]) {
+    const pools: [string, number][] = [
       [raid!.pool, kill.points],
       [POOL_GUILD, kill.guild_points],
-    ].map(([pool, asked]) =>
-      k.action === 'remove'
-        ? reverseStatement(db, { guildId, pool: pool as string, killId: kill.id, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending })
-        : readdStatement(db, { guildId, pool: pool as string, killId: kill.id, asked: asked as number, cap, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending }),
-    ),
-  );
+    ];
+    if (k.action === 'remove' && onKill.has(kill.id))
+      out.push(
+        ...pools.map(([pool]) => reverseStatement(db, { guildId, pool, killId: kill.id, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending })),
+        rosterRemoveStatement(db, kill.id, [k.member], gate),
+      );
+    else if (k.action === 'add' && !onKill.has(kill.id))
+      out.push(
+        ...pools.map(([pool, asked]) => readdStatement(db, { guildId, pool, killId: kill.id, asked, cap, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending })),
+        rosterAddStatement(db, kill.id, [{ member_id: k.member, state: 'present' }], gate),
+      );
+  }
+  if (k.action === 'remove' && raid!.standby_once)
+    for (const pool of [raid!.pool, POOL_GUILD]) out.push(standbyReverseStatement(db, { guildId, pool, raidId: k.raidId, members: [k.member], reason: k.reason, actor: k.actor, at, approvedPending: k.approvedPending }));
+  return out;
 }
 
 export const correctCommand: DkpRun = async (c, opts, d) => {
@@ -404,8 +454,16 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
       const data = await cardData(c.db, raid);
       const k = data.kills.at(-1);
       if (!k) return ephemeral(RAID_COPY.noKill);
-      const earned = data.earned.get(k.id) ?? [];
-      return ephemeral(truncate(`${RAID_COPY.earnedHead(k.name ?? RAID_COPY.flatName, earned.length)}\n${earned.map((e) => memberTag(e.member_id, e.name)).join(', ')}`, 2000));
+      const at = data.earned.get(k.id) ?? [];
+      const earned = at.filter((e) => earnedKill(raid, e));
+      const standby = at.filter((e) => !earnedKill(raid, e));
+      const tags = (list: AtKill[]) => list.map((e) => memberTag(e.member_id, e.name)).join(', ');
+      return ephemeral(
+        truncate(
+          [`${RAID_COPY.earnedHead(k.name ?? RAID_COPY.flatName, earned.length)}`, tags(earned), ...(standby.length ? [RAID_COPY.standbyHead(standby.length), tags(standby)] : [])].filter(Boolean).join('\n'),
+          2000,
+        ),
+      );
     }
   }
   if (!runner(c, d)) return ephemeral(RAID_COPY.notRunner);
@@ -429,7 +487,7 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
     case CLOSE_PREFIX: {
       const api = apiFor(c);
       try {
-        const closed = await closeRaid(c.db, api, c.guild.id, d.channel_id, raid.id, c.userId, 'officer', Date.now());
+        const closed = await closeRaid(c.db, api, c.guild.id, d.channel_id, raid.id, c.userId, 'officer', Date.now(), d.settings);
         return ephemeral(closed ? RAID_COPY.closedReply : RAID_COPY.raidClosed);
       } finally {
         if (api) c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
@@ -460,7 +518,7 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
       .bind(raid.id, c.userId, at, state),
   ]);
   rerender(c, raid.id);
-  return ephemeral(state === 'present' ? RAID_COPY.youPresent : state === 'standby' ? RAID_COPY.youStandby : RAID_COPY.youLeft);
+  return ephemeral(state === 'present' ? RAID_COPY.youPresent : state === 'standby' ? (raid.standby_once ? RAID_COPY.youStandby : RAID_COPY.youStandbyEach) : RAID_COPY.youLeft);
 }
 
 // ---------------------------------------------------------------- timers (src/dkp/due.ts)
@@ -468,17 +526,15 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
 /** check:<kill id>: members credited on the kill who did not tap again lose it, and are absent from now on. Idempotent. */
 export async function closeCheck(db: D1Database, guildId: string, killId: number, nowMs: number): Promise<{ again: number } | { raidId: number } | null> {
   const k = await db
-    .prepare('SELECT k.raid_id, r.pool, k.check_due FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ? AND k.check_closed_at IS NULL AND k.check_due IS NOT NULL')
+    .prepare('SELECT k.raid_id, r.pool, r.standby_once, k.check_due FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ? AND k.check_closed_at IS NULL AND k.check_due IS NOT NULL')
     .bind(killId, guildId)
-    .first<{ raid_id: number; pool: string; check_due: string }>();
+    .first<{ raid_id: number; pool: string; standby_once: number; check_due: string }>();
   if (!k) return null;
   if (Date.parse(k.check_due) > nowMs) return { again: Date.parse(k.check_due) };
+  // Order 29: who was at the kill is its roster, never the ledger.
   const { results } = await db
-    .prepare(
-      `SELECT l.member_id FROM dkp_ledger l WHERE l.kill_id = ?1 AND l.pool = ?2 GROUP BY l.member_id HAVING sum(l.amount + l.cut) > 0
-       EXCEPT SELECT member_id FROM dkp_recheck WHERE kill_id = ?1`,
-    )
-    .bind(killId, k.pool)
+    .prepare('SELECT member_id FROM dkp_kill_member WHERE kill_id = ?1 EXCEPT SELECT member_id FROM dkp_recheck WHERE kill_id = ?1')
+    .bind(killId)
     .all<{ member_id: string }>();
   const losers = results.map((r) => r.member_id);
   const at = new Date(nowMs).toISOString();
@@ -488,29 +544,58 @@ export async function closeCheck(db: D1Database, guildId: string, killId: number
       ? [
           reverseStatement(db, { guildId, pool: k.pool, killId, members: losers, reason: RAID_COPY.checkReason, actor: 'bot', at }),
           reverseStatement(db, { guildId, pool: POOL_GUILD, killId, members: losers, reason: RAID_COPY.checkReason, actor: 'bot', at }),
+          rosterRemoveStatement(db, killId, losers),
           db
             .prepare("UPDATE dkp_attendance SET state = 'absent', since = ?1, set_by = 'bot' WHERE raid_id = ?2 AND member_id IN (SELECT value FROM json_each(?3)) AND state <> 'absent' AND since <= ?4")
             .bind(at, k.raid_id, JSON.stringify(losers), k.check_due),
+          // A window that closes after the raid did: a member it took off their last Standby kill loses the standby payout.
+          ...(k.standby_once
+            ? [k.pool, POOL_GUILD].map((pool) => standbyReverseStatement(db, { guildId, pool, raidId: k.raid_id, members: losers, reason: RAID_COPY.checkReason, actor: 'bot', at }))
+            : []),
         ]
       : []),
   ]);
   return { raidId: k.raid_id };
 }
 
-/** Closes a raid (Close raid, or close:<raid id> at closes_at): the card, the night's summary, the standings. Idempotent. */
-export async function closeRaid(db: D1Database, api: BotApi | null, guildId: string, channelId: string | null, raidId: number, by: string, reason: 'officer' | 'auto', nowMs: number): Promise<boolean> {
+/**
+ * Order 29 (override 2): the standby value and its guild points, paid once to every member Standby at one or more of the
+ * raid's kills, in the batch that closes it (however it closes: an officer, auto-close, or Remove DKP). Raids opened
+ * before order 29 pay nothing here (their Standby earned each kill).
+ */
+export const standbyPayouts = (db: D1Database, guildId: string, raid: Pick<Raid, 'id' | 'pool' | 'standby_once'>, s: Settings, at: string): D1PreparedStatement[] =>
+  raid.standby_once
+    ? [
+        standbyStatement(db, { guildId, pool: raid.pool, raidId: raid.id, asked: s.standby_value, cap: s.cap, at }),
+        standbyStatement(db, { guildId, pool: POOL_GUILD, raidId: raid.id, asked: s.guild_points, cap: s.cap, at }),
+      ]
+    : [];
+
+/** Closes a raid (Close raid, or close:<raid id> at closes_at): standby pay, the card, the night's summary, the standings. Idempotent. */
+export async function closeRaid(db: D1Database, api: BotApi | null, guildId: string, channelId: string | null, raidId: number, by: string, reason: 'officer' | 'auto', nowMs: number, s: Settings): Promise<boolean> {
   const at = new Date(nowMs).toISOString();
-  const closed = await db
-    .prepare(`UPDATE dkp_raid SET closed_at = ?1, closed_by = ?2, close_reason = ?3 WHERE id = ?4 AND guild_id = ?5 AND closed_at IS NULL AND (?3 = 'officer' OR closes_at <= ?1) RETURNING ${RAID_COLS}`)
-    .bind(at, by, reason, raidId, guildId)
-    .first<Raid>();
+  const open = await raidById(db, guildId, raidId);
+  if (!open || open.closed_at) return false;
+  const [res] = await db.batch<Raid>([
+    db.prepare(`UPDATE dkp_raid SET closed_at = ?1, closed_by = ?2, close_reason = ?3 WHERE id = ?4 AND guild_id = ?5 AND closed_at IS NULL AND (?3 = 'officer' OR closes_at <= ?1) RETURNING ${RAID_COLS}`).bind(at, by, reason, raidId, guildId),
+    ...standbyPayouts(db, guildId, open, s, at),
+  ]);
+  const closed = res.results[0];
   if (!closed) return false;
   if (api && channelId) {
     const data = await cardData(db, closed);
     if (closed.message_id) await editIn(api, channelId, closed.message_id, cardMessage(data, guildId));
+    // Who was there: every roster; the points: what the ledger paid in the raid's pool (kills, and the standby payouts).
     const earners = new Set([...data.earned.values()].flat().map((e) => e.member_id));
-    const points = data.kills.reduce((n, k) => n + k.points * (data.earned.get(k.id)?.length ?? 0), 0);
-    await postIn(api, channelId, { content: RAID_COPY.summary(data.zone, data.kills.length, earners.size, points, reason) });
+    const paid = await db
+      .prepare(
+        `SELECT (SELECT coalesce(sum(l.amount), 0) FROM dkp_kill k JOIN dkp_ledger l ON l.kill_id = k.id WHERE k.raid_id = ?1 AND l.pool = ?2) AS points,
+                (SELECT count(*) FROM dkp_ledger WHERE raid_id = ?1 AND pool = ?2 AND kind = 'standby') AS standby,
+                (SELECT coalesce(sum(amount), 0) FROM dkp_ledger WHERE raid_id = ?1 AND pool = ?2 AND kind = 'standby') AS standby_points`,
+      )
+      .bind(closed.id, closed.pool)
+      .first<{ points: number; standby: number; standby_points: number }>();
+    await postIn(api, channelId, { content: RAID_COPY.summary(data.zone, data.kills.length, earners.size, (paid?.points ?? 0) + (paid?.standby_points ?? 0), reason, paid?.standby ?? 0) });
     await refreshStandings(db, api, guildId, channelId, [closed.pool, POOL_GUILD]);
   }
   return true;

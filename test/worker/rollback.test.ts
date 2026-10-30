@@ -26,6 +26,8 @@ import down21 from '../../scripts/rollback/0021_dkp.down.sql?raw';
 import up21 from '../../migrations/0021_dkp.sql?raw';
 import down22 from '../../scripts/rollback/0022_npc_tags.down.sql?raw';
 import up22 from '../../migrations/0022_npc_tags.sql?raw';
+import down23 from '../../scripts/rollback/0023_dkp_auctions.down.sql?raw';
+import up23 from '../../migrations/0023_dkp_auctions.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -57,13 +59,35 @@ it('order 28: 0022 down, then up again, restores the npc columns; down leaves no
   expect((await cols()).slice(-2)).toEqual(['named', 'raid']);
 });
 
+it('order 29: 0023 down, then up again, restores the schema; down leaves no trace of it and the ledger its 0021 shape', async () => {
+  const before = await schema();
+  await runWhole(down23);
+  const without = await schema();
+  expect(without.some((r) => /^dkp_(kill_member|auction|bid|nudge|wishlist|listing|purchase)/.test(r.name) || /standby_once|auction_id|'spend'/.test(r.sql ?? ''))).toBe(false);
+  // The ledger is back as 0021 made it, byte for byte, with its triggers.
+  const ledger = without.filter((r) => r.name.startsWith('dkp_ledger'));
+  await runWhole(down21);
+  await runWhole(up21);
+  expect((await schema()).filter((r) => r.name.startsWith('dkp_ledger'))).toEqual(ledger);
+  await runWhole(up23);
+  // ALTER TABLE rewrites dkp_raid's CREATE TABLE text, so compare names and kinds, then the column.
+  expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
+  expect((await schema()).filter((r) => r.name !== 'dkp_raid')).toEqual(before.filter((r) => r.name !== 'dkp_raid'));
+  const cols = (await env.DB.prepare("SELECT name FROM pragma_table_xinfo('dkp_raid') ORDER BY cid").all<{ name: string }>()).results.map((r) => r.name);
+  expect(cols.at(-1)).toBe('standby_once');
+  expect(withTriggers(up23).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
+});
+
 it('order 27: 0021 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  // Order 29: 0023 rebuilds 0021's ledger and names its tables, so it comes off first and goes back last.
+  await runWhole(down23);
   const before = await schema();
   await runWhole(down21);
   expect((await schema()).some((r) => /dkp/.test(r.name))).toBe(false);
   await runWhole(up21);
   expect(await schema()).toEqual(before);
   expect(withTriggers(up21).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
+  await runWhole(up23);
 });
 
 it('order 26: 0020 down, then up again, restores the schema; down leaves no trace of it', async () => {

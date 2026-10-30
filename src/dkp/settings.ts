@@ -14,8 +14,11 @@ export interface NumberSetting {
 export const SETTINGS = [
   { key: 'kill_points', label: 'Raid points per named kill', default: 10, min: 0, max: 1000, unit: 'points' },
   { key: 'flat_points', label: 'Flat raid value', default: 30, min: 0, max: 1000, unit: 'points' },
+  // Order 29: Standby earns this once per raid, at close (with the guild points for that payout).
+  { key: 'standby_value', label: 'Standby value', default: 30, min: 0, max: 1000, unit: 'points' },
   { key: 'guild_points', label: 'Guild points per kill or flat payout', default: 2, min: 0, max: 1000, unit: 'points' },
-  { key: 'cap', label: 'Pool cap', default: 100, min: 1, max: 100000, unit: 'points' },
+  // Order 29 (override 2): 200, from 100; a server that never changed it gets 200 at once.
+  { key: 'cap', label: 'Pool cap', default: 200, min: 1, max: 100000, unit: 'points' },
   { key: 'check_seconds', label: 'Check-again window', default: 300, min: 30, max: 3600, unit: 'seconds' },
   { key: 'second_officer_over', label: 'Second officer needed over', default: 20, min: 0, max: 100000, unit: 'points' },
   { key: 'approval_hours', label: 'Approval lapses after', default: 24, min: 1, max: 168, unit: 'hours' },

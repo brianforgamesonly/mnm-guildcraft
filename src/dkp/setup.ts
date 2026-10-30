@@ -25,7 +25,7 @@ import { DKP_COPY } from './copy.ts';
 import { DKP_COMMAND } from './definition.ts';
 import { POOL_GUILD } from './ledger.ts';
 import { refreshStandings } from './messages.ts';
-import { showRemoved } from './raid.ts';
+import { showRemoved, standbyPayouts } from './raid.ts';
 import { loadDkp } from './state.ts';
 
 export const ADD_DKP_PREFIX = 'dkpadd:';
@@ -148,9 +148,12 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     const del = await api.call('DELETE', `/applications/${appId}/guilds/${g}/commands/${cmd.id}`);
     if (!del.ok && del.status !== 404) return ephemeral(DKP_COPY.commandFailed(del.status));
   }
-  const open = await c.db.prepare('SELECT id FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number }>();
+  const open = await c.db.prepare('SELECT id, pool, standby_once FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number; pool: string; standby_once: number }>();
+  const at = now();
   const [closed] = await c.db.batch([
     closeOpenRaid(c.db, g, c.userId, 'removed'),
+    // Order 29 (override 2): a raid closed by Remove DKP pays its Standby once, as any close does.
+    ...(open ? standbyPayouts(c.db, g, open, state.settings, at) : []),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.
     c.db.prepare("UPDATE dkp_pending SET status = 'lapsed', decided_at = ?1 WHERE guild_id = ?2 AND status = 'open'").bind(now(), g),
     ...saveStatements(c, { enabled: 0, channel: state.channel_id, command: null }),

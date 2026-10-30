@@ -70,6 +70,13 @@ export const RAID_COPY = {
   earlier: (n: number) => `…${plural(n, 'earlier kill')} not shown.`,
   noKills: 'No kills yet. An officer picks **Named killed** below, or uses `/dkp kill`.',
   noPayouts: 'No payout yet. An officer presses **Pay attendance**.',
+  /** Order 29 (ITEM 2): a closed card's lines, with nothing to pick any more. */
+  noKillsClosed: 'No kills were recorded.',
+  noPayoutsClosed: 'No payout was made.',
+  /** Order 29: Standby earns the standby value once, when the raid closes. */
+  onStandby: (n: number) => `${n} on Standby`,
+  standbyLater: (n: number) => `On Standby: ${plural(n, 'member')}, paid the standby value once, when the raid closes.`,
+  standbyHead: (n: number) => `On **Standby** (${n}): they earn the standby value once, when the raid closes.`,
   noCreatures: "GuildCraft's data lists no creatures in this zone: use `/dkp kill named:` and type the name.",
   flatName: 'Flat payout',
   checkOpen: (due: number) => ` · Check again: tap **Present** by <t:${due}:T>`,
@@ -101,10 +108,13 @@ export const RAID_COPY = {
   checkStarted: (name: string, seconds: number) => `Check again on **${md(name)}**: members it paid have ${seconds} seconds to tap **Present**.`,
   checkReason: 'Did not tap Present for Check again',
   closedReply: 'Raid closed. The summary and standings are posted.',
-  summary: (zone: string, kills: number, members: number, points: number, reason: 'officer' | 'auto') =>
-    `**Raid closed${reason === 'auto' ? ' by itself' : ''}: ${md(zone)}.** ${plural(kills, 'payout')}, ${plural(members, 'member')} earned, ${points} raid points in all.`,
+  summary: (zone: string, kills: number, members: number, points: number, reason: 'officer' | 'auto', standby = 0) =>
+    `**Raid closed${reason === 'auto' ? ' by itself' : ''}: ${md(zone)}.** ${plural(kills, 'payout')}, ${plural(members, 'member')} earned, ${points} raid points in all${standby ? ` (${plural(standby, 'member')} on Standby paid the standby value)` : ''}.`,
   youPresent: "You're **Present**: you earn every kill from now on until you tap **Leaving**.",
-  youStandby: "You're on **Standby**: you earn every kill from now on until you tap **Leaving**.",
+  /** Order 29 (override 2): Standby earns the standby value once, at close, however many kills. */
+  youStandby: "You're on **Standby**: you earn the standby value once, when the raid closes, if you're on Standby for at least one kill.",
+  /** A raid opened before order 29 keeps order 27's rule. */
+  youStandbyEach: "You're on **Standby**: you earn every kill from now on until you tap **Leaving**.",
   youLeft: "You've left the raid: you earn nothing more from it unless you tap **Present** again.",
   reason: DKP_COPY.adjustReason,
   corrected: (member: string, action: 'add' | 'remove', kills: number, by: string, reason: string) =>

@@ -171,23 +171,32 @@ describe('raid nights (ITEM 4)', () => {
     expect(c.allowed_mentions).toEqual({ parse: [] });
   });
 
-  it('a kill pays everyone Present or Standby at that moment (raid and guild points); Present after a kill earns only later ones; /me shows it', async () => {
+  it('a kill pays everyone Present at that moment (raid and guild points); Standby goes on its roster (order 29); Present after a kill earns only later ones; /me shows it', async () => {
     await open();
     const { id } = await raid();
     await pressAs(kestrel, `${PRESENT_PREFIX}${id}`);
     const k = await send(select(officer, `${NAMED_PREFIX}${id}`, ['Kestrel the Old']), TOKEN);
     expect(k.data.content).toBe(RAID_COPY.killed('Kestrel the Old', 10, 1));
     expect([await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([10, 2]);
-    await pressAs(pip, `${STANDBY_PREFIX}${id}`);
+    expect((await pressAs(pip, `${STANDBY_PREFIX}${id}`)).data.content).toBe(RAID_COPY.youStandby);
     expect(await balance(pip, 'the ruins')).toBe(0);
-    await dkp(officer, 'kill', { named: 'Goblin King' });
-    expect([await balance(kestrel, 'the ruins'), await balance(pip, 'the ruins')]).toEqual([20, 10]);
+    expect((await dkp(officer, 'kill', { named: 'Goblin King' })).data.content).toBe(`${RAID_COPY.killed('Goblin King', 10, 1)} ${RAID_COPY.standbyLater(1)}`);
+    // Order 29 (override 2): Standby earns nothing per kill; the roster holds who was there, and how.
+    expect([await balance(kestrel, 'the ruins'), await balance(pip, 'the ruins')]).toEqual([20, 0]);
+    expect(await all('SELECT k.name, km.member_id, km.state FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id ORDER BY k.id, km.member_id')).toEqual([
+      { name: 'Kestrel the Old', member_id: kestrel.user.id, state: 'present' },
+      { name: 'Goblin King', member_id: kestrel.user.id, state: 'present' },
+      { name: 'Goblin King', member_id: pip.user.id, state: 'standby' },
+    ]);
     const line = (await render()).embeds[0].description.split('\n').find((l: string) => l.includes('Goblin King'));
-    expect(line).toMatch(/Goblin King\*\* · 10 pts · 2 earned · \+Pip$/);
+    expect(line).toMatch(new RegExp(`Goblin King\\*\\* · 10 pts · 1 earned · ${RAID_COPY.onStandby(1)} · \\+Pip$`));
     const me = await send(rawCmd(kestrel, 'me', undefined), TOKEN);
     expect(me.data.content).toContain(`${RAID_COPY.meHead}\n${RAID_COPY.meLine('Guild pool', 4, 2, 2)}\n${RAID_COPY.meLine('The Ruins', 20, 2, 2)}`);
+    // Attendance reads the roster: Pip was at one of the two kills, on Standby.
+    expect((await send(rawCmd(pip, 'me', undefined), TOKEN)).data.content).toContain(RAID_COPY.meLine('The Ruins', 0, 1, 2));
     const who = await pressAs(pip, `${WHO_EARNED_PREFIX}${id}`);
-    expect(who.data.content).toContain(RAID_COPY.earnedHead('Goblin King', 2));
+    expect(who.data.content).toContain(RAID_COPY.earnedHead('Goblin King', 1));
+    expect(who.data.content).toContain(`${RAID_COPY.standbyHead(1)}\n<@${pip.user.id}>`);
   });
 
   it('the same named within 2 minutes asks to confirm a respawn; confirming records it', async () => {
@@ -316,16 +325,19 @@ describe('raid nights (ITEM 4)', () => {
     expect([await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([20, 4]);
   });
 
-  it('flat mode: no Named killed; Pay attendance pays the flat value once to everyone Present or Standby', async () => {
+  it('flat mode: no Named killed; Pay attendance pays the flat value once to everyone Present; Standby earns the standby value at close (order 29)', async () => {
     await open('The Ruins', 'flat');
     const { id } = await raid();
     const ids = (await card()).components.flatMap((r: any) => r.components).map((c: any) => c.custom_id);
     expect(ids.some((x: string) => x.startsWith(NAMED_PREFIX))).toBe(false);
     expect(ids).toContain(`${PAY_PREFIX}${id}`);
+    await pressAs(pip, `${PRESENT_PREFIX}${id}`);
     await pressAs(kestrel, `${STANDBY_PREFIX}${id}`);
-    expect((await pressAs(officer, `${PAY_PREFIX}${id}`)).data.content).toBe(RAID_COPY.paid(30, 1));
-    expect([await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([30, 2]);
+    expect((await pressAs(officer, `${PAY_PREFIX}${id}`)).data.content).toBe(`${RAID_COPY.paid(30, 1)} ${RAID_COPY.standbyLater(1)}`);
+    expect([await balance(pip, 'the ruins'), await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([30, 0, 0]);
     expect((await dkp(officer, 'kill', { named: 'x' })).data.content).toBe(RAID_COPY.flatNoKills);
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    expect([await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([30, 2]);
   });
 
   it('Close raid posts the summary, closes the card (no buttons) and refreshes standings; auto-close does the same at closes_at, once', async () => {
@@ -349,6 +361,10 @@ describe('raid nights (ITEM 4)', () => {
     await HANDLERS.close(withToken, GUILD, String(second.id), closes, closes + 2000, api());
     expect(await one('SELECT close_reason FROM dkp_raid WHERE id = ?', second.id)).toEqual({ close_reason: 'auto' });
     expect(fake.messages.filter((m) => m.body.content === RAID_COPY.summary('The Ruins', 0, 0, 0, 'auto')).length).toBe(1);
+    // Order 29 (ITEM 2): the closed card no longer says "An officer picks Named killed below".
+    const closedCard = (await card()).embeds[0].description;
+    expect(closedCard).toContain(RAID_COPY.noKillsClosed);
+    expect(closedCard).not.toContain(RAID_COPY.noKills);
   });
 
   it('Remove DKP mid-raid closes the raid at once, cancels its timers, and its buttons answer "DKP is off"', async () => {
@@ -399,6 +415,120 @@ describe('raid nights (ITEM 4)', () => {
       expect(OPENS_MODAL.some((m) => p.startsWith(m)), p).toBe(false);
       expect(planFor(press(kestrel, `${p}1`) as never), p).toMatchObject({ defer: true });
     }
+  });
+});
+
+describe('order 29, ITEM 1: Standby earns the standby value once, at close; the cap is 200; who earned reads the kill rosters', () => {
+  const standbyRows = () => all<{ member_id: string; pool: string; amount: number; cut: number; actor: string }>("SELECT member_id, pool, amount, cut, actor FROM dkp_ledger WHERE kind = 'standby' ORDER BY pool, member_id");
+
+  it('Standby only: nothing per kill; the standby value and its guild points once at close, by the bot; a second close pays nothing', async () => {
+    await open();
+    const { id } = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${id}`);
+    for (const n of ['Kestrel the Old', 'Goblin King']) await dkp(officer, 'kill', { named: n });
+    expect([await balance(pip, 'the ruins'), await balance(pip, POOL_GUILD)]).toEqual([0, 0]);
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    expect(await standbyRows()).toEqual([
+      { member_id: pip.user.id, pool: POOL_GUILD, amount: 2, cut: 0, actor: 'bot' },
+      { member_id: pip.user.id, pool: 'the ruins', amount: 30, cut: 0, actor: 'bot' },
+    ]);
+    // The close summary reads the rosters (who) and the ledger (points): 2 kills, 1 member, 30 raid points, 1 on Standby.
+    expect(fake.messages.some((m) => m.body.content === RAID_COPY.summary('The Ruins', 2, 1, 30, 'officer', 1))).toBe(true);
+    // At least once: the auto-close timer finding it closed pays nothing more.
+    const closes = Date.parse((await one<{ closes_at: string }>('SELECT closes_at FROM dkp_raid WHERE id = ?', id)).closes_at);
+    await HANDLERS.close(withToken, GUILD, String(id), closes, closes + 1000, timerApi(withToken, Date.now(), () => 0));
+    expect((await standbyRows()).length).toBe(2);
+  });
+
+  it('mixed attendance: per-kill points for the Present kills, plus the standby value once', async () => {
+    await open();
+    const { id } = await raid();
+    await pressAs(kestrel, `${PRESENT_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Kestrel the Old' });
+    await pressAs(kestrel, `${STANDBY_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    await dkp(officer, 'kill', { named: 'An Ogre' });
+    expect(await balance(kestrel, 'the ruins')).toBe(10);
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    expect([await balance(kestrel, 'the ruins'), await balance(kestrel, POOL_GUILD)]).toEqual([40, 4]);
+  });
+
+  it('the cap applies to the standby payout; the cap default is 200, and the standby value is its own setting', async () => {
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO dkp_setting (guild_id, key, value, set_at, set_by) VALUES (?, 'standby_value', '40', 'x', 'x')").bind(GUILD),
+    ]);
+    await env.DB.prepare("INSERT INTO dkp_setting (guild_id, key, value, set_at, set_by) VALUES (?, 'second_officer_over', '1000', 'x', 'x')").bind(GUILD).run();
+    await dkp(officer, 'adjust', { member: pip.user.id, pool: 'The Ruins', points: 175, reason: 'carried over' });
+    await open();
+    const { id } = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    // 175 + 40 asked, capped at 200: 25 paid, 15 cut.
+    expect((await standbyRows()).find((r) => r.pool === 'the ruins')).toMatchObject({ amount: 25, cut: 15 });
+    expect(await balance(pip, 'the ruins')).toBe(200);
+    expect((await dkp(admin, 'settings')).data.content).toContain('Standby value: **40** points (default 30)');
+  });
+
+  it('corrections: removing the last Standby kill before close means no standby pay; after close, a correction row reverses it', async () => {
+    await open();
+    const first = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${first.id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    const k1 = await one<{ id: number }>('SELECT max(id) AS id FROM dkp_kill');
+    await dkp(officer, 'correct', { member: pip.user.id, action: 'remove', reason: 'not on standby', kill: k1.id });
+    expect(await count('dkp_kill_member', 'member_id = ?', pip.user.id)).toBe(0);
+    await pressAs(officer, `${CLOSE_PREFIX}${first.id}`);
+    expect(await standbyRows()).toEqual([]);
+    // A second raid: paid at close, then removed from the whole raid (12 points: no second officer needed).
+    await open();
+    const second = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${second.id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    await pressAs(officer, `${CLOSE_PREFIX}${second.id}`);
+    expect([await balance(pip, 'the ruins'), await balance(pip, POOL_GUILD)]).toEqual([30, 2]);
+    await dkp(officer, 'correct', { member: pip.user.id, action: 'remove', reason: 'was not there' });
+    expect([await balance(pip, 'the ruins'), await balance(pip, POOL_GUILD)]).toEqual([0, 0]);
+    const rev = await all<{ amount: number; corrects: number; kind: string }>("SELECT amount, corrects, (SELECT kind FROM dkp_ledger s WHERE s.id = l.corrects) AS kind FROM dkp_ledger l WHERE kind = 'correction' AND raid_id = ? ORDER BY pool", second.id);
+    expect(rev.map((r) => [r.amount, r.kind])).toEqual([[-2, 'standby'], [-30, 'standby']]);
+    // Once: the same correction again changes nothing.
+    await dkp(officer, 'correct', { member: pip.user.id, action: 'remove', reason: 'was not there' });
+    expect(await count('dkp_ledger', "kind = 'correction' AND raid_id = ?", second.id)).toBe(2);
+  });
+
+  it('a raid opened before order 29 (open across the deploy) keeps the old rule: Standby earns each kill, and nothing at close', async () => {
+    await open();
+    const { id } = await raid();
+    await env.DB.prepare('UPDATE dkp_raid SET standby_once = 0 WHERE id = ?').bind(id).run();
+    expect((await pressAs(pip, `${STANDBY_PREFIX}${id}`)).data.content).toBe(RAID_COPY.youStandbyEach);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    expect(await balance(pip, 'the ruins')).toBe(10);
+    await pressAs(officer, `${CLOSE_PREFIX}${id}`);
+    expect(await standbyRows()).toEqual([]);
+    expect(await balance(pip, 'the ruins')).toBe(10);
+  });
+
+  it('Remove DKP mid-raid pays Standby once, as any close does', async () => {
+    await open();
+    const { id } = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    await pressAs(admin, REMOVE_DKP_PREFIX);
+    expect([await balance(pip, 'the ruins'), await balance(pip, POOL_GUILD)]).toEqual([30, 2]);
+  });
+
+  it('Check again reads the roster: a member at a kill that paid 0 points, who does not tap, comes off it (not "sum > 0")', async () => {
+    await dkp(officer, 'named-value', { zone: 'The Ruins', named: 'Bob', points: 0 });
+    await open();
+    const { id } = await raid();
+    await pressAs(pip, `${PRESENT_PREFIX}${id}`);
+    await dkp(officer, 'kill', { named: 'Bob' });
+    await pressAs(officer, `${CHECK_PREFIX}${id}`);
+    const kill = await one<{ id: number; check_due: string }>('SELECT id, check_due FROM dkp_kill');
+    const due = Date.parse(kill.check_due);
+    await HANDLERS.check(withToken, GUILD, String(kill.id), due, due + 1000, null);
+    expect(await count('dkp_kill_member', 'kill_id = ?', kill.id)).toBe(0);
+    expect((await one<{ state: string }>('SELECT state FROM dkp_attendance WHERE member_id = ?', pip.user.id)).state).toBe('absent');
   });
 });
 

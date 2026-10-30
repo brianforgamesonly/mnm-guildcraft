@@ -15,7 +15,7 @@ import { zoneInput } from '../../test/fixtures/zones-small.ts';
 import { report } from './report.ts';
 import { readFileSync } from 'node:fs';
 import { npcZoneParts } from '../import/zones.ts';
-import { sameButFirstCase } from './parse.ts';
+import { leadText, sameButFirstCase, TEMPLATE_FIELDS } from './parse.ts';
 import { busy, DeployStillRunning, overlapping, POLL_MS, waitForDeploys, WAIT_LIMIT_MS, type Run } from './deploys.ts';
 import { FIXTURE_PAGES, type WikiFixture } from './fixtures.ts';
 
@@ -456,6 +456,22 @@ test('order 28b fixtures: named, raid, merchant, zone and quest read from real p
   assert.ok(p.npcs.some((n) => n.page === 'A bandit' && n.zone === 'Scarwood'), 'Brian’s check: /zone Scarwood lists a bandit');
   assert.deepEqual(p.zones.map((z) => z.name), ['Rothold']);
   assert.ok(p.quests[0].rewards.some((r) => r.startsWith('Faction with ')));
+});
+
+test('order 29 ITEM 2: a zone’s description is its page’s lead text, markup removed; NULL when nothing is left', () => {
+  const p = parseSnapshot(fixture());
+  assert.equal(p.zones.find((z) => z.name === 'Rothold')!.description, 'Little is known of Rothold at this time.', 'the real page (__NOTOC__, a file and <br> before it)');
+  assert.equal(leadText('__NOTOC__\n{{ZoneDetails\n|Level = 38+\n}}\n<br>\n{|\n|-\n|Prose in a table\n|}'), null, 'only a template and a table: nothing');
+  assert.equal(
+    leadText("[[File:a.png|thumb|A [[Scarwood|view]] of it]]\nThe '''old''' city of [[Rothold|Rot]]<ref>Seen in beta</ref> &amp; its {{Nested|{{x}}}}keep.<ref name=a/>\n[[Category:Zones]]\n== Quests ==\nNot the lead."),
+    'The old city of Rot & its keep.',
+    'files with nested captions, references, templates, categories and markup removed; the lead ends at the first heading',
+  );
+  assert.equal(leadText('A line\n{|\n|table\n|}\nAfter the table'), 'A line', 'the lead ends at the first table');
+  assert.equal(leadText('A dungeon.\n<br>\n\n|}\n{|\n|x'), 'A dungeon.', 'a stray table line ends it too (Blind Midden)');
+  assert.equal(leadText('Closed.\n* <span>No date yet.</span>\n# Second'), 'Closed. No date yet. Second', 'list markers are markup');
+  assert.equal(leadText('{{Multi\n|a = == not a heading ==\n}}\nProse.'), 'Prose.', 'a template spanning lines never cuts the lead');
+  assert.equal(TEMPLATE_FIELDS.zoneDescription, 'lead text');
 });
 
 test('order 28b ITEM 1: the snapshot waits for deploys every 15 s, at most 10 minutes, and lists those that overlapped', async () => {

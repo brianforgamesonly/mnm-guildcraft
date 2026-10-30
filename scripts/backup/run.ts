@@ -1,6 +1,9 @@
 // Nightly database backup (order 8, ITEM 1; PRD: "the nightly job exports the database to a separate private GitHub
 // repository"). .github/workflows/backup.yml runs it.
-//   node scripts/backup/run.ts [--dry-run]
+//   node scripts/backup/run.ts [--dry-run [--migration-check]]
+// --migration-check (order 29, override 1; dry run only): after step 3, the scratch copy of the live data is migrated with
+// this checkout's pending migrations, and the ledger's row count and SHA-256 of every column (scripts/backup/ledger-proof.ts)
+// are compared before and after. Only counts and hashes are printed.
 // Environment: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BACKUP_REPO_TOKEN (may be unset: the run then fails and
 // says so), RUNNER_TEMP. The export and every working file stay under RUNNER_TEMP; nothing is uploaded as an artifact.
 //
@@ -22,10 +25,11 @@ import { alarm, summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { remoteDb } from '../import/db.ts';
 import { FINISHED_IMPORT } from '../../src/import-status.ts';
-import { BACKUP_REPO, backupDir, checkBounds, commitToBackupRepo, countsOf, countSql, expiryAlarms, expiryState, loadAndCount, prune, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
+import { BACKUP_REPO, backupDir, checkBounds, commitToBackupRepo, countsOf, countSql, expiryAlarms, expiryState, loadAndCount, migrationCheck, prune, sha256, TABLES_SQL, VIRTUAL_SQL, wrangler, type Manifest } from './lib.ts';
 
-const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
+const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false }, 'migration-check': { type: 'boolean', default: false } } });
 const dryRun = args['dry-run'];
+if (args['migration-check'] && !dryRun) throw new Error('--migration-check runs only with --dry-run');
 const token = process.env.CLOUDFLARE_API_TOKEN;
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 if (!token || !account) throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
@@ -83,6 +87,13 @@ try {
   for (const t of Object.keys({ ...before, ...after }).sort()) console.log([t, before[t], exported[t], after[t]].join('\t'));
   const bad = checkBounds(before, after, exported);
   if (bad.length) throw new Error(`integrity: ${bad.join('; ')}`);
+
+  if (args['migration-check']) {
+    step('3b. migration check (order 29): the pending migrations on the scratch copy; the ledger before and after');
+    const check = migrationCheck(join(tmp, 'scratch-d1'));
+    console.log(JSON.stringify({ migration_check: check }));
+    if (!check.match) throw new Error(`migration check: the ledger changed (${check.before.rows} rows ${check.before.sha256.slice(0, 12)} → ${check.after.rows} rows ${check.after.sha256.slice(0, 12)})`);
+  }
 
   const [src] = await db.all<{ v: string | null }>(`SELECT (SELECT source_version FROM data_import WHERE ${FINISHED_IMPORT} ORDER BY id DESC LIMIT 1) AS v`);
   const [mig] = await db.all<{ name: string | null }>('SELECT max(name) AS name FROM d1_migrations');

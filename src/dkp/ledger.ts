@@ -4,10 +4,14 @@
 // adjustment is never cut. A reversal returns the amount actually paid, with the mirrored cut, so a kill's asked amounts
 // for a member sum to zero once reversed.
 //
-// One reader (dkpRead) answers every balance and attendance question: standings, /me, history, Who earned.
+// One reader (dkpRead) answers every balance and attendance question: standings, /me, history.
+//
+// Order 29: who was at a kill is read only from dkp_kill_member (the kill's roster, written in the same batch as its
+// ledger rows), never from the ledger. Standby earns the standby value once per raid, at close (standbyStatement), in raids
+// opened from order 29 on (dkp_raid.standby_once); a correction after close reverses it (standbyReverseStatement).
 export const POOL_GUILD = 'guild';
 
-export type LedgerKind = 'kill' | 'flat' | 'adjust' | 'correction';
+export type LedgerKind = 'kill' | 'flat' | 'adjust' | 'correction' | 'standby' | 'spend' | 'refund' | 'decay';
 
 /** The member's previous balance in the pool: one indexed row (dkp_ledger_balance), 0 before the first row. */
 const PREV = (member: string) =>
@@ -89,6 +93,62 @@ export function readdStatement(db: D1Database, r: { guildId: string; pool: strin
     .bind(r.guildId, r.pool, r.killId, r.asked, r.cap, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at, r.approvedPending ?? null);
 }
 
+// ---------------------------------------------------------------- kill rosters and standby (order 29)
+
+/** One roster row per member at a kill (Present or Standby, as they stood); a member already on it is kept as recorded. */
+export const rosterAddStatement = (db: D1Database, killId: number, members: { member_id: string; state: 'present' | 'standby' }[], approvedPending?: { id: number; actor: string; at: string }) =>
+  db
+    .prepare(
+      `INSERT INTO dkp_kill_member (kill_id, member_id, state) SELECT ?1, json_extract(j.value, '$.m'), json_extract(j.value, '$.s') FROM json_each(?2) j
+       WHERE ${APPROVED_GATE('?3', '?4', '?5')} ON CONFLICT DO NOTHING`,
+    )
+    .bind(killId, JSON.stringify(members.map((m) => ({ m: m.member_id, s: m.state }))), approvedPending?.id ?? null, approvedPending?.actor ?? null, approvedPending?.at ?? null);
+
+/** Members off one kill's roster (Check again, a correction). */
+export const rosterRemoveStatement = (db: D1Database, killId: number, members: string[], approvedPending?: { id: number; actor: string; at: string }) =>
+  db
+    .prepare(`DELETE FROM dkp_kill_member WHERE kill_id = ?1 AND member_id IN (SELECT value FROM json_each(?2)) AND ${APPROVED_GATE('?3', '?4', '?5')}`)
+    .bind(killId, JSON.stringify([...new Set(members)]), approvedPending?.id ?? null, approvedPending?.actor ?? null, approvedPending?.at ?? null);
+
+/**
+ * The standby value, once per raid (order 29, override 2): every member Standby at one or more of the raid's kills (its
+ * roster), active now (frozen members earn nothing), in a closed raid opened from order 29 on. Capped as a kill is. Once
+ * per member and pool: a payout already made (or made and reversed) is never made again (and dkp_ledger_standby_once
+ * refuses a second).
+ */
+export const standbyStatement = (db: D1Database, p: { guildId: string; pool: string; raidId: number; asked: number; cap: number; at: string }) =>
+  db
+    .prepare(
+      `WITH s AS (SELECT DISTINCT km.member_id FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id
+                  JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = km.member_id
+                  WHERE k.raid_id = ?3 AND km.state = 'standby' AND m.status = 'active'),
+            t AS (SELECT member_id, ${PREV('s.member_id')} AS prev FROM s),
+            a AS (SELECT member_id, prev, CASE WHEN ?4 > 0 THEN min(?4, max(0, ?5 - prev)) ELSE ?4 END AS applied FROM t)
+       INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at)
+       SELECT ?1, member_id, ?2, applied, ?4 - applied, prev + applied, 'standby', ?3, NULL, NULL, NULL, 'bot', ?6 FROM a
+       WHERE EXISTS (SELECT 1 FROM dkp_raid r WHERE r.id = ?3 AND r.standby_once = 1 AND r.closed_at IS NOT NULL)
+         AND NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.kind = 'standby' AND x.raid_id = ?3 AND x.pool = ?2 AND x.member_id = a.member_id)`,
+    )
+    .bind(p.guildId, p.pool, p.raidId, p.asked, p.cap, p.at);
+
+/**
+ * After close, a member who no longer has a Standby kill in the raid (Check again or a correction removed their last) loses
+ * the standby payout: a correction row returning what it paid (corrects: the standby row). Runs after the roster change in
+ * the same batch; once only (a reversed payout is not reversed again).
+ */
+export const standbyReverseStatement = (db: D1Database, r: { guildId: string; pool: string; raidId: number; members: string[]; reason: string; actor: string; at: string; approvedPending?: number }) =>
+  db
+    .prepare(
+      `WITH s AS (SELECT x.id, x.member_id, x.amount, x.cut FROM dkp_ledger x WHERE x.kind = 'standby' AND x.raid_id = ?3 AND x.pool = ?2
+                    AND x.member_id IN (SELECT value FROM json_each(?4))
+                    AND NOT EXISTS (SELECT 1 FROM dkp_ledger c WHERE c.corrects = x.id)
+                    AND NOT EXISTS (SELECT 1 FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id WHERE k.raid_id = ?3 AND km.member_id = x.member_id AND km.state = 'standby'))
+       INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, corrects, reason, actor, at)
+       SELECT ?1, s.member_id, ?2, -s.amount, -s.cut, ${PREV('s.member_id')} - s.amount, 'correction', ?3, NULL, s.id, ?5, ?6, ?7 FROM s
+       WHERE ${APPROVED_GATE('?8', '?6', '?7')}`,
+    )
+    .bind(r.guildId, r.pool, r.raidId, JSON.stringify([...new Set(r.members)]), r.reason, r.actor, r.at, r.approvedPending ?? null);
+
 // ---------------------------------------------------------------- the one reader
 
 export interface Standing {
@@ -109,7 +169,7 @@ const windowStart = (now: number) => new Date(now - ATTENDANCE_DAYS * 86_400_000
 /**
  * Balances and attendance, the one place they are read (order 27). `pools`: which pools; `member`: one member (/me,
  * history) or every member with a row (standings). Attendance (30 days) only when asked: kills and flat payouts the member
- * earned in the pool (asked amounts on the kill sum above zero) ÷ those the pool held.
+ * was at in the pool (Present or Standby: on the kill's roster, order 29) ÷ those the pool held.
  */
 export async function dkpRead(
   db: D1Database,
@@ -130,7 +190,7 @@ export async function dkpRead(
   if (q.attendance && q.member) {
     const since = windowStart(q.now ?? Date.now());
     // Kills each pool held in the window (raids opened within the window plus the longest auto-close), and of those the
-    // ones the member earned, through dkp_ledger_kill.
+    // ones the member was at, through the roster's primary key.
     stmts.push(
       db
         .prepare(
@@ -138,7 +198,7 @@ export async function dkpRead(
            SELECT p.value AS pool,
                   (SELECT count(*) FROM k WHERE p.value = '${POOL_GUILD}' OR k.pool = p.value) AS held,
                   (SELECT count(*) FROM k WHERE (p.value = '${POOL_GUILD}' OR k.pool = p.value)
-                     AND (SELECT coalesce(sum(l.amount + l.cut), 0) FROM dkp_ledger l WHERE l.kill_id = k.id AND l.member_id = ?2 AND l.pool = p.value) > 0) AS earned
+                     AND EXISTS (SELECT 1 FROM dkp_kill_member km WHERE km.kill_id = k.id AND km.member_id = ?2)) AS earned
            FROM json_each(?5) p`,
         )
         .bind(guildId, q.member, since, new Date(Date.parse(since) - 24 * 3_600_000).toISOString(), pools),
