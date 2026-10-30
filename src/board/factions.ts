@@ -7,7 +7,7 @@
 import { EMBED_LIMITS, md, NO_PINGS, plural, truncate, type Embed } from '../discord.ts';
 import { FACTION_ALIASES } from '../faction-aliases.ts';
 import { safeUrl } from '../zone/card.ts';
-import { BOARD_COLOR, plainText, type BoardMessage, type LineMode } from './render.ts';
+import { BOARD_COLOR, buildingLine, plainText, type BoardMessage, type LineMode } from './render.ts';
 
 /** One creature row on a faction's post: an active link to an active npc row in an active zone. */
 export interface FactionLine {
@@ -44,7 +44,6 @@ export const FACTION_COPY = {
     'One post per faction, A→Z below. Each lists the creatures whose wiki page names the faction under **Reputation Gained** or **Reputation Lost**, by zone.',
     "As listed on each creature's wiki page (Monsters and Memories Wiki, CC BY-SA 4.0). Amounts aren't recorded.",
   ].join('\n'),
-  coming: (n: number) => `${plural(n, 'more post')} coming: the board fills in over the next few hours.`,
 };
 
 /** A creature's line: its name, then whichever of level and location the wiki records. */
@@ -166,17 +165,17 @@ export const factionIndexLine = (factions: number): string => `Factions · ${plu
 
 /**
  * The pinned index: what the board holds, a link to every faction's post with its creature count, and the last refresh.
- * Posts not created yet are counted in one line (their names would overflow the message while the board fills). The links
- * fill embeds of at most 4,096 characters in one message (125 links are about 3,700 characters, under the 6,000 total).
- * `hashable` leaves out the time, as the tradeskill index's does.
+ * Posts not created yet are counted in one line, first (order 30: buildingLine; their names would overflow the message
+ * while the board fills). The links fill embeds of at most 4,096 characters in one message (125 links are about 3,700
+ * characters, under the 6,000 total). `hashable` leaves out the time, as the tradeskill index's does.
  */
-export function renderFactionIndex(entries: FactionIndexEntry[], refreshedAtMs: number, line: LineMode = 'on'): { message: BoardMessage; hashable: string } {
+export function renderFactionIndex(entries: FactionIndexEntry[], refreshedAtMs: number, line: LineMode = 'on', perRun = 1): { message: BoardMessage; hashable: string } {
   const posted = entries.filter((e) => e.thread_id);
-  const missing = entries.length - posted.length;
+  const building = buildingLine(posted.length, entries.length, perRun);
   const t = Math.floor(refreshedAtMs / 1000);
   // Review of PR A: the message's 6,000-character total holds about 150 links with counts. Past that the counts are left
   // out, and past about 250 bare links the rest are counted in one line, so the index never fails to post.
-  const budget = EMBED_LIMITS.total - FACTION_COPY.indexIntro.length - FACTION_COPY.indexTitle.length - 300;
+  const budget = EMBED_LIMITS.total - FACTION_COPY.indexIntro.length - FACTION_COPY.indexTitle.length - (building?.length ?? 0) - 300;
   const withCounts = posted.map((e) => `<#${e.thread_id}> · ${plural(e.creatures, 'creature')}`);
   const size = (xs: string[]) => xs.reduce((n, x) => n + x.length + 1, 0);
   let links = size(withCounts) <= budget ? withCounts : posted.map((e) => `<#${e.thread_id}>`);
@@ -184,7 +183,7 @@ export function renderFactionIndex(entries: FactionIndexEntry[], refreshedAtMs: 
     const fit = Math.floor((budget - 80) / (links[0].length + 1));
     links = [...links.slice(0, fit), `…and ${plural(links.length - fit, 'more post')} below.`];
   }
-  const rows = [FACTION_COPY.indexIntro, '', ...links, ...(missing ? ['', FACTION_COPY.coming(missing)] : [])];
+  const rows = [...(building ? [building, ''] : []), FACTION_COPY.indexIntro, '', ...links];
   const embeds: Embed[] = [];
   let desc: string[] = [];
   let len = 0;

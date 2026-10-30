@@ -7,7 +7,7 @@ import worker from '../../src/index.ts';
 import { BOARD_CALL_CAP, botApi as makeBotApi } from '../../src/board/api.ts';
 import { FACTION_COPY, renderFactionIndex, renderFactionPost, type FactionLine } from '../../src/board/factions.ts';
 import { FACTIONS } from '../../src/board/kinds.ts';
-import { FACTIONS_FLOOR, refreshGuildBoard } from '../../src/board/refresh.ts';
+import { FACTIONS_FLOOR, refreshGuildBoard, SWEEP_SQL } from '../../src/board/refresh.ts';
 import { BOARD_PERMISSIONS } from '../../src/commands/setup.ts';
 import { EMBED_LIMITS, embedChars } from '../../src/discord.ts';
 import { all, one, reset } from '../db.ts';
@@ -124,7 +124,86 @@ describe('order 24: the factions board', () => {
     expect(runs).toBeGreaterThan(1);
     expect(forum.display(FACTION_FORUM).filter((n) => n !== FACTIONS.indexTitle)).toEqual([...names].sort());
     // The index counts posts still coming in one line, never naming each (it would overflow while the board fills).
-    expect(renderFactionIndex(names.map((f) => ({ faction: f, thread_id: null, creatures: 1 })), 0).message.embeds[0].description).toContain(FACTION_COPY.coming(30));
+    expect(renderFactionIndex(names.map((f) => ({ faction: f, thread_id: null, creatures: 1 })), 0, 'on', 10).message.embeds[0].description).toContain('Still building: 0 of 30 posts so far. The rest appear within about 45 minutes.');
+  });
+
+  it('order 30: a half-built board shows the building line with its counts; the run that finishes it removes it, at no extra Discord call', async () => {
+    const names = Array.from({ length: 30 }, (_, i) => `Faction ${String.fromCharCode(65 + Math.floor(i / 10))}${i % 10}`);
+    await seedFactions(names.map((f): Link => ['Night Harbor', `A creature ${f}`, f, 'lost']));
+    await setGuild();
+    const first = await refresh(12);
+    const text = () => forum.text(forum.byName(FACTIONS.indexTitle)!);
+    expect(first.created).toBeGreaterThan(0);
+    const runs = Math.ceil((30 - first.created) / first.created);
+    expect(text()).toContain(`Still building: ${first.created} of 30 posts so far. The rest appear within about ${runs * 15} minutes.`);
+    expect(text().indexOf('Still building')).toBeLessThan(text().indexOf('One post per faction'));
+    forum.calls.length = 0;
+    const second = await refresh(12);
+    // One index edit per run, as a run that wrote a post always made.
+    expect(forum.calls.filter((c) => c.method === 'PATCH' && c.path.includes('/messages/')).length).toBe(1);
+    expect(text()).toContain(`Still building: ${first.created + second.created} of 30 posts so far.`);
+    while ((await one<{ n: number }>('SELECT count(*) AS n FROM faction_post')).n < 30) await refresh(12);
+    expect(text()).not.toContain('Still building');
+  });
+
+  it('order 30: a post no longer wanted does not count: a board that loses a topic never reads as building', async () => {
+    await seedFactions(STEEL);
+    await setGuild();
+    await refresh();
+    await env.DB.prepare("UPDATE npc_faction SET active = 0 WHERE faction_id = (SELECT id FROM faction WHERE name = 'Steel Talons')").run();
+    await env.DB.prepare("UPDATE faction SET changed_at = '2099-01-01T00:00:00.000Z' WHERE name = 'Steel Talons'").run();
+    const r = await refresh();
+    expect(r.retired).toBe(1);
+    expect(forum.line(forum.byName(FACTIONS.indexTitle)!)).toBe("Factions · 2 posts, A→Z · from each creature's wiki page");
+    expect(forum.text(forum.byName(FACTIONS.indexTitle)!)).not.toContain('Still building');
+    expect(renderFactionIndex([{ faction: 'A', thread_id: '1', creatures: 1 }], 0, 'on', 10).hashable).not.toContain('Still building');
+  });
+
+  it('order 30: an index edit the run could not reach is owed: the next sweep picks the board up and makes it', async () => {
+    await seedFactions(STEEL);
+    await setGuild();
+    await refresh();
+    await env.DB.prepare("UPDATE guild SET faction_index_hash = 'an older text'").run();
+    const sweep = () => env.DB.prepare(SWEEP_SQL).bind(0).all<{ board: string }>();
+    expect((await sweep()).results).toEqual([]);
+    expect((await refresh(1)).index).toBe('not_reached');
+    expect((await sweep()).results.map((r) => r.board)).toEqual(['factions']);
+    expect((await refresh()).index).toBe('edited');
+    expect((await sweep()).results).toEqual([]);
+    // The tradeskill half asks the same way.
+    await env.DB.prepare("UPDATE guild SET board_channel_id = ?, board_index_thread_id = 't', board_index_message_id = 'm'").bind(FORUM).run();
+    await env.DB.prepare("INSERT INTO board_post (guild_id, tradeskill_id, thread_id, message_ids_json, dirty) SELECT ?, id, 'p', '[]', 0 FROM tradeskill").bind(GUILD).run();
+    expect((await sweep()).results.map((r) => r.board)).toEqual(['tradeskills']);
+    await env.DB.prepare("UPDATE guild SET board_index_hash = 'h'").run();
+    expect((await sweep()).results).toEqual([]);
+  });
+
+  it('order 30 (review): a passing failure is owed to the next sweep; a refused index edit is not, so a lost forum never retries every 15 minutes', async () => {
+    await seedFactions(STEEL);
+    await setGuild();
+    await refresh();
+    const sweep = async () => (await env.DB.prepare(SWEEP_SQL).bind(0).all()).results.length;
+    const edit = (c: { method: string; path: string }) => c.method === 'PATCH' && c.path.includes('/messages/');
+    await env.DB.prepare("UPDATE guild SET faction_index_hash = NULL").run();
+    forum.failures.push({ match: edit, status: 500, times: 1 });
+    expect((await refresh()).index).toBe('failed');
+    expect(await sweep()).toBe(1);
+    // Even a row that held no hash goes idle after a refusal.
+    forum.failures.push({ match: edit, status: 403, code: 50001 });
+    expect((await refresh()).index).toBe('failed');
+    expect(await sweep()).toBe(0);
+  });
+
+  it('order 30 (review): X counts wanted posts only: a stale extra post beside a missing one still reads as building', async () => {
+    await seedFactions(STEEL);
+    await setGuild();
+    await refresh();
+    // One faction no longer shown (its post stays, to retire), and one wanted post missing.
+    await env.DB.prepare("UPDATE npc_faction SET active = 0 WHERE faction_id = (SELECT id FROM faction WHERE name = 'Steel Talons')").run();
+    await env.DB.prepare("UPDATE faction SET changed_at = '2099-01-01T00:00:00.000Z' WHERE name = 'Steel Talons'").run();
+    await env.DB.prepare("DELETE FROM faction_post WHERE faction_id = (SELECT id FROM faction WHERE name = 'Night Harbor Garrison')").run();
+    await refresh(4); // room for the index edit only: two posts on record, but one of the two wanted
+    expect(forum.text(forum.byName(FACTIONS.indexTitle)!)).toContain('Still building: 1 of 2 posts so far.');
   });
 
   it('re-renders only posts whose faction changed after they were rendered (faction.changed_at); unchanged posts are not edited', async () => {

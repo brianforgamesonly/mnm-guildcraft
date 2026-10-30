@@ -34,7 +34,7 @@ import { boardStatements, boardFromResults, sourceOf } from '../../src/board/dat
 import { boardNamed, TRADESKILLS } from '../../src/board/kinds.ts';
 import { contentHash, renderIndex, renderSkillPost } from '../../src/board/render.ts';
 import { BOARD_CALL_CAP, botApi } from '../../src/board/api.ts';
-import { archivesAt, BOARD_LINE, CRON_RUN_MS, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
+import { archivesAt, BOARD_LINE, CRON_RUN_MS, postsPerSweep, refreshGuildBoard, requestRebuild } from '../../src/board/refresh.ts';
 import { boardInOrder, displayOrder, snowflakeAt, snowflakeMs } from '../../src/board/order.ts';
 import { runDepartures } from '../../src/departures.ts';
 
@@ -128,7 +128,7 @@ if (action === 'render' && factions) {
     }
     // Order 25: the posts the next refresh retires (edited to one line, then archived; never deleted).
     for (const t of data.retiring) console.log(`\n--- retire "${t.name}" · thread ${tail(data.posts.get(t.id)?.thread_id)} · notice: ${t.notice.content}`);
-    const idx = data.index((id) => data.posts.get(id)?.thread_id ?? null, now, BOARD_LINE);
+    const idx = data.index((id) => data.posts.get(id)?.thread_id ?? null, now, BOARD_LINE, postsPerSweep(kind));
     console.log(`\n--- index post "${kind.indexTitle}" (pinned)\nline: ${idx.message.content}\n${redact(JSON.stringify(idx.message.embeds))}`);
     console.log(`\nsummary: ${data.topics.length + 1} posts would exist (${data.topics.length} factions + index), ${messages} faction messages in all; ${data.retiring.length} posts to retire.`);
   }
@@ -153,7 +153,7 @@ if (action === 'render' && factions) {
       console.log(`line: ${redact(msgs[0].content ?? '(none)')}`);
       console.log(redact(JSON.stringify(msgs.map((m) => m.embeds))));
     }
-    const idx = renderIndex(data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })), now, BOARD_LINE);
+    const idx = renderIndex(data.tradeskills.map((t) => ({ skill: t.name, thread_id: threads.get(t.id) ?? null, lines: (data.lines.get(t.id) ?? []).length })), now, BOARD_LINE, postsPerSweep(kind));
     console.log('\n--- index post "Index: how to get listed" (pinned)');
     console.log(`line: ${redact(idx.message.content ?? '(none)')}`);
     console.log(redact(JSON.stringify(idx.message.embeds)));

@@ -39,7 +39,8 @@ export interface BoardSource {
   /** A post whose data changed after it was rendered (order 24: faction.changed_at), besides its dirty flag. */
   stale: (topicId: number) => boolean;
   render: (t: Topic, nowMs: number, line: LineMode) => BoardMessage[];
-  index: (threadOf: (topicId: number) => string | null, nowMs: number, line: LineMode) => { message: BoardMessage; hashable: string };
+  /** Order 30: `perRun`, the posts a run makes, for the building line's time. */
+  index: (threadOf: (topicId: number) => string | null, nowMs: number, line: LineMode, perRun: number) => { message: BoardMessage; hashable: string };
   /**
    * Order 25: posts whose topic is no longer shown and that have not been retired since it changed (dirty, or rendered
    * before the topic's changed_at). Each is edited to its one-line notice and archived, never deleted.
@@ -95,8 +96,8 @@ export function boardFromResults(results: D1Result[]): BoardData | null {
     stale: () => false,
     retiring: [],
     render: (t, nowMs, line) => renderSkillPost(t.name, byskill.get(t.id) ?? [], guild.stale_days, nowMs, line),
-    index: (threadOf, nowMs, line) =>
-      renderIndex(tradeskills.map((t) => ({ skill: t.name, thread_id: threadOf(t.id), lines: (byskill.get(t.id) ?? []).length })), nowMs, line),
+    index: (threadOf, nowMs, line, perRun) =>
+      renderIndex(tradeskills.map((t) => ({ skill: t.name, thread_id: threadOf(t.id), lines: (byskill.get(t.id) ?? []).length })), nowMs, line, perRun),
   };
 }
 
@@ -169,7 +170,7 @@ export function factionsFromResults(results: D1Result[]): FactionData | null {
       .filter((f) => Number(f.shown) !== 1 && postsBy.has(f.id) && (postsBy.get(f.id)!.dirty !== 0 || stale(f.id)))
       .map(({ id, name }) => ({ id, name, notice: retiredNotice(name) })),
     render: (t, _nowMs, line: LineMode) => renderFactionPost(t.name, byFaction.get(t.id) ?? [], line, questsBy.get(t.id) ?? []),
-    index: (threadOf, nowMs, line) => renderFactionIndex(factions.map((f) => ({ faction: f.name, thread_id: threadOf(f.id), creatures: creatures(f.id) })), nowMs, line),
+    index: (threadOf, nowMs, line, perRun) => renderFactionIndex(factions.map((f) => ({ faction: f.name, thread_id: threadOf(f.id), creatures: creatures(f.id) })), nowMs, line, perRun),
   };
 }
 

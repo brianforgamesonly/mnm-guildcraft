@@ -188,7 +188,9 @@ Discord dropdowns hold at most 25 options, so the tradeskill switcher lists only
 
 - A Discord message holds about 6,000 characters of embed text, roughly 150 roster lines. Larger lists continue in bot-owned follow-up messages in the same post.
 
-- A pinned "Index" post links to every tradeskill post and shows last-refresh time.
+- A pinned "Index" post links to every tradeskill post and shows last-refresh time. While a board fills it also shows one line with how many of its posts exist and about how long the rest will take (order 30).
+
+- A forum GuildCraft creates gets short post guidelines saying what it holds and that GuildCraft writes its posts. GuildCraft never touches them after that, so officers can change them (order 30).
 
 ### FR-6 Item stats and images
 

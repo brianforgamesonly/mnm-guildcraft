@@ -5,10 +5,11 @@ import { createExecutionContext, createScheduledController, env, waitOnExecution
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../../src/index.ts';
 import { BOARD_CALL_CAP, botApi as makeBotApi, routeOf } from '../../src/board/api.ts';
-import { contentHash, plainText, renderIndex, renderSkillPost, type BoardLine } from '../../src/board/render.ts';
+import { buildingLine, contentHash, plainText, renderIndex, renderSkillPost, SWEEP_MINUTES, type BoardLine } from '../../src/board/render.ts';
 import { isNightly, PINNED, refreshGuildBoard } from '../../src/board/refresh.ts';
 import up17 from '../../migrations/0017_board_preview_line.sql?raw';
 import down17 from '../../scripts/rollback/0017_board_preview_line.down.sql?raw';
+import wrangler from '../../wrangler.jsonc?raw';
 import { BOARD_PERMISSIONS } from '../../src/commands/setup.ts';
 import { EMBED_LIMITS, embedChars, plural } from '../../src/discord.ts';
 import { all, count, one, reset } from '../db.ts';
@@ -420,6 +421,20 @@ describe('order 22: each post has a one-line summary (the forum list previews it
     expect(renderIndex(entries, NOW + 3_600_000).hashable).toBe(a.hashable);
     expect(renderIndex(entries.slice(0, 1), NOW).message.content).toBe('How to get listed · 1 tradeskill · /me to start');
     expect(renderIndex(entries, NOW, 'clear').hashable).not.toBe(a.hashable);
+  });
+
+  it('order 30: the building line: posts that exist of those wanted, whole sweeps rounded up, minutes under an hour, then hours', () => {
+    expect(buildingLine(10, 16, 10)).toBe('Still building: 10 of 16 posts so far. The rest appear within about 15 minutes.');
+    expect(buildingLine(0, 100, 24)).toBe('Still building: 0 of 100 posts so far. The rest appear within about 2 hours.');
+    expect(buildingLine(0, 8, 2)).toBe('Still building: 0 of 8 posts so far. The rest appear within about 1 hour.');
+    expect(buildingLine(16, 16, 10)).toBeNull();
+    expect(buildingLine(17, 16, 10)).toBeNull();
+    const entries = [{ skill: 'Blacksmithing', thread_id: '700000000000000001', lines: 1 }, { skill: 'Brewing', thread_id: null, lines: 0 }];
+    expect(renderIndex(entries, NOW, 'on', 10).message.embeds[0].description).toMatch(/^Still building: 1 of 2 posts so far\. The rest appear within about 15 minutes\.\n\n/);
+    expect(renderIndex(entries, NOW, 'on', 10).hashable).toContain('Still building: 1 of 2');
+    expect(renderIndex(entries.slice(0, 1), NOW, 'on', 10).message.embeds[0].description).not.toContain('Still building');
+    // The interval is the cron's own.
+    expect(wrangler).toContain(`"crons": ["*/${SWEEP_MINUTES} * * * *"]`);
   });
 
   it('the first build and a rewrite send the line on create and on edit, never empty, and ping nobody', async () => {

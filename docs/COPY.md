@@ -977,7 +977,7 @@ No new sentence: each button's label is a zone's name from the data. What the me
 | src/board/kinds.ts:60 | (the index post's title) Index: how to read this board | DRAFT |
 | src/board/factions.ts:116 | (the index's preview line) Factions · \<N> posts, A→Z · from each creature's wiki page | DRAFT |
 | src/board/factions.ts:27-31 | (the index) **Factions: index** · One post per faction, A→Z below. Each lists the creatures whose wiki page names the faction under **Reputation Gained** or **Reputation Lost**, by zone. · the footer line above · then "#\<post> · \<n> creatures" per faction | DRAFT |
-| src/board/factions.ts:32 | (index, while the board fills) \<n> more posts coming: the board fills in over the next few hours. | DRAFT |
+| (removed, order 30) | (index, while the board fills) \<n> more posts coming: the board fills in over the next few hours. | Replaced by order 30's building line |
 | src/commands/definitions.ts:187 | (`/guildcraft setup` option) factions: A forum channel for the factions board: one post per faction | DRAFT |
 | src/commands/definitions.ts:196 | (`/guildcraft rebuild-board` option) which: The board to rebuild (default: tradeskills) · Tradeskills · Factions | DRAFT |
 | src/commands/setup.ts:29-30 | Factions board: #\<channel> / not set (`factions:` picks a forum channel) | DRAFT |
@@ -1138,3 +1138,11 @@ Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the com
 | src/dkp/copy.ts:167 | (ledger reason, `/dkp history`) Decay: \<n>% a week after \<n> idle days | DRAFT |
 | src/dkp/definition.ts | `shop` The shop: items at fixed prices in guild points; `add` Officers: list an item for guild points in GC-DKP (first come, first served); item, price, quantity, per_member | DRAFT |
 | src/dkp/settings.ts | (setting labels) Decay after (days idle) · Decay per week | DRAFT |
+
+## Work order 30, PR A: forum guidelines and the building line (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/board/kinds.ts:52 | (GC-Tradeskills post guidelines) Who in the guild can craft what: one post per tradeskill, ranked by skill level. GuildCraft writes and updates these posts. To get listed, use /me to add a character, then /skills. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests. | DRAFT |
+| src/board/kinds.ts:71 | (GC-Factions post guidelines) Which creatures raise or lower each faction: one post per faction, from the Monsters and Memories Wiki. GuildCraft writes and updates these posts. A missing or wrong creature is fixed on the wiki. To ask for a craft, use /request: it opens a private thread in GC-Craft Requests. | DRAFT |
+| src/board/render.ts:155 | (both indexes, while a board fills) Still building: \<x> of \<n> posts so far. The rest appear within about \<n> minutes (or \<n> hours). Replaces the factions index's "\<n> more posts coming" line. | DRAFT |

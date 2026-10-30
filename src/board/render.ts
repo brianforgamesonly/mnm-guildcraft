@@ -140,15 +140,31 @@ export const HOW_TO_GET_LISTED = [
   '`/help` every command',
 ].join('\n');
 
+/** The cron's interval (wrangler.jsonc "*\/15 * * * *"; test/worker/board.test.ts holds the two together). */
+export const SWEEP_MINUTES = 15;
+
+/**
+ * Order 30: the index's line while a board fills: `posted` of the `wanted` posts exist, and `perRun` more arrive each
+ * sweep. Whole sweeps, rounded up: a post appears only when a run happens. Minutes under an hour, otherwise hours. None
+ * once every wanted post exists, so a stale extra post can never read as "building".
+ */
+export function buildingLine(posted: number, wanted: number, perRun: number): string | null {
+  if (posted >= wanted) return null;
+  const minutes = Math.ceil((wanted - posted) / Math.max(perRun, 1)) * SWEEP_MINUTES;
+  const wait = minutes < 60 ? plural(minutes, 'minute') : plural(Math.ceil(minutes / 60), 'hour');
+  return `Still building: ${posted} of ${wanted} posts so far. The rest appear within about ${wait}.`;
+}
+
 /**
  * The pinned index post: a link to every tradeskill post with its count, how to get listed, and the last
  * refresh as a Discord timestamp. `hashable` is the same text without the time, so an index whose links
  * and counts are unchanged is not edited just because time passed. It ends with the first-message line (order 22),
- * so a change in the line edits the index too.
+ * so a change in the line edits the index too. Order 30: the building line goes first, where truncation never reaches.
  */
-export function renderIndex(entries: IndexEntry[], refreshedAtMs: number, line: LineMode = 'on'): { message: BoardMessage; hashable: string } {
+export function renderIndex(entries: IndexEntry[], refreshedAtMs: number, line: LineMode = 'on', perRun = 1): { message: BoardMessage; hashable: string } {
   const links = entries.map((e) => `${e.thread_id ? `<#${e.thread_id}>` : `${e.skill} *(post coming)*`} · ${plural(e.lines, 'character')}`);
-  const body = [links.join('\n'), '', HOW_TO_GET_LISTED].join('\n');
+  const building = buildingLine(entries.filter((e) => e.thread_id).length, entries.length, perRun);
+  const body = [...(building ? [building, ''] : []), links.join('\n'), '', HOW_TO_GET_LISTED].join('\n');
   const t = Math.floor(refreshedAtMs / 1000);
   const description = truncate(`${body}\n\nLast refresh: <t:${t}:f> (<t:${t}:R>)`, EMBED_LIMITS.description);
   const content = line === 'on' ? indexLine(entries.length) : '';
