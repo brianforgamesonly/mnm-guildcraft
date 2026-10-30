@@ -6,12 +6,13 @@ import { botApi, type BotApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, memberTag, optInt, optString, row, STYLE_SUCCESS, truncate, updateMessage, type MessageReply, type Option } from '../discord.ts';
 import { zoneKey } from '../zone/names.ts';
-import { DKP_COPY } from './copy.ts';
+import { adjustEvent, batchMembers, batchNames, postBatch, type BatchMember } from './batch.ts';
+import { BATCH_COPY, DKP_COPY } from './copy.ts';
 import { payStatement, POOL_GUILD, registerPool, dkpRead } from './ledger.ts';
 import { FULL_PAGE, FULL_STANDINGS_PREFIX, poolNames, postIn, refreshStandings, showDecision, standingLine } from './messages.ts';
 import { RUNNER_ROLE, settingOf, SETTINGS } from './settings.ts';
 import type { DkpState } from './state.ts';
-import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand } from './raid.ts';
+import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand, redrawNoShows } from './raid.ts';
 import { auctionCommand, cancelCommand } from './auction.ts';
 import { wishlistAdd, wishlistRemove, wishlistShow } from './wishlist.ts';
 import { shopAdd } from './shop.ts';
@@ -50,9 +51,11 @@ const spent = (c: Ctx, api: BotApi | null) => {
   if (api) c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
 };
 const by = (c: Ctx) => memberTag(c.userId, c.member.nick || c.member.user.global_name || c.member.user.username);
+/** Order 34: src/dkp/batch.ts's way to the same three. */
+export { apiFor as dkpApi, by as whoRan, spent as spentDkp };
 
 /** A pool option: the guild pool, or a zone (by its name, as /zone takes it). */
-async function resolvePool(db: D1Database, typed: string): Promise<{ key: string; name: string } | null> {
+export async function resolvePool(db: D1Database, typed: string): Promise<{ key: string; name: string } | null> {
   if (typed === POOL_GUILD || typed.toLowerCase() === DKP_COPY.guildPool.toLowerCase()) return { key: POOL_GUILD, name: DKP_COPY.guildPool };
   return db.prepare('SELECT key, name FROM zone WHERE key = ? AND active = 1').bind(zoneKey(typed.trim())).first<{ key: string; name: string }>();
 }
@@ -70,13 +73,17 @@ async function targetMember(c: Ctx, id: string): Promise<string> {
 }
 
 async function adjust(c: Ctx, opts: Option[], d: DkpState): Promise<MessageReply> {
+  // Order 34: a whole event, or one member. Discord can't require one of two options, so both are optional there.
+  if (optString(opts, 'event') !== undefined) return adjustEvent(c, opts, d);
   const member = optString(opts, 'member') ?? '';
+  if (!member) return ephemeral(BATCH_COPY.either);
   const points = optInt(opts, 'points') ?? 0;
   const reason = (optString(opts, 'reason') ?? '').trim();
   if (dkpSelfConflict(c.userId, { member })) return ephemeral(DKP_COPY.own);
   if (!reason) return ephemeral(DKP_COPY.adjustReason);
   if (!points) return ephemeral(DKP_COPY.noPoints);
-  const typed = optString(opts, 'pool') ?? '';
+  const typed = optString(opts, 'pool');
+  if (typed === undefined) return ephemeral(BATCH_COPY.needsPool);
   const pool = await resolvePool(c.db, typed);
   if (!pool) return ephemeral(DKP_COPY.unknownPool(truncate(typed, 100)));
   const name = await targetMember(c, member);
@@ -114,24 +121,32 @@ export async function askApproval(
   c: Ctx,
   d: DkpState,
   api: BotApi | null,
-  a: { member: string; name: string; pool: { key: string; name: string }; points: number; reason: string; at: string; correction?: { action: 'add' | 'remove'; raidId: number; killId: number | null } },
+  a: {
+    member: string; name: string; pool: { key: string; name: string }; points: number; reason: string; at: string;
+    correction?: { action: 'add' | 'remove'; raidId: number; killId: number | null };
+    /** Order 34: a whole event; its members are fixed here. */
+    batch?: { eventId: number; title: string; members: BatchMember[] };
+  },
 ): Promise<MessageReply> {
   // No card, no approval: nobody could press Approve (review of PR A).
   if (!api || !d.channel_id) return ephemeral(DKP_COPY.noChannel);
   const due = Date.parse(a.at) + d.settings.approval_hours * 3_600_000;
   const p = await c.db
     .prepare(
-      'INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, action, raid_id, kill_id, reason, asked_by, asked_at, due_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
+      'INSERT INTO dkp_pending (guild_id, kind, member_id, pool, amount, action, raid_id, kill_id, reason, asked_by, asked_at, due_at, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id',
     )
     .bind(
       c.guild.id, a.correction ? 'correction' : 'adjust', a.member, a.pool.key, a.points, a.correction?.action ?? null, a.correction?.raidId ?? null, a.correction?.killId ?? null, a.reason,
-      c.userId, a.at, new Date(due).toISOString(),
+      c.userId, a.at, new Date(due).toISOString(), a.batch?.eventId ?? null,
     )
     .first<{ id: number }>();
+  // The lapse first: a batch whose members didn't save still lapses.
   c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `lapse:${p!.id}`, due }] };
+  if (a.batch) await c.db.prepare('INSERT INTO dkp_pending_member (pending_id, member_id) SELECT ?, value FROM json_each(?)').bind(p!.id, JSON.stringify(a.batch.members.map((m) => m.member_id))).run();
   {
+    const who = a.batch ? BATCH_COPY.cardWho(a.batch.title, a.batch.members.length, batchNames(a.batch.members)) : memberTag(a.member, a.name);
     const id = await postIn(api, d.channel_id, {
-      embeds: [{ description: DKP_COPY.approvalCard(memberTag(a.member, a.name), a.points, a.pool.name, by(c), a.reason, String(Math.floor(due / 1000))) }],
+      embeds: [{ description: DKP_COPY.approvalCard(who, a.points, a.pool.name, by(c), a.reason, String(Math.floor(due / 1000))) }],
       components: [row([button(`${APPROVE_PREFIX}${p!.id}`, DKP_COPY.approve, STYLE_SUCCESS)])],
     });
     if (id) await c.db.prepare('UPDATE dkp_pending SET message_id = ? WHERE id = ?').bind(id, p!.id).run();
@@ -143,12 +158,19 @@ export async function askApproval(
 export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<MessageReply> {
   if (!isDkpRunner(c.guild, d.settings.runner_role, c.member)) return ephemeral(DKP_COPY.notRunner);
   const pid = Number(id.slice(APPROVE_PREFIX.length));
-  const p = await c.db.prepare('SELECT member_id, pool, amount, reason, asked_by, kind, action, raid_id, kill_id, message_id, status, due_at FROM dkp_pending WHERE id = ? AND guild_id = ?').bind(pid, c.guild.id).first<{
-    member_id: string; pool: string; amount: number; reason: string; asked_by: string; kind: string; action: 'add' | 'remove' | null; raid_id: number | null; kill_id: number | null; message_id: string | null; status: string; due_at: string;
+  const p = await c.db.prepare('SELECT member_id, pool, amount, reason, asked_by, kind, action, raid_id, kill_id, message_id, status, due_at, event_id FROM dkp_pending WHERE id = ? AND guild_id = ?').bind(pid, c.guild.id).first<{
+    member_id: string; pool: string; amount: number; reason: string; asked_by: string; kind: string; action: 'add' | 'remove' | null; raid_id: number | null; kill_id: number | null; message_id: string | null; status: string; due_at: string; event_id: number | null;
   }>();
   if (!p) return ephemeral(DKP_COPY.notOpen);
   const conflict = dkpSelfConflict(c.userId, { member: p.member_id, askedBy: p.asked_by });
   if (conflict) return ephemeral(conflict === 'own' ? DKP_COPY.own : DKP_COPY.asked);
+  // Order 34: a batch's members were fixed when it was asked for. An approver among them can't approve it; the frozen are skipped.
+  const members = p.event_id ? await batchMembers(c.db, c.guild.id, pid) : [];
+  if (members.some((m) => dkpSelfConflict(c.userId, { member: m.member_id }))) return ephemeral(BATCH_COPY.inBatch);
+  // A cancelled event can't be adjusted, whenever it was cancelled. The status change below checks it again.
+  const event = p.event_id ? await c.db.prepare('SELECT title, status FROM event WHERE id = ?').bind(p.event_id).first<{ title: string; status: string }>() : null;
+  if (p.status === 'open' && event?.status === 'cancelled') return ephemeral(BATCH_COPY.cancelled);
+  if (p.status === 'open' && p.event_id && members.every((m) => m.frozen)) return ephemeral(BATCH_COPY.allFrozen);
   const at = now();
   // One approval wins, and it pays in the same batch (review of PR A): the status changes once, and the payment is
   // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing. A
@@ -158,25 +180,31 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
       ? await correctionStatements(c.db, c.guild.id, d.settings.cap, { member: p.member_id, action: p.action, raidId: p.raid_id, killId: p.kill_id, reason: p.reason, actor: c.userId, at, approvedPending: pid })
       : [
           registerPool(c.db, c.guild.id, p.pool, at),
-          payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
+          payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: p.event_id ? members.filter((m) => !m.frozen).map((m) => m.member_id) : [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
         ];
   const [took] = await c.db.batch([
-    c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2").bind(c.userId, at, pid),
+    c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2 AND NOT EXISTS (SELECT 1 FROM event e WHERE e.id = dkp_pending.event_id AND e.status = 'cancelled')").bind(c.userId, at, pid),
     ...pays,
   ]);
   if (took.meta.changes !== 1) return ephemeral(DKP_COPY.notOpen);
   await audit(c.db, c.guild.id, c.userId, 'dkp.approve', `pending:${pid}`, { status: 'open' }, { status: 'approved' }).run();
   // Its lapse timer stays set and finds it approved (lapse acts only on an open row).
   const api = apiFor(c);
+  let posted = true;
   try {
     if (api && d.channel_id) {
       if (p.message_id) await showDecision(c.db, api, c.guild.id, d.channel_id, pid, p.message_id, 'approved', c.userId, c.member.nick || c.member.user.global_name || c.member.user.username);
-      await refreshStandings(c.db, api, c.guild.id, d.channel_id, p.kind === 'correction' ? [p.pool, POOL_GUILD] : [p.pool]);
+      if (p.event_id) {
+        const name = (await poolNames(c.db, [p.pool])).get(p.pool)!;
+        posted = await postBatch(c, d, api, { title: event?.title ?? '', pool: { key: p.pool, name }, points: p.amount, reason: p.reason, actor: c.userId, at, by: by(c), frozen: members.filter((m) => m.frozen) });
+      } else await refreshStandings(c.db, api, c.guild.id, d.channel_id, p.kind === 'correction' ? [p.pool, POOL_GUILD] : [p.pool]);
     }
   } finally {
     spent(c, api);
   }
-  return ephemeral(DKP_COPY.approvedReply);
+  // Order 34: a correction after a linked raid closed can change who was a no-show.
+  if (p.kind === 'correction' && p.raid_id !== null) await redrawNoShows(c, p.raid_id);
+  return ephemeral(posted ? DKP_COPY.approvedReply : BATCH_COPY.approvedQuiet);
 }
 
 async function settings(c: Ctx, opts: Option[], d: DkpState): Promise<MessageReply> {

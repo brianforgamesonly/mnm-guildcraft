@@ -5,6 +5,7 @@
 import type { Env } from '../env.ts';
 import { UNKNOWN_MESSAGE, type BotApi } from '../board/api.ts';
 import { button, EMBED_LIMITS, md, memberTag, NO_PINGS, row, STYLE_PRIMARY, STYLE_SECONDARY, type Embed } from '../discord.ts';
+import { dkpRead, type EventRaid } from '../dkp/ledger.ts';
 import { cardRefused } from '../dkp/stale.ts';
 import { EVENT_COPY } from './copy.ts';
 import type { EventSettings } from './settings.ts';
@@ -130,7 +131,7 @@ const MORE_RESERVE = EVENT_COPY.more(9999).length + 2;
  * The header, then each section's lines, into the description and then fields, within Discord's limits. Stops at the
  * whole embed's 6,000 characters (less the title and footer) or 25 fields, and says how many lines it left out.
  */
-export function layoutRoster(header: string, sections: Section[], reserved: number): Pick<Embed, 'description' | 'fields'> {
+export function layoutRoster(header: string, sections: Section[], reserved: number, moreText: (n: number) => string = EVENT_COPY.more): Pick<Embed, 'description' | 'fields'> {
   const total = EMBED_LIMITS.total - reserved - MORE_RESERVE;
   const lines = sections.flatMap((x) => [{ text: `**${x.head}**`, head: x.head, first: true }, ...x.lines.map((text) => ({ text, head: x.head, first: false }))]);
   let description = header;
@@ -166,20 +167,45 @@ export function layoutRoster(header: string, sections: Section[], reserved: numb
   }
   const left = lines.slice(i).filter((l) => !l.first).length;
   if (left) {
-    const more = EVENT_COPY.more(left);
+    const more = moreText(left);
     if (fields.length) fields[fields.length - 1].value += `\n${more}`;
     else description += `\n${more}`;
   }
   return { description, ...(fields.length ? { fields } : {}) };
 }
 
-function header(e: EventRow, now: number): string {
+/** Order 34: no-shows take at most this much of the card, whole names only, so the roster keeps its room. */
+const NO_SHOWS_MAX = 1500;
+
+/** Order 34: as many whole names as fit in `max` characters, a cut mention being no use, and how many didn't. */
+export function wholeNames(tags: string[], max: number): string {
+  let used = 0;
+  let shown = 0;
+  while (shown < tags.length && used + tags[shown].length + 2 <= max) used += tags[shown++].length + 2;
+  const left = tags.length - shown;
+  return `${tags.slice(0, shown).join(', ')}${left ? ` ${EVENT_COPY.andMore(left)}` : ''}`;
+}
+
+/**
+ * Order 34: the card's no-shows line, worked out from the rows each time the card is drawn: Signed up, and on no kill's roster
+ * (a flat payout is one) of the linked raid. Null until that raid closes. Names show; nobody is pinged (NO_PINGS).
+ */
+export function noShowsLine(signups: SignupRow[], raid: EventRaid | null): string | null {
+  if (!raid?.closed) return null;
+  if (!raid.kills) return EVENT_COPY.noShowsNotRecorded;
+  const was = new Set(raid.attended);
+  const tags = signups.filter((s) => s.status === 'signed_up' && !was.has(s.member_id)).sort((a, b) => a.name.localeCompare(b.name)).map((s) => memberTag(s.member_id, s.name));
+  return tags.length ? EVENT_COPY.noShows(wholeNames(tags, NO_SHOWS_MAX)) : EVENT_COPY.noShowsNone;
+}
+
+function header(e: EventRow, now: number, noShows: string | null): string {
   const start = Date.parse(e.start_at);
   const hours = Math.round((e.duration_minutes / 60) * 100) / 100;
   const lock = e.lock_at ? Date.parse(e.lock_at) : null;
   const zone = e.zone_key ? md(e.zone_name ?? e.zone_key) : null;
   return [
     e.status === 'cancelled' ? EVENT_COPY.cancelledLine(memberTag(e.cancelled_by ?? '', e.canceller_name ?? e.cancelled_by ?? ''), e.cancel_reason ?? '') : e.status === 'closed' ? EVENT_COPY.closedLine : null,
+    noShows,
     `${stamp(start, 'F')} (${stamp(start, 'R')})`,
     [EVENT_COPY.duration(hours), zone, EVENT_COPY.posted(memberTag(e.posted_by, e.poster_name ?? e.posted_by))].filter(Boolean).join(' · '),
     e.status === 'open' || e.status === PREVIEW ? (lock === null ? EVENT_COPY.noLock : lock <= now ? EVENT_COPY.locked(stamp(lock, 'f')) : EVENT_COPY.locks(stamp(lock, 'f'), stamp(lock, 'R'))) : null,
@@ -199,14 +225,14 @@ export function cardButtons(e: Pick<EventRow, 'id' | 'type'>): unknown[] {
 }
 
 /** The card's embed and buttons. Only an open event has buttons (a preview carries its own). */
-export function cardMessage(e: EventRow, signups: SignupRow[], s: EventSettings, now: number): { embeds: Embed[]; components: unknown[] } {
+export function cardMessage(e: EventRow, signups: SignupRow[], s: EventSettings, now: number, noShows: string | null = null): { embeds: Embed[]; components: unknown[] } {
   const title = `${e.status === 'cancelled' ? EVENT_COPY.cancelledTag : ''}${md(s.type_labels[e.type])} · ${md(e.title)}`.slice(0, EMBED_LIMITS.title);
   const declined = signups.filter((x) => x.status === 'declined').length;
   const left = signups.filter((x) => x.status === 'left').length;
   const going = signups.filter((x) => x.status === 'signed_up').length;
   const footer = [EVENT_COPY.countLine(statusLabel('signed_up', e.type), countOf(going, e.capacity)), declined ? EVENT_COPY.declinedCount(declined) : null, left ? EVENT_COPY.leftCount(left) : null].filter(Boolean).join(' · ');
   const sections = rosterSections(e, signups, s);
-  const body = layoutRoster(header(e, now), sections, title.length + footer.length);
+  const body = layoutRoster(header(e, now, noShows), sections, title.length + footer.length);
   const embed: Embed = { title, ...body, footer: { text: footer } };
   return { embeds: [embed], components: e.status === 'open' ? cardButtons(e) : [] };
 }
@@ -221,7 +247,10 @@ export const messageLink = (guildId: string, channelId: string, messageId: strin
 export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, state: EventState, id: number, now: number, repost = true) {
   const e = await loadEvent(env.DB, guildId, id);
   if (!e || e.status === PREVIEW || !state.channel_id) return null;
-  const m = cardMessage(e, await loadSignups(env.DB, id), state.settings, now);
+  const signups = await loadSignups(env.DB, id);
+  // Order 34: only a closed event can have a closed linked raid, so every other draw reads nothing more.
+  const raid = e.status === 'closed' ? (await dkpRead(env.DB, guildId, { pools: [], eventRaid: id })).eventRaid : null;
+  const m = cardMessage(e, signups, state.settings, now, noShowsLine(signups, raid));
   const body = { ...m, allowed_mentions: NO_PINGS };
   // Post is still saving the card's id: posting here would make a second card.
   if (!e.message_id) return null;

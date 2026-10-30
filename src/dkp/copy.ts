@@ -53,6 +53,27 @@ export const DKP_COPY = {
   unknownZone: (typed: string) => `No zone is called **${md(typed)}**.`,
 } as const;
 
+/** Order 34: adjusting a whole event. Members are memberTag; nobody is pinged. */
+export const BATCH_COPY = {
+  either: 'Pick either `member:` or `event:`.',
+  needsPool: 'Pick a `pool:` for a change to one member.',
+  cancelled: "A cancelled event can't be adjusted.",
+  noOne: (title: string) => `No one on **${md(title)}**'s roster is eligible, so nothing was changed.`,
+  onlyYou: (title: string) => `Nobody changes their own points, so you were skipped, and no one else on **${md(title)}**'s roster is eligible. Nothing was changed.`,
+  youSkipped: 'Nobody changes their own points, so you were skipped.',
+  frozenSkipped: (who: string) => `Skipped as frozen: ${who}.`,
+  inBatch: "You're in this batch, so another officer has to approve it.",
+  allFrozen: 'Everyone in this batch is frozen, so there is no one to pay. It lapses by itself.',
+  approvedQuiet: 'Approved. The change is applied, but I could not post it in GC-DKP.',
+  more: (n: number) => `+${n} more: \`/dkp history\``,
+  cardWho: (title: string, n: number, names: string) => `everyone on **${md(title)}** (${plural(n, 'member')}: ${names})`,
+  head: (points: number, title: string, pool: string, n: number, by: string, reason: string) =>
+    `**${points > 0 ? '+' : ''}${points} in ${md(pool)}** for ${plural(n, 'member')} on **${md(title)}**. By ${by}. Reason: ${md(reason)}`,
+  paidHead: 'Changed',
+  frozenHead: 'Skipped (frozen)',
+  line: (member: string, balance: number, cut: number) => `${member}: now ${balance}${cut ? `; ${cut} over the cap was not added` : ''}`,
+} as const;
+
 /** Order 29, PR B: auctions (docs/PRD.md "Order 29: spending points"). Members are memberTag; nobody is pinged. */
 export const AUCTION_COPY = {
   auctionDrop: 'Auction a drop',

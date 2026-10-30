@@ -21,7 +21,7 @@ export async function clearDkp() {
   await env.DB.batch([
     ...DKP_TRIGGERS.map((t) => env.DB.prepare(`DROP TRIGGER IF EXISTS ${t.name}`)),
     ...[
-      'dkp_ledger', 'dkp_purchase', 'dkp_listing', 'dkp_nudge', 'dkp_bid', 'dkp_wishlist', 'dkp_auction', 'dkp_kill_member', 'dkp_pending', 'dkp_recheck', 'dkp_kill', 'dkp_attendance', 'dkp_raid', 'dkp_pool',
+      'dkp_ledger', 'dkp_purchase', 'dkp_listing', 'dkp_nudge', 'dkp_bid', 'dkp_wishlist', 'dkp_auction', 'dkp_kill_member', 'dkp_pending_member', 'dkp_pending','dkp_recheck', 'dkp_kill', 'dkp_attendance', 'dkp_raid', 'dkp_pool',
       'dkp_named_value', 'dkp_setting', 'dkp_guild',
     ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     ...DKP_TRIGGERS.map((t) => env.DB.prepare(t.sql)),

@@ -8,6 +8,7 @@ import { renderPending, showDecision } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
 import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
 import { renderListing } from './shop.ts';
+import { markStale } from './stale.ts';
 import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
 import { TIMER_CALL_CAP, type DueHandler, type DueResult, type ItemRun } from './due-types.ts';
@@ -44,7 +45,8 @@ const check: Handler = async (env, guildId, id, _due, now) => {
   const r = await closeCheck(env.DB, guildId, Number(id), now);
   if (r === null) return null;
   if ('again' in r) return { again: r.again };
-  return { schedule: [{ key: `render:${r.raidId}`, due: now }] };
+  if (r.closedEvent) await markStale(env.DB, guildId, `evcard:${r.closedEvent}`, { status: 0 }).run();
+  return { schedule: [{ key: `render:${r.raidId}`, due: now }, ...(r.closedEvent ? [{ key: `evcard:${r.closedEvent}`, due: now }] : [])] };
 };
 
 /** close:<raid id>: the raid closes itself at its closes_at. */

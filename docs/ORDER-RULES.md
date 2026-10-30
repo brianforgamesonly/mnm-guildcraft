@@ -473,4 +473,6 @@ Order 34 is the Events module, part 3: the DKP link (docs/PRD.md, "Events module
 - A raid with no linked event behaves exactly as today. No check and no marks.
 - Events never pays or removes points by itself. The Present check only marks or refuses taps. Points still come from kills, flat payouts, standby and adjustments.
 - One function decides who is on an event's roster (src/events/eligible.ts `onRoster`), and every route calls it.
+- A foreign key names only a table created before the one holding it. A D1 export writes tables in creation order, and SQLite refuses a row whose key names a table that doesn't exist yet, so a later key makes the dump unloadable as soon as that table has a row (dev's backup dry run, run 41134004732). test/worker/schema.test.ts derives this from the live schema. A column pointing at a later table holds the id with no REFERENCES, and the code keeps it true.
+- No-shows and raid-event attendance are derived, never stored: dkpRead reads them from dkp_kill_member and the sign-up rows (order 27's one reader), and a flat payout's roster is there too (src/dkp/raid.ts `recordKill`).
 - Failed runs: every one is listed in the FINAL (order 12).

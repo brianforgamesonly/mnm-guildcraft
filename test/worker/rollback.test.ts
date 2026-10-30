@@ -26,6 +26,8 @@ import down21 from '../../scripts/rollback/0021_dkp.down.sql?raw';
 import up21 from '../../migrations/0021_dkp.sql?raw';
 import down22 from '../../scripts/rollback/0022_npc_tags.down.sql?raw';
 import up22 from '../../migrations/0022_npc_tags.sql?raw';
+import down28 from '../../scripts/rollback/0028_pending_batch.down.sql?raw';
+import up28 from '../../migrations/0028_pending_batch.sql?raw';
 import down27 from '../../scripts/rollback/0027_raid_event.down.sql?raw';
 import up27 from '../../migrations/0027_raid_event.sql?raw';
 import down25 from '../../scripts/rollback/0025_card_stale.down.sql?raw';
@@ -90,7 +92,8 @@ it('order 28: 0022 down, then up again, restores the npc columns; down leaves no
 });
 
 it('order 29: 0023 down, then up again, restores the schema; down leaves no trace of it and the ledger its 0021 shape', async () => {
-  await run(down27); // order 34's column sits after order 29's
+  await run(down28); // order 34's columns sit after order 29's
+  await run(down27);
   const before = await schema();
   await runWhole(down23);
   const without = await schema();
@@ -108,20 +111,25 @@ it('order 29: 0023 down, then up again, restores the schema; down leaves no trac
   expect(cols.at(-1)).toBe('standby_once');
   expect(withTriggers(up23).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
   await run(up27);
+  await run(up28);
 });
 
-it('order 34: 0027 down, then up again, restores the schema; down leaves no trace of it', async () => {
+it('order 34: 0028 and 0027 down, then up again, restore the schema; down leaves no trace of them', async () => {
   const before = await schema();
+  await run(down28);
   await run(down27);
   const after = await schema();
-  expect(after.some((r) => r.name === 'dkp_raid_event')).toBe(false);
+  expect(after.some((r) => r.name === 'dkp_raid_event' || r.name === 'dkp_pending_member')).toBe(false);
   expect(after.find((r) => r.name === 'dkp_raid')!.sql).not.toContain('event_id');
+  expect(after.find((r) => r.name === 'dkp_pending')!.sql).not.toContain('event_id');
   await run(up27);
+  await run(up28);
   expect((await schema()).map((r) => `${r.type}:${r.name}`)).toEqual(before.map((r) => `${r.type}:${r.name}`));
 });
 
 it('order 27: 0021 down, then up again, restores the schema; down leaves no trace of it', async () => {
-  // Order 29: 0023 rebuilds 0021's ledger and names its tables, so it comes off first and goes back last. Order 34's column too.
+  // Order 29: 0023 rebuilds 0021's ledger and names its tables, so it comes off first and goes back last. Order 34's columns too.
+  await run(down28);
   await run(down27);
   await runWhole(down23);
   const before = await schema();
@@ -132,6 +140,7 @@ it('order 27: 0021 down, then up again, restores the schema; down leaves no trac
   expect(withTriggers(up21).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
   await runWhole(up23);
   await run(up27);
+  await run(up28);
 });
 
 it('order 26: 0020 down, then up again, restores the schema; down leaves no trace of it', async () => {

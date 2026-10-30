@@ -29,6 +29,7 @@ import {
   historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, rosterAddStatement, rosterRemoveStatement, standbyReverseStatement, standbyStatement, type LedgerRow,
 } from './ledger.ts';
 import { editCard, editCardItem, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import { markStale } from './stale.ts';
 import type { Settings } from './settings.ts';
 import type { DkpState } from './state.ts';
 
@@ -422,6 +423,15 @@ export async function correctionStatements(db: D1Database, guildId: string, cap:
   return out;
 }
 
+/** Order 34: who was at a closed linked raid changed, so its event card's no-shows are drawn again. One statement. */
+export async function redrawNoShows(c: Ctx, raidId: number): Promise<void> {
+  const r = await c.db.prepare("SELECT r.event_id FROM dkp_raid r JOIN event e ON e.id = r.event_id WHERE r.id = ? AND r.closed_at IS NOT NULL AND e.status = 'closed'").bind(raidId).first<{ event_id: number }>();
+  if (!r) return;
+  // Flagged too: with the Events module off this item does nothing, and the sweep draws the card once it's back.
+  await markStale(c.db, c.guild.id, `evcard:${r.event_id}`, { status: 0 }).run();
+  c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${r.event_id}`, due: Date.now() }] };
+}
+
 export const correctCommand: DkpRun = async (c, opts, d) => {
   const member = optString(opts, 'member') ?? '';
   const action = optString(opts, 'action') === 'add' ? 'add' : 'remove';
@@ -455,6 +465,7 @@ export const correctCommand: DkpRun = async (c, opts, d) => {
     if (api) c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
   }
   rerender(c, scope.raid.id);
+  await redrawNoShows(c, scope.raid.id);
   return ephemeral(RAID_COPY.correctedReply);
 };
 
@@ -593,11 +604,11 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
 // ---------------------------------------------------------------- timers (src/dkp/due.ts)
 
 /** check:<kill id>: members credited on the kill who did not tap again lose it, and are absent from now on. Idempotent. */
-export async function closeCheck(db: D1Database, guildId: string, killId: number, nowMs: number): Promise<{ again: number } | { raidId: number } | null> {
+export async function closeCheck(db: D1Database, guildId: string, killId: number, nowMs: number): Promise<{ again: number } | { raidId: number; closedEvent: number | null } | null> {
   const k = await db
-    .prepare('SELECT k.raid_id, r.pool, r.standby_once, k.check_due FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ? AND k.check_closed_at IS NULL AND k.check_due IS NOT NULL')
+    .prepare('SELECT k.raid_id, r.pool, r.standby_once, r.closed_at, r.event_id, k.check_due FROM dkp_kill k JOIN dkp_raid r ON r.id = k.raid_id WHERE k.id = ? AND r.guild_id = ? AND k.check_closed_at IS NULL AND k.check_due IS NOT NULL')
     .bind(killId, guildId)
-    .first<{ raid_id: number; pool: string; standby_once: number; check_due: string }>();
+    .first<{ raid_id: number; pool: string; standby_once: number; closed_at: string | null; event_id: number | null; check_due: string }>();
   if (!k) return null;
   if (Date.parse(k.check_due) > nowMs) return { again: Date.parse(k.check_due) };
   // Order 29: who was at the kill is its roster, never the ledger.
@@ -624,7 +635,8 @@ export async function closeCheck(db: D1Database, guildId: string, killId: number
         ]
       : []),
   ]);
-  return { raidId: k.raid_id };
+  // Order 34: a window that closes after a linked raid did can change its no-shows.
+  return { raidId: k.raid_id, closedEvent: k.closed_at && k.event_id && losers.length && (await closedEvent(db, k.event_id)) ? k.event_id : null };
 }
 
 /**

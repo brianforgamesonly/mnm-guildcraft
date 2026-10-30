@@ -122,12 +122,13 @@ export const DKP_COMMAND = {
     {
       type: SUBCOMMAND,
       name: 'adjust',
-      description: "Officers: change a member's points, with a reason (posted publicly)",
+      description: "Officers: change a member's points, or a whole event's, with a reason (posted publicly)",
       options: [
-        { type: USER, name: 'member', description: 'The member', required: true },
-        { type: STRING, name: 'pool', description: 'The pool: a raid zone, or the guild pool', required: true, autocomplete: true, max_length: 100 },
         { type: INTEGER, name: 'points', description: 'Points to add (negative to take away)', required: true, min_value: -100000, max_value: 100000 },
         { type: STRING, name: 'reason', description: 'Why (shown publicly)', required: true, max_length: 200 },
+        { type: USER, name: 'member', description: 'The member (or use event:)' },
+        { type: STRING, name: 'pool', description: "The pool: a raid zone, or the guild pool (event: defaults to its raid's zone)", autocomplete: true, max_length: 100 },
+        { type: STRING, name: 'event', description: "Everyone on this event's roster (or use member:)", autocomplete: true, max_length: 100 },
       ],
     },
     {
