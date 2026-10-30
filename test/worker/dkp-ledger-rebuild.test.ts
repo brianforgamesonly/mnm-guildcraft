@@ -61,7 +61,10 @@ it('0023 copies every ledger row unchanged (count and SHA-256 of every column ma
   await runWhole(up23);
   expect(await proof()).toEqual(before);
   // The columns 0023 adds are empty on every copied row; no row of a new kind.
-  expect(await one(AFTER_SQL)).toEqual({ new_rows: 0, roster_rows: 3, roster_kills: 3, kills: 3, roster_with_state: 0, kill_ledger_rows: 12, paid_kills_without_roster: 0, triggers: 2 });
+  expect(await one(AFTER_SQL)).toEqual({ new_rows: 0, roster_rows: 3, roster_kills: 3, kills: 3, roster_with_state: 0, kill_ledger_rows: 12, missing_rosters: 0, triggers: 2 });
+  // A kill recorded by the old code after the backfill (the deploy window) shows as a missing roster.
+  await env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, raid_id, kill_id, actor, at) VALUES (?, ?, 'the ruins', 10, 0, 10, 'kill', 1, 3, 'bot', ?)").bind(G, X, at).run();
+  expect(await one<{ missing_rosters: number }>(AFTER_SQL)).toMatchObject({ missing_rosters: 1 });
   // Kill 1: Y only (X's kill row is reversed; Y's reversal is re-added). Kill 2: Z, though it paid 0. Kill 3: Z (capped).
   expect(await all('SELECT kill_id, member_id, state FROM dkp_kill_member ORDER BY kill_id, member_id')).toEqual([
     { kill_id: 1, member_id: Y, state: null },
