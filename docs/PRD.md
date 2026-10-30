@@ -903,3 +903,4 @@ Marks are derived: "(not signed up)" and the bench list are worked out each time
 - The card's "(not signed up)" mark shows under Require as well as Flag, and on the Standby line as well as Present: such a member may have tapped before Require was set, or been taken off the roster after.
 - Once an event has closed, Require only marks: its roster is final and no officer can add to it, so the refusal's own advice couldn't work.
 - The bench list is shown only while the raid is open.
+- A sign-up or a roster change shows on the raid card at its next redraw (a tap or a kill), not at once, so an event's button presses cost the raid card nothing. The check at each tap always reads the current roster.

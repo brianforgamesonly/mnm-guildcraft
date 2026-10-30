@@ -174,6 +174,35 @@ describe('ITEM 1: linking', () => {
     expect((await raidRow()).event_id).toBe(far);
   });
 
+  it('a raid card Discord refuses leaves the event linkable by the next /dkp raid', async () => {
+    const id = await openEvent(10 * MIN);
+    fake.refuse = (m, p) => (m === 'POST' && /^\/channels\/\d+\/messages$/.test(p) ? json({ message: 'down', code: 0 }, 500) : null);
+    expect((await openRaid()).data.content).toBe(RAID_COPY.cannotPost);
+    expect((await raidRow()).event_id).toBeNull();
+    fake.refuse = null;
+    expect((await openRaid()).data.content).toContain('Linked to');
+    expect((await raidRow()).event_id).toBe(id);
+  });
+
+  it('an event still being posted has no card yet, and is not linked', async () => {
+    const id = await openEvent(10 * MIN);
+    await env.DB.prepare('UPDATE event SET message_id = NULL WHERE id = ?').bind(id).run();
+    await openRaid();
+    expect((await raidRow()).event_id).toBeNull();
+  });
+
+  it('a raid outliving its cancelled event leaves the event card alone at close', async () => {
+    const id = await openEvent(10 * MIN);
+    await openRaid();
+    const { id: raid } = await raidRow();
+    await event(officer, 'cancel', { event: String(id), reason: 'nope' });
+    await timersOf(env, GUILD).cancel([`evcard:${id}`, `evgone:${id}`]);
+    await pressAs(officer, `${CLOSE_PREFIX}${raid}`);
+    expect((await items())[`evcard:${id}`]).toBeUndefined();
+    expect(await count('card_stale')).toBe(0);
+    expect(await one('SELECT status FROM event WHERE id = ?', id)).toEqual({ status: 'cancelled' });
+  });
+
   it('an option naming nothing linkable opens no raid', async () => {
     const r = await openRaid({ event: 'not an event' });
     expect(r.data.content).toBe(RAID_COPY.notLinkable);
@@ -493,6 +522,32 @@ describe('ITEM 4: order 33\'s three gaps', () => {
     expect(dmsTo(uid(1)).filter((d) => d.content.startsWith('Reminder')).length).toBe(1);
     expect(dmsTo(uid(6)).length).toBe(1);
     expect(dmsTo(uid(5))).toEqual([]);
+  }, 30_000);
+
+  it('a member promoted ahead of the cursor gets one reminder, even when the chunk stops after them', async () => {
+    const id = await openEvent(20 * MIN);
+    await env.DB.prepare('UPDATE event SET capacity = 2').run();
+    await signup(id, uid(1), 'signed_up');
+    await signup(id, uid(2), 'signed_up');
+    await signup(id, uid(9), 'waitlist', { queued: '2026-10-30T00:00:00.000Z' });
+    // uid(1) has left, so uid(9), past the end of the walk, moves up and joins in id order. uid(2)'s send fails once, before uid(9)'s.
+    let failed = false;
+    fake.refuse = (m, p) => {
+      if (m === 'GET' && p.endsWith(`/members/${uid(1)}`)) return json({ message: 'Unknown Member', code: 10007 }, 404);
+      if (m === 'POST' && p === `/channels/9${uid(2)}/messages` && !failed) {
+        failed = true;
+        return json({ message: 'down', code: 0 }, 503);
+      }
+      return null;
+    };
+    await store(`evremind:${id}`, { due: Date.now() - 1 });
+    await alarm();
+    expect(failed).toBe(true);
+    const held = await stored(`evremind:${id}`);
+    await store(`evremind:${id}`, { ...held, due: Date.now() - 1 });
+    await alarm();
+    expect(dmsTo(uid(2)).length).toBe(1);
+    expect(dmsTo(uid(9)).filter((d) => d.content.startsWith('Reminder')).length).toBe(1);
   }, 30_000);
 
   it('a cancel landing mid-send stops the remaining reminders', async () => {

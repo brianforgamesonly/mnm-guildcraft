@@ -202,18 +202,23 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
   const promoted = await leftAndPromoted(env, api, e, state, left, new Date(now).toISOString(), EVENT_COPY.leftLineReminder);
   const last = results.at(-1)?.member_id ?? after;
   const more = chosen.length === size || results.length < chosen.length;
-  // A member who moved up where the walk won't reach them goes in the cursor before anything else can fail: they get both messages.
+  // A member who moved up where the walk won't reach them gets both messages. Behind the cursor, they go in it before anything
+  // else can fail. Ahead of it, they join this chunk in their place: the cursor passes them, or the next chunk finds them.
   const missed = promoted.filter((m) => !more || m <= last);
-  const owing = [...new Set([...(walked?.owed ?? []), ...missed])];
-  if (missed.length) await run.save(reminderCursor(e.start_at, after, owing));
+  const behind = missed.filter((m) => m <= after);
+  const owing = [...new Set([...(walked?.owed ?? []), ...behind])];
+  if (behind.length) await run.save(reminderCursor(e.start_at, after, owing));
   // At once: these rows are committed, and whatever happens below, the card and the message are owed.
   const follow = [...(left.length ? [{ key: `evcard:${id}`, due: now }] : []), ...promoItems(eventId, promoted, now)];
   if (follow.length) await run.schedule?.(follow);
   // Those owed go first, while they still qualify. One message goes out only if the event is still as this run read it.
-  const found = owing.length
-    ? (await env.DB.prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id IN (SELECT value FROM json_each(?)) AND coalesce(p.reminders_off, 0) = 0`).bind(eventId, JSON.stringify(owing)).all<Recipient>()).results
+  const wanted = [...owing, ...missed.filter((m) => m > after)];
+  const found = wanted.length
+    ? (await env.DB.prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id IN (SELECT value FROM json_each(?)) AND coalesce(p.reminders_off, 0) = 0`).bind(eventId, JSON.stringify(wanted)).all<Recipient>()).results
     : [];
-  const owed = new Set(found.map((r) => r.member_id));
+  const first = found.filter((r) => r.member_id <= after);
+  const owed = new Set(first.map((r) => r.member_id));
+  recipients = [...recipients, ...found.filter((r) => r.member_id > after)].sort((a, b) => (a.member_id < b.member_id ? -1 : 1));
   let cursor = after;
   const save = run.save;
   const done = async (m: string) => {
@@ -224,7 +229,7 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
     const live = await env.DB.prepare('SELECT status, start_at FROM event WHERE id = ?').bind(eventId).first<{ status: string; start_at: string }>();
     return live?.status === 'open' && live.start_at === e.start_at;
   };
-  const stopped = await walk(env, api, guildId, 'reminder', eventId, [...found, ...recipients.filter((r) => !owed.has(r.member_id))], (x) => reminderText(e, state, x, link), done, same);
+  const stopped = await walk(env, api, guildId, 'reminder', eventId, [...first, ...recipients], (x) => reminderText(e, state, x, link), done, same);
   // Those who left move the cursor too: the next chunk starts after the last one looked up.
   if (!stopped && last > cursor) await run.save(reminderCursor(e.start_at, last, [...owed]));
   return nextRun(stopped, more, now);

@@ -20,7 +20,7 @@ import {
   ADMINISTRATOR, button, CREATE_PRIVATE_THREADS, ephemeral, GUILD_CATEGORY, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, row, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, STYLE_DANGER, STYLE_PRIMARY,
   VIEW_CHANNEL, type MessageReply,
 } from '../discord.ts';
-import { closeWithRaid } from '../events/link.ts';
+import { closedEvent, closeWithRaid } from '../events/link.ts';
 import { channelBits, PERMISSION_NAMES } from '../permissions.ts';
 import { DKP_COPY } from './copy.ts';
 import { DKP_COMMAND } from './definition.ts';
@@ -180,7 +180,7 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     audit(c.db, g, c.userId, 'dkp.off', `channel:${state.channel_id}`, { enabled: true }, { enabled: false }),
   ]);
   c.effects.dkpCancel = g;
-  if (open?.event_id) c.effects.dkpTimers = { guildId: g, items: [{ key: `evcard:${open.event_id}`, due: Date.now() }] };
+  if (open?.event_id && (await closedEvent(c.db, open.event_id))) c.effects.dkpTimers = { guildId: g, items: [{ key: `evcard:${open.event_id}`, due: Date.now() }] };
   // DKP removed mid-raid: the raid is closed at once, and its card says so (its buttons answer "off" from now on).
   if (open && closed.meta.changes) await showRemoved(c.db, api, g, state.channel_id, open.id);
   await showCancelled(c.db, api, c.guild, state.channel_id, cancelled.results.filter((r) => r.message_id).map((r) => r.id));

@@ -2,7 +2,6 @@
 // it opens and never again, so an event created later can't be linked to it. A cancelled event counts as no link, and so does
 // a server whose Events module is off: the raid then behaves as an unlinked one. Marks are worked out each time a card is
 // drawn, never stored. Events never pays or removes points: this file only reads, and closes the event with its raid.
-import { markStale } from '../dkp/stale.ts';
 import { rosterMark } from './eligible.ts';
 import { PRESENT_CHECK, presentCheckOf, type PresentCheck } from './settings.ts';
 import { ON_ROSTER, type Status } from './types.ts';
@@ -75,7 +74,8 @@ export interface Linkable {
   title: string;
   start_at: string;
 }
-const OPEN_RAID_EVENT = "e.guild_id = ?1 AND e.status = 'open' AND e.type = 'raid' AND NOT EXISTS (SELECT 1 FROM dkp_raid r WHERE r.event_id = e.id)";
+/** A card that hasn't posted has no message_id: Post can still put that row back to a preview, which must stay unlinked. */
+const OPEN_RAID_EVENT = "e.guild_id = ?1 AND e.status = 'open' AND e.type = 'raid' AND e.message_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dkp_raid r WHERE r.event_id = e.id)";
 /** The SQL each list of linkable events shares (src/commands/autocomplete.ts). */
 export const SQL_LINKABLE = OPEN_RAID_EVENT;
 
@@ -93,10 +93,14 @@ export const pickableEvent = (db: D1Database, guildId: string, id: number) => db
 
 /**
  * For the batch that closes a linked raid, however it closes: the event closes too, only once the raid really has (override
- * 3 of order 32's "The event closes 8 hours after start"). The card is flagged out of date in the same batch, so the sweep
- * draws it whatever follows, Events module off included: order 33's flag waits for the module to come back.
+ * 3 of order 32's "The event closes 8 hours after start"). A closed event's card is flagged out of date in the same batch,
+ * so the sweep draws it whatever follows, Events module off included: order 33's flag waits for the module to come back. A
+ * cancelled event's card isn't touched: nothing about it changed, and order 33's repost is only for a change.
  */
 export const closeWithRaid = (db: D1Database, guildId: string, raidId: number, eventId: number, at: string): D1PreparedStatement[] => [
   db.prepare("UPDATE event SET status = 'closed', closed_at = ?1 WHERE id = ?2 AND guild_id = ?3 AND status = 'open' AND EXISTS (SELECT 1 FROM dkp_raid r WHERE r.id = ?4 AND r.closed_at IS NOT NULL)").bind(at, eventId, guildId, raidId),
-  markStale(db, guildId, `evcard:${eventId}`, { status: 0 }),
+  db.prepare("INSERT INTO card_stale (guild_id, item, since, status, code) SELECT ?1, ?2, ?3, 0, NULL FROM event e WHERE e.id = ?4 AND e.status = 'closed' ON CONFLICT (guild_id, item) DO NOTHING").bind(guildId, `evcard:${eventId}`, at, eventId),
 ];
+
+/** Whether the linked event's card needs drawing after its raid closed. One statement, only for a linked raid. */
+export const closedEvent = async (db: D1Database, eventId: number) => !!(await db.prepare("SELECT 1 FROM event WHERE id = ? AND status = 'closed'").bind(eventId).first());

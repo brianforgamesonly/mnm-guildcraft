@@ -18,7 +18,7 @@ import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, STYLE_SUCCESS, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { EVENT_COPY } from '../events/copy.ts';
 import { presentVerdict } from '../events/eligible.ts';
-import { closeWithRaid, linkedRoster, marked, matchEvents, pickableEvent, tapLink, type EventLink, type Linkable, type LinkedRoster } from '../events/link.ts';
+import { closedEvent, closeWithRaid, linkedRoster, marked, matchEvents, pickableEvent, tapLink, type EventLink, type Linkable, type LinkedRoster } from '../events/link.ts';
 import { loadEvents } from '../events/state.ts';
 import { zoneKey } from '../zone/names.ts';
 import { AUCTION_DROP_PREFIX } from './auction.ts';
@@ -297,8 +297,9 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
     await refreshStandings(c.db, api, c.guild.id, d.channel_id, [zone.key]);
     const id = await postIn(api, d.channel_id, cardMessage(await cardData(c.db, raid!), c.guild.id));
     if (!id) {
-      // The card was refused: the raid closes at once, so the next /dkp raid is not refused as "already open".
-      await c.db.prepare("UPDATE dkp_raid SET closed_at = ?1, closed_by = 'bot', close_reason = 'officer' WHERE id = ?2 AND closed_at IS NULL").bind(now(), raid!.id).run();
+      // The card was refused: the raid closes at once, so the next /dkp raid is not refused as "already open". Order 34: a
+      // raid nobody saw never held its event, which the next /dkp raid can link.
+      await c.db.prepare("UPDATE dkp_raid SET closed_at = ?1, closed_by = 'bot', close_reason = 'officer', event_id = NULL WHERE id = ?2 AND closed_at IS NULL").bind(now(), raid!.id).run();
       return ephemeral(RAID_COPY.cannotPost);
     }
     await c.db.prepare('UPDATE dkp_raid SET message_id = ? WHERE id = ?').bind(id, raid!.id).run();
@@ -671,7 +672,7 @@ export async function closeRaid(db: D1Database, api: BotApi | null, guildId: str
     await postIn(api, channelId, { content: RAID_COPY.summary(data.zone, data.kills.length, earners.size, (paid?.points ?? 0) + (paid?.standby_points ?? 0), reason, paid?.standby ?? 0) });
     await refreshStandings(db, api, guildId, channelId, [closed.pool, POOL_GUILD]);
   }
-  return { eventId: closed.event_id };
+  return { eventId: closed.event_id && (await closedEvent(db, closed.event_id)) ? closed.event_id : null };
 }
 
 /** Remove DKP mid-raid: the card shows the raid closed (src/dkp/setup.ts closed it in D1). */
