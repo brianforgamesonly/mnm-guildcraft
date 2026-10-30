@@ -42,6 +42,9 @@ interface Item {
 }
 
 export class DkpTimers extends DurableObject<Env> {
+  /** The item alarm() is running. */
+  private running: string | null = null;
+
   /** Sets each item to its due time; an item already due earlier keeps the earlier time (coalescing). A card edit is paced. */
   async schedule(guildId: string, items: { key: string; due: number; later?: boolean }[]): Promise<void> {
     const s = this.ctx.storage;
@@ -56,8 +59,9 @@ export class DkpTimers extends DurableObject<Env> {
       for (const i of part) {
         const due = paced(i.key) ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
         const was = have.get(i.key);
-        // `later`: replace even with a later time.
-        if (!was || i.later || due < was.due) put[i.key] = { due };
+        // `later`: replace even with a later time. An item running now keeps its old time, so a change that lands during
+        // the run (a D1 or Discord wait lets this in) gets a time of its own, and alarm() keeps the item for another edit.
+        if (!was || i.later || due < was.due || i.key === this.running) put[i.key] = { due: i.key === this.running ? Math.max(due, was!.due + 1) : due };
       }
       if (Object.keys(put).length) await s.put(put);
     }
@@ -149,6 +153,7 @@ export class DkpTimers extends DurableObject<Env> {
       // Items left when the budget runs low stay due; the alarm below is set again at once for them.
       if (api && budgetLeft(api.budget) < 8) break;
       let r: Awaited<ReturnType<typeof runDue>> = null;
+      this.running = key;
       try {
         r = guildId ? await runDue(env, guildId, key, item.due, now, api) : null;
       } catch (e) {
@@ -158,6 +163,8 @@ export class DkpTimers extends DurableObject<Env> {
           await s.put(key, { due: Date.now() + RETRY_MS, tries });
           continue;
         }
+      } finally {
+        this.running = null;
       }
       if (r?.headers && paced(key)) {
         const pace = afterEdit((await s.get<Pace>(paceKey(key))) ?? START, Date.now(), r.headers);
@@ -165,7 +172,8 @@ export class DkpTimers extends DurableObject<Env> {
         console.log(JSON.stringify({ gc: 'dkp-card-edit', remaining: r.headers.remaining ?? null, reset_after: r.headers.resetAfter ?? null, retry_after: r.headers.retryAfter ?? null, gap_ms: pace.gap }));
       }
       if (r?.again !== undefined) await s.put(key, { due: r.again });
-      else await s.delete(key);
+      // A change landed during this run: its edit is still to come.
+      else if ((await s.get<Item>(key))?.due === item.due) await s.delete(key);
       if (r?.schedule?.length) await this.schedule(guildId!, r.schedule);
     }
     await this.arm();

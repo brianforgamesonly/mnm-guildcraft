@@ -7,12 +7,17 @@ import { EVENT_COPY } from './copy.ts';
 import { DEFAULT_TIME_ZONE, EVENT_SETTINGS, EVENTS_ROLE, eventSettingOf, roleLabelKey, SIGNUP_ROLE, SUPPORT_ON, TIME_ZONE, typeLabelKey, validTimeZone } from './settings.ts';
 import type { EventState } from './state.ts';
 import { ROLES, TYPES, type Role } from './types.ts';
+import { cancelCommand, createCommand, editCommand, listCommand } from './manage.ts';
 
 export type EventRun = (c: Ctx, opts: Option[], d: EventState) => Promise<MessageReply>;
 /** runner: isEventRunner · admin: Administrator or Manage Server · member: the member-role gate. */
 export type EventAccess = 'runner' | 'admin' | 'member';
 export const EVENT_ROUTES: Record<string, { access: EventAccess; run: EventRun }> = {
   'event settings': { access: 'admin', run: settings },
+  'event create': { access: 'runner', run: (c, o, d) => createCommand(c, o, d) },
+  'event edit': { access: 'runner', run: (c, o, d) => editCommand(c, o, d) },
+  'event cancel': { access: 'runner', run: (c, o, d) => cancelCommand(c, o, d) },
+  'event list': { access: 'member', run: (c, o, d) => listCommand(c, o, d) },
 };
 
 export const mayRunEvent = (c: Ctx, access: EventAccess, d: EventState) =>

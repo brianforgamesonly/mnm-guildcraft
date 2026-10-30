@@ -163,7 +163,9 @@ describe('copy rules over src/ (order 11)', () => {
   });
   for (const [rule, re] of rules)
     it(rule, () => {
-      const hits = Object.entries(SOURCES).flatMap(([file, text]) => text.split('\n').flatMap((l, i) => (re.test(l) ? [`${file}:${i + 1}: ${l.trim()}`] : [])));
+      // Order 32: one exemption, the stored status value of an event's preview (never shown, migrations/0024's CHECK).
+      const stored = (l: string) => l === "export const PREVIEW = 'draft';";
+      const hits = Object.entries(SOURCES).flatMap(([file, text]) => text.split('\n').flatMap((l, i) => (re.test(l) && !stored(l) ? [`${file}:${i + 1}: ${l.trim()}`] : [])));
       expect(hits).toEqual([]);
     });
 });
