@@ -177,6 +177,8 @@ export const LISTS: Record<string, Lister> = {
   '/event edit event': openEvents,
   '/event cancel event': openEvents,
   '/event list event': openEvents,
+  '/event roster event': openEvents,
+  '/event roster character': characters,
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;

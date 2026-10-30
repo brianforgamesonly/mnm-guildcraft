@@ -8,6 +8,7 @@ import { DEFAULT_TIME_ZONE, EVENT_SETTINGS, EVENTS_ROLE, eventSettingOf, roleLab
 import type { EventState } from './state.ts';
 import { ROLES, TYPES, type Role } from './types.ts';
 import { cancelCommand, createCommand, editCommand, listCommand } from './manage.ts';
+import { rosterCommand } from './press.ts';
 
 export type EventRun = (c: Ctx, opts: Option[], d: EventState) => Promise<MessageReply>;
 /** runner: isEventRunner · admin: Administrator or Manage Server · member: the member-role gate. */
@@ -18,6 +19,7 @@ export const EVENT_ROUTES: Record<string, { access: EventAccess; run: EventRun }
   'event edit': { access: 'runner', run: (c, o, d) => editCommand(c, o, d) },
   'event cancel': { access: 'runner', run: (c, o, d) => cancelCommand(c, o, d) },
   'event list': { access: 'member', run: (c, o, d) => listCommand(c, o, d) },
+  'event roster': { access: 'runner', run: (c, o, d) => rosterCommand(c, o, d) },
 };
 
 export const mayRunEvent = (c: Ctx, access: EventAccess, d: EventState) =>

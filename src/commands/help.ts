@@ -88,7 +88,7 @@ export const PAGES: { key: PageKey; label: string; before: string[]; after: stri
     key: 'events',
     label: 'Events',
     before: ['Raids and get-togethers with sign-ups. Event cards are in GC-Events; everyone in the server can see them.'],
-    after: [],
+    after: ["On a card, press a status to sign up. **Change character** and **Change role** keep your place. After the lock you can only press **Can't make it**."],
   },
 ];
 

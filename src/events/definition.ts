@@ -11,6 +11,7 @@ const SUBCOMMAND = 1;
 const STRING = 3;
 const INTEGER = 4;
 const BOOLEAN = 5;
+const USER = 6;
 const ROLE = 8;
 const NUMBER = 10;
 
@@ -76,6 +77,20 @@ export const EVENT_COMMAND = {
     },
     {
       type: SUBCOMMAND,
+      name: 'roster',
+      description: 'Officers: add, move or remove a member, with a public reason; officers may exceed a limit',
+      options: [
+        EVENT_OPTION,
+        { type: STRING, name: 'action', description: 'What to do', required: true, choices: [{ name: 'Add', value: 'add' }, { name: 'Move', value: 'move' }, { name: 'Remove', value: 'remove' }] },
+        { type: USER, name: 'member', description: 'The member', required: true },
+        { type: STRING, name: 'reason', description: 'Why (shown publicly)', required: true, max_length: 200 },
+        { type: STRING, name: 'status', description: 'Their status (Add: default signed up)', choices: [{ name: 'Signed up / Going', value: 'signed_up' }, { name: 'Tentative / Maybe', value: 'tentative' }, { name: 'Bench', value: 'bench' }, { name: 'Waitlist', value: 'waitlist' }, { name: "Can't make it", value: 'declined' }] },
+        { type: STRING, name: 'role', description: 'Their role', choices: ROLES.map((r) => ({ name: ROLE_DEFAULTS[r], value: r })) },
+        { type: STRING, name: 'character', description: 'Their character (default: their main)', autocomplete: true, max_length: 40 },
+      ],
+    },
+    {
+      type: SUBCOMMAND,
       name: 'settings',
       description: 'Admins: Events settings, posted publicly; leave the options out to see them',
       options: [
@@ -98,4 +113,4 @@ export const EVENT_COMMAND = {
 export const EVENT_DEFINED_LIST = EVENT_COMMAND.options.map((o) => ({ cmd: `/${EVENT_NAME} ${o.name}`, command: EVENT_NAME, description: o.description as string }));
 export const EVENT_DEFINED = new Set(EVENT_DEFINED_LIST.map((d) => d.cmd));
 /** The PRD's /event commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). */
-export const EVENT_COMING: string[] = ['/event roster'];
+export const EVENT_COMING: string[] = [];
