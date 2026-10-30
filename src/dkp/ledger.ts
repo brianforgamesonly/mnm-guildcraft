@@ -222,28 +222,79 @@ export interface Attendance {
 export const ATTENDANCE_DAYS = 30;
 const windowStart = (now: number) => new Date(now - ATTENDANCE_DAYS * 86_400_000).toISOString();
 
+/** Order 34: one member's linked raids in the window. module: the Events switch, read in the same statement. */
+export interface RaidEvents {
+  module: number | null;
+  signed_up: number;
+  attended: number;
+  no_shows: number;
+}
+/** Order 34: a linked raid, for its event card: whether it has closed, its kills and flat payouts, and who was at any of them. */
+export interface EventRaid {
+  closed: boolean;
+  kills: number;
+  attended: string[];
+}
+
 /**
  * Balances and attendance, the one place they are read (order 27). `pools`: which pools; `member`: one member (/me,
  * history) or every member with a row (standings). Attendance (30 days) only when asked: kills and flat payouts the member
- * was at in the pool (Present or Standby: on the kill's roster, order 29) ÷ those the pool held.
+ * was at in the pool (Present or Standby: on the kill's roster, order 29) ÷ those the pool held. Order 34: `raidEvents`, the
+ * same member's linked raids; `eventRaid`, an event's linked raid. Both read the kill's roster, never the ledger, and only
+ * Signed up counts toward signed up and no-shows. A cancelled event is no link.
  */
 export async function dkpRead(
   db: D1Database,
   guildId: string,
-  q: { pools: string[]; member?: string; attendance?: boolean; now?: number },
-): Promise<{ standings: Map<string, Standing[]>; attendance: Attendance[]; rowsRead: number }> {
+  q: { pools: string[]; member?: string; attendance?: boolean; now?: number; raidEvents?: boolean; eventRaid?: number },
+): Promise<{ standings: Map<string, Standing[]>; attendance: Attendance[]; raidEvents: RaidEvents | null; eventRaid: EventRaid | null; rowsRead: number }> {
   const pools = JSON.stringify(q.pools);
-  const stmts = [
+  const stmts: D1PreparedStatement[] = [];
+  const at: { standings?: number; attendance?: number; raidEvents?: number; eventRaid?: number } = {};
+  if (q.pools.length) {
+    at.standings = stmts.length;
     // Members with a row in the pool: the member table (the pool's members are a subset), then one indexed row each.
-    db
-      .prepare(
-        `SELECT p.value AS pool, m.discord_user_id AS member_id, m.display_name AS name, m.status,
-                (SELECT l.balance_after FROM dkp_ledger l WHERE l.guild_id = ?1 AND l.pool = p.value AND l.member_id = m.discord_user_id ORDER BY l.id DESC LIMIT 1) AS balance
-         FROM json_each(?2) p, member m WHERE m.guild_id = ?1 AND (?3 IS NULL OR m.discord_user_id = ?3)`,
-      )
-      .bind(guildId, pools, q.member ?? null),
-  ];
+    stmts.push(
+      db
+        .prepare(
+          `SELECT p.value AS pool, m.discord_user_id AS member_id, m.display_name AS name, m.status,
+                  (SELECT l.balance_after FROM dkp_ledger l WHERE l.guild_id = ?1 AND l.pool = p.value AND l.member_id = m.discord_user_id ORDER BY l.id DESC LIMIT 1) AS balance
+           FROM json_each(?2) p, member m WHERE m.guild_id = ?1 AND (?3 IS NULL OR m.discord_user_id = ?3)`,
+        )
+        .bind(guildId, pools, q.member ?? null),
+    );
+  }
+  if (q.raidEvents && q.member) {
+    at.raidEvents = stmts.length;
+    stmts.push(
+      db
+        .prepare(
+          `WITH r AS (SELECT r.id, r.closed_at, r.event_id FROM dkp_raid r JOIN event e ON e.id = r.event_id
+                      WHERE r.guild_id = ?1 AND r.opened_at >= ?3 AND r.event_id IS NOT NULL AND e.status <> 'cancelled'),
+                t AS (SELECT r.closed_at,
+                             EXISTS (SELECT 1 FROM event_signup s WHERE s.event_id = r.event_id AND s.member_id = ?2 AND s.status = 'signed_up') AS signed,
+                             EXISTS (SELECT 1 FROM dkp_kill k JOIN dkp_kill_member km ON km.kill_id = k.id WHERE k.raid_id = r.id AND km.member_id = ?2) AS was,
+                             EXISTS (SELECT 1 FROM dkp_kill k WHERE k.raid_id = r.id) AS held FROM r)
+           SELECT (SELECT enabled FROM event_guild WHERE guild_id = ?1) AS module, coalesce(sum(signed), 0) AS signed_up, coalesce(sum(was), 0) AS attended,
+                  coalesce(sum(signed AND NOT was AND held AND closed_at IS NOT NULL), 0) AS no_shows FROM t`,
+        )
+        .bind(guildId, q.member, windowStart(q.now ?? Date.now())),
+    );
+  }
+  if (q.eventRaid !== undefined) {
+    at.eventRaid = stmts.length;
+    stmts.push(
+      db
+        .prepare(
+          `SELECT r.closed_at, (SELECT count(*) FROM dkp_kill k WHERE k.raid_id = r.id) AS kills,
+                  (SELECT json_group_array(x.member_id) FROM (SELECT DISTINCT km.member_id FROM dkp_kill_member km JOIN dkp_kill k ON k.id = km.kill_id WHERE k.raid_id = r.id) x) AS attended
+           FROM dkp_raid r WHERE r.guild_id = ?1 AND r.event_id = ?2`,
+        )
+        .bind(guildId, q.eventRaid),
+    );
+  }
   if (q.attendance && q.member) {
+    at.attendance = stmts.length;
     const since = windowStart(q.now ?? Date.now());
     // Kills each pool held in the window (raids opened within the window plus the longest auto-close), and of those the
     // ones the member was at, through the roster's primary key.
@@ -262,11 +313,19 @@ export async function dkpRead(
   }
   const res = await db.batch<Record<string, unknown>>(stmts);
   const standings = new Map<string, Standing[]>(q.pools.map((p) => [p, []]));
-  for (const r of res[0].results as unknown as (Standing & { pool: string; balance: number | null })[])
+  const rows = (i: number | undefined) => (i === undefined ? [] : res[i].results) as unknown[];
+  for (const r of rows(at.standings) as (Standing & { pool: string; balance: number | null })[])
     if (r.balance !== null) standings.get(r.pool)!.push({ member_id: r.member_id, name: r.name, status: r.status, balance: r.balance });
   for (const list of standings.values()) list.sort((a, b) => b.balance - a.balance || a.name.localeCompare(b.name));
-  const attendance = (res[1]?.results ?? []) as unknown as Attendance[];
-  return { standings, attendance, rowsRead: res.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0) };
+  const attendance = rows(at.attendance) as Attendance[];
+  const raid = rows(at.eventRaid)[0] as { closed_at: string | null; kills: number; attended: string } | undefined;
+  return {
+    standings,
+    attendance,
+    raidEvents: (rows(at.raidEvents)[0] as RaidEvents | undefined) ?? null,
+    eventRaid: raid ? { closed: raid.closed_at !== null, kills: raid.kills, attended: JSON.parse(raid.attended) as string[] } : null,
+    rowsRead: res.reduce((n, r) => n + (r.meta.rows_read ?? 0), 0),
+  };
 }
 
 export interface LedgerRow {

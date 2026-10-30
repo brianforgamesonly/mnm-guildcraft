@@ -903,4 +903,7 @@ Marks are derived: "(not signed up)" and the bench list are worked out each time
 - The card's "(not signed up)" mark shows under Require as well as Flag, and on the Standby line as well as Present: such a member may have tapped before Require was set, or been taken off the roster after.
 - Once an event has closed, Require only marks: its roster is final and no officer can add to it, so the refusal's own advice couldn't work.
 - The bench list is shown only while the raid is open.
+- `/dkp adjust`'s `member:` and `pool:` are optional in Discord, because a command can't require one of two options; the command itself refuses neither or both. `points:` and `reason:` come first, since Discord lists required options before optional ones. An event's frozen members are skipped when it is applied too, not only when a batch waits.
+- `/me`'s line shows only with both modules on, and sits under the DKP lines: `/me` has no Events section. A member Present at a linked raid they never signed up for counts as attended, so attended can exceed signed up.
+- The no-show list takes at most 1,500 characters of the card, whole names only, then says how many it left out.
 - A sign-up or a roster change shows on the raid card at its next redraw (a tap or a kill), not at once, so an event's button presses cost the raid card nothing. The check at each tap always reads the current roster.

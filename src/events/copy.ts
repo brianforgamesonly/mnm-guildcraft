@@ -166,4 +166,9 @@ export const EVENT_COPY = {
   calendarNoFile: (title: string) => `**${title}**: use the Google Calendar button. I couldn't attach the calendar file here.`,
   calendarStays: "If the event later moves or is cancelled, your calendar entry won't change by itself; GuildCraft sends you a direct message.",
   leftLineReminder: (title: string, who: string) => `**${title}:** ${who} left the server. Found by the check at the reminder.`,
+  // Order 34: no-shows on the card, and attendance on /me
+  noShows: (who: string) => `No-shows: ${who}`,
+  noShowsNone: 'No-shows: none',
+  noShowsNotRecorded: 'No-shows: not recorded (no kills)',
+  meRaidEvents: (signed: number, attended: number, noShows: number) => `Raid events (30 days): signed up ${signed} · attended ${attended} · no-shows ${noShows}`,
 };

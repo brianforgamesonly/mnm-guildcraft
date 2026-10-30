@@ -133,9 +133,9 @@ const dkpKills: Lister = async ({ db, i, typed }) => {
 /** Whoever may run events, from src/access.ts isEventRunner's two rules: admins and officers, or the events_role setting's role. */
 const SQL_RUNS_EVENTS = `(${SQL_IS_OFFICER} OR EXISTS (SELECT 1 FROM event_setting s WHERE s.guild_id = ?1 AND s.key = 'events_role' AND s.value IN (SELECT value FROM json_each(?2))))`;
 /** The event-list statement's rows, soonest first, by id. Who may see them is inside the statement: the route's own rule. */
-const eventChoices = (gate: 'member' | 'runner', which: string): Lister => async ({ db, i, typed }) => {
+const eventChoices = (gate: 'member' | 'runner', which: string, order: 'ASC' | 'DESC' = 'ASC'): Lister => async ({ db, i, typed }) => {
   const { results } = await db
-    .prepare(`SELECT e.id, e.title, e.start_at, ${SQL_TIME_ZONE} AS tz FROM event e WHERE ${which} AND (?3 = ?3) AND ${gate === 'member' ? SQL_PASSES_MEMBER_GATE : SQL_RUNS_EVENTS} ORDER BY e.start_at LIMIT 100`)
+    .prepare(`SELECT e.id, e.title, e.start_at, ${SQL_TIME_ZONE} AS tz FROM event e WHERE ${which} AND (?3 = ?3) AND ${gate === 'member' ? SQL_PASSES_MEMBER_GATE : SQL_RUNS_EVENTS} ORDER BY e.start_at ${order} LIMIT 100`)
     .bind(...sqlAccessParams(i.guild_id, i.member))
     .all<{ id: number; title: string; start_at: string; tz: string | null }>();
   const q = typed.trim().toLowerCase();
@@ -153,6 +153,9 @@ const eventChoices = (gate: 'member' | 'runner', which: string): Lister => async
 const openEvents = (gate: 'member' | 'runner') => eventChoices(gate, "e.guild_id = ?1 AND e.status = 'open'");
 /** Order 34: /dkp raid event: open Raid events not already linked, while the Events module is on. One statement. */
 const linkableEvents = eventChoices('member', `${SQL_LINKABLE} AND EXISTS (SELECT 1 FROM event_guild g WHERE g.guild_id = ?1 AND g.enabled = 1)`);
+
+/** Order 34: /dkp adjust event: open and closed events, latest first; a cancelled one can't be adjusted. One statement. */
+const adjustableEvents = eventChoices('member', "e.guild_id = ?1 AND e.status IN ('open', 'closed') AND EXISTS (SELECT 1 FROM event_guild g WHERE g.guild_id = ?1 AND g.enabled = 1)", 'DESC');
 
 /** Order 32: /event roster character: the characters of the member: option, for whoever runs events. One statement. */
 const rosterCharacters: Lister = async ({ db, i, options, typed }) => {
@@ -186,6 +189,7 @@ export const LISTS: Record<string, Lister> = {
   '/officer recipe-fix item': allRecipes,
   // Order 27: /dkp (a per-server definition, src/dkp/definition.ts).
   '/dkp adjust pool': dkpPools,
+  '/dkp adjust event': adjustableEvents,
   '/dkp named-value zone': game('zones'),
   '/dkp named-value named': dkpCreatures,
   '/dkp raid zone': game('zones'),

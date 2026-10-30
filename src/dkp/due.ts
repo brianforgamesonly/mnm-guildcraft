@@ -44,7 +44,7 @@ const check: Handler = async (env, guildId, id, _due, now) => {
   const r = await closeCheck(env.DB, guildId, Number(id), now);
   if (r === null) return null;
   if ('again' in r) return { again: r.again };
-  return { schedule: [{ key: `render:${r.raidId}`, due: now }] };
+  return { schedule: [{ key: `render:${r.raidId}`, due: now }, ...(r.closedEvent ? [{ key: `evcard:${r.closedEvent}`, due: now }] : [])] };
 };
 
 /** close:<raid id>: the raid closes itself at its closes_at. */

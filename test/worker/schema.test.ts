@@ -45,6 +45,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'card_stale',
       // Order 33 (0026): a member's No reminders, and the first sign-up's note.
       'event_member',
+      // Order 34 (0028): who a batch adjustment waiting for approval covers.
+      'dkp_pending_member',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

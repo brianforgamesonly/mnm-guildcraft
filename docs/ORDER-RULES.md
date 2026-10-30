@@ -473,4 +473,5 @@ Order 34 is the Events module, part 3: the DKP link (docs/PRD.md, "Events module
 - A raid with no linked event behaves exactly as today. No check and no marks.
 - Events never pays or removes points by itself. The Present check only marks or refuses taps. Points still come from kills, flat payouts, standby and adjustments.
 - One function decides who is on an event's roster (src/events/eligible.ts `onRoster`), and every route calls it.
+- No-shows and raid-event attendance are derived, never stored: dkpRead reads them from dkp_kill_member and the sign-up rows (order 27's one reader), and a flat payout's roster is there too (src/dkp/raid.ts `recordKill`).
 - Failed runs: every one is listed in the FINAL (order 12).

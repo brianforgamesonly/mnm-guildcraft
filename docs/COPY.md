@@ -1253,3 +1253,20 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/events/settings.ts:21-23 | (`/event settings`) Flag · Require · Off | DRAFT |
 | src/events/definition.ts:103 | (`/event settings` option) On a linked raid: mark or refuse a tap from someone not on the event's roster | DRAFT |
 | src/dkp/definition.ts:32 | (`/dkp raid` option) The event to link (default: the one in this zone within an hour of now) | DRAFT |
+
+## Work order 34, PR B: no-shows, /me and adjusting a whole event (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/events/copy.ts:170-172 | (event card) No-shows: \<members> · No-shows: none · No-shows: not recorded (no kills) | DRAFT |
+| src/events/copy.ts:173 | (`/me`) Raid events (30 days): signed up \<n> · attended \<n> · no-shows \<n> | DRAFT |
+| src/dkp/copy.ts:58-59 | Pick either `member:` or `event:`. · Pick a `pool:` for a change to one member. | DRAFT |
+| src/dkp/copy.ts:60 | A cancelled event can't be adjusted. | DRAFT |
+| src/dkp/copy.ts:61 | No one on **\<title>**'s roster is eligible, so nothing was changed. | DRAFT |
+| src/dkp/copy.ts:62 | Nobody changes their own points, so you were skipped, and no one else on **\<title>**'s roster is eligible. Nothing was changed. | DRAFT |
+| src/dkp/copy.ts:63-64 | Nobody changes their own points, so you were skipped. · Skipped as frozen: \<members>. | DRAFT |
+| src/dkp/copy.ts:65 | You're in this batch, so another officer has to approve it. | DRAFT |
+| src/dkp/copy.ts:66 | (approval card, in place of the member) everyone on **\<title>** (\<n> members: \<members>) | DRAFT |
+| src/dkp/copy.ts:67-71 | (GC-DKP post) **+\<n> in \<pool>** for \<n> members on **\<title>**. By \<officer>. Reason: \<reason> · Changed · \<member>: now \<balance>; \<n> over the cap was not added · Skipped (frozen) | DRAFT |
+| src/dkp/definition.ts:125 | (`/dkp adjust`) Officers: change a member's points, or a whole event's, with a reason (posted publicly) | DRAFT |
+| src/dkp/definition.ts:129-131 | (options) The member (or use event:) · The pool: a raid zone, or the guild pool (event: defaults to its raid's zone) · Everyone on this event's roster (or use member:) | DRAFT |

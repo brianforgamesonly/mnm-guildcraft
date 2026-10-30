@@ -266,7 +266,7 @@ describe('ITEM 1: linking', () => {
     await openRaid();
     await pressAs(officer, `${CLOSE_PREFIX}${(await raidRow()).id}`);
     expect(await one('SELECT status FROM event WHERE id = ?', id)).toEqual({ status: 'closed' });
-    expect((await items())[`evcard:${id}`]).toBeDefined();
+    expect(await all('SELECT item FROM card_stale')).toEqual([{ item: `evcard:${id}` }]);
     expect((await eventCard(id)).components).toEqual([]);
   });
 
@@ -285,7 +285,7 @@ describe('ITEM 1: linking', () => {
     await openRaid();
     await pressAs(admin, REMOVE_DKP_PREFIX);
     expect(await one('SELECT status FROM event WHERE id = ?', id)).toEqual({ status: 'closed' });
-    expect((await items())[`evcard:${id}`]).toBeDefined();
+    expect(await all('SELECT item FROM card_stale')).toEqual([{ item: `evcard:${id}` }]);
   });
 
   it('a raid with no link and an event that closed first: closing changes nothing else', async () => {
