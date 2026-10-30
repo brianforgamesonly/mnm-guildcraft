@@ -4,7 +4,7 @@
 // it after each deploy on every server whose Events module is on. It is never registered globally and never sent in a bulk
 // PUT (scripts/discord/dkp.ts). Discord allows 25 options per subcommand, so /event create takes its fields as options and
 // needs no modal.
-import { EVENT_SETTINGS, LABEL_MAX } from './settings.ts';
+import { EVENT_SETTINGS, LABEL_MAX, PRESENT_CHECK, PRESENT_CHECKS } from './settings.ts';
 import { ROLES, ROLE_DEFAULTS, TYPES, TYPE_DEFAULTS } from './types.ts';
 
 const SUBCOMMAND = 1;
@@ -100,6 +100,7 @@ export const EVENT_COMMAND = {
         { type: ROLE, name: 'signup_role', description: 'The sign-up role a new event starts with (default: none)' },
         { type: STRING, name: 'clear', description: 'Set a role setting back to its default', choices: [{ name: 'Who creates events', value: 'events_role' }, { name: 'Default sign-up role', value: 'signup_role' }] },
         { type: BOOLEAN, name: 'support', description: 'Whether new sign-ups can choose Support (existing ones stay)' },
+        { type: STRING, name: PRESENT_CHECK, description: "On a linked raid: mark or refuse a tap from someone not on the event's roster", choices: PRESENT_CHECKS.map((c) => ({ name: c.label, value: c.value })) },
         ...ROLES.map((r) => ({ type: STRING, name: `role_${r}`, description: `The label for ${ROLE_DEFAULTS[r]}`, max_length: LABEL_MAX })),
         ...TYPES.map((t) => ({ type: STRING, name: `type_${t}`, description: `The label for ${TYPE_DEFAULTS[t]}`, max_length: LABEL_MAX })),
         { type: STRING, name: 'class', description: 'A class, to set its default role', autocomplete: true, max_length: 32 },

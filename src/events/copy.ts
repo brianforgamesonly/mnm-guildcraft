@@ -17,6 +17,7 @@ export const EVENT_COPY = {
   // settings
   settingsNow: '**Events settings:**',
   timeZone: 'Server time zone',
+  presentCheck: 'Present check',
   whoCreates: 'Who creates events',
   officerRole: 'the officer role',
   defaultSignup: 'Default sign-up role',

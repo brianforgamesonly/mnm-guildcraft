@@ -20,6 +20,7 @@ import {
   ADMINISTRATOR, button, CREATE_PRIVATE_THREADS, ephemeral, GUILD_CATEGORY, GUILD_TEXT, MANAGE_CHANNELS, MANAGE_ROLES, row, SEND_MESSAGES, SEND_MESSAGES_IN_THREADS, STYLE_DANGER, STYLE_PRIMARY,
   VIEW_CHANNEL, type MessageReply,
 } from '../discord.ts';
+import { closeWithRaid } from '../events/link.ts';
 import { channelBits, PERMISSION_NAMES } from '../permissions.ts';
 import { DKP_COPY } from './copy.ts';
 import { DKP_COMMAND } from './definition.ts';
@@ -161,7 +162,7 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     const del = await api.call('DELETE', `/applications/${appId}/guilds/${g}/commands/${cmd.id}`);
     if (!del.ok && del.status !== 404) return ephemeral(DKP_COPY.commandFailed(del.status));
   }
-  const open = await c.db.prepare('SELECT id, pool, standby_once FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number; pool: string; standby_once: number }>();
+  const open = await c.db.prepare('SELECT id, pool, standby_once, event_id FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL').bind(g).first<{ id: number; pool: string; standby_once: number; event_id: number | null }>();
   const at = now();
   const [closed, cancelled] = await c.db.batch<{ id: number; message_id: string | null }>([
     closeOpenRaid(c.db, g, c.userId, 'removed'),
@@ -171,12 +172,15 @@ async function removeDkp(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
     c.db.prepare("UPDATE dkp_listing SET closed_at = ?1, closed_by = 'bot' WHERE guild_id = ?2 AND closed_at IS NULL").bind(at, g),
     // Order 29 (override 2): a raid closed by Remove DKP pays its Standby once, as any close does.
     ...(open ? standbyPayouts(c.db, g, open, state.settings, at) : []),
+    // Order 34: closing the raid closes its linked event, however the raid closes.
+    ...(open?.event_id ? closeWithRaid(c.db, g, open.id, open.event_id, at) : []),
     // Its timers are cancelled, so open approvals lapse now (review of PR A); their cards answer "off" from now on.
     c.db.prepare("UPDATE dkp_pending SET status = 'lapsed', decided_at = ?1 WHERE guild_id = ?2 AND status = 'open'").bind(now(), g),
     ...saveStatements(c, { enabled: 0, channel: state.channel_id, command: null }),
     audit(c.db, g, c.userId, 'dkp.off', `channel:${state.channel_id}`, { enabled: true }, { enabled: false }),
   ]);
   c.effects.dkpCancel = g;
+  if (open?.event_id) c.effects.dkpTimers = { guildId: g, items: [{ key: `evcard:${open.event_id}`, due: Date.now() }] };
   // DKP removed mid-raid: the raid is closed at once, and its card says so (its buttons answer "off" from now on).
   if (open && closed.meta.changes) await showRemoved(c.db, api, g, state.channel_id, open.id);
   await showCancelled(c.db, api, c.guild, state.channel_id, cancelled.results.filter((r) => r.message_id).map((r) => r.id));

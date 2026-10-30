@@ -55,7 +55,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       // listing; wishlists by item (nudges).
       'dkp_auction_by_raid', 'dkp_auction_live', 'dkp_auction_wins',
       'dkp_kill_by_raid', 'dkp_kill_member_by_member', 'dkp_ledger_auction_spend', 'dkp_ledger_balance', 'dkp_ledger_kill', 'dkp_ledger_purchase_spend', 'dkp_ledger_standby_once', 'dkp_listing_live',
-      'dkp_purchase_by_listing', 'dkp_raid_by_pool', 'dkp_raid_by_time', 'dkp_raid_open', 'dkp_wishlist_by_item',
+      // Order 34 (0027): at most one raid per event.
+      'dkp_purchase_by_listing', 'dkp_raid_by_pool', 'dkp_raid_by_time', 'dkp_raid_event', 'dkp_raid_open', 'dkp_wishlist_by_item',
       // Order 32 (0024): a member's changes in the last minute (the spam limit); upcoming events.
       'event_history_by_member', 'event_upcoming',
       // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.

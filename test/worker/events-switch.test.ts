@@ -218,7 +218,7 @@ describe('evclose (review of PR A)', () => {
 describe('/event settings and the switch\'s help page', () => {
   it('defaults, as section E states them', () => {
     expect(eventSettingsOf(null)).toEqual({
-      lock_minutes: 30, close_hours: 8, reminder_minutes: 30, time_zone: 'America/New_York', events_role: null, signup_role: null, support_on: true,
+      present_check: 'flag', lock_minutes: 30, close_hours: 8, reminder_minutes: 30, time_zone: 'America/New_York', events_role: null, signup_role: null, support_on: true,
       role_labels: { tank: 'Tank', healer: 'Healer', dps: 'DPS', support: 'Support' }, type_labels: { raid: 'Raid', group: 'Group', social: 'Social', other: 'Other' },
     });
   });

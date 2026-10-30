@@ -4,7 +4,7 @@ import { botApi, type BotApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, memberTag, md, NO_PINGS, optBool, optInt, optString, truncate, type MessageReply, type Option } from '../discord.ts';
 import { EVENT_COPY } from './copy.ts';
-import { DEFAULT_TIME_ZONE, EVENT_SETTINGS, EVENTS_ROLE, eventSettingOf, roleLabelKey, SIGNUP_ROLE, SUPPORT_ON, TIME_ZONE, typeLabelKey, validTimeZone } from './settings.ts';
+import { DEFAULT_TIME_ZONE, EVENT_SETTINGS, EVENTS_ROLE, eventSettingOf, PRESENT_CHECK, presentCheckLabel, presentCheckOf, roleLabelKey, SIGNUP_ROLE, SUPPORT_ON, TIME_ZONE, typeLabelKey, validTimeZone } from './settings.ts';
 import type { EventState } from './state.ts';
 import { ROLES, TYPES, type Role } from './types.ts';
 import { cancelCommand, createCommand, editCommand, listCommand } from './manage.ts';
@@ -42,6 +42,7 @@ function settingsText(d: EventState, classes: { class_code: string; role: Role }
     ...EVENT_SETTINGS.map((n) => `${n.label}: **${s[n.key]}** ${n.unit}${s[n.key] === n.default ? '' : ` (default ${n.default})`}`),
     `${EVENT_COPY.whoCreates}: ${s.events_role ? roleName(s.events_role) : EVENT_COPY.officerRole}`,
     `${EVENT_COPY.defaultSignup}: ${s.signup_role ? roleName(s.signup_role) : EVENT_COPY.none}`,
+    `${EVENT_COPY.presentCheck}: **${presentCheckLabel(s.present_check)}**${s.present_check === 'flag' ? '' : ` (default ${presentCheckLabel('flag')})`}`,
     `${EVENT_COPY.roleLabels}: ${ROLES.map((r) => md(s.role_labels[r])).join(', ')}; ${EVENT_COPY.support} ${s.support_on ? EVENT_COPY.on : EVENT_COPY.off_}`,
     `${EVENT_COPY.typeLabels}: ${TYPES.map((t) => md(s.type_labels[t])).join(', ')}`,
     `${EVENT_COPY.classRoles}: ${classes.length ? classes.map((x) => `${md(x.class_code)} ${md(s.role_labels[x.role])}`).join(', ') : EVENT_COPY.none}`,
@@ -71,6 +72,8 @@ async function settings(c: Ctx, opts: Option[], d: EventState): Promise<MessageR
   if (clear === SIGNUP_ROLE) changes.push({ key: SIGNUP_ROLE, label: EVENT_COPY.defaultSignup, value: null, shown: EVENT_COPY.none, before: s.signup_role });
   const support = optBool(opts, 'support');
   if (support !== undefined) changes.push({ key: SUPPORT_ON, label: EVENT_COPY.support, value: support ? '1' : '0', shown: support ? EVENT_COPY.on : EVENT_COPY.off_, before: s.support_on });
+  const check = optString(opts, PRESENT_CHECK);
+  if (check !== undefined) changes.push({ key: PRESENT_CHECK, label: EVENT_COPY.presentCheck, value: presentCheckOf(check), shown: presentCheckLabel(presentCheckOf(check)), before: s.present_check });
   for (const r of ROLES) {
     const v = optString(opts, `role_${r}`)?.trim();
     if (v) changes.push({ key: roleLabelKey(r), label: `${EVENT_COPY.roleLabels}: ${md(s.role_labels[r])}`, value: v, shown: md(v), before: s.role_labels[r] });

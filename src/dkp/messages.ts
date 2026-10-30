@@ -53,6 +53,26 @@ export async function editCardItem(db: D1Database, api: BotApi, guildId: string,
   return last ? { remaining: last.remaining ?? null, resetAfter: last.reset_after ?? null, retryAfter: last.retry_after ?? null } : null;
 }
 
+/** Order 34 (ITEM 4): an approval card's item: pcard:<pending id>, the sweep's way back to a card Discord refused. */
+export const pendingItem = (id: number) => `pcard:${id}`;
+
+/** A decided approval card, from its row. The card's text is its embed, which the edit keeps (order 22). */
+const decidedCard = (status: string, by: string | null, name: string | null): Message => ({ content: status === 'approved' ? DKP_COPY.approved(memberTag(by ?? '', name ?? by ?? '')) : DKP_COPY.lapsed, components: [] });
+
+/** A decision just made, shown on its card. A refused edit is flagged for the sweep. */
+export const showDecision = (db: D1Database, api: BotApi, guildId: string, channelId: string, id: number, messageId: string, status: 'approved' | 'lapsed', by: string | null, name: string | null) =>
+  editCard(db, api, guildId, pendingItem(id), channelId, messageId, decidedCard(status, by, name));
+
+/** pcard:<pending id> on the timer object: only a decided card is drawn. */
+export async function renderPending(db: D1Database, api: BotApi, guildId: string, channelId: string, id: number) {
+  const p = await db
+    .prepare('SELECT p.status, p.decided_by, p.message_id, m.display_name AS name FROM dkp_pending p LEFT JOIN member m ON m.guild_id = p.guild_id AND m.discord_user_id = p.decided_by WHERE p.id = ? AND p.guild_id = ?')
+    .bind(id, guildId)
+    .first<{ status: string; decided_by: string | null; message_id: string | null; name: string | null }>();
+  if (!p?.message_id || p.status === 'open') return null;
+  return editCardItem(db, api, guildId, pendingItem(id), channelId, p.message_id, decidedCard(p.status, p.decided_by, p.name));
+}
+
 /** A pool's name: the guild pool, or its zone's name (the key when the zone is gone). */
 export async function poolNames(db: D1Database, pools: string[]): Promise<Map<string, string>> {
   const { results } = await db.prepare('SELECT key, name FROM zone WHERE key IN (SELECT value FROM json_each(?))').bind(JSON.stringify(pools)).all<{ key: string; name: string }>();

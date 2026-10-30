@@ -13,10 +13,10 @@ import { googleLink, icsText, type CalendarEvent } from './calendar.ts';
 import { byName, eventApi, spentEvent, type EventRun } from './commands.ts';
 import { EVENT_COPY } from './copy.ts';
 import { promoItems } from './dm.ts';
-import { signupRefusal, SPAM_WINDOW_MS, type SignupRefusal } from './eligible.ts';
+import { onRoster, signupRefusal, SPAM_WINDOW_MS, type SignupRefusal } from './eligible.ts';
 import { characterStatements, changeStatements, promotionStatements, roleStatements, type Snapshot } from './signup.ts';
 import type { EventState } from './state.ts';
-import { ON_ROSTER, PREVIEW, ROLES, TYPE_RULES, type Choice, type Role, type Status } from './types.ts';
+import { PREVIEW, ROLES, TYPE_RULES, type Choice, type Role, type Status } from './types.ts';
 
 export const PICK_CHARACTER_PREFIX = 'evpc:';
 export const PICK_ROLE_PREFIX = 'evpr:';
@@ -301,7 +301,7 @@ async function changing(c: Ctx, eventId: number) {
   const p = await loadPress(c, e.id, c.userId);
   const refusal = askRefusal(c, e, p, false);
   if (refusal) return { refusal: refusalText(refusal) };
-  if (!p.current || !(ON_ROSTER as readonly string[]).includes(p.current.status)) return { refusal: EVENT_COPY.signUpFirst };
+  if (!p.current || !onRoster(p.current.status)) return { refusal: EVENT_COPY.signUpFirst };
   return { e, current: p.current };
 }
 
@@ -370,9 +370,9 @@ export const rosterCommand: EventRun = async (c, opts: Option[], d) => {
   const refusal = signupRefusal({ event: e, memberRole: c.guild.member_role_id, roles: resolved?.roles ?? [], memberStatus: p.memberStatus, current: cur?.status ?? null, leaving, route: 'officer', inServer: !!resolved, recent: 0, now: Date.now() });
   if (refusal) return ephemeral(refusalText(refusal, true));
   const rule = TYPE_RULES[e.type];
-  const onRoster = cur && (ON_ROSTER as readonly string[]).includes(cur.status);
-  if (action !== 'add' && !onRoster) return ephemeral(EVENT_COPY.notOnRoster);
-  if (action === 'add' && onRoster) return ephemeral(EVENT_COPY.alreadyOn);
+  const listed = onRoster(cur?.status);
+  if (action !== 'add' && !listed) return ephemeral(EVENT_COPY.notOnRoster);
+  if (action === 'add' && listed) return ephemeral(EVENT_COPY.alreadyOn);
   const status: Status = action === 'remove' ? 'removed' : ((optString(opts, 'status') as Status | undefined) ?? (action === 'add' ? 'signed_up' : cur!.status));
   if (status === 'bench' && !rule.statuses.includes('bench') && e.when_full !== 'bench') return ephemeral(EVENT_COPY.noBench);
   const role = rule.character === 'none' ? null : ((optString(opts, 'role') as Role | undefined) ?? cur?.role ?? null);

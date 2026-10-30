@@ -225,14 +225,17 @@ export const cancelCommand: EventRun = async (c, opts) => {
   if (id === null) return ephemeral(EVENT_COPY.pickEvent);
   const reason = (optString(opts, 'reason') ?? '').trim().slice(0, 200);
   if (!reason) return ephemeral(EVENT_COPY.noReason);
-  const [took] = await c.db.batch([
+  const [took, , raid] = await c.db.batch<{ id?: number }>([
     c.db.prepare("UPDATE event SET status = 'cancelled', cancelled_by = ?, cancel_reason = ? WHERE id = ? AND guild_id = ? AND status = 'open'").bind(c.userId, reason, id, c.guild.id),
     auditIfChanged(c.db, c.guild.id, c.userId, 'event.cancel', `event:${id}`, null, { reason }),
+    c.db.prepare('SELECT id FROM dkp_raid WHERE event_id = ? AND closed_at IS NULL').bind(id),
   ]);
   if (took.meta.changes !== 1) return ephemeral(EVENT_COPY.notOpen);
   // Order 33: the reminder goes with it, and the roster is told.
   c.effects.timersDrop = { guildId: c.guild.id, keys: [`evremind:${id}`, `evmoved:${id}`] };
-  c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `evcard:${id}`, due: Date.now() }, { key: `evgone:${id}`, due: Date.now() }] };
+  // Order 34: a linked raid carries on, unlinked, and its card says so.
+  const linked = raid.results.map((r) => ({ key: `render:${r.id}`, due: Date.now() }));
+  c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `evcard:${id}`, due: Date.now() }, { key: `evgone:${id}`, due: Date.now() }, ...linked] };
   return ephemeral(EVENT_COPY.cancelled);
 };
 

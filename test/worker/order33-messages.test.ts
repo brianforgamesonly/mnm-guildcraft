@@ -290,17 +290,17 @@ describe('ITEM 2: chunks', () => {
     for (let n = 45; n >= 1; n--) await signup(id, uid(n), 'signed_up');
     await run(`evremind:${id}`);
     expect(fake.dms.map((d) => d.to)).toEqual(Array.from({ length: 45 }, (_, i) => uid(i + 1)));
-    expect(await count('audit_log', "action = 'event.dm'")).toBe(Math.ceil(45 / chunkSize(true)));
+    expect(await count('audit_log', "action = 'event.dm'")).toBe(Math.ceil(45 / chunkSize(true, true)));
     expect(fake.lookups.length).toBe(45);
   }, 30_000);
 
-  it('a batch of 40 costs 120 Discord calls in 4 chunks: 1 lookup and 2 calls per recipient', async () => {
+  it('a batch of 40 costs 120 Discord calls in chunks: 1 lookup and 2 calls per recipient', async () => {
     const id = await openEvent(20 * MIN);
     for (let n = 1; n <= 40; n++) await signup(id, uid(n), 'signed_up');
     fake.calls = 0;
     await run(`evremind:${id}`);
     expect(fake.calls).toBe(120);
-    expect(await count('audit_log', "action = 'event.dm'")).toBe(4);
+    expect(await count('audit_log', "action = 'event.dm'")).toBe(Math.ceil(40 / chunkSize(true, true)));
   }, 30_000);
 
   it('a run that dies part-way carries on after the last message: the cursor is the item\'s', async () => {
@@ -711,7 +711,7 @@ describe('review of PR B: what lands during a run', () => {
     for (let n = 1; n <= 3; n++) await signup(id, uid(n), 'signed_up');
     const e = { ...env, ...TOKEN.env };
     const api = timerApi(e as never, Date.now(), () => 0)!;
-    api.budget.discord = TIMER_CALL_CAP - 11; // room for 2 recipients after the chunk's tail
+    api.budget.discord = TIMER_CALL_CAP - 13; // room for 2 recipients after the chunk's tail
     const r = await EVENT_HANDLERS.evremind(e as never, GUILD, String(id), 0, Date.now(), api, { save: async () => {} });
     expect(fake.dms.length).toBe(2);
     expect(r!.again).toBeDefined();

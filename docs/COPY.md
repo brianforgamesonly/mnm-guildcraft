@@ -1234,3 +1234,22 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/events/copy.ts:167 | (GC-Events) **\<title>:** \<member> left the server. Found by the check at the reminder. | DRAFT |
 | src/commands/me.ts:68-70 | (buttons on `/me`) Reminders: on · Reminders: off · That button is for the member whose `/me` it is. | DRAFT |
 | src/events/settings.ts:9 | (`/event settings`) Reminder before start; its option reads "Reminder before start, in minutes (0: off)" | DRAFT |
+
+## Work order 34, PR A: the link and the Present check (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:255 | (`/dkp raid` reply) Linked to **\<title>**, \<time>. | DRAFT |
+| src/dkp/copy.ts:256 | Not linked to an event: no open Raid event in this zone starts within an hour of now. A link can't be added later; to link one, close this raid and open it again with `event:`. | DRAFT |
+| src/dkp/copy.ts:257 | Not linked to an event: \<n> open Raid events fit. A link can't be added later; to pick one, close this raid and open it again with `event:`. | DRAFT |
+| src/dkp/copy.ts:258 | That event can't be linked: pick an open Raid event from the list, or leave `event:` out. | DRAFT |
+| src/dkp/copy.ts:259 | (raid card) Event: \<title, linked to the event card> | DRAFT |
+| src/dkp/copy.ts:260 | (raid card) Event: \<title> was cancelled, so this raid is no longer linked to it. The raid carries on. | DRAFT |
+| src/dkp/copy.ts:261 | (raid card, Who's here) (not signed up) | DRAFT |
+| src/dkp/copy.ts:262 | (raid card) **Standby (bench, not confirmed):** \<names> | DRAFT |
+| src/dkp/copy.ts:263 | (private reply) You're not on **\<title>**'s roster, and officers can see that. | DRAFT |
+| src/dkp/copy.ts:264 | (private reply) You're not on **\<title>**'s roster. An officer can add you with `/event roster`. | DRAFT |
+| src/events/copy.ts:20 | (`/event settings`) Present check | DRAFT |
+| src/events/settings.ts:21-23 | (`/event settings`) Flag · Require · Off | DRAFT |
+| src/events/definition.ts:103 | (`/event settings` option) On a linked raid: mark or refuse a tap from someone not on the event's roster | DRAFT |
+| src/dkp/definition.ts:32 | (`/dkp raid` option) The event to link (default: the one in this zone within an hour of now) | DRAFT |

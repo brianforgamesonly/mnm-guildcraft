@@ -29,6 +29,7 @@ export const DKP_COMMAND = {
       options: [
         { type: STRING, name: 'zone', description: 'The raid zone: pick from the list', required: true, autocomplete: true, max_length: 100 },
         { type: STRING, name: 'mode', description: 'Pay per named kill (default), or a flat value once', choices: [{ name: 'Per named kill', value: 'named' }, { name: 'Flat', value: 'flat' }] },
+        { type: STRING, name: 'event', description: 'The event to link (default: the one in this zone within an hour of now)', autocomplete: true, max_length: 100 },
       ],
     },
     {
