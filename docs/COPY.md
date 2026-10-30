@@ -1217,3 +1217,20 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/events/copy.ts:54 | (cancelled card) **Cancelled** by \<member> (\<name>). Reason: \<reason>. One string with DKP's (src/dkp/copy.ts). Before: **Cancelled.** \<reason> | DRAFT |
 | src/commands/autocomplete.ts:146 | (`/event edit`, `cancel`, `roster` and `list`, the event list) \<title> · Sat Oct 31, 8:00 PM EDT, in the server time zone. Before: \<title> · 2026-11-01 00:00 UTC | DRAFT |
 | src/commands/autocomplete.ts:122 | (`/dkp correct kill`, the kill list) \<creature> · Sat Oct 31, 8:00 PM EDT · #\<id>, in the server time zone. Before: \<creature> · 00:00:00 UTC · #\<id> | DRAFT |
+
+## Work order 33, PR B: direct messages, reminders and Add to calendar (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/events/copy.ts:152 | (direct message) Reminder: **\<title>** starts \<date> (\<relative>). · You're down as \<character>, \<role>. · \<card link> | DRAFT |
+| src/events/copy.ts:154 | (direct message) You've moved up from the Waitlist for **\<title>**, so you're signed up. It starts \<date> (\<relative>). · \<card link> | DRAFT |
+| src/events/copy.ts:155 | (direct message) **\<title>** has a new time: \<date> (\<relative>). · \<card link> | DRAFT |
+| src/events/copy.ts:156 | (direct message) **\<title>**, due to start \<date> (\<relative>), is cancelled. Reason: \<reason> · \<card link> | DRAFT |
+| src/events/copy.ts:158 | (private reply to a first sign-up) You'll get a direct message before events you sign up for. Press **No reminders** to stop those; `/me` turns them back on. | DRAFT |
+| src/events/copy.ts:159 | (button) No reminders | DRAFT |
+| src/events/copy.ts:160 | Reminders are off for you on this server. `/me` turns them back on. You'll still hear if an event moves or is cancelled. | DRAFT |
+| src/events/copy.ts:162-163 | (buttons) Add to calendar · Google Calendar | DRAFT |
+| src/events/copy.ts:164-166 | **\<title>**: use the Google Calendar button, or open the attached file in Outlook or Apple Calendar. · **\<title>**: use the Google Calendar button. I couldn't attach the calendar file here. · If the event later moves or is cancelled, your calendar entry won't change by itself; GuildCraft sends you a direct message. | DRAFT |
+| src/events/copy.ts:167 | (GC-Events) **\<title>:** \<member> left the server. Found by the check at the reminder. | DRAFT |
+| src/commands/me.ts:68-70 | (buttons on `/me`) Reminders: on · Reminders: off · That button is for the member whose `/me` it is. | DRAFT |
+| src/events/settings.ts:9 | (`/event settings`) Reminder before start; its option reads "Reminder before start, in minutes (0: off)" | DRAFT |

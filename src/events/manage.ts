@@ -206,7 +206,7 @@ export const editCommand: EventRun = async (c, opts, d) => {
   // Each change after the lock is posted, a promotion by this edit too.
   const promoted = results.slice(2, -1).flatMap((r) => r.results.map((x) => x.member_id!)).filter(Boolean);
   if (promoted.length && lock && Date.parse(lock) <= Date.now()) await notice(c, d, `**${md(f.title)}:** ${EVENT_COPY.promotedLine(await tags(c, promoted))}`);
-  const items: { key: string; due: number; later?: boolean }[] = [{ key: `evcard:${id}`, due: Date.now() }, ...promoItems(id, promoted.filter((m) => m !== c.userId), Date.now())];
+  const items: { key: string; due: number; later?: boolean }[] = [{ key: `evcard:${id}`, due: Date.now() }, ...promoItems(id, promoted, Date.now())];
   // A new start moves the lock and the close: `later` replaces the old items even with a later time.
   if (moved) items.push(...(lock ? [{ key: `evlock:${id}`, due: Date.parse(lock), later: true }] : []), { key: `evclose:${id}`, due: Date.parse(closes), later: true });
   // Order 33: a start that really moved tells the roster, and re-arms the reminder; a reminder whose time has passed goes.

@@ -81,9 +81,9 @@ const askRefusal = (c: Ctx, e: EventRow, p: Awaited<ReturnType<typeof loadPress>
 const redraw = (c: Ctx, eventId: number) => {
   c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${eventId}`, due: Date.now() }] };
 };
-/** Order 33: a direct message to each member moved up, except the presser: their private reply says so. */
-const tellPromoted = (c: Ctx, eventId: number, members: (string | null | undefined)[]) => {
-  const others = members.filter((m): m is string => !!m && m !== c.userId);
+/** Order 33: a direct message to each member moved up. `told`: a member's own press, whose private reply already says so. */
+const tellPromoted = (c: Ctx, eventId: number, members: (string | null | undefined)[], told?: string) => {
+  const others = members.filter((m): m is string => !!m && m !== told);
   if (others.length) c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), ...promoItems(eventId, others, Date.now())] };
 };
 const isLocked = (e: EventRow) => !!e.lock_at && Date.parse(e.lock_at) <= Date.now();
@@ -153,7 +153,7 @@ async function apply(c: Ctx, d: EventState, e: EventRow, cur: Current | null, st
   if (!final) return { content: EVENT_COPY.notOpen, components: [] };
   const promoted = freed ? (results[3].results[0]?.member_id ?? null) : null;
   redraw(c, e.id);
-  tellPromoted(c, e.id, [promoted]);
+  tellPromoted(c, e.id, [promoted], c.userId);
   if (isLocked(e)) await notice(c, d, [EVENT_COPY.changeLine(md(e.title), byName(c), statusWord(final, e)), ...(promoted ? [EVENT_COPY.promotedLine(await tags(c, [promoted]))] : [])].join('\n'));
   const text = resultText(e, d, status, final, role);
   if (asks && results.at(-1)!.results[0]?.reminders_off === 0) return { content: `${text}\n${EVENT_COPY.reminderNote}`, components: [row([button(NO_REMINDERS_PREFIX, EVENT_COPY.noReminders)])] };
@@ -347,10 +347,10 @@ export async function changeRolePicked(c: Ctx, id: string, values: string[], d: 
   if (role === r.current!.role) return updateMessage({ content: EVENT_COPY.already(md(d.settings.role_labels[role])), components: [] });
   const at = now();
   const results = await c.db.batch<{ status?: string; member_id?: string }>([...roleStatements(c.db, { eventId: r.e!.id, member: c.userId, role, actor: c.userId, at }), ...promotionStatements(c.db, r.e!.id, at, 1)]);
-  if (!results[0].results.length) return updateMessage({ content: EVENT_COPY.roleFull(md(d.settings.role_labels[role])), components: [] });
-  redraw(c, r.e!.id);
   const promoted = results[2].results[0]?.member_id;
-  tellPromoted(c, r.e!.id, [promoted]);
+  if (results[0].results.length || promoted) redraw(c, r.e!.id);
+  tellPromoted(c, r.e!.id, [promoted], c.userId);
+  if (!results[0].results.length) return updateMessage({ content: EVENT_COPY.roleFull(md(d.settings.role_labels[role])), components: [] });
   return updateMessage({ content: promoted === c.userId ? EVENT_COPY.promotedYou(md(d.settings.role_labels[role])) : EVENT_COPY.roleChanged(md(d.settings.role_labels[role])), components: [] });
 }
 

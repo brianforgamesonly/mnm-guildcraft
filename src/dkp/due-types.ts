@@ -23,5 +23,7 @@ export interface ItemRun {
   cursor?: string;
   /** Stores the cursor at once, so a run that dies part-way never messages anyone twice. */
   save?: (cursor: string) => Promise<void>;
+  /** Sets other items now, not with the result: what a committed write owes survives this run dying. */
+  schedule?: (items: { key: string; due: number }[]) => Promise<void>;
 }
 export type DueHandler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null, run?: ItemRun) => Promise<DueResult | null>;

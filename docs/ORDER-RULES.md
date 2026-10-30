@@ -455,5 +455,6 @@ Order 33 is the Events module, part 2 (docs/PRD.md, "Events module"; the owner a
   - Each guild's Durable Object does its own redraws, so no single run approaches the 50-subrequest limit. This adds to order 30's override 1: the cron also calls the object's `schedule`, only for a guild with a flag.
   - 10003, 10008 and 50001 stop the retries and are recorded (audit action `card.stopped`). A 429 waits for retry_after.
   - The sweep's redraw only edits. Order 32's "posted again if Discord no longer has it" stands for a change to the event (an `evcard:` item), never for the sweep: a card someone deleted doesn't come back unasked.
+- A chunk of direct messages is derived from the alarm's cap (src/events/dm.ts `chunkSize`), and its cursor names the start it belongs to. A change or a cancel landing during a run wins over the run's own progress (src/dkp/timers.ts `save`).
 - Remove module never switches a module off by mistake. A refused Add or Remove leaves the state exactly as it was, for DKP and Events. A refused Add saves only the channel it kept or made, through a statement that can't name the switch (src/dkp/setup.ts `keepChannel`).
 - Failed runs: every one is listed in the FINAL (order 12).

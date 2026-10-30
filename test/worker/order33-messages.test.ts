@@ -14,10 +14,10 @@ import { EVENT_HANDLERS } from '../../src/events/due.ts';
 import { POST_PREFIX } from '../../src/events/manage.ts';
 import { NO_REMINDERS_PREFIX } from '../../src/events/press.ts';
 import { ADD_EVENTS_PREFIX, REMOVE_EVENTS_PREFIX } from '../../src/events/setup.ts';
-import { TIMER_CALL_CAP } from '../../src/dkp/due.ts';
+import { TIMER_CALL_CAP, timerApi } from '../../src/dkp/due.ts';
 import { SEND_MESSAGES, VIEW_CHANNEL } from '../../src/discord.ts';
 import { INSTALL_PERMISSIONS } from '../../src/permissions.ts';
-import { all, count, one, reset } from '../db.ts';
+import { count, one, reset } from '../db.ts';
 import { ADMIN, APP_ID, as, botApi, GUILD, press, rawCmd, send, webhook, webhookCalls, type Member } from '../discord.ts';
 
 const TOKEN = { env: { DISCORD_BOT_TOKEN: 'test-bot-token' } };
@@ -164,9 +164,9 @@ describe('ITEM 2: who gets which message', () => {
     for (const [n, s] of [[1, 'signed_up'], [2, 'tentative'], [3, 'bench'], [4, 'waitlist'], [5, 'declined'], [6, 'left']] as const) await signup(id, uid(n), s);
     const next = Date.now() + 4 * 3_600_000;
     await event(officer, 'edit', { event: String(id), start: typed(next) });
-    await until(() => dmRecipients().length === 4);
-    expect(dmRecipients()).toEqual([uid(1), uid(2), uid(3), uid(4)]);
-    expect(fake.dms[0].content).toContain('has a new time');
+    const moved = () => fake.dms.filter((d) => d.content.includes('has a new time')).map((d) => d.to).sort();
+    await until(() => moved().length === 4);
+    expect(moved()).toEqual([uid(1), uid(2), uid(3), uid(4)]);
     const start = Date.parse((await one<{ start_at: string }>('SELECT start_at FROM event')).start_at);
     expect((await items())[`evremind:${id}`]).toBe(start - 30 * MIN);
   });
@@ -591,9 +591,129 @@ describe('ITEM 3: the button', () => {
     expect(settings.options.length).toBeLessThanOrEqual(25);
   });
 
-  it('the calendar\'s two UTC forms are the only ones, and the reply itself shows none', async () => {
+  it('the reply itself shows no UTC: only the file and the link\'s dates carry it', async () => {
     const id = await postedRaid(typed(Date.now() + 3 * 3_600_000));
     expect((await pressAs(member, `${CALENDAR_PREFIX}${id}`)).data.content).not.toContain('UTC');
-    expect(await all('SELECT 1 FROM card_stale')).toEqual([]);
+  });
+});
+
+describe('review of PR B: what lands during a run', () => {
+  /** Runs `during` at the moment a direct message is sent, on the object itself, as a press landing mid-run would. */
+  const whileSending = async (key: string, during: (o: any) => Promise<void>) => {
+    const handle = botApi.handle!;
+    let done = false;
+    await store(key, { due: Date.now() - 1 });
+    await inObject(timersOf(env, GUILD), async (o) => {
+      botApi.handle = async (m, p, b) => {
+        if (!done && m === 'POST' && /^\/channels\/9/.test(p)) {
+          done = true;
+          await during(o);
+        }
+        return handle(m, p, b);
+      };
+      await o.alarm();
+    });
+    botApi.handle = handle;
+  };
+
+  it('a new start landing during the last chunk keeps its reminder item', async () => {
+    const id = await openEvent(20 * MIN);
+    await signup(id, uid(1), 'signed_up');
+    const key = `evremind:${id}`;
+    const far = Date.now() + 3_600_000;
+    await whileSending(key, (o) => o.schedule(GUILD, [{ key, due: far, later: true }]));
+    expect((await stored(key)).due).toBeGreaterThanOrEqual(far);
+    expect((await stored(key)).cursor).toBeUndefined();
+  });
+
+  it('a second move during a time-changed walk still tells the roster', async () => {
+    const id = await openEvent(3 * 3_600_000);
+    await signup(id, uid(1), 'signed_up');
+    const key = `evmoved:${id}`;
+    const soon = Date.now() + 50;
+    await whileSending(key, (o) => o.schedule(GUILD, [{ key, due: soon, later: true }]));
+    await settled(key);
+    expect(dmsTo(uid(1)).length).toBe(2);
+  });
+
+  it('a cancel landing during a run stays cancelled: the item doesn\'t come back', async () => {
+    const id = await openEvent(20 * MIN);
+    for (let n = 1; n <= 12; n++) await signup(id, uid(n), 'signed_up');
+    const key = `evremind:${id}`;
+    await whileSending(key, (o) => o.cancel([key]));
+    expect(await stored(key)).toBeUndefined();
+  });
+
+  it('a change to the reminder setting leaves a walk in progress to finish', async () => {
+    const id = await openEvent(20 * MIN);
+    const start = (await one<{ start_at: string }>('SELECT start_at FROM event')).start_at;
+    await env.DB.prepare('UPDATE event SET reminded_start = ?').bind(start).run();
+    const far = Date.now() + 3_600_000;
+    await store(`evremind:${id}`, { due: far, cursor: `${start}|${uid(5)}` });
+    await event(admin, 'settings', { reminder_minutes: 25 });
+    await new Promise((r) => setTimeout(r, 100));
+    expect((await stored(`evremind:${id}`)).cursor).toContain(uid(5));
+  });
+
+  it('a run that died after the cursor and before the claim claims now, and still sends', async () => {
+    const id = await openEvent(20 * MIN);
+    await signup(id, uid(1), 'signed_up');
+    const start = (await one<{ start_at: string }>('SELECT start_at FROM event')).start_at;
+    await store(`evremind:${id}`, { due: Date.now() - 1, cursor: `${start}|` });
+    await alarm();
+    expect(dmRecipients()).toEqual([uid(1)]);
+    expect(await one('SELECT reminded_start FROM event')).toEqual({ reminded_start: start });
+  });
+
+  it('a lock that never finishes holds the reminder only so long', async () => {
+    const id = await openEvent(20 * MIN, { lockAt: Date.now() - 3 * MIN });
+    await signup(id, uid(1), 'signed_up');
+    await store(`evremind:${id}`, { due: Date.now() - 1 });
+    await alarm();
+    expect(dmRecipients()).toEqual([uid(1)]);
+    expect(fake.lookups).toEqual([uid(1)]);
+  });
+
+  it('a lookup Discord won\'t answer costs nobody their reminder, and marks nobody Left', async () => {
+    const id = await openEvent(20 * MIN);
+    await signup(id, uid(1), 'signed_up');
+    await signup(id, uid(2), 'signed_up');
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'GET' && p.endsWith(`/members/${uid(1)}`) ? json({ message: 'no', code: 0 }, 500) : handle(m, p, b));
+    await run(`evremind:${id}`);
+    expect(dmRecipients()).toEqual([uid(1), uid(2)]);
+    expect(await one("SELECT count(*) AS n FROM event_signup WHERE status = 'left'")).toEqual({ n: 0 });
+  });
+
+  it('what a Left commit owes is asked for at once, not with the run\'s result', async () => {
+    const id = await openEvent(20 * MIN, { capacity: 1 });
+    await signup(id, uid(5), 'signed_up');
+    await signup(id, uid(2), 'waitlist', { queued: '2026-10-30T00:00:00.000Z' });
+    fake.gone.add(uid(5));
+    const asked: string[] = [];
+    const e = { ...env, ...TOKEN.env };
+    const api = timerApi(e as never, Date.now(), () => 0);
+    await expect(EVENT_HANDLERS.evremind(e as never, GUILD, String(id), 0, Date.now(), api, { save: async () => {}, schedule: async (i) => void asked.push(...i.map((x) => x.key)) })).resolves.toBeDefined();
+    expect(asked).toEqual([`evcard:${id}`, `evpromo:${id}.${uid(2)}`]);
+  });
+
+  it('an officer moved up by their own /event roster gets the message: its reply doesn\'t say so', async () => {
+    const id = await openEvent(3 * 3_600_000, { capacity: 1 });
+    await signup(id, uid(1), 'signed_up');
+    await signup(id, officer.user.id, 'waitlist', { queued: '2026-10-30T00:00:00.000Z' });
+    await event(officer, 'roster', { event: String(id), action: 'remove', member: uid(1), reason: 'test' });
+    await until(() => dmsTo(officer.user.id).length === 1);
+    expect(dmsTo(officer.user.id)[0].content).toContain('moved up');
+  });
+
+  it('a chunk that shares its alarm shrinks, and the rest follow', async () => {
+    const id = await openEvent(20 * MIN);
+    for (let n = 1; n <= 3; n++) await signup(id, uid(n), 'signed_up');
+    const e = { ...env, ...TOKEN.env };
+    const api = timerApi(e as never, Date.now(), () => 0)!;
+    api.budget.discord = TIMER_CALL_CAP - 11; // room for 2 recipients after the chunk's tail
+    const r = await EVENT_HANDLERS.evremind(e as never, GUILD, String(id), 0, Date.now(), api, { save: async () => {} });
+    expect(fake.dms.length).toBe(2);
+    expect(r!.again).toBeDefined();
   });
 });

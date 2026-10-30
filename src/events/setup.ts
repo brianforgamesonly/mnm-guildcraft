@@ -68,7 +68,8 @@ export async function rearmReminders(db: D1Database, guildId: string, minutes: n
   const { results } = await db.prepare("SELECT id, start_at, reminded_start FROM event WHERE guild_id = ? AND status = 'open'").bind(guildId).all<{ id: number; start_at: string; reminded_start: string | null }>();
   return {
     items: results.flatMap((e) => reminderItem(e, minutes, nowMs) ?? []),
-    drop: results.filter((e) => !reminderItem(e, minutes, nowMs)).map((e) => `evremind:${e.id}`),
+    // A reminder already being sent for this start is left to finish, unless reminders are now off.
+    drop: results.filter((e) => !reminderItem(e, minutes, nowMs) && (!minutes || e.reminded_start !== e.start_at)).map((e) => `evremind:${e.id}`),
   };
 }
 

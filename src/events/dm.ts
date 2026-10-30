@@ -38,9 +38,12 @@ export const CHUNK_OVERHEAD = 9;
 export const chunkSize = (lookups: boolean) => Math.floor((TIMER_CALL_CAP - CHUNK_OVERHEAD) / (CALLS_PER_DM + (lookups ? LOOKUP_CALLS : 0)));
 /** A lock this recent already looked everyone up: the reminder reuses its Left result. */
 const LEFT_FRESH_MS = 300_000;
-/** A failed send, or a lock not finished yet, is tried again this much later. */
+/** A chunk's calls after its recipients are chosen: the Left batch, their names, the notice, those moved up, the count. */
+const CHUNK_TAIL = 5;
+/** A failed send is tried again this much later; an unfinished lock is waited for, up to a limit: a stuck lock costs no one a reminder. */
 const RETRY_MS = 30_000;
 const LOCK_WAIT_MS = 5_000;
+const LOCK_WAIT_MAX_MS = 120_000;
 
 type Sent = 'sent' | 'refused' | 'failed' | 'retry';
 
@@ -146,38 +149,44 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
   if (at === null || Date.parse(e.start_at) <= now) return null;
   if (at > now) return { again: at };
   const lockDue = !!e.lock_at && Date.parse(e.lock_at) <= now;
-  if (lockDue && !e.lock_done_at) return { again: now + LOCK_WAIT_MS };
-  const lookups = !(lockDue && now - Date.parse(e.lock_done_at!) < LEFT_FRESH_MS);
-  let after = walkOf(e.start_at, run.cursor);
-  if (after === null) {
-    // The cursor first: a run that dies between these two carries on, and a claim another start holds ends here.
-    await run.save(`${e.start_at}|`);
+  if (lockDue && !e.lock_done_at && now - Date.parse(e.lock_at!) < LOCK_WAIT_MAX_MS) return { again: now + LOCK_WAIT_MS };
+  const lookups = !(lockDue && e.lock_done_at && now - Date.parse(e.lock_done_at) < LEFT_FRESH_MS);
+  const walked = walkOf(e.start_at, run.cursor);
+  if (!walked) {
+    // The cursor first: a stored cursor means this walk is ours, so a run that died before the claim claims now; with none,
+    // a claim already held means this start has had its reminder.
+    if (walked === null) await run.save(`${e.start_at}|`);
     const took = await env.DB.prepare('UPDATE event SET reminded_start = ?1 WHERE id = ?2 AND reminded_start IS NOT ?1').bind(e.start_at, eventId).run();
-    if (took.meta.changes !== 1) return null;
-    after = '';
+    if (walked === null && took.meta.changes !== 1) return null;
   }
+  const after = walked ?? '';
   const size = chunkSize(lookups);
-  const { results } = await env.DB
+  const { results: chosen } = await env.DB
     .prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id > ? AND coalesce(p.reminders_off, 0) = 0 ORDER BY s.member_id LIMIT ${size}`)
     .bind(eventId, after)
     .all<Recipient>();
+  // Other items may have shared this alarm: a smaller chunk now, rather than a notice or a count refused at the cap.
+  const room = Math.floor((budgetLeft(api.budget) - CHUNK_TAIL) / (CALLS_PER_DM + (lookups ? LOOKUP_CALLS : 0)));
+  if (chosen.length && room < 1) return { again: now + 1_000 };
+  const results = chosen.slice(0, room);
   const link = cardLink(e, state);
   const left: string[] = [];
   let recipients = results;
   if (lookups) {
+    // Only a 404 marks anyone Left. Any other answer tells nothing about this member, and costs them no reminder.
     for (const r of results) {
       const m = await api.call('GET', `/guilds/${guildId}/members/${r.member_id}`);
-      if (m.ok) continue;
-      if (m.status === 404 && m.code === UNKNOWN_MEMBER) left.push(r.member_id);
-      else return { again: now + RETRY_MS };
+      if (!m.ok && m.status === 404 && m.code === UNKNOWN_MEMBER) left.push(r.member_id);
     }
     recipients = results.filter((r) => !left.includes(r.member_id));
   }
   const promoted = await leftAndPromoted(env, api, e, state, left, new Date(now).toISOString(), EVENT_COPY.leftLineReminder);
+  // At once: these rows are committed, and whatever happens below, the card and the message are owed.
   const follow = [...(left.length ? [{ key: `evcard:${id}`, due: now }] : []), ...promoItems(eventId, promoted, now)];
+  if (follow.length) await run.schedule?.(follow);
   // A member who moved up where the walk won't reach them is picked up here: they get both messages.
   const last = results.at(-1)?.member_id ?? after;
-  const more = results.length === size;
+  const more = chosen.length === size || results.length < chosen.length;
   const missed = promoted.filter((m) => !more || m <= last);
   if (missed.length) {
     const found = await env.DB.prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id IN (SELECT value FROM json_each(?)) AND coalesce(p.reminders_off, 0) = 0`).bind(eventId, JSON.stringify(missed)).all<Recipient>();
@@ -186,7 +195,7 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
   const stopped = await walk(env, api, guildId, 'reminder', eventId, e.start_at, after, recipients, (x) => reminderText(e, state, x, link), run.save);
   // Those who left move the cursor too: the next chunk starts after the last one looked up.
   if (!stopped && last > after) await run.save(`${e.start_at}|${last}`);
-  return { ...nextRun(stopped, more, now), ...(follow.length ? { schedule: follow } : {}) };
+  return nextRun(stopped, more, now);
 };
 
 /** evmoved: and evgone:: everyone on the roster, Waitlist included. No reminders doesn't stop these. */
