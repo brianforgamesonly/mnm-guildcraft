@@ -17,7 +17,7 @@ import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, STYLE_SUCCESS, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { zoneKey } from '../zone/names.ts';
 import { AUCTION_DROP_PREFIX } from './auction.ts';
-import { AUCTION_COPY, RAID_COPY } from './copy.ts';
+import { AUCTION_COPY, QUEUE_COPY, RAID_COPY } from './copy.ts';
 import { zoneCreatures, type Creature } from './creatures.ts';
 import { askApproval, type DkpRun } from './commands.ts';
 import {
@@ -46,6 +46,8 @@ export const NAMES_SHOWN = 30;
 /** Kill lines on the card: the most recent; the rest are counted. */
 export const KILLS_SHOWN = 12;
 export const HISTORY_PAGE = 10;
+/** Order 29, PR C: Won tonight's lines on the card: the latest (the card's 4,096 characters hold them with the kills). */
+export const WON_SHOWN = 15;
 const SELECT_MAX = 25;
 const CALL_CAP = 8;
 
@@ -92,13 +94,16 @@ interface CardData {
   /** Who was at each kill, from its roster (never from the ledger). */
   earned: Map<number, AtKill[]>;
   creatures: Creature[];
+  /** Order 29, PR C: Won tonight (the raid's sold auctions, in order), and the drops still queued. */
+  won: { item: string; winner: string; name: string; price: number }[];
+  queued: number;
 }
 
 /** Whether a member on a kill's roster earned that kill's points (order 29: Standby earns once, at close, instead). */
 export const earnedKill = (raid: Pick<Raid, 'standby_once'>, a: Pick<AtKill, 'state'>) => !(raid.standby_once === 1 && a.state === 'standby');
 
 async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
-  const [zone, people, kills, earned] = await db.batch<Record<string, unknown>>([
+  const [zone, people, kills, earned, won] = await db.batch<Record<string, unknown>>([
     db.prepare('SELECT name FROM zone WHERE key = ?').bind(raid.pool),
     db
       .prepare(
@@ -115,7 +120,15 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
          WHERE k.raid_id = ?2 ORDER BY lower(name)`,
       )
       .bind(raid.guild_id, raid.id),
+    // Order 29, PR C: the raid's auctions (dkp_auction_by_raid): Won tonight, and how many wait in the queue.
+    db
+      .prepare(
+        `SELECT a.status, i.name AS item, a.winner, coalesce(m.display_name, a.winner) AS name, a.price FROM dkp_auction a JOIN item i ON i.id = a.item_id
+         LEFT JOIN member m ON m.guild_id = ?1 AND m.discord_user_id = a.winner WHERE a.raid_id = ?2 AND a.status IN ('sold', 'queued') ORDER BY a.closed_at, a.id`,
+      )
+      .bind(raid.guild_id, raid.id),
   ]);
+  const auctions = won.results as { status: string; item: string; winner: string; name: string; price: number }[];
   const byKill = new Map<number, AtKill[]>();
   for (const r of earned.results as unknown as (AtKill & { kill_id: number })[]) byKill.set(r.kill_id, [...(byKill.get(r.kill_id) ?? []), { member_id: r.member_id, name: r.name, state: r.state }]);
   return {
@@ -124,6 +137,8 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
     people: people.results as CardData['people'],
     kills: kills.results as CardData['kills'],
     earned: byKill,
+    won: auctions.filter((a) => a.status === 'sold'),
+    queued: auctions.filter((a) => a.status === 'queued').length,
     creatures: raid.mode === 'named' && !raid.closed_at ? (await zoneCreatures(db, raid.pool)).slice(0, SELECT_MAX) : [],
   };
 }
@@ -175,6 +190,9 @@ export function cardMessage(d: CardData, guildId: string): Message {
         '',
         ...(d.kills.length > shown.length ? [RAID_COPY.earlier(d.kills.length - shown.length)] : []),
         ...(lines.length ? lines : [none]),
+        // Order 29, PR C: Won tonight (item, winner, price), members shown, nobody pinged; and the queue's length.
+        ...(d.won.length ? ['', QUEUE_COPY.wonTonight, ...d.won.slice(-WON_SHOWN).map((w) => QUEUE_COPY.wonLine(w.item, memberTag(w.winner, w.name), w.price))] : []),
+        ...(d.queued && !raid.closed_at ? [QUEUE_COPY.upNext(d.queued)] : []),
         ...(raid.mode === 'named' && !raid.closed_at && !d.creatures.length ? ['', RAID_COPY.noCreatures] : []),
       ].join('\n'),
       4096,

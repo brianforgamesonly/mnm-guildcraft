@@ -96,7 +96,8 @@ describe('/help pages (order 18: derived from the definitions)', () => {
       // Order 27: /dkp is registered per server, where DKP is on (its page shows only there).
       const c = [...COMMANDS, DKP_COMMAND].find((k) => k.name === name);
       expect(c, `/${name}`).toBeDefined();
-      const subs = ((c as { options?: readonly { type: number; name: string }[] }).options ?? []).filter((o) => o.type === 1).map((o) => o.name);
+      // Order 29: a subcommand group (type 2) is named as a subcommand is (`/dkp wishlist`).
+      const subs = ((c as { options?: readonly { type: number; name: string }[] }).options ?? []).filter((o) => o.type === 1 || o.type === 2).map((o) => o.name);
       if (subs.length && sub) expect(subs, `/${name} ${sub}`).toContain(sub);
     }
   });

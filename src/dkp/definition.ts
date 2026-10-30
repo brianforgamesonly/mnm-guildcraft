@@ -7,6 +7,7 @@
 import { SETTINGS } from './settings.ts';
 
 const SUBCOMMAND = 1;
+const SUBCOMMAND_GROUP = 2;
 const STRING = 3;
 const INTEGER = 4;
 const BOOLEAN = 5;
@@ -68,6 +69,29 @@ export const DKP_COMMAND = {
       ],
     },
     {
+      type: SUBCOMMAND_GROUP,
+      name: 'wishlist',
+      description: 'Wishlists, public in this server (adding an item opts you in to a direct message)',
+      options: [
+        {
+          type: SUBCOMMAND,
+          name: 'add',
+          description: 'Add an item to your wishlist (you get a direct message when an auction opens for it)',
+          options: [
+            { type: STRING, name: 'item', description: 'The item: pick from the list', required: true, autocomplete: true, max_length: 100 },
+            { type: STRING, name: 'character', description: 'Which of your characters it is for', autocomplete: true, max_length: 40 },
+          ],
+        },
+        {
+          type: SUBCOMMAND,
+          name: 'remove',
+          description: 'Remove an item from your wishlist',
+          options: [{ type: STRING, name: 'item', description: 'The item on your wishlist', required: true, autocomplete: true, max_length: 100 }],
+        },
+        { type: SUBCOMMAND, name: 'show', description: "A member's wishlist (default: yours)", options: [{ type: USER, name: 'member', description: 'The member (default: you)' }] },
+      ],
+    },
+    {
       type: SUBCOMMAND,
       name: 'adjust',
       description: "Officers: change a member's points, with a reason (posted publicly)",
@@ -108,4 +132,4 @@ export const DKP_DEFINED = new Set(DKP_DEFINED_LIST.map((d) => d.cmd));
  * The PRD's /dkp commands not built yet (test/worker/interactions.test.ts derives them from docs/PRD.md). Order 29: each
  * leaves this list in the pull request that builds it (auction in PR B, wishlist in PR C, shop in PR D).
  */
-export const DKP_COMING: string[] = ['/dkp wishlist', '/dkp shop'];
+export const DKP_COMING: string[] = ['/dkp shop'];

@@ -14,6 +14,7 @@ import { FACTION_MAX, recipeLabel, recipeValue } from '../recipes.ts';
 import { DKP_COPY } from '../dkp/copy.ts';
 import { OPEN_RAID_CREATURES_SQL, zoneCreatures } from '../dkp/creatures.ts';
 import { POOL_GUILD } from '../dkp/ledger.ts';
+import { ownWishlist } from '../dkp/wishlist.ts';
 import { zoneKey } from '../zone/names.ts';
 
 const CHOICE_MAX = 100;
@@ -147,6 +148,10 @@ export const LISTS: Record<string, Lister> = {
   '/dkp history pool': dkpPools,
   // Order 29: any item, as /item name lists them (one statement per keystroke: the cached item list).
   '/dkp auction item': allItems,
+  // Order 29, PR C: wishlists (a subcommand group's subcommand: "wishlist add").
+  '/dkp wishlist add item': allItems,
+  '/dkp wishlist add character': characters,
+  '/dkp wishlist remove item': async ({ db, i, typed }) => asChoices(await ownWishlist(db, i.guild_id, i.member.user.id, typed)),
 };
 
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;
