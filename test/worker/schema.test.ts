@@ -17,6 +17,21 @@ const departureIndexes = Object.entries(laterMigrations)
   .filter(([path]) => !path.endsWith('/0001_init.sql'))
   .flatMap(([, sql]) => [...sql.matchAll(/CREATE (?:UNIQUE )?INDEX (\w+)/g)].map((m) => m[1]));
 
+describe('a dump of this schema loads (order 34)', () => {
+  // A D1 export writes tables in creation order, and SQLite refuses a row whose foreign key names a table that doesn't exist
+  // yet, even with that key NULL and foreign keys deferred. Derived from the live schema: no new table or column escapes it.
+  it('every foreign key names a table created before the table that holds it', async () => {
+    const { results } = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' AND name <> 'd1_migrations' ORDER BY rowid").all<{ name: string }>();
+    const order = results.map((r) => r.name);
+    const late: string[] = [];
+    for (const [i, table] of order.entries()) {
+      const fks = await env.DB.prepare('SELECT DISTINCT "table" AS parent FROM pragma_foreign_key_list(?)').bind(table).all<{ parent: string }>();
+      for (const { parent } of fks.results) if (order.indexOf(parent) > i) late.push(`${table} -> ${parent}`);
+    }
+    expect(late).toEqual([]);
+  });
+});
+
 describe('schema (migrations/0001_init.sql)', () => {
   it('is the PRD schema byte for byte', () => {
     expect(migration).toBe(prdSchema);
