@@ -9,7 +9,8 @@ import { test } from 'node:test';
 import { COMMANDS } from '../../src/commands/definitions.ts';
 import { DKP_COMMAND, DKP_NAME } from '../../src/dkp/definition.ts';
 import { GUARD_PATH, verifyGuard } from '../../src/dkp/guard.ts';
-import { callDecayGuard, DKP_ON_SQL, upsertDkp } from './dkp.ts';
+import { EVENT_COMMAND, EVENT_NAME } from '../../src/events/definition.ts';
+import { callDecayGuard, DKP_ON_SQL, EVENTS_ON_SQL, upsertDkp, upsertEvents } from './dkp.ts';
 
 const APP = '1';
 const TEST_GUILD = '900';
@@ -56,6 +57,19 @@ test('register.ts upserts /dkp on the copy\'s DKP-on servers after the PUT, and 
   // upsertDkp only ever calls the guild route.
   const calls: string[] = [];
   return upsertDkp(async (_m, p) => (calls.push(p), { status: 201, text: '' }), APP, ['5', '6']).then(() => assert.deepEqual(calls, [`/applications/${APP}/guilds/5/commands`, `/applications/${APP}/guilds/6/commands`]));
+});
+
+test("order 32: /event gets the same step: never in the PUT, upserted after it, and only on the copy's Events-on servers", async () => {
+  const d = fakeDiscord();
+  await d.call('POST', `/applications/${APP}/guilds/${TEST_GUILD}/commands`, EVENT_COMMAND);
+  await d.call('PUT', `/applications/${APP}/guilds/${TEST_GUILD}/commands`, COMMANDS);
+  assert.equal(d.guild.get(TEST_GUILD)!.some((c) => c.name === EVENT_NAME), false);
+  assert.equal((await upsertEvents(d.call, APP, [TEST_GUILD])).failed, 0);
+  assert.equal(d.guild.get(TEST_GUILD)!.some((c) => c.name === EVENT_NAME), true);
+  assert.equal((COMMANDS as readonly { name: string }[]).some((c) => c.name === EVENT_NAME), false);
+  const src = readFileSync(new URL('./register.ts', import.meta.url), 'utf8');
+  assert.ok(src.indexOf('upsertEvents(call, appId, eventsOn)') > src.indexOf("discord('PUT', commandsPath, COMMANDS)"));
+  assert.equal(EVENTS_ON_SQL, 'SELECT guild_id FROM event_guild WHERE enabled = 1 ORDER BY guild_id');
 });
 
 test('order 30: register.ts asks the live Worker for the decay guard after the upserts, and a refusal only warns', () => {

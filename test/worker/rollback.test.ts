@@ -28,6 +28,8 @@ import down22 from '../../scripts/rollback/0022_npc_tags.down.sql?raw';
 import up22 from '../../migrations/0022_npc_tags.sql?raw';
 import down23 from '../../scripts/rollback/0023_dkp_auctions.down.sql?raw';
 import up23 from '../../migrations/0023_dkp_auctions.sql?raw';
+import down24 from '../../scripts/rollback/0024_events.down.sql?raw';
+import up24 from '../../migrations/0024_events.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -47,6 +49,14 @@ const withTriggers = (sql: string) => sql.replace(/--.*$/gm, '').match(/\s*CREAT
 const runWhole = async (sql: string) => {
   for (const s of withTriggers(sql)) await env.DB.prepare(s).run();
 };
+
+it('order 32: 0024 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down24);
+  expect((await schema()).some((r) => /^event/.test(r.name))).toBe(false);
+  await run(up24);
+  expect(await schema()).toEqual(before);
+});
 
 it('order 28: 0022 down, then up again, restores the npc columns; down leaves no trace of them', async () => {
   const before = await schema();

@@ -9,6 +9,9 @@
 // render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Order 29:
 // auction:<id> (an auction closes, by its timer only), acard:<id> (an auction card's coalesced, paced edit). Keys starting
 // with "!" are the object's own state (its guild, each card's pace), never items.
+//
+// Order 32 (override 2): the Events module's items share this due-list. Every Events kind starts "ev" (src/events/due.ts),
+// and each module removes only its own items: Remove DKP module clears everything else, Remove Events module clears "ev".
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env.ts';
 import { budgetLeft } from '../board/api.ts';
@@ -20,8 +23,13 @@ import { afterEdit, nextEditAt, START, type Pace } from './pace.ts';
 const GUILD_KEY = '!guild';
 const paceKey = (key: string) => `!pace:${key}`;
 /** Card edits, each paced by its own message's last answer: raid cards (render:) and, order 29, auction cards (acard:). */
-const paced = (key: string) => key.startsWith('render:') || key.startsWith('acard:');
+const paced = (key: string) => key.startsWith('render:') || key.startsWith('acard:') || key.startsWith('evcard:');
 const isItem = (k: string) => !k.startsWith('!');
+/** Order 32: an Events item; every other item is DKP's. A card's pace follows its item. */
+export const isEventsItem = (k: string) => k.startsWith('ev');
+const paceItem = (k: string) => (k.startsWith('!pace:') ? k.slice('!pace:'.length) : null);
+/** Storage's limit per get, put and delete call: "up to 128 keys" (developers.cloudflare.com/durable-objects/api/storage-api). */
+const STORAGE_KEYS = 128;
 /** Items handled per alarm; the rest stay due and the alarm is set again at once (each run is its own invocation). */
 export const PER_ALARM = 8;
 /** A handler that failed is tried again this much later, up to MAX_TRIES. */
@@ -37,31 +45,42 @@ export class DkpTimers extends DurableObject<Env> {
   /** Sets each item to its due time; an item already due earlier keeps the earlier time (coalescing). A card edit is paced. */
   async schedule(guildId: string, items: { key: string; due: number; later?: boolean }[]): Promise<void> {
     const s = this.ctx.storage;
-    const keys = items.map((i) => i.key);
-    const have = await s.get<Item>(keys);
-    const paces = await s.get<Pace>(keys.filter(paced).map(paceKey));
-    const put: Record<string, Item | string> = {};
-    if ((await s.get<string>(GUILD_KEY)) !== guildId) put[GUILD_KEY] = guildId;
-    for (const i of items) {
-      const due = paced(i.key) ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
-      const was = have.get(i.key);
-      // `later`: replace even with a later time.
-      if (!was || i.later || due < was.due) put[i.key] = { due };
+    // Order 32: Add Events module re-arms every open event at once, which can pass storage's limit per call.
+    for (let n = 0; n < items.length; n += STORAGE_KEYS - 1) {
+      const part = items.slice(n, n + STORAGE_KEYS - 1);
+      const keys = part.map((i) => i.key);
+      const have = await s.get<Item>(keys);
+      const paces = await s.get<Pace>(keys.filter(paced).map(paceKey));
+      const put: Record<string, Item | string> = {};
+      if ((await s.get<string>(GUILD_KEY)) !== guildId) put[GUILD_KEY] = guildId;
+      for (const i of part) {
+        const due = paced(i.key) ? nextEditAt(paces.get(paceKey(i.key)) ?? START, i.due) : i.due;
+        const was = have.get(i.key);
+        // `later`: replace even with a later time.
+        if (!was || i.later || due < was.due) put[i.key] = { due };
+      }
+      if (Object.keys(put).length) await s.put(put);
     }
-    if (Object.keys(put).length) await s.put(put);
     await this.arm();
   }
 
-  /** Removes items (all of them, with no keys: Remove DKP). */
+  /** Removes these items; with no keys, every DKP item and its pace (Remove DKP module). Events items stay (order 32). */
   async cancel(keys?: string[]): Promise<void> {
-    const s = this.ctx.storage;
-    if (keys) await s.delete(keys);
-    else {
-      await s.deleteAll();
-      await s.deleteAlarm();
-      return;
-    }
+    if (keys) await this.ctx.storage.delete(keys);
+    else await this.clear((item) => !isEventsItem(item));
     await this.arm();
+  }
+
+  /** Order 32: every Events item and its pace (Remove Events module). DKP's items, decay:week among them, stay. */
+  async cancelEvents(): Promise<void> {
+    await this.clear(isEventsItem);
+    await this.arm();
+  }
+
+  private async clear(mine: (item: string) => boolean): Promise<void> {
+    const s = this.ctx.storage;
+    const keys = [...(await s.list()).keys()].filter((k) => (isItem(k) ? mine(k) : paceItem(k) !== null && mine(paceItem(k)!)));
+    for (let n = 0; n < keys.length; n += STORAGE_KEYS) await s.delete(keys.slice(n, n + STORAGE_KEYS));
   }
 
   /**

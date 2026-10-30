@@ -90,6 +90,10 @@ export const isOfficer = (guild: Guild | null, m: GuildMember): boolean =>
 export const isDkpRunner = (guild: Guild | null, runnerRole: string | null, m: GuildMember): boolean =>
   isAdmin(m) || (runnerRole ? m.roles.includes(runnerRole) : isOfficer(guild, m));
 
+/** Order 32: who creates and runs events. Admins always; then the events_role setting, or, when none is named, the officer role. */
+export const isEventRunner = (guild: Guild | null, eventsRole: string | null, m: GuildMember): boolean =>
+  isAdmin(m) || (eventsRole ? m.roles.includes(eventsRole) : isOfficer(guild, m));
+
 /**
  * Order 27: nobody changes, or approves a change to, their own DKP; nor approves a change they asked for. The one decider,
  * called by every route that changes points (adjust, approve, corrections). Bot-made rows (payouts, Kill roll call) never

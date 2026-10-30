@@ -732,3 +732,95 @@ Approved by the owner on 2026-10-29. DKP is an optional add-on that a server's a
 - The card's Who earned and Kill roll call act on the raid's latest kill. Order 29: so does **Auction a drop** (one button on the card, not one per kill line: a card holds at most 5 rows of buttons).
 - Order 29: the close re-checks who may bid (the one function), not only the balance: a member whose win limit another auction filled meanwhile is dropped, and the result says so. `/dkp auction item: general:` is how an officer posts any item to the general auction.
 - A raid zone's standings message is posted when that pool is first used, so it sits below GC-DKP's earlier messages rather than at the top. Only the guild pool's message, posted by Add DKP module, is at the top. The bot cannot pin the others there: Pin Message requires PIN_MESSAGES, which the install link does not ask for.
+
+## Events module
+
+Approved by the owner on 2026-10-30. Events is an optional module for raids and get-togethers with sign-ups. Order 32 is part 1. Part 2 adds direct messages (reminders, promotions, changes) and Add to calendar. Part 3 adds the DKP link: the Present check, bulk adjustment and attendance on `/me`.
+
+**The switch.** `/guildcraft setup` gains **Add Events module** and **Remove Events module**, worded like the DKP pair.
+
+- Add creates or keeps GC-Events (members read; only GuildCraft posts) and registers `/event` on that server.
+- Remove unregisters `/event` and removes Events timer items only. Every event and sign-up is kept, and adding the module again resumes them.
+- Add re-arms the lock and close items of every open event, idempotently. An event whose close time has passed closes at once.
+- While the module is off, a press on an old card gets a short refusal.
+
+**Who uses what.** `/event create`, `/event edit`, `/event cancel` and `/event roster` use the events_role setting (default: the officer role, plus admins). `/event list` uses the member role. `/event settings` is for admins.
+
+**Types** (fixed keys, renameable labels):
+
+| Type | Statuses offered | Character and role | Role limits | Zone |
+|---|---|---|---|---|
+| Raid | Signed up · Tentative · Bench · Can't make it | Required | Yes | Required |
+| Group | Signed up · Tentative · Can't make it | Required | Yes | Optional |
+| Social | Going · Maybe · Can't make it | Not asked | No | No |
+| Other | Going · Maybe · Can't make it | Optional | No | Optional |
+
+"Going" is stored as signed up, and "Maybe" as tentative. The type can't change once anyone has signed up.
+
+**Roles** (fixed keys tank, healer, dps, support, with renameable labels).
+
+- Admins can turn support off. Existing Support sign-ups stay, but new ones can't choose it.
+- Class defaults: each class has an optional default role, set by admins (`/event settings class: role:`). There are none at first, and GuildCraft never guesses.
+- When signing up, the suggested role is preselected, and the member can pick another.
+
+**`/event create`.** Fields: type, title, start, duration (default 3 h for Raid, 2 h otherwise), zone, description, capacity, the four role limits, when full (waitlist by default, or bench), and the sign-up role (optional; the server default comes from settings).
+
+- Times: YYYY-MM-DD HH:MM, or a weekday, today or tomorrow plus a time (meaning the next such day), in the server time zone (default America/New_York).
+- Times in the past, or more than 90 days ahead, are refused. Each time is converted with that date's own offset.
+- A private preview shows Discord's local-time display and the full date, with Post and Cancel.
+
+**`/event edit`** changes any field except the type once anyone has signed up.
+
+- Lowering capacity or a limit removes nobody; the card shows "over limit".
+- Raising one promotes from the waitlist.
+- A new start moves the lock.
+
+**`/event cancel`.** A reason is required and shown publicly. The card says Cancelled and loses its buttons.
+
+**`/event list`.** Upcoming events, privately, with links, filtered by type. It can show one event's full roster privately. Sign-up history is shown only to officers, here.
+
+**`/event roster`.** Officers add, move (status or role) or remove a member, with a public reason. Officers may exceed a limit; the card shows it as over.
+
+**The card** (one message in GC-Events).
+
+- Header: title, a type tag, start, duration, zone, description, who posted it, and the lock time.
+- Roster: compact text, grouped by role with each count against its limit, then by class. Each line is Name · Cls 32 · @member (mention text, no ping).
+- Tentative, Bench and Waitlist are listed the same way. Can't make it is a count.
+- The roster fills the description (at most 4,096 characters), then fields (at most 1,024 each). The whole embed stays within 6,000. On overflow it ends with "+N more: `/event list`".
+- Buttons, by type: the type's statuses, and Change character and Change role (Raid and Group). Nothing officer-only.
+- Redraw: debounced with the DKP render pattern, never faster than Discord allows.
+
+**Sign-ups.**
+
+- One current status per member per event, with history rows.
+- A sign-up names one of the member's `/me` characters, with a snapshot (where the type asks for one). A member with none is offered Add a character first.
+- When a role or the capacity is full, the member goes to the Waitlist (or Bench, per the event), and the reply says so. Only Signed up counts against a limit.
+- Promotion: the earliest waitlisted member whose role now has room moves up. Changing character or role keeps their place; Can't make it gives it up. Promotion continues after the lock, up to the start.
+- The lock: 30 minutes before start (a setting; 0 means never). After it, members can only choose Can't make it, officers use `/event roster`, and each change is posted in GC-Events with who made it and why.
+- Who may sign up (one function): not frozen; the server member role if set; the event's sign-up role if set. A role gates Sign up, Tentative and Bench (Going and Maybe for Social and Other). Can't make it is never gated. A member without the role is told which one is needed.
+- Spam: at most 10 changes per member per event per minute; Change character and Change role count. Beyond that, presses are refused with a short reply.
+- Switching roles: a member may switch to a role with room until the lock.
+- Members who left: at the lock, each member on the roster is checked with Get Guild Member. A 404 (Unknown Member) marks them Left, and the waitlist promotes. This needs no privileged intent. Checks run in batches of at most 40 per alarm, inside the Free plan's 50 subrequests per invocation.
+
+**Closing.** The event closes 8 hours after start (a setting) by a due-list item. Part 3 adds closing with its raid. A closed card shows the final roster with no buttons.
+
+**Settings** (`/event settings`, admins, posted publicly):
+
+| Setting | Default |
+|---|---|
+| Server time zone | America/New_York |
+| Sign-ups lock before start | 30 minutes |
+| Event closes after start | 8 hours |
+| Who creates events (events_role) | the officer role |
+| Default sign-up role | none |
+| Role labels; Support on/off | Tank, Healer, DPS, Support; on |
+| Type labels | Raid, Group, Social, Other |
+| Class default roles | none |
+
+**Data.** The events, sign-ups and history tables are in the per-guild export and the backup, and are never shown on another server.
+
+**Departures from this section, named (order 32).**
+
+- Events settings have their own table, event_setting, in dkp_setting's pattern (a row per changed value), rather than rows in dkp_setting: a server can run Events without DKP.
+- The rule for a time on the weekday form: today when that time is still ahead, otherwise the same weekday next week. The preview shows the full date.
+- A local time that doesn't exist (the hour clocks skip in spring) is refused; one that happens twice (the hour repeated in autumn) means the first.

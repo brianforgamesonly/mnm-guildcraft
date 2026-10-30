@@ -14,7 +14,7 @@ import { ATTACH_FILES, CREATE_GUILD_EXPRESSIONS, CREATE_PRIVATE_THREADS, EMBED_L
  * The channel a route acts in: one /guildcraft setup checks, or none (guild-level and application routes). Order 24: the
  * factions forum is served by the board's own routes (the same machinery, src/board/kinds.ts), so it has no rows of its own.
  */
-export type ChannelKind = 'board' | 'factions' | 'review' | 'vault' | 'requests' | 'dkp';
+export type ChannelKind = 'board' | 'factions' | 'review' | 'vault' | 'requests' | 'dkp' | 'events';
 type RouteChannel = Exclude<ChannelKind, 'factions'>;
 const routeChannel = (kind: ChannelKind): RouteChannel => (kind === 'factions' ? 'board' : kind);
 
@@ -67,6 +67,9 @@ export const ROUTES: Route[] = [
   // permission; the bot scope "automatically" includes applications.commands).
   { method: 'POST', path: '/channels/{}/messages', channel: 'dkp', needs: [VIEW_CHANNEL, SEND_MESSAGES, EMBED_LINKS], why: 'dkp: standings messages, raid and approval cards, change notices (Create Message: "must have the SEND_MESSAGES permission")' },
   { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'dkp', needs: [VIEW_CHANNEL, READ_MESSAGE_HISTORY], why: 'dkp: edit its own messages in place ("can be edited by the original message author"; Read Message History keeps its earlier messages readable, unverified whether an edit needs it)' },
+  // Order 32: GC-Events, the Events module's text channel, on the same rules as GC-DKP; no new bit, so the install link is unchanged.
+  { method: 'POST', path: '/channels/{}/messages', channel: 'events', needs: [VIEW_CHANNEL, SEND_MESSAGES, EMBED_LINKS], why: 'events: event cards, setting notices and roster changes (Create Message: "must have the SEND_MESSAGES permission")' },
+  { method: 'PATCH', path: '/channels/{}/messages/{}', channel: 'events', needs: [VIEW_CHANNEL, READ_MESSAGE_HISTORY], why: 'events: edit its own cards in place ("can be edited by the original message author"; Read Message History as in dkp)' },
 ];
 
 /** Discord's settings names for the bits the routes use. */

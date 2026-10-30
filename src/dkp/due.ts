@@ -9,19 +9,14 @@ import { closeCheck, closeRaid, renderCard } from './raid.ts';
 import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
 import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
+import type { DueHandler, DueResult } from './due-types.ts';
+import { EVENT_HANDLERS } from '../events/due.ts';
 
 /** About 40 external calls an invocation (order 5), D1 and Discord together; shared by every item one alarm runs. */
 export const TIMER_CALL_CAP = 40;
 
-export interface DueResult {
-  /** Run this item again at this time (it was not due yet). */
-  again?: number;
-  /** Other items to set (a card edit after a window closes). */
-  schedule?: { key: string; due: number }[];
-  /** Discord's rate-limit headers on the card edit, for the pace of the next one (src/dkp/pace.ts). */
-  headers?: { remaining?: string | null; resetAfter?: string | null; retryAfter?: number | null } | null;
-}
-export type Handler = (env: Env, guildId: string, id: string, due: number, now: number, api: BotApi | null) => Promise<DueResult | null>;
+export type { DueResult } from './due-types.ts';
+export type Handler = DueHandler;
 
 /** lapse:<pending id>: an approval nobody gave in time. */
 const lapse: Handler = async (env, guildId, id, _due, now, api) => {
@@ -134,8 +129,10 @@ const decay: Handler = async (env, guildId, _id, _due, now) => {
   return { again: now + WEEK_MS };
 };
 
-/** The handlers by item kind ("kind:id"). */
-export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, decay };
+/** DKP's handlers by item kind. */
+export const DKP_HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, decay };
+/** The handlers by item kind ("kind:id"). Order 32: the Events module's items share the guild's due-list. */
+export const HANDLERS: Record<string, Handler> = { ...DKP_HANDLERS, ...EVENT_HANDLERS };
 
 /** The calls one alarm's items share (the alarm is one invocation). */
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>

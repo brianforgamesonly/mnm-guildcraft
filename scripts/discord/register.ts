@@ -11,7 +11,7 @@ import { deflateSync } from 'node:zlib';
 import { commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
 import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, remoteDb } from '../import/db.ts';
-import { callDecayGuard, DKP_ON_SQL, upsertDkp, workerUrl } from './dkp.ts';
+import { callDecayGuard, DKP_ON_SQL, EVENTS_ON_SQL, upsertDkp, upsertEvents, workerUrl } from './dkp.ts';
 
 const COPY = currentCopy();
 const GLOBAL = COPY.name === 'production';
@@ -156,6 +156,13 @@ const dkpOn = hasDkp ? (await db.all<{ guild_id: string }>(DKP_ON_SQL)).map((r) 
 const dkp = await upsertDkp(call, appId, dkpOn);
 console.log(`/dkp upserted on ${dkpOn.length - dkp.failed} of ${dkpOn.length} server(s) with DKP on`);
 for (const l of dkp.lines) console.log(l);
+// Order 32 (override 1): /event, the same step, on every server of this copy whose Events module is on. 0024 may not be
+// applied yet when this runs from a reviewed branch: no table, no server has it on.
+const hasEvents = (await db.all<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'event_guild'"))[0].n === 1;
+const eventsOn = hasEvents ? (await db.all<{ guild_id: string }>(EVENTS_ON_SQL)).map((r) => r.guild_id) : [];
+const events = await upsertEvents(call, appId, eventsOn);
+console.log(`/event upserted on ${eventsOn.length - events.failed} of ${eventsOn.length} server(s) with Events on`);
+for (const l of events.lines) console.log(l);
 // Order 30 (ITEM 4): each DKP-on server's decay item. A warning only: the cron's daily slot covers it, and a registration
 // from a reviewed branch can reach a Worker that doesn't have this route yet.
 try {
@@ -186,4 +193,4 @@ console.log('read back GET /applications/@me:', JSON.stringify({ id: me.id, inte
 const readBack = (await discord('GET', commandsPath)) as Command[];
 console.log(`read back ${GLOBAL ? 'global' : 'guild'} commands:`, JSON.stringify(describe(readBack)));
 for (const d of descriptions(readBack)) console.log('read back:', JSON.stringify(d));
-if (me.interactions_endpoint_url !== url || dkp.failed) process.exitCode = 1;
+if (me.interactions_endpoint_url !== url || dkp.failed || events.failed) process.exitCode = 1;

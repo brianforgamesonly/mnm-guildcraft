@@ -1171,3 +1171,17 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/dkp/copy.ts:242 | Kill roll call on **\<named>**: members it paid have 5 minutes to tap **Present**. (or \<n> seconds, when the window isn't whole minutes) | DRAFT |
 | src/dkp/copy.ts:244 | (ledger reason, new rows only) Did not tap Present for the kill roll call | DRAFT |
 | src/dkp/settings.ts:22 | (setting label) Kill roll call window | DRAFT |
+
+## Work order 32, PR A: the Events module's switch and settings (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/events/copy.ts:3 | The Events module is off on this server. | DRAFT |
+| src/events/copy.ts:4 | Only officers (or the role an admin named in `/event settings`) can do that. | DRAFT |
+| src/events/copy.ts:5, 6 | (buttons) Add Events module · Remove Events module | DRAFT |
+| src/events/copy.ts:7-11 | Events module is on. Event cards go in \<channel>. `/event` is now in this server's command list (reload Discord if you don't see it yet). · Kept \<channel>. · Created \<channel>: event cards and roster changes. Everyone can read it; only GuildCraft posts there. · Discord refused to change `/event` on this server (it answered \<n>). The Events module is unchanged; press the button again to retry. · Could not create **GC-Events** (Discord answered \<n>). The Events module is still off; press **Add Events module** again to retry. | DRAFT |
+| src/events/copy.ts:12-14 | Events module is off. `/event` is removed from this server; every event and sign-up is kept, and **Add Events module** later resumes them. \<channel> is left as it is: keep it or delete it. · The Events module is already off on this server. | DRAFT |
+| src/events/copy.ts:16-30 | **Events settings:** · Server time zone · Who creates events · the officer role · Default sign-up role · none · Role labels · Support · on · off · Type labels · Class default roles · \<zone> isn't a time zone I know. Use a name like America/New_York. · Pick both `class:` and `role:` to set a default role. · Saved. The change is posted in the events channel. · Saved. · **\<setting>** is now \<value>. Changed by \<admin>. · Default role for \<class> | DRAFT |
+| src/events/settings.ts:7, 8 | (setting labels) Sign-ups lock before start · Event closes after start | DRAFT |
+| src/events/definition.ts | `/event` Events: raids and get-togethers with sign-ups; `settings` Admins: Events settings, posted publicly; leave the options out to see them; and its options | DRAFT |
+| src/commands/help.ts | (help page) Events: Raids and get-togethers with sign-ups. Event cards are in GC-Events; everyone in the server can see them. | DRAFT |

@@ -6,6 +6,7 @@ import { CRAFTABLE_MARK, LISTS, listKey } from '../../src/commands/autocomplete.
 import { COMMANDS as NEXT_COMMANDS, DEFINED, SUBCOMMAND } from '../../src/commands/definitions.ts';
 import { ROUTES } from '../../src/interactions.ts';
 import { DKP_COMMAND } from '../../src/dkp/definition.ts';
+import { EVENT_COMMAND } from '../../src/events/definition.ts';
 import { ITEM_COPY, USED_IN_SQL } from '../../src/commands/item.ts';
 import { SCREENSHOTS_OFF } from '../../src/commands/images.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
@@ -114,7 +115,7 @@ describe('autocomplete, keyed by command and option', () => {
     );
   it('every autocomplete option in both lists has a list, and every list names one (derived both ways)', () => {
     // Order 27: /dkp's per-server definition has its lists too.
-    const defined = new Set(autocompleteOptions([...NEXT_COMMANDS, DKP_COMMAND]));
+    const defined = new Set(autocompleteOptions([...NEXT_COMMANDS, DKP_COMMAND, EVENT_COMMAND]));
     expect([...defined].filter((k) => !LISTS[k])).toEqual([]);
     expect(Object.keys(LISTS).filter((k) => !defined.has(k))).toEqual([]);
   });

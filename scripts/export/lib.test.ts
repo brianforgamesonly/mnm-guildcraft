@@ -83,6 +83,13 @@ function fixture(): string {
       `INSERT INTO dkp_listing (id, guild_id, item_id, price, quantity, per_member, posted_by, posted_at) VALUES (${n}, '${g}', 1, 5, 2, 1, '${u}', '${at}')`,
       `INSERT INTO dkp_purchase (id, listing_id, member_id, at) VALUES (${n}, ${n}, '${u}9', '${at}')`,
       `INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, purchase_id, reason, actor, at) VALUES ('${g}', '${u}9', 'guild', -5, 0, -5, 'spend', ${n}, 'Spend${n}', 'bot', '${at}')`,
+      // Order 32: the Events module.
+      `INSERT INTO event_guild (guild_id, enabled, channel_id, command_id, changed_at, changed_by) VALUES ('${g}', 1, 'evch${n}', 'evcmd${n}', '${at}', '${u}')`,
+      `INSERT INTO event_setting (guild_id, key, value, set_at, set_by) VALUES ('${g}', 'lock_minutes', '${n}0', '${at}', '${u}')`,
+      `INSERT INTO event_class_role (guild_id, class_code, role, set_at, set_by) VALUES ('${g}', 'WAR', 'tank', '${at}', '${u}')`,
+      `INSERT INTO event (id, guild_id, type, title, start_at, duration_minutes, closes_at, status, posted_by, created_at) VALUES (${n}, '${g}', 'raid', 'Title${n}', '${at}', 180, '${at}', 'open', '${u}', '${at}')`,
+      `INSERT INTO event_signup (event_id, guild_id, member_id, status, role, char_name, updated_at, changed_by) VALUES (${n}, '${g}', '${u}', 'signed_up', 'tank', 'Snap${n}', '${at}', '${u}')`,
+      `INSERT INTO event_signup_history (event_id, guild_id, member_id, status, role, char_name, actor, at) VALUES (${n}, '${g}', '${u}', 'signed_up', 'tank', 'Hist${n}', '${u}', '${at}')`,
     );
   }
   return `${schema()}\n${rows.map((r) => `${r};`).join('\n')}\n`;
@@ -125,7 +132,9 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
     for (const g of [A, B]) assert.ok(Number((full.prepare(`SELECT count(*) AS n FROM "${t.name}" WHERE guild_id = ?`).get(g) as { n: number }).n) > 0, `${t.name} has no row for ${g}`);
   }
   const out = guildDump(sql, A, IMPORT_WRITES);
-  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2', 'Reason2', 'Ledger2', 'Named2', 'dkpch2', 'Cancel2', 'Wisher2', 'Spend2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  for (const leak of [B, '200000000000000002', 'Char2', 'Member2', 'Departed2', 'Faction2', 'thread2', 'private2', 'Guild 2', 'Note2', 'Reason2', 'Ledger2', 'Named2', 'dkpch2', 'Cancel2', 'Wisher2', 'Spend2', 'evch2', 'Title2', 'Snap2', 'Hist2']) assert.ok(!out.sql.includes(leak), `B's ${leak} leaked`);
+  // Order 32: one guild's events, sign-ups and history, and nobody else's.
+  assert.deepEqual([out.counts.event_guild, out.counts.event, out.counts.event_signup, out.counts.event_signup_history], [1, 1, 1, 1]);
   // Order 29: an auction's bids and nudges, and a listing's purchases, come with them.
   assert.deepEqual([out.counts.dkp_kill_member, out.counts.dkp_auction, out.counts.dkp_bid, out.counts.dkp_nudge, out.counts.dkp_wishlist, out.counts.dkp_listing, out.counts.dkp_purchase, out.counts.dkp_ledger], [1, 1, 1, 1, 1, 1, 1, 2]);
   // Order 16: the request's items come with it, by their parent.
