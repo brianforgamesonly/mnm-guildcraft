@@ -37,9 +37,9 @@ import { raidComponent } from './dkp/raid.ts';
 import { AUCTION_OPENS_MODAL, auctionComponent, auctionImmediate } from './dkp/auction.ts';
 import { shopComponent } from './dkp/shop.ts';
 import { EVENT_ROUTES, mayRunEvent } from './events/commands.ts';
-import { CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, STATUS_PREFIX } from './events/card.ts';
+import { CALENDAR_PREFIX, CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, STATUS_PREFIX } from './events/card.ts';
 import { EVENT_COPY } from './events/copy.ts';
-import { CHANGE_CHARACTER_PICK, CHANGE_ROLE_PICK, changeCharacterPicked, changeCharacterPress, changeRolePicked, changeRolePress, confirmPress, CONFIRM_PREFIX, pickPress, PICK_CHARACTER_PREFIX, PICK_ROLE_PREFIX, statusPress } from './events/press.ts';
+import { calendarPress, CHANGE_CHARACTER_PICK, CHANGE_ROLE_PICK, changeCharacterPicked, changeCharacterPress, changeRolePicked, changeRolePress, confirmPress, CONFIRM_PREFIX, noReminders, NO_REMINDERS_PREFIX, pickPress, PICK_CHARACTER_PREFIX, PICK_ROLE_PREFIX, statusPress } from './events/press.ts';
 import { DROP_PREFIX, dropDraft, POST_PREFIX as EVENT_POST_PREFIX, postDraft, ROSTER_PAGE_PREFIX, rosterPageButton } from './events/manage.ts';
 import { ADD_EVENTS_PREFIX, addEventsButton, REMOVE_EVENTS_PREFIX, removeEventsButton } from './events/setup.ts';
 import { loadEvents } from './events/state.ts';
@@ -251,6 +251,9 @@ async function eventComponent(c: Ctx, id: string, values: string[]): Promise<Mes
   if (id.startsWith(CHANGE_CHARACTER_PICK)) return changeCharacterPicked(c, id, values, d);
   if (id.startsWith(CHANGE_ROLE_PREFIX)) return changeRolePress(c, id, d);
   if (id.startsWith(CHANGE_ROLE_PICK)) return changeRolePicked(c, id, values, d);
+  // Order 33: Add to calendar is for any member, and No reminders is the member's own choice.
+  if (id.startsWith(CALENDAR_PREFIX)) return calendarPress(c, id, d);
+  if (id.startsWith(NO_REMINDERS_PREFIX)) return noReminders(c);
   if (!passesMemberGate(c.guild, c.member) && !c.officer) return ephemeral(roleRequired(c.guild));
   if (id.startsWith(ROSTER_PAGE_PREFIX)) return rosterPageButton(c, id, d);
   return ephemeral(STALE_FORM);

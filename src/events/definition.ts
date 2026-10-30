@@ -95,7 +95,7 @@ export const EVENT_COMMAND = {
       description: 'Admins: Events settings, posted publicly; leave the options out to see them',
       options: [
         { type: STRING, name: 'time_zone', description: 'The server time zone, such as America/New_York', max_length: 64 },
-        ...EVENT_SETTINGS.map((s) => ({ type: INTEGER, name: s.key, description: `${s.label}, in ${s.unit}${s.key === 'lock_minutes' ? ' (0: never)' : ''}`, min_value: s.min, max_value: s.max })),
+        ...EVENT_SETTINGS.map((s) => ({ type: INTEGER, name: s.key, description: `${s.label}, in ${s.unit}${s.zero ? ` (0: ${s.zero})` : ''}`, min_value: s.min, max_value: s.max })),
         { type: ROLE, name: 'events_role', description: 'The role that creates events (default: the officer role)' },
         { type: ROLE, name: 'signup_role', description: 'The sign-up role a new event starts with (default: none)' },
         { type: STRING, name: 'clear', description: 'Set a role setting back to its default', choices: [{ name: 'Who creates events', value: 'events_role' }, { name: 'Default sign-up role', value: 'signup_role' }] },

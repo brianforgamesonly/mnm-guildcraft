@@ -1,16 +1,18 @@
 // Order 32 (ITEM 3): what a member's press does, and /event roster. Every route asks src/events/eligible.ts, and every write
 // goes through src/events/signup.ts. The presser's answer is always a new private message (or an edit of their own private
 // message); the card is redrawn by an evcard item, at the pace Discord allows. After the lock, each change is posted in
-// GC-Events with who made it and why. Direct messages are part 2: a promoted member sees it on the card, and privately if
-// it happened on their own press.
+// GC-Events with who made it and why. A promoted member gets a direct message (src/events/dm.ts; order 33's override 3), and
+// the private reply is enough when it happened on their own press.
 import { MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import { ADD_PREFIX as ME_ADD_PREFIX } from '../commands/me.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, memberTag, NO_PINGS, optString, row, STYLE_PRIMARY, truncate, updateMessage, type GuildMember, type MessageReply, type Option } from '../discord.ts';
-import { actionLabel, CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, loadEvent, STATUS_PREFIX, statusLabel, type EventRow } from './card.ts';
+import { button, ephemeral, linkButton, md, memberTag, NO_PINGS, optString, row, STYLE_PRIMARY, truncate, updateMessage, type GuildMember, type MessageReply, type Option } from '../discord.ts';
+import { actionLabel, CALENDAR_PREFIX, CHANGE_CHARACTER_PREFIX, CHANGE_ROLE_PREFIX, loadEvent, messageLink, STATUS_PREFIX, statusLabel, type EventRow } from './card.ts';
+import { googleLink, icsText, type CalendarEvent } from './calendar.ts';
 import { byName, eventApi, spentEvent, type EventRun } from './commands.ts';
 import { EVENT_COPY } from './copy.ts';
+import { promoItems } from './dm.ts';
 import { signupRefusal, SPAM_WINDOW_MS, type SignupRefusal } from './eligible.ts';
 import { characterStatements, changeStatements, promotionStatements, roleStatements, type Snapshot } from './signup.ts';
 import type { EventState } from './state.ts';
@@ -21,6 +23,7 @@ export const PICK_ROLE_PREFIX = 'evpr:';
 export const CONFIRM_PREFIX = 'evpo:';
 export const CHANGE_CHARACTER_PICK = 'evcs:';
 export const CHANGE_ROLE_PICK = 'evrs:';
+export const NO_REMINDERS_PREFIX = 'evnr:';
 const SELECT_MAX = 25;
 const NONE = '-';
 
@@ -78,6 +81,11 @@ const askRefusal = (c: Ctx, e: EventRow, p: Awaited<ReturnType<typeof loadPress>
 const redraw = (c: Ctx, eventId: number) => {
   c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${eventId}`, due: Date.now() }] };
 };
+/** Order 33: a direct message to each member moved up. `told`: a member's own press, whose private reply already says so. */
+const tellPromoted = (c: Ctx, eventId: number, members: (string | null | undefined)[], told?: string) => {
+  const others = members.filter((m): m is string => !!m && m !== told);
+  if (others.length) c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), ...promoItems(eventId, others, Date.now())] };
+};
 const isLocked = (e: EventRow) => !!e.lock_at && Date.parse(e.lock_at) <= Date.now();
 
 /** A member's row, so the card has a name for someone who has never run a command. */
@@ -112,22 +120,71 @@ function resultText(e: EventRow, d: EventState, asked: Status, final: Status, ro
   return role ? EVENT_COPY.youAreRole(label, md(d.settings.role_labels[role])) : EVENT_COPY.youAre(label);
 }
 
+interface Applied {
+  content: string;
+  components: unknown[];
+}
+
+/**
+ * Order 33: the one-time note, with a member's first sign-up in the server. The write is its own proof: only a row not yet
+ * told comes back, and only if this press really left a sign-up row.
+ */
+const firstSignup = (c: Ctx, eventId: number, at: string) =>
+  c.db
+    .prepare(
+      `INSERT INTO event_member (guild_id, member_id, told_at) SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM event_signup s WHERE s.event_id = ?4 AND s.member_id = ?2 AND s.updated_at = ?3)
+       ON CONFLICT (guild_id, member_id) DO UPDATE SET told_at = excluded.told_at WHERE told_at IS NULL RETURNING reminders_off`,
+    )
+    .bind(c.guild.id, c.userId, at, eventId);
+
 /** Applies a member's own choice: their row, its history, a promotion if it freed a place, then the card and any notice. */
-async function apply(c: Ctx, d: EventState, e: EventRow, cur: Current | null, status: Status, role: Role | null, character: Snapshot | null): Promise<string> {
+async function apply(c: Ctx, d: EventState, e: EventRow, cur: Current | null, status: Status, role: Role | null, character: Snapshot | null): Promise<Applied> {
   const at = now();
   const freed = cur?.status === 'signed_up' && (status !== 'signed_up' || role !== cur.role);
-  const results = await c.db.batch<{ status?: Status; member_id?: string }>([
+  const asks = status !== 'declined' && d.settings.reminder_minutes > 0;
+  const results = await c.db.batch<{ status?: Status; member_id?: string; reminders_off?: number }>([
     memberRow(c, c.member),
     ...changeStatements(c.db, { eventId: e.id, member: c.userId, status, role, character, actor: c.userId, reason: null, at }),
     ...(freed ? promotionStatements(c.db, e.id, at, 1) : []),
+    ...(asks ? [firstSignup(c, e.id, at)] : []),
   ]);
   if (results[0].meta.changes === 1) c.effects.welcome = true;
   const final = results[1].results[0]?.status;
-  if (!final) return EVENT_COPY.notOpen;
+  if (!final) return { content: EVENT_COPY.notOpen, components: [] };
   const promoted = freed ? (results[3].results[0]?.member_id ?? null) : null;
   redraw(c, e.id);
+  tellPromoted(c, e.id, [promoted], c.userId);
   if (isLocked(e)) await notice(c, d, [EVENT_COPY.changeLine(md(e.title), byName(c), statusWord(final, e)), ...(promoted ? [EVENT_COPY.promotedLine(await tags(c, [promoted]))] : [])].join('\n'));
-  return resultText(e, d, status, final, role);
+  const text = resultText(e, d, status, final, role);
+  if (asks && results.at(-1)!.results[0]?.reminders_off === 0) return { content: `${text}\n${EVENT_COPY.reminderNote}`, components: [row([button(NO_REMINDERS_PREFIX, EVENT_COPY.noReminders)])] };
+  return { content: text, components: [] };
+}
+const privately = (a: Applied) => ephemeral(a.content, a.components.length ? { components: a.components } : {});
+
+/** evnr:: the first sign-up's No reminders. It stops reminders only, on this server. */
+export async function noReminders(c: Ctx): Promise<MessageReply> {
+  await c.db.prepare('INSERT INTO event_member (guild_id, member_id, reminders_off) VALUES (?1, ?2, 1) ON CONFLICT (guild_id, member_id) DO UPDATE SET reminders_off = 1').bind(c.guild.id, c.userId).run();
+  return updateMessage({ content: EVENT_COPY.remindersOff, components: [] });
+}
+
+/**
+ * evcal:<event>: Add to calendar, for any member, privately: the Google link and the .ics file. The file goes with the
+ * reply; if Discord refuses it, the reply goes without it (src/respond.ts).
+ */
+export async function calendarPress(c: Ctx, id: string, d: EventState): Promise<MessageReply> {
+  const e = await loaded(c, Number(id.slice(CALENDAR_PREFIX.length)));
+  if (!e) return ephemeral(EVENT_COPY.notOpen);
+  if (e.status !== 'open') return ephemeral(e.status === 'cancelled' ? EVENT_COPY.isCancelled : EVENT_COPY.isClosed);
+  const event: CalendarEvent = {
+    id: e.id, guildId: e.guild_id, title: e.title, startMs: Date.parse(e.start_at), durationMinutes: e.duration_minutes, location: e.zone_key ? (e.zone_name ?? e.zone_key) : null, description: e.description,
+    cardUrl: e.message_id && d.channel_id ? messageLink(e.guild_id, d.channel_id, e.message_id) : null,
+  };
+  const title = md(e.title);
+  return ephemeral([EVENT_COPY.calendarHead(title), EVENT_COPY.calendarStays].join('\n'), {
+    components: [row([linkButton(EVENT_COPY.googleCalendar, googleLink(event))])],
+    files: [{ name: `event-${e.id}.ics`, type: 'text/calendar', text: icsText(event, Date.now()) }],
+    noFiles: [EVENT_COPY.calendarNoFile(title), EVENT_COPY.calendarStays].join('\n'),
+  });
 }
 
 const parseEvent = (id: string, prefix: string) => id.slice(prefix.length).split(':');
@@ -185,12 +242,12 @@ export async function statusPress(c: Ctx, id: string, d: EventState): Promise<Me
   if (refusal) return ephemeral(refusalText(refusal));
   const cur = p.current;
   if (alreadyThere(cur, status)) return ephemeral(EVENT_COPY.already(statusWord(cur!.status, e)));
-  if (leaving) return ephemeral(await apply(c, d, e, cur, status, cur?.role ?? null, keptSnapshot(cur)));
-  if (rule.character === 'none') return ephemeral(await apply(c, d, e, cur, status, null, null));
-  if (keptSnapshot(cur) && (cur?.role || rule.character !== 'required')) return ephemeral(await apply(c, d, e, cur, status, cur!.role, keptSnapshot(cur)));
+  if (leaving) return privately(await apply(c, d, e, cur, status, cur?.role ?? null, keptSnapshot(cur)));
+  if (rule.character === 'none') return privately(await apply(c, d, e, cur, status, null, null));
+  if (keptSnapshot(cur) && (cur?.role || rule.character !== 'required')) return privately(await apply(c, d, e, cur, status, cur!.role, keptSnapshot(cur)));
   const chars = await ownCharacters(c, c.userId);
   if (!chars.length) {
-    if (rule.character === 'optional') return ephemeral(await apply(c, d, e, cur, status, null, null));
+    if (rule.character === 'optional') return privately(await apply(c, d, e, cur, status, null, null));
     return ephemeral(EVENT_COPY.needsCharacter, { components: [row([button(`${ME_ADD_PREFIX}${c.userId}`, EVENT_COPY.addCharacter, STYLE_PRIMARY)])] });
   }
   const first = chars[0];
@@ -234,7 +291,7 @@ export async function confirmPress(c: Ctx, id: string, d: EventState): Promise<M
   const ch = chars.find((x) => x.id === charId);
   const required = TYPE_RULES[e.type].character === 'required';
   if ((required && (!ch || !role)) || (charId !== 0 && !ch)) return updateMessage({ content: EVENT_COPY.characterGone, components: [] });
-  return updateMessage({ content: await apply(c, d, e, p.current, status as Status, role, ch ? snapshotOf(ch) : null), components: [] });
+  return updateMessage(await apply(c, d, e, p.current, status as Status, role, ch ? snapshotOf(ch) : null));
 }
 
 /** What Change character and Change role need: an open event, the member on its roster, and the one function's yes. */
@@ -290,9 +347,10 @@ export async function changeRolePicked(c: Ctx, id: string, values: string[], d: 
   if (role === r.current!.role) return updateMessage({ content: EVENT_COPY.already(md(d.settings.role_labels[role])), components: [] });
   const at = now();
   const results = await c.db.batch<{ status?: string; member_id?: string }>([...roleStatements(c.db, { eventId: r.e!.id, member: c.userId, role, actor: c.userId, at }), ...promotionStatements(c.db, r.e!.id, at, 1)]);
-  if (!results[0].results.length) return updateMessage({ content: EVENT_COPY.roleFull(md(d.settings.role_labels[role])), components: [] });
-  redraw(c, r.e!.id);
   const promoted = results[2].results[0]?.member_id;
+  if (results[0].results.length || promoted) redraw(c, r.e!.id);
+  tellPromoted(c, r.e!.id, [promoted], c.userId);
+  if (!results[0].results.length) return updateMessage({ content: EVENT_COPY.roleFull(md(d.settings.role_labels[role])), components: [] });
   return updateMessage({ content: promoted === c.userId ? EVENT_COPY.promotedYou(md(d.settings.role_labels[role])) : EVENT_COPY.roleChanged(md(d.settings.role_labels[role])), components: [] });
 }
 
@@ -338,6 +396,7 @@ export const rosterCommand: EventRun = async (c, opts: Option[], d) => {
   ]);
   redraw(c, e.id);
   const promoted = freed ? results[3].results[0]?.member_id : undefined;
+  tellPromoted(c, e.id, [promoted]);
   const shown = role ? `${statusWord(status, e)} (${md(d.settings.role_labels[role])})` : statusWord(status, e);
   const posted = await notice(c, d, [EVENT_COPY.rosterLine(md(e.title), memberTag(member, name), shown, byName(c), md(reason)), ...(promoted ? [EVENT_COPY.promotedLine(await tags(c, [promoted]))] : [])].join('\n'));
   return ephemeral(posted ? EVENT_COPY.rosterDone : EVENT_COPY.rosterQuiet);

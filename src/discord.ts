@@ -141,12 +141,22 @@ export const mention = (userId: string) => `<@${userId}>`;
  */
 export const memberTag = (userId: string, savedName: string) => `${mention(userId)} (${md(savedName)})`;
 
+/** Order 33: a file sent with a deferred reply (src/respond.ts sends it as multipart/form-data). */
+export interface Upload {
+  name: string;
+  type: string;
+  text: string;
+}
+
 export interface MessageData {
   content?: string;
   embeds?: Embed[];
   components?: unknown[];
   flags?: number;
   allowed_mentions?: AllowedMentions;
+  files?: Upload[];
+  /** The content to send instead, without the files, if Discord refuses them. */
+  noFiles?: string;
 }
 
 export type InteractionReply =

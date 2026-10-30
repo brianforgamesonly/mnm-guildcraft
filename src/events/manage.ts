@@ -13,6 +13,8 @@ import type { EventState } from './state.ts';
 import { fullDate, lockAndClose, MAX_DAYS_AHEAD, parseStart, stamp } from './times.ts';
 import { LIMIT_COLUMN, PREVIEW, ROLES, TYPE_RULES, type EventType, type Role } from './types.ts';
 import { notice, tags } from './press.ts';
+import { promoItems } from './dm.ts';
+import { reminderItem } from './setup.ts';
 import { MAX_PROMOTIONS, promotionStatements } from './signup.ts';
 
 export const POST_PREFIX = 'evpost:';
@@ -117,7 +119,7 @@ export async function postDraft(c: Ctx, id: string, d: EventState): Promise<Mess
       return ephemeral(EVENT_COPY.postFailed(posted.status));
     }
     // Asked for first: the card is live, so the event closes on time even if the save below fails.
-    c.effects.dkpTimers = { guildId: c.guild.id, items: [...(e.lock_at ? [{ key: `evlock:${eventId}`, due: Date.parse(e.lock_at) }] : []), { key: `evclose:${eventId}`, due: Date.parse(e.closes_at) }] };
+    c.effects.dkpTimers = { guildId: c.guild.id, items: [...(e.lock_at ? [{ key: `evlock:${eventId}`, due: Date.parse(e.lock_at) }] : []), { key: `evclose:${eventId}`, due: Date.parse(e.closes_at) }, ...(reminderItem(e, d.settings.reminder_minutes, Date.now()) ?? [])] };
     await c.db.batch([c.db.prepare('UPDATE event SET message_id = ? WHERE id = ?').bind(posted.body.id, eventId), audit(c.db, c.guild.id, c.userId, 'event.create', `event:${eventId}`, null, { type: e.type, start: e.start_at })]);
     return updateMessage({ content: EVENT_COPY.posted_(messageLink(c.guild.id, d.channel_id, posted.body.id)), embeds: [], components: [] });
   } finally {
@@ -204,9 +206,16 @@ export const editCommand: EventRun = async (c, opts, d) => {
   // Each change after the lock is posted, a promotion by this edit too.
   const promoted = results.slice(2, -1).flatMap((r) => r.results.map((x) => x.member_id!)).filter(Boolean);
   if (promoted.length && lock && Date.parse(lock) <= Date.now()) await notice(c, d, `**${md(f.title)}:** ${EVENT_COPY.promotedLine(await tags(c, promoted))}`);
-  const items: { key: string; due: number; later?: boolean }[] = [{ key: `evcard:${id}`, due: Date.now() }];
+  const items: { key: string; due: number; later?: boolean }[] = [{ key: `evcard:${id}`, due: Date.now() }, ...promoItems(id, promoted, Date.now())];
   // A new start moves the lock and the close: `later` replaces the old items even with a later time.
   if (moved) items.push(...(lock ? [{ key: `evlock:${id}`, due: Date.parse(lock), later: true }] : []), { key: `evclose:${id}`, due: Date.parse(closes), later: true });
+  // Order 33: a start that really moved tells the roster, and re-arms the reminder; a reminder whose time has passed goes.
+  if (moved && start !== e.start_at) {
+    const reminder = reminderItem({ id, start_at: start, reminded_start: e.reminded_start }, d.settings.reminder_minutes, Date.now());
+    if (reminder) items.push(...reminder);
+    else c.effects.timersDrop = { guildId: c.guild.id, keys: [`evremind:${id}`] };
+    items.push({ key: `evmoved:${id}`, due: Date.now(), later: true });
+  }
   c.effects.dkpTimers = { guildId: c.guild.id, items };
   return ephemeral(EVENT_COPY.edited);
 };
@@ -221,7 +230,9 @@ export const cancelCommand: EventRun = async (c, opts) => {
     auditIfChanged(c.db, c.guild.id, c.userId, 'event.cancel', `event:${id}`, null, { reason }),
   ]);
   if (took.meta.changes !== 1) return ephemeral(EVENT_COPY.notOpen);
-  c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `evcard:${id}`, due: Date.now() }] };
+  // Order 33: the reminder goes with it, and the roster is told.
+  c.effects.timersDrop = { guildId: c.guild.id, keys: [`evremind:${id}`, `evmoved:${id}`] };
+  c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `evcard:${id}`, due: Date.now() }, { key: `evgone:${id}`, due: Date.now() }] };
   return ephemeral(EVENT_COPY.cancelled);
 };
 

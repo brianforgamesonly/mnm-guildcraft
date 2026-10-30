@@ -26,6 +26,10 @@ import down21 from '../../scripts/rollback/0021_dkp.down.sql?raw';
 import up21 from '../../migrations/0021_dkp.sql?raw';
 import down22 from '../../scripts/rollback/0022_npc_tags.down.sql?raw';
 import up22 from '../../migrations/0022_npc_tags.sql?raw';
+import down25 from '../../scripts/rollback/0025_card_stale.down.sql?raw';
+import up25 from '../../migrations/0025_card_stale.sql?raw';
+import down26 from '../../scripts/rollback/0026_event_messages.down.sql?raw';
+import up26 from '../../migrations/0026_event_messages.sql?raw';
 import down23 from '../../scripts/rollback/0023_dkp_auctions.down.sql?raw';
 import up23 from '../../migrations/0023_dkp_auctions.sql?raw';
 import down24 from '../../scripts/rollback/0024_events.down.sql?raw';
@@ -52,9 +56,23 @@ const runWhole = async (sql: string) => {
 
 it('order 32: 0024 down, then up again, restores the schema; down leaves no trace of it', async () => {
   const before = await schema();
+  await run(down26); // order 33's table and column depend on it
   await run(down24);
   expect((await schema()).some((r) => /^event/.test(r.name))).toBe(false);
   await run(up24);
+  await run(up26);
+  expect(await schema()).toEqual(before);
+});
+
+it('order 33: 0026 and 0025 down, then up again, restore the schema; down leaves no trace of them', async () => {
+  const before = await schema();
+  await run(down26);
+  await run(down25);
+  const after = await schema();
+  expect(after.some((r) => r.name === 'card_stale' || r.name === 'event_member')).toBe(false);
+  expect(after.find((r) => r.name === 'event')!.sql).not.toContain('reminded_start');
+  await run(up25);
+  await run(up26);
   expect(await schema()).toEqual(before);
 });
 

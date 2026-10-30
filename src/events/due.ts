@@ -4,10 +4,9 @@
 // checks that state itself, and does nothing while the module is off (Add Events module re-arms it).
 import type { DueHandler } from '../dkp/due-types.ts';
 import { budgetLeft } from '../board/api.ts';
-import { md, memberTag, NO_PINGS, truncate } from '../discord.ts';
-import { loadEvent, loadSignups, renderEvent } from './card.ts';
+import { loadEvent, renderEvent } from './card.ts';
 import { EVENT_COPY } from './copy.ts';
-import { leftStatements, MAX_PROMOTIONS, promotionStatements } from './signup.ts';
+import { evgone, evmoved, evpromo, evremind, leftAndPromoted, promoItems, UNKNOWN_MEMBER } from './dm.ts';
 import { loadEvents } from './state.ts';
 import { ON_ROSTER } from './types.ts';
 
@@ -31,17 +30,16 @@ const evclose: DueHandler = async (env, guildId, id, _due, now) => {
 };
 
 /** evcard:<event id>: the card, edited in place, paced by Discord's last answer (src/dkp/timers.ts). */
-const evcard: DueHandler = async (env, guildId, id, _due, now, api, stale) => {
+const evcard: DueHandler = async (env, guildId, id, _due, now, api, run) => {
   const state = await loadEvents(env.DB, guildId);
   if (!api || !state.enabled) return { skip: true };
-  return { headers: await renderEvent(env, api, guildId, state, Number(id), now, !stale) };
+  return { headers: await renderEvent(env, api, guildId, state, Number(id), now, !run?.stale) };
 };
 
 /** Member lookups one alarm may make, and what it keeps back for D1 and the notice (the alarm's budget is 40 calls in all). */
 export const LEFT_BATCH = 40;
 const LEFT_RESERVE = 6;
-/** Discord's "Unknown member" (docs.discord.com/developers/topics/opcodes-and-status-codes). */
-export const UNKNOWN_MEMBER = 10007;
+export { UNKNOWN_MEMBER };
 
 /**
  * evlock:<event id>: the lock. Each member on the roster is looked up (Get Guild Member needs no privileged intent); only a
@@ -84,22 +82,13 @@ const evlock: DueHandler = async (env, guildId, id, _due, now, api) => {
     looked++;
   }
   const done = !stopped && looked === results.length && results.length < LEFT_BATCH;
-  // Names first: once the batch below has run, a failure here could lose the notice.
-  const signups = left.length ? new Map((await loadSignups(env.DB, eventId)).map((s) => [s.member_id, s.name])) : new Map<string, string>();
-  const moved = await env.DB.batch<{ member_id: string }>([
-    ...(left.length ? [...leftStatements(env.DB, eventId, left, at), ...promotionStatements(env.DB, eventId, at, Math.min(left.length, MAX_PROMOTIONS))] : []),
-    done ? finish(cursor) : env.DB.prepare('UPDATE event SET left_cursor = ? WHERE id = ? AND lock_at = ?').bind(cursor, eventId, e.lock_at),
-  ]);
-  if (left.length && state.channel_id) {
-    const promoted = moved.slice(2, -2).flatMap((r) => r.results.map((x) => x.member_id));
-    const tags = (ids: string[]) => ids.map((m) => memberTag(m, signups.get(m) ?? m)).join(', ');
-    const posted = await api.call('POST', `/channels/${state.channel_id}/messages`, { content: truncate([EVENT_COPY.leftLine(md(e.title), tags(left)), ...(promoted.length ? [EVENT_COPY.promotedLine(tags(promoted))] : [])].join('\n'), 2000), allowed_mentions: NO_PINGS });
-    if (!posted.ok) console.error('event notice failed', posted.status);
-  }
-  if (done) return { schedule: card };
+  const saved = done ? finish(cursor) : env.DB.prepare('UPDATE event SET left_cursor = ? WHERE id = ? AND lock_at = ?').bind(cursor, eventId, e.lock_at);
+  const promoted = await leftAndPromoted(env, api, e, state, left, at, EVENT_COPY.leftLine, [saved]);
+  const promos = promoItems(eventId, promoted, now);
+  if (done) return { schedule: [...card, ...promos] };
   // Discord said something else, or the budget ran out: the next batch, a moment later (each alarm is its own invocation).
-  return { again: now + (stopped ? 30_000 : 1_000), ...(left.length ? { schedule: card } : {}) };
+  return { again: now + (stopped ? 30_000 : 1_000), ...(left.length ? { schedule: [...card, ...promos] } : {}) };
 };
 
 /** The Events handlers by item kind. test/worker/events-switch.test.ts holds every kind to the "ev" prefix. */
-export const EVENT_HANDLERS: Record<string, DueHandler> = { evclose, evcard, evlock };
+export const EVENT_HANDLERS: Record<string, DueHandler> = { evclose, evcard, evlock, evremind, evmoved, evgone, evpromo };

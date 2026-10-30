@@ -75,6 +75,7 @@ async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>,
   try {
     if (effects.dkpCancel) await timersOf(env, effects.dkpCancel).cancel();
     if (effects.eventsCancel) await timersOf(env, effects.eventsCancel).cancelEvents();
+    if (effects.timersDrop?.keys.length) await timersOf(env, effects.timersDrop.guildId).cancel(effects.timersDrop.keys);
     if (effects.dkpTimers?.items.length) await timersOf(env, effects.dkpTimers.guildId).schedule(effects.dkpTimers.guildId, effects.dkpTimers.items);
     if (effects.dkpDecay) await timersOf(env, effects.dkpDecay).ensureDecay(effects.dkpDecay);
   } catch (e) {

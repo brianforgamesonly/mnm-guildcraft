@@ -36,6 +36,7 @@ export const UPDATE_PREFIX = 'meu:';
 export const UPDATE_PICK_PREFIX = 'meus:';
 export const NOTICES_PREFIX = 'men:';
 export const NOTICES_PICK_PREFIX = 'mens:';
+export const REMINDERS_PREFIX = 'merm:';
 export const FORGET_PREFIX = 'mef:';
 export const FORGET_PAGE_PREFIX = 'mefn:';
 export const FORGET_PICK_PREFIX = 'mefs:';
@@ -64,6 +65,9 @@ export const ME_COPY = {
   remove: 'Remove character',
   update: 'Update skills',
   notices: 'Notices',
+  remindersOn: 'Reminders: on',
+  remindersOff: 'Reminders: off',
+  notYours: 'That button is for the member whose `/me` it is.',
   forget: 'Forget a recipe',
   cancel: 'Cancel a request',
   ownOnly: 'Only the member can do that, from their own `/me`.',
@@ -139,7 +143,7 @@ async function openRequests(c: Ctx, ownerId: string): Promise<RequestRow[]> {
 }
 
 /** The panel's buttons: at most 2 rows of 4 and 3 (Discord: 5 rows, 5 buttons a row). Own-only buttons on one's own panel only. */
-export function panelRows(ownerId: string, own: boolean, hasCharacters: boolean, hasRequests: boolean): unknown[] {
+export function panelRows(ownerId: string, own: boolean, hasCharacters: boolean, hasRequests: boolean, reminders: boolean | null = null): unknown[] {
   const first = [
     ...(own ? [button(`${ADD_PREFIX}${ownerId}`, ME_COPY.add, STYLE_PRIMARY)] : []),
     ...(hasCharacters
@@ -148,10 +152,30 @@ export function panelRows(ownerId: string, own: boolean, hasCharacters: boolean,
   ];
   const second = [
     ...(own ? [button(`${NOTICES_PREFIX}${ownerId}`, ME_COPY.notices)] : []),
+    ...(own && reminders !== null ? [button(`${REMINDERS_PREFIX}${ownerId}`, reminders ? ME_COPY.remindersOn : ME_COPY.remindersOff)] : []),
     ...(own && hasCharacters ? [button(`${FORGET_PREFIX}${ownerId}:0`, ME_COPY.forget)] : []),
     ...(hasRequests ? [button(`${CANCEL_PREFIX}${ownerId}`, ME_COPY.cancel, STYLE_SECONDARY)] : []),
   ];
   return [first, second].filter((r) => r.length).map((r) => row(r));
+}
+
+/** Order 33: the Reminders toggle's state: null where the Events module is off, so the panel doesn't offer it. One statement. */
+async function remindersOn(c: Ctx): Promise<boolean | null> {
+  const r = await c.db
+    .prepare('SELECT (SELECT enabled FROM event_guild WHERE guild_id = ?1) AS module, (SELECT reminders_off FROM event_member WHERE guild_id = ?1 AND member_id = ?2) AS off')
+    .bind(c.guild.id, c.userId)
+    .first<{ module: number | null; off: number | null }>();
+  return r?.module === 1 ? r.off !== 1 : null;
+}
+
+/** merm:<member>: Reminders on or off, for this server. It stops reminders only, as No reminders does. */
+export async function remindersButton(c: Ctx, id: string): Promise<MessageReply> {
+  if (id.slice(REMINDERS_PREFIX.length) !== c.userId) return ephemeral(ME_COPY.notYours);
+  await c.db
+    .prepare('INSERT INTO event_member (guild_id, member_id, reminders_off) VALUES (?1, ?2, 1) ON CONFLICT (guild_id, member_id) DO UPDATE SET reminders_off = 1 - reminders_off')
+    .bind(c.guild.id, c.userId)
+    .run();
+  return asEdit(await mePanel(c, c.userId));
 }
 
 /** The panel for `ownerId` (the caller, or a member an officer opened), optionally one named character only. */
@@ -167,8 +191,9 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
   const who = own ? '' : await whoIs(c, ownerId);
   // Order 27: DKP balances and attendance, only where DKP is on.
   const dkp = await dkpMeLine(c.db, c.guild.id, ownerId);
+  const reminders = own ? await remindersOn(c) : null;
   if (!chars.length) {
-    const rows = panelRows(ownerId, own, false, reqs.length > 0);
+    const rows = panelRows(ownerId, own, false, reqs.length > 0, reminders);
     const head = own ? ME_COPY.noCharacters : ME_COPY.othersNone(who);
     const content = dkp ? `${head}\n${dkp}` : head;
     return own ? ephemeral(content, { embeds: [WELCOME], components: rows }) : ephemeral(content, { components: rows });
@@ -185,7 +210,7 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
     anyStale ? ME_COPY.stale(c.guild.stale_days) : null,
     dkp,
   ].filter(Boolean);
-  return ephemeral(truncate(notes.join('\n'), 2000), { embeds, components: panelRows(ownerId, own, true, reqs.length > 0) });
+  return ephemeral(truncate(notes.join('\n'), 2000), { embeds, components: panelRows(ownerId, own, true, reqs.length > 0, reminders) });
 }
 
 async function whoIs(c: Ctx, userId: string): Promise<string> {
@@ -523,6 +548,7 @@ export function meComponent(c: Ctx, id: string, values: string[], components: Mo
   if (id.startsWith(UPDATE_PREFIX)) return updateButton(c, id);
   if (id.startsWith(NOTICES_PICK_PREFIX)) return noticesPicked(c, id, values);
   if (id.startsWith(NOTICES_PREFIX)) return noticesButton(c, id);
+  if (id.startsWith(REMINDERS_PREFIX)) return remindersButton(c, id);
   if (id.startsWith(FORGET_PICK_PREFIX)) return forgetPicked(c, values);
   if (id.startsWith(FORGET_PAGE_PREFIX)) return forgetPage(c, id);
   if (id.startsWith(FORGET_PREFIX)) return forgetButton(c, id);

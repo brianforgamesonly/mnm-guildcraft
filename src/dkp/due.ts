@@ -10,12 +10,10 @@ import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } 
 import { renderListing } from './shop.ts';
 import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
-import type { DueHandler, DueResult } from './due-types.ts';
+import { TIMER_CALL_CAP, type DueHandler, type DueResult, type ItemRun } from './due-types.ts';
 import { EVENT_HANDLERS } from '../events/due.ts';
 
-/** About 40 external calls an invocation (order 5), D1 and Discord together; shared by every item one alarm runs. */
-export const TIMER_CALL_CAP = 40;
-
+export { TIMER_CALL_CAP } from './due-types.ts';
 export type { DueResult } from './due-types.ts';
 export type Handler = DueHandler;
 
@@ -146,12 +144,12 @@ export const HANDLERS: Record<string, Handler> = { ...DKP_HANDLERS, ...EVENT_HAN
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>
   env.DISCORD_BOT_TOKEN ? botApi(env.DISCORD_BOT_TOKEN, { d1, discord: 0, cap: TIMER_CALL_CAP, deadline: now + 20_000 }) : null;
 
-export async function runDue(env: Env, guildId: string, key: string, due: number, now: number, api: BotApi | null, stale = false): Promise<DueResult | null> {
+export async function runDue(env: Env, guildId: string, key: string, due: number, now: number, api: BotApi | null, run: ItemRun = {}): Promise<DueResult | null> {
   const [kind, id] = key.split(':');
   const h = HANDLERS[kind];
   if (!h) {
     console.error('dkp timer: unknown item', key);
     return null;
   }
-  return h(env, guildId, id, due, now, api, stale);
+  return h(env, guildId, id, due, now, api, run);
 }

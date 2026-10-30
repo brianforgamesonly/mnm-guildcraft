@@ -38,15 +38,31 @@ const isPrivate = (data: MessageData) => ((data.flags ?? 0) & InteractionRespons
 /** An edit cannot change visibility, so the flags field is left out of it. */
 const editBody = ({ flags: _flags, ...rest }: MessageData) => rest;
 
+/**
+ * Order 33: a reply with files is multipart/form-data: "Non-file parameters can be sent ... collectively as JSON in the
+ * `payload_json` form field", each file as `files[n]`, and "The `attachments` JSON parameter includes all files"
+ * (docs.discord.com/developers/reference, Uploading Files). fetch sets the form's own Content-Type.
+ */
+function encoded(body: unknown): { headers: Record<string, string>; body?: BodyInit } {
+  if (body === undefined) return { headers: { 'Content-Type': 'application/json' } };
+  const { files, noFiles: _noFiles, ...rest } = body as MessageData;
+  if (!files?.length) return { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rest) };
+  const form = new FormData();
+  form.append('payload_json', JSON.stringify({ ...rest, attachments: files.map((f, id) => ({ id, filename: f.name })) }));
+  files.forEach((f, n) => form.append(`files[${n}]`, new Blob([f.text], { type: f.type }), f.name));
+  return { headers: {}, body: form };
+}
+
 async function call(i: Interaction, op: Delivery['op'], body?: unknown): Promise<Delivery> {
   const base = `${DISCORD_API}/webhooks/${i.application_id}/${i.token}`;
   const url = op === 'followup' ? base : `${base}/messages/@original`;
   const method = op === 'followup' ? 'POST' : op === 'edit' ? 'PATCH' : 'DELETE';
+  const sent = encoded(body);
   try {
     const res = await fetch(url, {
       method,
-      headers: { 'Content-Type': 'application/json', 'User-Agent': 'DiscordBot (mnm-guildcraft, 1)' },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      headers: { ...sent.headers, 'User-Agent': 'DiscordBot (mnm-guildcraft, 1)' },
+      ...(sent.body === undefined ? {} : { body: sent.body }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
     if (res.ok) return { op, status: res.status };
@@ -83,7 +99,14 @@ export async function deliver(i: Interaction, plan: Deferred, reply: MessageRepl
   }
   // Type 6: an UPDATE_MESSAGE edits the component's message; a new message is a follow-up with its own flags.
   if (reply.type === InteractionResponseType.UPDATE_MESSAGE) log.push(await call(i, 'edit', editBody(reply.data)));
-  else log.push(await call(i, 'followup', reply.data));
+  else {
+    log.push(await call(i, 'followup', reply.data));
+    // Order 33: Discord's documents don't say a private reply may always carry a file. If it won't, the reply still goes.
+    if (!ok(log.at(-1)!) && reply.data.files?.length) {
+      const { files: _files, noFiles, ...rest } = reply.data;
+      log.push(await call(i, 'followup', { ...rest, content: noFiles ?? rest.content }));
+    }
+  }
   return ok(log.at(-1)!);
 }
 
