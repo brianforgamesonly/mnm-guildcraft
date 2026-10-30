@@ -87,8 +87,8 @@ async function addEvents(c: Ctx, api: BotApi, appId: string): Promise<MessageRep
   }
   const cmd = await api.call<{ id: string }>('POST', `/applications/${appId}/guilds/${g}/commands`, EVENT_COMMAND);
   if (!cmd.ok) {
-    // The channel is saved (the module stays off), so a retry keeps it.
-    await saveStatement(c, { enabled: 0, channel: channel.id, command: state.command_id }).run();
+    // The channel is saved and the switch stays as it was, so a retry keeps it and a second press never turns the module off.
+    await saveStatement(c, { enabled: state.enabled ? 1 : 0, channel: channel.id, command: state.command_id }).run();
     return ephemeral([...lines, EVENT_COPY.commandFailed(cmd.status)].join('\n'));
   }
   await c.db.batch([saveStatement(c, { enabled: 1, channel: channel.id, command: cmd.body.id }), audit(c.db, g, c.userId, 'event.on', `channel:${channel.id}`, { enabled: state.enabled }, { enabled: true })]);

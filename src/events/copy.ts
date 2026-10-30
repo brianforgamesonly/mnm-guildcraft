@@ -29,6 +29,8 @@ export const EVENT_COPY = {
   classNeedsRole: 'Pick both `class:` and `role:` to set a default role.',
   saved: 'Saved. The change is posted in the events channel.',
   savedQuiet: 'Saved.',
-  changed: (label: string, value: string, by: string) => `**${label}** is now ${value}. Changed by ${by}.`,
-  classRole: (cls: string, role: string) => `Default role for ${cls}`,
+  changed: (label: string, value: string) => `**${label}** is now ${value}.`,
+  changedBy: (by: string) => `Changed by ${by}.`,
+  classRole: (cls: string) => `Default role for ${cls}`,
+  unknownClass: (typed: string) => `There is no class called **${typed}**. Pick one from the list.`,
 };
