@@ -16,7 +16,8 @@ import { botApi, type BotApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, STYLE_SUCCESS, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { zoneKey } from '../zone/names.ts';
-import { RAID_COPY } from './copy.ts';
+import { AUCTION_DROP_PREFIX } from './auction.ts';
+import { AUCTION_COPY, RAID_COPY } from './copy.ts';
 import { zoneCreatures, type Creature } from './creatures.ts';
 import { askApproval, type DkpRun } from './commands.ts';
 import {
@@ -187,7 +188,8 @@ export function cardMessage(d: CardData, guildId: string): Message {
       button(`${WHO_HERE_PREFIX}${id}`, RAID_COPY.whoHere),
       button(`${WHO_EARNED_PREFIX}${id}`, RAID_COPY.whoEarned, STYLE_SECONDARY, !d.kills.length),
       button(`${CHECK_PREFIX}${id}`, RAID_COPY.checkAgain, STYLE_SECONDARY, !d.kills.length),
-      ...(raid.mode === 'flat' ? [button(`${PAY_PREFIX}${id}`, RAID_COPY.payAttendance, STYLE_PRIMARY)] : []),
+      // Order 29: Auction a drop (the latest kill's known loot); flat mode has no named, so no loot.
+      ...(raid.mode === 'flat' ? [button(`${PAY_PREFIX}${id}`, RAID_COPY.payAttendance, STYLE_PRIMARY)] : [button(`${AUCTION_DROP_PREFIX}${id}`, AUCTION_COPY.auctionDrop, STYLE_SECONDARY, !d.kills.length)]),
       button(`${CLOSE_PREFIX}${id}`, RAID_COPY.close, STYLE_DANGER),
     ]),
   ];

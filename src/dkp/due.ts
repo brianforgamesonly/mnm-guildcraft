@@ -5,6 +5,8 @@ import type { Env } from '../env.ts';
 import { DKP_COPY } from './copy.ts';
 import { editIn } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
+import { closeAuction, renderAuction } from './auction.ts';
+import { loadGuild } from '../access.ts';
 import { loadDkp } from './state.ts';
 
 /** About 40 external calls an invocation (order 5), D1 and Discord together; shared by every item one alarm runs. */
@@ -59,8 +61,26 @@ const render: Handler = async (env, guildId, id, _due, _now, api) => {
   return { headers: await renderCard(env.DB, api, guildId, state.channel_id, Number(id)) };
 };
 
+/** Order 29: auction:<id>, an auction closes at closes_at (the timer only; never extended). */
+const auction: Handler = async (env, guildId, id, _due, now, api) => {
+  const [state, guild] = await Promise.all([loadDkp(env.DB, guildId), loadGuild(env.DB, guildId)]);
+  if (!state.enabled || !guild) return null;
+  const r = await closeAuction(env.DB, api, guild, state.channel_id, Number(id), now, state.settings);
+  if (r === null) return null;
+  if ('again' in r) return { again: r.again };
+  // A raid auction's result shows on its raid card (Won tonight, order 29 PR C).
+  return r.closed.raid_id ? { schedule: [{ key: `render:${r.closed.raid_id}`, due: now }] } : null;
+};
+
+/** Order 29: acard:<id>, an auction card edited in place (its bidder count), paced as the raid card is. */
+const acard: Handler = async (env, guildId, id, _due, _now, api) => {
+  const state = await loadDkp(env.DB, guildId);
+  if (!api || !state.channel_id) return null;
+  return { headers: await renderAuction(env.DB, api, guildId, state.channel_id, Number(id)) };
+};
+
 /** The handlers by item kind ("kind:id"). */
-export const HANDLERS: Record<string, Handler> = { lapse, check, close, render };
+export const HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, acard };
 
 /** The calls one alarm's items share (the alarm is one invocation). */
 export const timerApi = (env: Env, now: number, d1: () => number): BotApi | null =>
