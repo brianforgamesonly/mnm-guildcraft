@@ -7,10 +7,11 @@ import {
   AUCTION_DROP_PREFIX, AUCTION_OPENS_MODAL, AUCTION_PREFIXES, BID_MODAL_PREFIX, BID_PREFIX, CANCEL_MODAL_PREFIX, CANCEL_PREFIX, decide, DROP_MODAL_PREFIX, DROP_SELECT_PREFIX, POST_GENERAL_PREFIX,
   RECORD_MODAL_PREFIX, RECORD_PREFIX,
 } from '../../src/dkp/auction.ts';
-import { AUCTION_COPY, DKP_COPY, QUEUE_COPY, WISHLIST_COPY } from '../../src/dkp/copy.ts';
+import { AUCTION_COPY, DKP_COPY, QUEUE_COPY, SHOP_COPY, WISHLIST_COPY } from '../../src/dkp/copy.ts';
+import { BUY_PREFIX, SHOP_CLOSE_PREFIX, SHOP_PREFIXES } from '../../src/dkp/shop.ts';
 import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
 import { bidRefusal } from '../../src/dkp/eligible.ts';
-import { POOL_GUILD } from '../../src/dkp/ledger.ts';
+import { decayStatement, POOL_GUILD } from '../../src/dkp/ledger.ts';
 import { CLOSE_PREFIX, NAMED_PREFIX, PRESENT_PREFIX, STANDBY_PREFIX } from '../../src/dkp/raid.ts';
 import { settingsOf } from '../../src/dkp/settings.ts';
 import { ADD_DKP_PREFIX, DKP_CHANNEL_NAME, REMOVE_DKP_PREFIX } from '../../src/dkp/setup.ts';
@@ -697,7 +698,8 @@ describe('decay (order 29, ITEM 8)', () => {
     const one = await measure(GUILD);
     for (let g = 2; g <= 10; g++) await seed(`90000000000000000${g}`.slice(-18));
     const ten = await measure(`90000000000000000${2}`.slice(-18));
-    console.log(JSON.stringify({ decayCost: { ledgerRowsPerGuild: members * 20, oneGuild: one, oneOfTenGuilds: ten } }));
+    // Measured 2026-10-30: 1,000 ledger rows, 100 idle balances: rows_read 3,498 (one guild) and 3,501 (one of ten), rows_written 200.
+    expect(one.rows_read).toBeLessThan(members * 20 * 5);
     expect(one.changes).toBe(members * 2);
     // The read is the guild's own rows (its index), not the whole table: about the same with ten guilds present.
     expect(ten.rows_read).toBeLessThan(one.rows_read * 2);

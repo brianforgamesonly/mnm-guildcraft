@@ -194,7 +194,7 @@ export const decayStatement = (db: D1Database, p: { guildId: string; idleSince: 
     .prepare(
       `WITH last AS (SELECT member_id, pool, max(id) AS id FROM dkp_ledger WHERE guild_id = ?1 GROUP BY member_id, pool),
             bal AS (SELECT l.member_id, l.pool, l.balance_after AS balance FROM last JOIN dkp_ledger l ON l.id = last.id WHERE l.balance_after > 0),
-            idle AS (SELECT b.member_id, b.pool, b.balance, max(1, b.balance * ?4 / 100) AS loss FROM bal b
+            idle AS (SELECT b.member_id, b.pool, b.balance, max(1, CAST(b.balance * CAST(?4 AS INTEGER) / 100 AS INTEGER)) AS loss FROM bal b
                      WHERE NOT EXISTS (SELECT 1 FROM dkp_ledger x WHERE x.guild_id = ?1 AND x.pool = b.pool AND x.member_id = b.member_id AND x.kind <> 'decay' AND x.at > ?2)
                        AND NOT EXISTS (SELECT 1 FROM dkp_ledger y WHERE y.guild_id = ?1 AND y.pool = b.pool AND y.member_id = b.member_id AND y.kind = 'decay' AND y.at > ?3))
        INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, reason, actor, at)

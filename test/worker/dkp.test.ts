@@ -324,6 +324,8 @@ describe('the ledger (ITEM 2)', () => {
 describe('timers (ITEM 3): one object per guild, its alarm at the earliest due item', () => {
   it('sets the alarm to the earliest item, coalesces an item to its earlier time, runs only what is due, then re-arms', async () => {
     const stub = timersOf(env, GUILD);
+    // Order 29: Add DKP seeds the weekly decay item; this test watches its own items only.
+    await stub.cancel();
     const t = Date.now();
     await stub.schedule(GUILD, [{ key: 'lapse:1', due: t + 60_000 }, { key: 'lapse:2', due: t + 5_000 }]);
     await stub.schedule(GUILD, [{ key: 'lapse:2', due: t + 9_000 }]); // later: ignored
@@ -356,7 +358,8 @@ describe('timers (ITEM 3): one object per guild, its alarm at the earliest due i
     const stub = timersOf(env, GUILD);
     await stub.schedule(GUILD, [{ key: `lapse:${p.id}`, due: Date.now() - 1 }]);
     await runDurableObjectAlarm(stub);
-    await until(async () => Object.keys(await stub.list()).length === 0);
-    expect(await stub.list()).toEqual({});
+    // Order 29: only the weekly decay item (seeded by Add DKP) is left.
+    await until(async () => Object.keys(await stub.list()).every((k) => k === 'decay:week'));
+    expect(Object.keys(await stub.list())).toEqual(['decay:week']);
   });
 });

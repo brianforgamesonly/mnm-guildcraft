@@ -1128,3 +1128,13 @@ Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the com
 | src/dkp/copy.ts:147-155 | There is no item called **\<typed>**. Pick one from the list. · Your wishlist already holds \<n> items, the most it can. Remove one first. · Added **\<item>** for \<character> to your wishlist (\<n> of \<max>). · When an auction opens for it and you may bid, GuildCraft sends you a direct message with a link. That's your opt-in; remove the item to stop it. · Removed **\<item>** from your wishlist. · **\<item>** is not on your wishlist. · \<name>'s wishlist (\<n> of \<max>) · \<item> · for \<character> · Nothing on it yet. Members add items with `/dkp wishlist add`. | DRAFT |
 | src/dkp/definition.ts | `wishlist` Wishlists, public in this server (adding an item opts you in to a direct message); `add`, `remove`, `show` and their options | DRAFT |
 | src/dkp/settings.ts | (setting label) Wishlist size | DRAFT |
+
+## Work order 29, PR D: the shop and decay (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/dkp/copy.ts:147-156 | There is no item called **\<typed>**. Pick one from the list. · (listing card) Shop: \<item> · **\<n>** guild points each. First come, first served. · \<left> of \<n> left · at most \<n> per member. · Posted by \<officer> (who can't buy from it). · **Closed** by \<officer>. · **Sold out.** · Buy · Close listing · Listed. \<link> | DRAFT |
+| src/dkp/copy.ts:157-166 | You posted this listing, so you can't buy from it. · This listing is closed. · Sold out. · You've bought \<n> of these, the most a member may. · It costs \<n> guild points, and you have \<n>. · You bought **\<item>** for \<n> guild points (now \<n>). It's posted in GC-DKP; collect it from an officer. · (GC-DKP) **Bought:** \<member> bought **\<item>** for \<n> guild points. · (ledger reason) Bought \<item> · Closed. The listing says so. | DRAFT |
+| src/dkp/copy.ts:167 | (ledger reason, `/dkp history`) Decay: \<n>% a week after \<n> idle days | DRAFT |
+| src/dkp/definition.ts | `shop` The shop: items at fixed prices in guild points; `add` Officers: list an item for guild points in GC-DKP (first come, first served); item, price, quantity, per_member | DRAFT |
+| src/dkp/settings.ts | (setting labels) Decay after (days idle) · Decay per week | DRAFT |
