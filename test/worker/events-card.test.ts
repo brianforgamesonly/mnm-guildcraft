@@ -1,6 +1,6 @@
 // Work order 32, PR B: times, /event create with its preview, the card, edit, cancel and list, in workerd against a mocked
 // Discord. ITEM 2's overflow test inserts sign-up rows directly, so it doesn't depend on ITEM 3.
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { storedName } from '../../src/commands/channels.ts';
 import { HANDLERS, timerApi } from '../../src/dkp/due.ts';
@@ -206,7 +206,7 @@ describe('/event create and its preview', () => {
 
   it('the event options autocomplete this server\'s open events', async () => {
     const id = await posted(raid);
-    const r = await send(auto(member, 'event', 'cancel', { event: 'test' }, 'event'), TOKEN);
+    const r = await send(auto(officer, 'event', 'cancel', { event: 'test' }, 'event'), TOKEN);
     expect(r.data.choices!.map((c) => c.value)).toEqual([String(id)]);
   });
 });
@@ -355,6 +355,91 @@ describe('/event edit', () => {
     await event(officer, 'edit', { event: String(id), clear: 'capacity' });
     expect(await one('SELECT capacity FROM event')).toEqual({ capacity: null });
     expect((await event(officer, 'edit', { event: String(id) })).data.content).toBe(EVENT_COPY.nothingToEdit);
+  });
+});
+
+describe('review of PR B', () => {
+  beforeEach(setup);
+
+  it('a card edit Discord refuses throws, so the object retries it; a gone card is posted again', async () => {
+    const id = await posted(raid);
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'PATCH' ? json({ message: 'oops', code: 0 }, 500) : handle(m, p, b));
+    await expect(draw(id)).rejects.toThrow('event card edit failed');
+    botApi.handle = handle;
+    fake.messages = [];
+    await draw(id);
+    expect(fake.messages.length).toBe(1);
+    expect(await one('SELECT message_id FROM event')).toEqual({ message_id: fake.messages[0].id });
+  });
+
+  it('an open event with no message id yet gets no second card', async () => {
+    const id = await posted(raid);
+    await env.DB.prepare('UPDATE event SET message_id = NULL').run();
+    const n = fake.messages.length;
+    await draw(id);
+    expect(fake.messages.length).toBe(n);
+  });
+
+  it('a change during a run keeps its item, so its edit still comes', async () => {
+    const stub: any = timersOf(env, GUILD);
+    await (runInDurableObject as any)(stub, async (o: any) => {
+      await o.schedule(GUILD, [{ key: 'evcard:1', due: 1000 }]);
+      o.running = 'evcard:1';
+      await o.schedule(GUILD, [{ key: 'evcard:1', due: 1000 }]);
+      o.running = null;
+    });
+    expect((await stub.list())['evcard:1']).toBeGreaterThan(1000);
+    await stub.cancelEvents();
+  });
+
+  it('a runner without the member role still gets the list of events to edit; a member-only list keeps its gate', async () => {
+    const id = await posted(raid);
+    await send(rawCmd(admin, 'guildcraft', 'setup', { member_role: '600000000000000009' }), TOKEN);
+    expect((await send(auto(officer, 'event', 'edit', { event: '' }, 'event'), TOKEN)).data.choices!.map((c) => c.value)).toEqual([String(id)]);
+    expect((await send(auto(officer, 'event', 'list', { event: '' }, 'event'), TOKEN)).data.choices).toEqual([]);
+    expect((await send(auto(member, 'event', 'edit', { event: '' }, 'event'), TOKEN)).data.choices).toEqual([]);
+  });
+
+  it('a refused cancel writes no audit row', async () => {
+    const id = await posted(raid);
+    await event(officer, 'cancel', { event: String(id), reason: 'x' });
+    await event(officer, 'cancel', { event: String(id), reason: 'y' });
+    expect(await count('audit_log', "action = 'event.cancel'")).toBe(1);
+  });
+
+  it('a press that lost the race gets a new private message, never an edit of the winner\'s', async () => {
+    const r = await event(officer, 'create', { ...raid, start: 'tomorrow 20:00' });
+    const [post, drop] = r.data.components![0].components.map((b: any) => b.custom_id as string);
+    await pressAs(officer, post);
+    for (const id of [post, drop]) {
+      const late = await pressAs(officer, id);
+      expect(late.type).toBe(4);
+      expect(late.data.content).toBe(EVENT_COPY.draftGone);
+    }
+    expect(await one('SELECT status FROM event')).toEqual({ status: 'open' });
+  });
+
+  it('an edit writes only what it changes, and a part-hour reads cleanly', async () => {
+    const id = await posted(raid);
+    await env.DB.prepare("UPDATE event SET title = 'Changed by another officer'").run();
+    await event(officer, 'edit', { event: String(id), healer: 3, hours: 1.3333 });
+    expect(await one('SELECT title, limit_healer FROM event')).toEqual({ title: 'Changed by another officer', limit_healer: 3 });
+    await draw(id);
+    expect((await card(id)).body.embeds[0].description).toContain('1.33 h');
+  });
+
+  it('a long roster pages whole, however long the names', async () => {
+    const id = await posted(raid);
+    for (let i = 0; i < 39; i++) await signup(id, `5${i}`, 'signed_up', 'dps', { char_name: `*${'N'.repeat(31)}${i}` });
+    const r = await event(member, 'list', { event: String(id) });
+    expect(r.data.embeds![0].description!.length).toBeLessThanOrEqual(EMBED_LIMITS.description);
+  });
+
+  it('a weekday\'s skipped hour, once it has passed today, means next week', () => {
+    const now = Date.UTC(2027, 2, 14, 12); // Sunday 2027-03-14, 08:00 EDT
+    const r = parseStart('sunday 02:30', NY, now);
+    expect(r).toEqual({ at: Date.UTC(2027, 2, 21, 6, 30) });
   });
 });
 
