@@ -30,6 +30,9 @@ export const SETTINGS = [
   { key: 'raid_auction_seconds', label: 'Raid auction length', default: 180, min: 30, max: 3600, unit: 'seconds' },
   { key: 'general_auction_hours', label: 'General auction length', default: 24, min: 1, max: 168, unit: 'hours' },
   { key: 'wishlist_size', label: 'Wishlist size', default: 30, min: 1, max: 100, unit: 'items' },
+  // Order 29, PR D: decay (0 per week turns it off).
+  { key: 'decay_days', label: 'Decay after (days idle)', default: 180, min: 7, max: 3650, unit: 'days' },
+  { key: 'decay_percent', label: 'Decay per week', default: 10, min: 0, max: 100, unit: '%' },
 ] as const satisfies readonly NumberSetting[];
 
 export type SettingKey = (typeof SETTINGS)[number]['key'];

@@ -35,6 +35,7 @@ import { ADD_DKP_PREFIX, addDkpButton, REMOVE_DKP_PREFIX, removeDkpButton } from
 import { loadDkp } from './dkp/state.ts';
 import { raidComponent } from './dkp/raid.ts';
 import { AUCTION_OPENS_MODAL, auctionComponent, auctionImmediate } from './dkp/auction.ts';
+import { shopComponent } from './dkp/shop.ts';
 import type { Ctx, Effects } from './context.ts';
 import { choices, ephemeral, subcommand, type GuildMember, type Interaction, type InteractionReply, type MessageReply, type ModalComponent, type Option } from './discord.ts';
 import type { Env } from './env.ts';
@@ -195,6 +196,9 @@ async function dkpComponent(c: Ctx, id: string, values: string[], components?: M
   // Order 29: auctions (their forms' submits too: a modal submit routes here by its dkp prefix).
   const auction = await auctionComponent(c, id, components, d);
   if (auction) return auction;
+  // Order 29, PR D: the shop's Buy and Close listing.
+  const shop = await shopComponent(c, id, d);
+  if (shop) return shop;
   return (await raidComponent(c, id, values, d)) ?? ephemeral(STALE_FORM);
 }
 

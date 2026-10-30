@@ -150,6 +150,7 @@ export const LISTS: Record<string, Lister> = {
   '/dkp auction item': allItems,
   // Order 29, PR C: wishlists (a subcommand group's subcommand: "wishlist add").
   '/dkp wishlist add item': allItems,
+  '/dkp shop add item': allItems,
   '/dkp wishlist add character': characters,
   '/dkp wishlist remove item': async ({ db, i, typed }) => asChoices(await ownWishlist(db, i.guild_id, i.member.user.id, typed)),
 };

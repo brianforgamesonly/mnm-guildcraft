@@ -576,3 +576,130 @@ describe('wishlists (order 29, ITEM 6)', () => {
     expect(await count('dkp_nudge')).toBe(2);
   });
 });
+
+/** /dkp shop add as Discord sends a subcommand group. */
+const shopAdd = (m: Member, options: Record<string, unknown>) =>
+  send({ type: 2, guild_id: GUILD, member: m, data: { name: 'dkp', options: [{ type: 2, name: 'shop', options: [{ type: 1, name: 'add', options: Object.entries(options).map(([name, value]) => ({ type: typeof value === 'number' ? 4 : 3, name, value })) }] }] } }, TOKEN);
+const listing = () => one<{ id: number; message_id: string }>('SELECT id, message_id FROM dkp_listing ORDER BY id DESC LIMIT 1');
+
+describe('the shop (order 29, ITEM 7)', () => {
+  it("Brian's check, mocked: the officer who posted a listing can't buy from it", async () => {
+    expect((await shopAdd(officer, { item: 'Lantern', price: 1, quantity: 1 })).data.content).toMatch(/^Listed\./);
+    const l = await listing();
+    expect(cardOf(l.message_id).components[0].components.map((b: any) => b.custom_id)).toEqual([`${BUY_PREFIX}${l.id}`, `${SHOP_CLOSE_PREFIX}${l.id}`]);
+    expect((await pressAs(officer, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.own);
+    expect(await count('dkp_purchase')).toBe(0);
+    expect((await shopAdd(kestrel, { item: 'Lantern', price: 1 })).data.content).toBe(DKP_COPY.notRunner);
+  });
+
+  it('Buy: first come, first served; a spend row by the bot; posted; the per-member limit, the stock and the balance; closing early', async () => {
+    await give(kestrel, 10, 'Guild pool');
+    await give(pip, 3, 'Guild pool');
+    await give(wren, 10, 'Guild pool');
+    await shopAdd(officer, { item: 'Lantern', price: 4, quantity: 2, per_member: 1 });
+    const l = await listing();
+    expect((await pressAs(kestrel, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.bought('Lantern', 4, 6));
+    expect((await pressAs(kestrel, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.limit(1));
+    expect((await pressAs(pip, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.poor(4, 3));
+    expect(await one("SELECT amount, kind, actor FROM dkp_ledger WHERE kind = 'spend'")).toEqual({ amount: -4, kind: 'spend', actor: 'bot' });
+    expect(fake.messages.some((m) => m.body.content === SHOP_COPY.purchaseLine(`<@${kestrel.user.id}> (Kestrel)`, 'Lantern', 4) && m.body.allowed_mentions?.parse?.length === 0)).toBe(true);
+    await pressAs(wren, `${BUY_PREFIX}${l.id}`);
+    expect(cardOf(l.message_id).embeds[1].description).toContain(SHOP_COPY.soldOut);
+    expect(cardOf(l.message_id).components).toEqual([]);
+    expect((await pressAs(pip, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.gone);
+    await shopAdd(officer, { item: 'Fungal Robe', price: 1, quantity: 5 });
+    const second = await listing();
+    expect((await pressAs(kestrel, `${SHOP_CLOSE_PREFIX}${second.id}`)).data.content).toBe(DKP_COPY.notRunner);
+    expect((await pressAs(officerB, `${SHOP_CLOSE_PREFIX}${second.id}`)).data.content).toBe(SHOP_COPY.closedReply);
+    expect((await pressAs(kestrel, `${BUY_PREFIX}${second.id}`)).data.content).toBe(SHOP_COPY.closed);
+    // Purchases count toward no win limit.
+    expect(await count('dkp_auction', 'winner = ?', kestrel.user.id)).toBe(0);
+  });
+
+  it("a shop purchase and an auction can't both spend the same points: the auction's close re-checks the balance", async () => {
+    await give(kestrel, 6, 'Guild pool');
+    await dkp(officer, 'auction', { item: 'Fungal Robe', general: true, minimum: 5 });
+    const a = await auction();
+    await bid(kestrel, a.id, '6');
+    await shopAdd(officer, { item: 'Lantern', price: 4 });
+    await pressAs(kestrel, `${BUY_PREFIX}${(await listing()).id}`);
+    await closeAt(a.id);
+    expect((await auction()).status).toBe('unsold');
+    expect(await balance(kestrel, POOL_GUILD)).toBe(2);
+    expect(await count('dkp_ledger', "kind = 'spend' AND member_id = ?", kestrel.user.id)).toBe(1);
+  });
+
+  it('routes the shop prefixes (order 23): deferred, never a form', () => {
+    for (const p of SHOP_PREFIXES) {
+      expect(p.startsWith(DKP_PREFIX), p).toBe(true);
+      expect(OPENS_MODAL.some((m) => p.startsWith(m)), p).toBe(false);
+      expect(planFor(press(kestrel, `${p}1`) as never), p).toMatchObject({ defer: true });
+    }
+  });
+});
+
+describe('decay (order 29, ITEM 8)', () => {
+  const DAY = 86_400_000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+  /** A ledger row written `daysAgo` days back (the test owns the clock it reads). */
+  const row = (m: Member, pool: string, amount: number, balanceAfter: number, daysAgo: number, kind = 'adjust') =>
+    env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, actor, at) VALUES (?, ?, ?, ?, 0, ?, ?, 'x', ?)").bind(GUILD, m.user.id, pool, amount, balanceAfter, kind, iso(Date.now() - daysAgo * DAY)).run();
+  const run = (at: number) => HANDLERS.decay(withToken, GUILD, 'week', at, at, null);
+
+  it('a balance idle for 181 days loses 10% (rounded down, at least 1), and again the next week; one active yesterday does not', async () => {
+    await row(kestrel, 'glinting hollow', 55, 55, 181);
+    await row(pip, 'glinting hollow', 3, 3, 181);
+    await row(wren, 'glinting hollow', 80, 80, 1);
+    const now = Date.now();
+    expect(await run(now)).toEqual({ again: now + 7 * DAY });
+    expect([await balance(kestrel, 'glinting hollow'), await balance(pip, 'glinting hollow'), await balance(wren, 'glinting hollow')]).toEqual([50, 2, 80]);
+    expect(await one("SELECT amount, kind, actor FROM dkp_ledger WHERE kind = 'decay' AND member_id = ?", kestrel.user.id)).toEqual({ amount: -5, kind: 'decay', actor: 'bot' });
+    // At least once: the same week again changes nothing; the next week decays again.
+    await run(now + 1000);
+    expect(await balance(kestrel, 'glinting hollow')).toBe(50);
+    await run(now + 7 * DAY);
+    expect(await balance(kestrel, 'glinting hollow')).toBe(45);
+  });
+
+  it('decay stops after a new earning or spending row in that pool; other pools decay on their own; frozen members decay too', async () => {
+    await row(kestrel, 'glinting hollow', 100, 100, 200);
+    await row(kestrel, POOL_GUILD, 20, 20, 200);
+    await row(pip, POOL_GUILD, 30, 30, 200);
+    await env.DB.prepare("INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, 'Pip', 'left', ?) ON CONFLICT DO UPDATE SET status = 'left'").bind(GUILD, pip.user.id, iso(Date.now())).run();
+    await row(kestrel, 'glinting hollow', -10, 90, 0, 'spend');
+    await run(Date.now());
+    expect([await balance(kestrel, 'glinting hollow'), await balance(kestrel, POOL_GUILD), await balance(pip, POOL_GUILD)]).toEqual([90, 18, 27]);
+  });
+
+  it('the item is seeded on Add DKP, a week out; Remove DKP clears it; a weekly run reads one guild\'s rows only', async () => {
+    const list = await timersOf(env, GUILD).list();
+    expect(list['decay:week']).toBeGreaterThan(Date.now() + 6.9 * DAY);
+    await pressAs(admin, REMOVE_DKP_PREFIX);
+    expect(await timersOf(env, GUILD).list()).toEqual({});
+    expect(await run(Date.now())).toBe(null);
+  });
+
+  it('cost: one statement per guild per week; rows read for 1 guild, and for 1 of 10 guilds of the same size', async () => {
+    const members = 50;
+    const seed = async (guild: string) => {
+      await env.DB.prepare("INSERT INTO guild (id, name, created_at) VALUES (?, 'g', ?) ON CONFLICT DO NOTHING").bind(guild, iso(Date.now())).run();
+      const stmts = [];
+      for (let m = 0; m < members; m++)
+        for (const [pool, n] of [['glinting hollow', 10], [POOL_GUILD, 10]] as const)
+          for (let k = 1; k <= n; k++) stmts.push(env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, actor, at) VALUES (?, ?, ?, 10, 0, ?, 'kill', 'bot', ?)").bind(guild, `5${String(m).padStart(16, '0')}`, pool, k * 10, iso(Date.now() - (200 - k) * DAY)));
+      for (let i = 0; i < stmts.length; i += 500) await env.DB.batch(stmts.slice(i, i + 500));
+    };
+    const measure = async (guild: string) => {
+      const [r] = await env.DB.batch([decayStatement(env.DB, { guildId: guild, idleSince: iso(Date.now() - 180 * DAY), percent: 10, reason: 'x', at: iso(Date.now()) })]);
+      return { rows_read: r.meta.rows_read, rows_written: r.meta.rows_written, changes: r.meta.changes };
+    };
+    await seed(GUILD);
+    const one = await measure(GUILD);
+    for (let g = 2; g <= 10; g++) await seed(`90000000000000000${g}`.slice(-18));
+    const ten = await measure(`90000000000000000${2}`.slice(-18));
+    console.log(JSON.stringify({ decayCost: { ledgerRowsPerGuild: members * 20, oneGuild: one, oneOfTenGuilds: ten } }));
+    expect(one.changes).toBe(members * 2);
+    // The read is the guild's own rows (its index), not the whole table: about the same with ten guilds present.
+    expect(ten.rows_read).toBeLessThan(one.rows_read * 2);
+  });
+});
