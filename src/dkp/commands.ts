@@ -140,8 +140,9 @@ export async function askApproval(
       c.userId, a.at, new Date(due).toISOString(), a.batch?.eventId ?? null,
     )
     .first<{ id: number }>();
-  if (a.batch) await c.db.prepare('INSERT INTO dkp_pending_member (pending_id, member_id) SELECT ?, value FROM json_each(?)').bind(p!.id, JSON.stringify(a.batch.members.map((m) => m.member_id))).run();
+  // The lapse first: a batch whose members didn't save still lapses.
   c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `lapse:${p!.id}`, due }] };
+  if (a.batch) await c.db.prepare('INSERT INTO dkp_pending_member (pending_id, member_id) SELECT ?, value FROM json_each(?)').bind(p!.id, JSON.stringify(a.batch.members.map((m) => m.member_id))).run();
   {
     const who = a.batch ? BATCH_COPY.cardWho(a.batch.title, a.batch.members.length, batchNames(a.batch.members)) : memberTag(a.member, a.name);
     const id = await postIn(api, d.channel_id, {
@@ -166,6 +167,10 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   // Order 34: a batch's members were fixed when it was asked for. An approver among them can't approve it; the frozen are skipped.
   const members = p.event_id ? await batchMembers(c.db, c.guild.id, pid) : [];
   if (members.some((m) => dkpSelfConflict(c.userId, { member: m.member_id }))) return ephemeral(BATCH_COPY.inBatch);
+  // A cancelled event can't be adjusted, whenever it was cancelled. The status change below checks it again.
+  const event = p.event_id ? await c.db.prepare('SELECT title, status FROM event WHERE id = ?').bind(p.event_id).first<{ title: string; status: string }>() : null;
+  if (p.status === 'open' && event?.status === 'cancelled') return ephemeral(BATCH_COPY.cancelled);
+  if (p.status === 'open' && p.event_id && members.every((m) => m.frozen)) return ephemeral(BATCH_COPY.allFrozen);
   const at = now();
   // One approval wins, and it pays in the same batch (review of PR A): the status changes once, and the payment is
   // gated on the row this press approved, so a failed batch changes neither and a second press pays nothing. A
@@ -178,20 +183,20 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
           payStatement(c.db, { guildId: c.guild.id, pool: p.pool, members: p.event_id ? members.filter((m) => !m.frozen).map((m) => m.member_id) : [p.member_id], asked: p.amount, cap: d.settings.cap, kind: 'adjust', reason: p.reason, actor: c.userId, at, approvedPending: pid }),
         ];
   const [took] = await c.db.batch([
-    c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2").bind(c.userId, at, pid),
+    c.db.prepare("UPDATE dkp_pending SET status = 'approved', decided_by = ?1, decided_at = ?2 WHERE id = ?3 AND status = 'open' AND due_at > ?2 AND NOT EXISTS (SELECT 1 FROM event e WHERE e.id = dkp_pending.event_id AND e.status = 'cancelled')").bind(c.userId, at, pid),
     ...pays,
   ]);
   if (took.meta.changes !== 1) return ephemeral(DKP_COPY.notOpen);
   await audit(c.db, c.guild.id, c.userId, 'dkp.approve', `pending:${pid}`, { status: 'open' }, { status: 'approved' }).run();
   // Its lapse timer stays set and finds it approved (lapse acts only on an open row).
   const api = apiFor(c);
+  let posted = true;
   try {
     if (api && d.channel_id) {
       if (p.message_id) await showDecision(c.db, api, c.guild.id, d.channel_id, pid, p.message_id, 'approved', c.userId, c.member.nick || c.member.user.global_name || c.member.user.username);
       if (p.event_id) {
-        const e = await c.db.prepare('SELECT title FROM event WHERE id = ?').bind(p.event_id).first<{ title: string }>();
         const name = (await poolNames(c.db, [p.pool])).get(p.pool)!;
-        await postBatch(c, d, api, { title: e?.title ?? '', pool: { key: p.pool, name }, points: p.amount, reason: p.reason, actor: c.userId, at, by: by(c), frozen: members.filter((m) => m.frozen) });
+        posted = await postBatch(c, d, api, { title: event?.title ?? '', pool: { key: p.pool, name }, points: p.amount, reason: p.reason, actor: c.userId, at, by: by(c), frozen: members.filter((m) => m.frozen) });
       } else await refreshStandings(c.db, api, c.guild.id, d.channel_id, p.kind === 'correction' ? [p.pool, POOL_GUILD] : [p.pool]);
     }
   } finally {
@@ -199,7 +204,7 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   }
   // Order 34: a correction after a linked raid closed can change who was a no-show.
   if (p.kind === 'correction' && p.raid_id !== null) await redrawNoShows(c, p.raid_id);
-  return ephemeral(DKP_COPY.approvedReply);
+  return ephemeral(posted ? DKP_COPY.approvedReply : BATCH_COPY.approvedQuiet);
 }
 
 async function settings(c: Ctx, opts: Option[], d: DkpState): Promise<MessageReply> {

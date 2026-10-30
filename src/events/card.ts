@@ -131,7 +131,7 @@ const MORE_RESERVE = EVENT_COPY.more(9999).length + 2;
  * The header, then each section's lines, into the description and then fields, within Discord's limits. Stops at the
  * whole embed's 6,000 characters (less the title and footer) or 25 fields, and says how many lines it left out.
  */
-export function layoutRoster(header: string, sections: Section[], reserved: number): Pick<Embed, 'description' | 'fields'> {
+export function layoutRoster(header: string, sections: Section[], reserved: number, moreText: (n: number) => string = EVENT_COPY.more): Pick<Embed, 'description' | 'fields'> {
   const total = EMBED_LIMITS.total - reserved - MORE_RESERVE;
   const lines = sections.flatMap((x) => [{ text: `**${x.head}**`, head: x.head, first: true }, ...x.lines.map((text) => ({ text, head: x.head, first: false }))]);
   let description = header;
@@ -167,7 +167,7 @@ export function layoutRoster(header: string, sections: Section[], reserved: numb
   }
   const left = lines.slice(i).filter((l) => !l.first).length;
   if (left) {
-    const more = EVENT_COPY.more(left);
+    const more = moreText(left);
     if (fields.length) fields[fields.length - 1].value += `\n${more}`;
     else description += `\n${more}`;
   }
@@ -176,6 +176,15 @@ export function layoutRoster(header: string, sections: Section[], reserved: numb
 
 /** Order 34: no-shows take at most this much of the card, whole names only, so the roster keeps its room. */
 const NO_SHOWS_MAX = 1500;
+
+/** Order 34: as many whole names as fit in `max` characters, a cut mention being no use, and how many didn't. */
+export function wholeNames(tags: string[], max: number): string {
+  let used = 0;
+  let shown = 0;
+  while (shown < tags.length && used + tags[shown].length + 2 <= max) used += tags[shown++].length + 2;
+  const left = tags.length - shown;
+  return `${tags.slice(0, shown).join(', ')}${left ? ` ${EVENT_COPY.andMore(left)}` : ''}`;
+}
 
 /**
  * Order 34: the card's no-shows line, worked out from the rows each time the card is drawn: Signed up, and on no kill's roster
@@ -186,12 +195,7 @@ export function noShowsLine(signups: SignupRow[], raid: EventRaid | null): strin
   if (!raid.kills) return EVENT_COPY.noShowsNotRecorded;
   const was = new Set(raid.attended);
   const tags = signups.filter((s) => s.status === 'signed_up' && !was.has(s.member_id)).sort((a, b) => a.name.localeCompare(b.name)).map((s) => memberTag(s.member_id, s.name));
-  if (!tags.length) return EVENT_COPY.noShowsNone;
-  let used = 0;
-  let shown = 0;
-  while (shown < tags.length && used + tags[shown].length + 2 <= NO_SHOWS_MAX) used += tags[shown++].length + 2;
-  const left = tags.length - shown;
-  return EVENT_COPY.noShows(`${tags.slice(0, shown).join(', ')}${left ? ` ${EVENT_COPY.andMore(left)}` : ''}`);
+  return tags.length ? EVENT_COPY.noShows(wholeNames(tags, NO_SHOWS_MAX)) : EVENT_COPY.noShowsNone;
 }
 
 function header(e: EventRow, now: number, noShows: string | null): string {
@@ -244,8 +248,8 @@ export async function renderEvent(env: Pick<Env, 'DB'>, api: BotApi, guildId: st
   const e = await loadEvent(env.DB, guildId, id);
   if (!e || e.status === PREVIEW || !state.channel_id) return null;
   const signups = await loadSignups(env.DB, id);
-  // Order 34: only a closed Raid event can have a closed linked raid, so every other draw reads nothing more.
-  const raid = e.status === 'closed' && e.type === 'raid' ? (await dkpRead(env.DB, guildId, { pools: [], eventRaid: id })).eventRaid : null;
+  // Order 34: only a closed event can have a closed linked raid, so every other draw reads nothing more.
+  const raid = e.status === 'closed' ? (await dkpRead(env.DB, guildId, { pools: [], eventRaid: id })).eventRaid : null;
   const m = cardMessage(e, signups, state.settings, now, noShowsLine(signups, raid));
   const body = { ...m, allowed_mentions: NO_PINGS };
   // Post is still saving the card's id: posting here would make a second card.

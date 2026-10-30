@@ -29,6 +29,7 @@ import {
   historySql, payStatement, POOL_GUILD, readdStatement, registerPool, reverseStatement, rosterAddStatement, rosterRemoveStatement, standbyReverseStatement, standbyStatement, type LedgerRow,
 } from './ledger.ts';
 import { editCard, editCardItem, poolNames, postIn, refreshStandings, type Message } from './messages.ts';
+import { markStale } from './stale.ts';
 import type { Settings } from './settings.ts';
 import type { DkpState } from './state.ts';
 
@@ -425,7 +426,10 @@ export async function correctionStatements(db: D1Database, guildId: string, cap:
 /** Order 34: who was at a closed linked raid changed, so its event card's no-shows are drawn again. One statement. */
 export async function redrawNoShows(c: Ctx, raidId: number): Promise<void> {
   const r = await c.db.prepare("SELECT r.event_id FROM dkp_raid r JOIN event e ON e.id = r.event_id WHERE r.id = ? AND r.closed_at IS NOT NULL AND e.status = 'closed'").bind(raidId).first<{ event_id: number }>();
-  if (r) c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${r.event_id}`, due: Date.now() }] };
+  if (!r) return;
+  // Flagged too: with the Events module off this item does nothing, and the sweep draws the card once it's back.
+  await markStale(c.db, c.guild.id, `evcard:${r.event_id}`, { status: 0 }).run();
+  c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${r.event_id}`, due: Date.now() }] };
 }
 
 export const correctCommand: DkpRun = async (c, opts, d) => {

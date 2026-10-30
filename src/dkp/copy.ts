@@ -63,6 +63,9 @@ export const BATCH_COPY = {
   youSkipped: 'Nobody changes their own points, so you were skipped.',
   frozenSkipped: (who: string) => `Skipped as frozen: ${who}.`,
   inBatch: "You're in this batch, so another officer has to approve it.",
+  allFrozen: 'Everyone in this batch is frozen, so there is no one to pay. It lapses by itself.',
+  approvedQuiet: 'Approved. The change is applied, but I could not post it in GC-DKP.',
+  more: (n: number) => `+${n} more: \`/dkp history\``,
   cardWho: (title: string, n: number, names: string) => `everyone on **${md(title)}** (${plural(n, 'member')}: ${names})`,
   head: (points: number, title: string, pool: string, n: number, by: string, reason: string) =>
     `**${points > 0 ? '+' : ''}${points} in ${md(pool)}** for ${plural(n, 'member')} on **${md(title)}**. By ${by}. Reason: ${md(reason)}`,

@@ -200,6 +200,33 @@ describe('ITEM 3: no-shows', () => {
     expect(await description(id)).toContain('No-shows: <@');
   });
 
+  it('the auto-close writes them too', async () => {
+    await memberRow(kestrel, 'Kestrel');
+    const id = await openEvent();
+    await signup(id, kestrel, 'signed_up');
+    const raid = await openRaid();
+    await dkp(officer, 'kill', { named: 'A myconid prince' });
+    await env.DB.prepare('UPDATE dkp_raid SET closes_at = ? WHERE id = ?').bind(new Date(Date.now() - 1000).toISOString(), raid).run();
+    await HANDLERS.close(withToken, GUILD, String(raid), 0, Date.now(), api());
+    expect(await description(id)).toContain('No-shows: <@');
+  });
+
+  it('an approved correction redraws them, and a change while Events is off waits for the module', async () => {
+    await memberRow(kestrel, 'Kestrel');
+    const id = await openEvent();
+    await signup(id, kestrel, 'signed_up');
+    const raid = await openRaid();
+    await dkp(officer, 'named-value', { zone: 'Glinting Hollow', named: 'A myconid prince', points: 40 });
+    await dkp(officer, 'kill', { named: 'A myconid prince' });
+    await closeRaid(raid);
+    await pressAs(admin, REMOVE_EVENTS_PREFIX);
+    await env.DB.prepare('DELETE FROM card_stale').run();
+    await dkp(officer, 'correct', { member: kestrel.user.id, action: 'add', reason: 'was there' });
+    const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    await pressAs(officerB, `${APPROVE_PREFIX}${pid}`);
+    expect(await all('SELECT item FROM card_stale')).toEqual([{ item: `evcard:${id}` }]);
+  });
+
   it('a kill roll call closing after the raid can add a no-show', async () => {
     await memberRow(kestrel, 'Kestrel');
     const id = await openEvent();
@@ -366,11 +393,61 @@ describe('ITEM 3: adjusting a whole event', () => {
     expect(r.data.content).toContain(`Skipped as frozen: <@${wren.user.id}> (Wren)`);
     await memberRow(pip, 'Pip', 'left');
     const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    const card = fake.messages.at(-1)!.body.embeds[0].description as string;
+    expect(card).toContain(`<@${wren.user.id}> (Wren) (frozen)`);
     await pressAs(officerB, `${APPROVE_PREFIX}${pid}`);
     expect((await ledger()).map((l) => l.member_id)).toEqual([kestrel.user.id]);
-    const text = postText(lastPost().embeds ? lastPost() : fake.messages.at(-2)!.body);
+    const text = postText(fake.messages.find((m) => m.body.embeds?.[0]?.description?.startsWith('**+50'))!.body);
     expect(text).toContain(`<@${pip.user.id}> (Pip)`);
+    expect(text).toContain(`<@${wren.user.id}> (Wren)`);
   });
+
+  it('a batch whose members have all frozen by approval is refused, stays open and pays nothing', async () => {
+    const id = await rosterOf([kestrel, 'Kestrel', 'signed_up']);
+    await adjust(officer, id, 50);
+    await memberRow(kestrel, 'Kestrel', 'left');
+    const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    expect((await pressAs(officerB, `${APPROVE_PREFIX}${pid}`)).data.content).toBe(BATCH_COPY.allFrozen);
+    expect(await one('SELECT status FROM dkp_pending')).toEqual({ status: 'open' });
+    expect(await ledger()).toEqual([]);
+  });
+
+  it('an event cancelled while its batch waits can no longer be paid', async () => {
+    const id = await rosterOf([kestrel, 'Kestrel', 'signed_up']);
+    await adjust(officer, id, 50);
+    await env.DB.prepare("UPDATE event SET status = 'cancelled' WHERE id = ?").bind(id).run();
+    const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    expect((await pressAs(officerB, `${APPROVE_PREFIX}${pid}`)).data.content).toBe(BATCH_COPY.cancelled);
+    expect(await ledger()).toEqual([]);
+  });
+
+  it('a post Discord refuses after approval is reported to the approver; the points stand', async () => {
+    const id = await rosterOf([kestrel, 'Kestrel', 'signed_up']);
+    await adjust(officer, id, 50);
+    const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
+    const handle = botApi.handle!;
+    botApi.handle = (m, p, b) => (m === 'POST' && /^\/channels\/\d+\/messages$/.test(p) ? json({ message: 'down', code: 0 }, 500) : handle(m, p, b));
+    expect((await pressAs(officerB, `${APPROVE_PREFIX}${pid}`)).data.content).toBe(BATCH_COPY.approvedQuiet);
+    expect((await ledger()).length).toBe(1);
+  });
+
+  it('a very long batch names those capped first, and points at /dkp history', async () => {
+    await dkp(admin, 'settings', { setting: 'cap', value: 5 });
+    const id = await openEvent();
+    const members = Array.from({ length: 150 }, (_, n) => as(`1000000000001${String(n).padStart(5, '0')}`, { global_name: `M${n}` }));
+    for (const [n, m] of members.entries()) {
+      await memberRow(m, `A rather long member name ${n}`);
+      await signup(id, m, 'signed_up');
+    }
+    await env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, actor, at) VALUES (?, ?, 'guild', 5, 0, 5, 'adjust', 'x', 'x')").bind(GUILD, members[149].user.id).run();
+    await adjust(officer, id, 1);
+    const b = fake.messages.find((m) => m.body.embeds?.[0]?.description?.startsWith('**+1'))!.body;
+    expect(embedChars(b.embeds)).toBeLessThanOrEqual(EMBED_LIMITS.total);
+    const text = postText(b);
+    expect(text.indexOf('1 over the cap')).toBeGreaterThan(0);
+    expect(text.indexOf('1 over the cap')).toBeLessThan(text.indexOf('(A rather long member name 0)'));
+    expect(text).toMatch(/\+\d+ more: `\/dkp history`/);
+  }, 30_000);
 
   it('refused when no one is eligible, with the officer told they were skipped', async () => {
     await memberRow(officer, 'Officer');

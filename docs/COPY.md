@@ -1266,7 +1266,10 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/dkp/copy.ts:62 | Nobody changes their own points, so you were skipped, and no one else on **\<title>**'s roster is eligible. Nothing was changed. | DRAFT |
 | src/dkp/copy.ts:63-64 | Nobody changes their own points, so you were skipped. · Skipped as frozen: \<members>. | DRAFT |
 | src/dkp/copy.ts:65 | You're in this batch, so another officer has to approve it. | DRAFT |
-| src/dkp/copy.ts:66 | (approval card, in place of the member) everyone on **\<title>** (\<n> members: \<members>) | DRAFT |
-| src/dkp/copy.ts:67-71 | (GC-DKP post) **+\<n> in \<pool>** for \<n> members on **\<title>**. By \<officer>. Reason: \<reason> · Changed · \<member>: now \<balance>; \<n> over the cap was not added · Skipped (frozen) | DRAFT |
+| src/dkp/copy.ts:66 | Everyone in this batch is frozen, so there is no one to pay. It lapses by itself. | DRAFT |
+| src/dkp/copy.ts:67 | Approved. The change is applied, but I could not post it in GC-DKP. | DRAFT |
+| src/dkp/copy.ts:68 | (GC-DKP post, when it overflows) +\<n> more: `/dkp history` | DRAFT |
+| src/dkp/copy.ts:69 | (approval card, in place of the member) everyone on **\<title>** (\<n> members: \<members>) | DRAFT |
+| src/dkp/copy.ts:70-74 | (GC-DKP post) **+\<n> in \<pool>** for \<n> members on **\<title>**. By \<officer>. Reason: \<reason> · Changed · \<member>: now \<balance>; \<n> over the cap was not added · Skipped (frozen) | DRAFT |
 | src/dkp/definition.ts:125 | (`/dkp adjust`) Officers: change a member's points, or a whole event's, with a reason (posted publicly) | DRAFT |
 | src/dkp/definition.ts:129-131 | (options) The member (or use event:) · The pool: a raid zone, or the guild pool (event: defaults to its raid's zone) · Everyone on this event's roster (or use member:) | DRAFT |

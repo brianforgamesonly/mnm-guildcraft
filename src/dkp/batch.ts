@@ -7,7 +7,7 @@ import { audit, dkpSelfConflict, now } from '../access.ts';
 import type { BotApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, memberTag, optInt, optString, truncate, type Embed, type MessageReply, type Option } from '../discord.ts';
-import { layoutRoster } from '../events/card.ts';
+import { layoutRoster, wholeNames } from '../events/card.ts';
 import { EVENT_COPY } from '../events/copy.ts';
 import { loadEvents } from '../events/state.ts';
 import { ON_ROSTER } from '../events/types.ts';
@@ -42,14 +42,14 @@ export async function batchMembers(db: D1Database, guildId: string, pendingId: n
 const tagsOf = (list: BatchMember[]) => list.map((m) => memberTag(m.member_id, m.name)).join(', ');
 
 /**
- * The one public post: everyone paid, with what the cap cut, and the frozen skipped. Reads the rows this batch wrote, so what
- * it says is what happened. Then the pool's standings.
+ * The one public post: everyone paid, with what the cap cut (those capped first, so a very long list still names them), and
+ * the frozen skipped. Reads the rows this batch wrote, so what it says is what happened. Then the pool's standings.
  */
 export async function postBatch(c: Ctx, d: DkpState, api: BotApi | null, b: { title: string; pool: { key: string; name: string }; points: number; reason: string; actor: string; at: string; by: string; frozen: BatchMember[] }): Promise<boolean> {
   if (!api || !d.channel_id) return false;
   const { results } = await c.db
     .prepare(`SELECT l.member_id, coalesce(m.display_name, l.member_id) AS name, l.cut, l.balance_after FROM dkp_ledger l LEFT JOIN member m ON m.guild_id = l.guild_id AND m.discord_user_id = l.member_id
-      WHERE l.guild_id = ? AND l.pool = ? AND l.actor = ? AND l.at = ? AND l.kind = 'adjust' ORDER BY lower(name)`)
+      WHERE l.guild_id = ? AND l.pool = ? AND l.actor = ? AND l.at = ? AND l.kind = 'adjust' ORDER BY l.cut <> 0 DESC, lower(name)`)
     .bind(c.guild.id, b.pool.key, b.actor, b.at)
     .all<{ member_id: string; name: string; cut: number; balance_after: number }>();
   const header = BATCH_COPY.head(b.points, b.title, b.pool.name, results.length, b.by, b.reason);
@@ -57,7 +57,7 @@ export async function postBatch(c: Ctx, d: DkpState, api: BotApi | null, b: { ti
     { head: BATCH_COPY.paidHead, lines: results.map((r) => BATCH_COPY.line(memberTag(r.member_id, r.name), r.balance_after, r.cut)) },
     ...(b.frozen.length ? [{ head: BATCH_COPY.frozenHead, lines: b.frozen.map((m) => memberTag(m.member_id, m.name)) }] : []),
   ];
-  const embed: Embed = layoutRoster(header, sections, 0);
+  const embed: Embed = layoutRoster(header, sections, 0, BATCH_COPY.more);
   const posted = await postIn(api, d.channel_id, { embeds: [embed] });
   await refreshStandings(c.db, api, c.guild.id, d.channel_id, [b.pool.key]);
   return !!posted;
@@ -94,7 +94,8 @@ export async function adjustEvent(c: Ctx, opts: Option[], d: DkpState): Promise<
   const api = dkpApi(c);
   try {
     if (Math.abs(points) > d.settings.second_officer_over) {
-      const r = await askApproval(c, d, api, { member: `event:${id}`, name: e.title, pool, points, reason, at, batch: { eventId: id, title: e.title, members: eligible } });
+      // The frozen stay in the batch, so its card and post name them; the approval decides on each as they stand then.
+      const r = await askApproval(c, d, api, { member: `event:${id}`, name: e.title, pool, points, reason, at, batch: { eventId: id, title: e.title, members: others } });
       return ephemeral([r.data.content, ...notes(skippedSelf, frozen)].join('\n'));
     }
     const ids = eligible.map((m) => m.member_id);
@@ -112,5 +113,5 @@ export async function adjustEvent(c: Ctx, opts: Option[], d: DkpState): Promise<
 
 const notes = (self: boolean, frozen: BatchMember[]) => [...(self ? [BATCH_COPY.youSkipped] : []), ...(frozen.length ? [BATCH_COPY.frozenSkipped(tagsOf(frozen))] : [])];
 
-/** The approval card's list of who a batch covers. */
-export const batchNames = (members: BatchMember[]) => truncate(tagsOf(members), 3000);
+/** The approval card's list of who a batch covers: whole names, and how many didn't fit. */
+export const batchNames = (members: BatchMember[]) => wholeNames(members.map((m) => `${memberTag(m.member_id, m.name)}${m.frozen ? DKP_COPY.frozen : ''}`), 3000);
