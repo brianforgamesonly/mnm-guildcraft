@@ -33,7 +33,7 @@ const evclose: DueHandler = async (env, guildId, id, _due, now) => {
 /** evcard:<event id>: the card, edited in place, paced by Discord's last answer (src/dkp/timers.ts). */
 const evcard: DueHandler = async (env, guildId, id, _due, now, api, stale) => {
   const state = await loadEvents(env.DB, guildId);
-  if (!api || !state.enabled) return null;
+  if (!api || !state.enabled) return { skip: true };
   return { headers: await renderEvent(env, api, guildId, state, Number(id), now, !stale) };
 };
 

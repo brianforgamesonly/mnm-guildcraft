@@ -43,8 +43,10 @@ const MAX_TRIES = 5;
 interface Item {
   due: number;
   tries?: number;
-  /** Order 33: the sweep asked for this redraw of an out-of-date card: one try, and a success clears its flag. */
+  /** Order 33: the sweep asked for this redraw: one try, and it only edits. A real change to the card clears this. */
   stale?: boolean;
+  /** Order 33: this card is flagged out of date, so a success clears the flag. */
+  flagged?: boolean;
 }
 
 export class DkpTimers extends DurableObject<Env> {
@@ -67,8 +69,11 @@ export class DkpTimers extends DurableObject<Env> {
         const was = have.get(i.key);
         // `later`: replace even with a later time. An item running now keeps its old time, so a change that lands during
         // the run (a D1 or Discord wait lets this in) gets a time of its own, and alarm() keeps the item for another edit.
-        const stale = !!(i.stale || was?.stale);
-        if (!was || i.later || due < was.due || i.key === this.running || (stale && !was.stale)) put[i.key] = { due: i.key === this.running ? Math.max(due, was!.due + 1) : was && !i.later ? Math.min(due, was.due) : due, ...(stale ? { stale } : {}) };
+        // Review of PR A: only a sweep's own request is stale; a real change landing on it keeps order 32's repost.
+        const stale = !!i.stale && (!was || !!was.stale);
+        const flagged = !!(i.stale || was?.flagged);
+        if (!was || i.later || due < was.due || i.key === this.running || flagged !== !!was.flagged || stale !== !!was.stale)
+          put[i.key] = { due: i.key === this.running ? Math.max(due, was!.due + 1) : was && !i.later ? Math.min(due, was.due) : due, ...(stale ? { stale } : {}), ...(flagged ? { flagged } : {}) };
       }
       if (Object.keys(put).length) await s.put(put);
     }
@@ -179,22 +184,25 @@ export class DkpTimers extends DurableObject<Env> {
       this.running = key;
       try {
         r = guildId ? await runDue(env, guildId, key, item.due, now, api, item.stale) : null;
+        // Inside the try (review of PR A): this D1 wait lets a press in, and `running` must still send it a time of its own.
+        if (api && guildId && paced(key) && item.flagged && !r?.skip) await this.unflag(env.DB, guildId, key);
       } catch (e) {
         console.error('dkp timer failed', key, e instanceof Error ? e.message : String(e));
         const card = paced(key) && guildId;
         // Order 33: a card is never dropped. The flag is set on its first failure, so the sweep has it whatever follows.
         if (card) await this.flag(env.DB, guildId, key, e);
+        const flagged = card ? { flagged: true } : {};
         // A 429 waits for its retry_after, and costs no try.
         if (card && e instanceof CardEditRefused && e.waitMs !== null) {
           const at = Date.now();
           await s.put(paceKey(key), afterEdit((await s.get<Pace>(paceKey(key))) ?? START, at, { retryAfter: e.waitMs / 1000 }));
-          await s.put(key, { ...item, due: at + e.waitMs });
+          await s.put(key, { ...item, ...flagged, due: at + e.waitMs });
           continue;
         }
         const tries = (item.tries ?? 0) + 1;
         // The sweep's redraw has one try: the next sweep is its retry.
         if (tries < MAX_TRIES && !item.stale) {
-          await s.put(key, { due: Date.now() + RETRY_MS, tries });
+          await s.put(key, { due: Date.now() + RETRY_MS, tries, ...flagged });
           continue;
         }
         if ((await s.get<Item>(key))?.due === item.due) await s.delete(key);
@@ -202,7 +210,6 @@ export class DkpTimers extends DurableObject<Env> {
       } finally {
         this.running = null;
       }
-      if (api && guildId && paced(key) && (item.tries || item.stale)) await this.unflag(env.DB, guildId, key);
       if (r?.headers && paced(key)) {
         const pace = afterEdit((await s.get<Pace>(paceKey(key))) ?? START, Date.now(), r.headers);
         await s.put(paceKey(key), pace);

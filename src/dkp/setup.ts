@@ -41,7 +41,7 @@ const PLAN = { kind: 'dkp', type: GUILD_TEXT, private: false } as const;
 export const DKP_NEEDS = MANAGE_CHANNELS | MANAGE_ROLES | VIEW_CHANNEL | SEND_MESSAGES | SEND_MESSAGES_IN_THREADS | CREATE_PRIVATE_THREADS | channelBits('dkp');
 /**
  * 4 reads, the category, the channel, the command, and the standings (the guild pool and each pool already used, up to 8).
- * Order 29: Remove DKP also edits each open auction's card (up to 8; a ninth stays as it was, its buttons answering "off").
+ * Order 29: Remove DKP also edits each open auction's card (up to 8; a ninth is flagged for the sweep, its buttons answering "off" until then).
  */
 export const DKP_CALL_CAP = 4 + 1 + 1 + 1 + 8 + 8;
 

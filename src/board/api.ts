@@ -141,7 +141,7 @@ export function botApi(token: string, budget: BoardBudget, fetcher: typeof fetch
       }
       if (res.ok) return { ok: true, status: res.status, body: json as T };
       const retry = res.status === 429 ? Number(json?.retry_after ?? res.headers.get('Retry-After')) : NaN;
-      return { ok: false, status: res.status, code: json?.code, error: (json?.message ?? text).slice(0, 300), ...(Number.isFinite(retry) ? { retryMs: retry * 1000 } : {}) };
+      return { ok: false, status: res.status, code: json?.code, error: (json?.message ?? text).slice(0, 300), ...(retry > 0 ? { retryMs: retry * 1000 } : {}) };
     }
     return { ok: false, status: 429, error: `rate limited twice on ${logRoute(route)}`, skipped: 'rate' };
   }

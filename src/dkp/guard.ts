@@ -47,10 +47,10 @@ export async function guardDecay(env: Pick<Env, 'DB' | 'DKP_TIMERS'>, pick: (ids
   return { guilds: ids.length, checked: chosen.length, counts };
 }
 
-/** The cron's pick: at most `limit`, starting further along each day, so every guild is reached when they don't all fit. */
-export const rotate = (limit: number, scheduledTime: number) => (ids: string[]) => {
+/** The cron's pick: at most `limit`, starting further along each `period` (a day), so every guild is reached when they don't all fit. */
+export const rotate = (limit: number, scheduledTime: number, period = 86_400_000) => (ids: string[]) => {
   if (ids.length <= limit) return ids;
-  const start = (Math.floor(scheduledTime / 86_400_000) * limit) % ids.length;
+  const start = (Math.floor(scheduledTime / period) * limit) % ids.length;
   return [...ids.slice(start), ...ids.slice(0, start)].slice(0, limit);
 };
 

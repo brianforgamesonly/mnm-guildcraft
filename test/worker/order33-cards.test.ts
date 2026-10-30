@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import worker from '../../src/index.ts';
 import { storedName } from '../../src/commands/channels.ts';
 import { DKP_COPY } from '../../src/dkp/copy.ts';
+import { rotate } from '../../src/dkp/guard.ts';
 import { CLOSE_PREFIX } from '../../src/dkp/raid.ts';
 import { ADD_DKP_PREFIX, REMOVE_DKP_PREFIX } from '../../src/dkp/setup.ts';
 import { SHOP_CLOSE_PREFIX } from '../../src/dkp/shop.ts';
@@ -332,9 +333,72 @@ describe('ITEM 1: out-of-date cards (Events)', () => {
     const id = await eventCard();
     const key = `evcard:${id}`;
     await env.DB.prepare("INSERT INTO card_stale (guild_id, item, since, status) VALUES (?, ?, 'x', 500)").bind(GUILD, key).run();
-    await store(key, { due: Date.now() - 1, tries: 1 });
+    await store(key, { due: Date.now() - 1, tries: 1, flagged: true });
     await alarm();
     expect(await count('card_stale')).toBe(0);
+  });
+
+  it('a 429, then a success: the flag goes with the item, with no redraw left over', async () => {
+    const id = await eventCard();
+    const key = `evcard:${id}`;
+    const allow = refusing(429, 0, { 'Retry-After': '60' }, { retry_after: 60, global: false });
+    await store(key, { due: Date.now() - 1 });
+    await alarm();
+    expect((await stored(key)).flagged).toBe(true);
+    allow();
+    await store(key, { ...(await stored(key)), due: Date.now() - 1 });
+    await alarm();
+    expect(await count('card_stale')).toBe(0);
+  });
+
+  it('a press that lands while the flag is being cleared keeps its edit (review of PR A)', async () => {
+    const id = await eventCard();
+    const key = `evcard:${id}`;
+    await env.DB.prepare("INSERT INTO card_stale (guild_id, item, since, status) VALUES (?, ?, 'x', 500)").bind(GUILD, key).run();
+    await store(key, { due: Date.now() - 1, flagged: true });
+    const landed = { due: 0, kept: false };
+    await (runInDurableObject as unknown as (s: unknown, f: (o: any, st: DurableObjectState) => Promise<void>) => Promise<void>)(timersOf(env, GUILD), async (o, st) => {
+      const unflag = o.unflag.bind(o);
+      o.unflag = async (...a: unknown[]) => {
+        await o.schedule(GUILD, [{ key, due: Date.now() }]);
+        landed.due = ((await st.storage.get(key)) as { due: number }).due;
+        await unflag(...a);
+      };
+      await o.alarm();
+      o.unflag = unflag;
+      landed.kept = !!(await st.storage.get(key));
+    });
+    expect(landed.due).toBeGreaterThan(0);
+    expect(landed.kept).toBe(true);
+  });
+
+  it('a real change landing on a sweep\'s redraw keeps order 32\'s repost, and still clears the flag', async () => {
+    const id = await eventCard();
+    const key = `evcard:${id}`;
+    const far = Date.now() + 60_000;
+    await store(key, { due: far, stale: true, flagged: true });
+    await timersOf(env, GUILD).schedule(GUILD, [{ key, due: far - 1000 }]);
+    const it = await stored(key);
+    expect(it.stale).toBeUndefined();
+    expect(it.flagged).toBe(true);
+  });
+
+  it('a card item that drew nothing leaves the flag: the module went off between the two', async () => {
+    const id = await eventCard();
+    const key = `evcard:${id}`;
+    await env.DB.prepare("INSERT INTO card_stale (guild_id, item, since, status) VALUES (?, ?, 'x', 500)").bind(GUILD, key).run();
+    await env.DB.prepare('UPDATE event_guild SET enabled = 0').run();
+    await store(key, { due: Date.now() - 1, flagged: true });
+    await alarm();
+    expect(await count('card_stale')).toBe(1);
+  });
+
+  it('more guilds than one run asks take turns by the sweep, not by the day', () => {
+    const ids = Array.from({ length: 20 }, (_, i) => `g${i}`);
+    const pick = (slot: number) => rotate(8, slot * 900_000, 900_000)(ids);
+    expect(pick(1)).not.toEqual(pick(2));
+    expect(new Set([0, 1, 2].flatMap(pick)).size).toBe(20);
+    expect(rotate(0, 0, 900_000)(ids)).toEqual([]);
   });
 
   it('nothing out of date: the sweep makes no Discord call and leaves the object alone', async () => {

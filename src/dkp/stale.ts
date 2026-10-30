@@ -28,7 +28,7 @@ export class CardEditRefused extends Error {
     super(`card edit refused: ${r.status}`);
     this.status = r.status;
     this.code = r.code ?? null;
-    this.waitMs = r.retryMs ?? null;
+    this.waitMs = r.retryMs && r.retryMs > 0 ? r.retryMs : null;
   }
 }
 
