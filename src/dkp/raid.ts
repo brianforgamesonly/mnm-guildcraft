@@ -4,17 +4,22 @@
 //
 // Costs per press (D1 statements; Discord calls), besides the interaction's own reply:
 //   Present / Standby / Leaving: guild, DKP state, the member row (touchMember), the raid, one write batch: 5 D1; 0 Discord
-//     (the card edit is a timer item: 1 Durable Object request).
+//     (the card edit is a timer item: 1 Durable Object request). Order 34: Present or Standby on a linked raid adds one read,
+//     6 D1 (5 when refused: no write). Leaving, and an unlinked raid, add none.
 //   Named killed / /dkp kill / Pay attendance: guild, state, raid, respawn (or flat) check, named value, earners, the kill,
 //     one pay batch: 8 D1; 0
 //     Discord (card edit: a timer item).
 //   Kill roll call: guild, state, raid, latest kill, one write: 5 D1; 0 Discord. Who's here / Who earned: 3-4 D1; 0 Discord.
 //   Close raid: guild, state, close, card render (1 batch), summary, standings (2 + 1 per pool): about 8 D1; 3 Discord.
-//   The card render (timer): 1 batch of 5 statements, 1 Discord edit.
+//   The card render (timer): 1 batch of 5 statements, 1 Discord edit. Order 34: a linked raid adds 1 batch of 2 statements.
 import { audit, dkpSelfConflict, isDkpRunner, now, touchMember } from '../access.ts';
 import { botApi, type BotApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, STYLE_SUCCESS, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { EVENT_COPY } from '../events/copy.ts';
+import { presentVerdict } from '../events/eligible.ts';
+import { closedEvent, closeWithRaid, linkedRoster, marked, matchEvents, pickableEvent, tapLink, type EventLink, type Linkable, type LinkedRoster } from '../events/link.ts';
+import { loadEvents } from '../events/state.ts';
 import { zoneKey } from '../zone/names.ts';
 import { AUCTION_DROP_PREFIX } from './auction.ts';
 import { AUCTION_COPY, QUEUE_COPY, RAID_COPY } from './copy.ts';
@@ -63,8 +68,10 @@ interface Raid {
   close_reason: string | null;
   /** Order 29: 1 when Standby earns the standby value once, at close; 0 for raids opened before (Standby earns each kill). */
   standby_once: number;
+  /** Order 34: the event linked when the raid opened (src/events/link.ts). */
+  event_id: number | null;
 }
-const RAID_COLS = 'id, guild_id, pool, mode, message_id, opened_at, closes_at, closed_at, close_reason, standby_once';
+const RAID_COLS = 'id, guild_id, pool, mode, message_id, opened_at, closes_at, closed_at, close_reason, standby_once, event_id';
 const openRaid = (db: D1Database, guildId: string) => db.prepare(`SELECT ${RAID_COLS} FROM dkp_raid WHERE guild_id = ? AND closed_at IS NULL`).bind(guildId).first<Raid>();
 const raidById = (db: D1Database, guildId: string, id: number) => db.prepare(`SELECT ${RAID_COLS} FROM dkp_raid WHERE guild_id = ? AND id = ?`).bind(guildId, id).first<Raid>();
 const unix = (iso: string) => Math.floor(Date.parse(iso) / 1000);
@@ -97,6 +104,8 @@ interface CardData {
   /** Order 29, PR C: Won tonight (the raid's sold auctions, in order), and the drops still queued. */
   won: { item: string; winner: string; name: string; price: number }[];
   queued: number;
+  /** Order 34: the linked event and its roster, read each time the card is drawn. Null: no link. */
+  link: LinkedRoster | null;
 }
 
 /** Whether a member on a kill's roster earned that kill's points (order 29: Standby earns once, at close, instead). */
@@ -140,7 +149,14 @@ async function cardData(db: D1Database, raid: Raid): Promise<CardData> {
     won: auctions.filter((a) => a.status === 'sold'),
     queued: auctions.filter((a) => a.status === 'queued').length,
     creatures: raid.mode === 'named' && !raid.closed_at ? (await zoneCreatures(db, raid.pool)).slice(0, SELECT_MAX) : [],
+    link: raid.event_id ? await linkedRoster(db, raid.guild_id, raid.event_id) : null,
   };
+}
+
+/** The card's Event line, or null with no link. The link goes to the event card when it has one. */
+function eventLine(l: EventLink, guildId: string): string {
+  if (l.cancelled) return RAID_COPY.eventCancelled(l.title);
+  return RAID_COPY.eventLine(l.title, link(guildId, l.channel_id, l.message_id));
 }
 
 /**
@@ -171,7 +187,10 @@ export function cardMessage(d: CardData, guildId: string): Message {
   const here = d.people.filter((p) => p.state === 'present');
   const standby = d.people.filter((p) => p.state === 'standby');
   const names = (list: CardData['people']) =>
-    list.length > NAMES_SHOWN ? RAID_COPY.counted(list.length) : list.map((p) => `${md(p.name)}${p.status === 'left' ? RAID_COPY.frozen : ''}`).join(', ') || RAID_COPY.nobody;
+    list.length > NAMES_SHOWN ? RAID_COPY.counted(list.length) : list.map((p) => `${md(p.name)}${p.status === 'left' ? RAID_COPY.frozen : ''}${marked(d.link, p.member_id) ? RAID_COPY.notSignedUp : ''}`).join(', ') || RAID_COPY.nobody;
+  // Order 34: the event's Bench, until they tap for themselves. They earn nothing from this line.
+  const tapped = new Set(d.people.filter((p) => p.state !== 'absent').map((p) => p.member_id));
+  const bench = d.link && !d.link.link.cancelled && !raid.closed_at ? d.link.bench.filter((b) => !tapped.has(b.member_id)) : [];
   const shown = d.kills.slice(-KILLS_SHOWN);
   const lines = shown.map((k) => {
     const i = d.kills.indexOf(k);
@@ -184,9 +203,11 @@ export function cardMessage(d: CardData, guildId: string): Message {
     description: truncate(
       [
         raid.closed_at ? RAID_COPY.closedAt(unix(raid.closed_at), raid.close_reason) : RAID_COPY.openUntil(unix(raid.closes_at)),
+        ...(d.link ? [eventLine(d.link.link, raid.guild_id)] : []),
         '',
         `**${RAID_COPY.present}** (${here.length}): ${names(here)}`,
         `**${RAID_COPY.standby}** (${standby.length}): ${names(standby)}`,
+        ...(bench.length ? [RAID_COPY.benchLine(bench.length > NAMES_SHOWN ? RAID_COPY.counted(bench.length) : bench.map((b) => md(b.name)).join(', '))] : []),
         '',
         ...(d.kills.length > shown.length ? [RAID_COPY.earlier(d.kills.length - shown.length)] : []),
         ...(lines.length ? lines : [none]),
@@ -226,6 +247,24 @@ export async function renderCard(db: D1Database, api: BotApi, guildId: string, c
 
 // ---------------------------------------------------------------- /dkp raid, /dkp kill, /dkp correct, /dkp history
 
+/**
+ * Order 34: which event a new raid links to. The event: option overrides the match; a refusal opens nothing. With the Events
+ * module off, the raid opens exactly as before. Otherwise `note` tells the officer what happened: the link can't be set later.
+ */
+async function pickLink(c: Ctx, opts: Option[], zone: string, nowMs: number): Promise<{ refusal: string } | { event: Linkable | null; note: string | null }> {
+  const typed = optString(opts, 'event');
+  if (!(await loadEvents(c.db, c.guild.id)).enabled) return typed === undefined ? { event: null, note: null } : { refusal: EVENT_COPY.off };
+  const linked = (e: Linkable) => ({ event: e, note: RAID_COPY.linked(e.title, Math.floor(Date.parse(e.start_at) / 1000)) });
+  if (typed !== undefined) {
+    const id = Number(typed);
+    const e = Number.isInteger(id) && id > 0 ? await pickableEvent(c.db, c.guild.id, id) : null;
+    return e ? linked(e) : { refusal: RAID_COPY.notLinkable };
+  }
+  const fits = await matchEvents(c.db, c.guild.id, zone, nowMs);
+  if (fits.length === 1) return linked(fits[0]);
+  return { event: null, note: fits.length ? RAID_COPY.notLinkedSeveral(fits.length) : RAID_COPY.notLinkedNone };
+}
+
 export const raidCommand: DkpRun = async (c, opts, d) => {
   const typed = optString(opts, 'zone') ?? '';
   const zone = await c.db.prepare('SELECT key, name FROM zone WHERE key = ? AND active = 1').bind(zoneKey(typed.trim())).first<{ key: string; name: string }>();
@@ -237,32 +276,35 @@ export const raidCommand: DkpRun = async (c, opts, d) => {
   const api = apiFor(c);
   if (!api || !d.channel_id) return ephemeral(RAID_COPY.cannotPost);
   const at = now();
+  const picked = await pickLink(c, opts, zone.key, Date.parse(at));
+  if ('refusal' in picked) return ephemeral(picked.refusal);
   const closes = new Date(Date.parse(at) + d.settings.auto_close_hours * 3_600_000).toISOString();
   let raid: Raid | null;
   try {
     raid = await c.db
       // Order 29 (override 2): raids opened from now on pay Standby once, at close.
-      .prepare(`INSERT INTO dkp_raid (guild_id, pool, mode, opened_by, opened_at, closes_at, standby_once) VALUES (?, ?, ?, ?, ?, ?, 1) RETURNING ${RAID_COLS}`)
-      .bind(c.guild.id, zone.key, mode, c.userId, at, closes)
+      .prepare(`INSERT INTO dkp_raid (guild_id, pool, mode, opened_by, opened_at, closes_at, standby_once, event_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?) RETURNING ${RAID_COLS}`)
+      .bind(c.guild.id, zone.key, mode, c.userId, at, closes, picked.event?.id ?? null)
       .first<Raid>();
   } catch {
     // Two openings at once: the unique index lets one through.
     const won = await openRaid(c.db, c.guild.id);
     return ephemeral(RAID_COPY.alreadyOpen(link(c.guild.id, d.channel_id, won?.message_id ?? null)));
   }
-  await c.db.batch([registerPool(c.db, c.guild.id, zone.key, at), registerPool(c.db, c.guild.id, POOL_GUILD, at), audit(c.db, c.guild.id, c.userId, 'dkp.raid.open', `raid:${raid!.id}`, null, { pool: zone.key, mode })]);
+  await c.db.batch([registerPool(c.db, c.guild.id, zone.key, at), registerPool(c.db, c.guild.id, POOL_GUILD, at), audit(c.db, c.guild.id, c.userId, 'dkp.raid.open', `raid:${raid!.id}`, null, { pool: zone.key, mode, ...(picked.event ? { event: picked.event.id } : {}) })]);
   try {
     // A pool's first raid: its standings message first, so it sits above the card.
     await refreshStandings(c.db, api, c.guild.id, d.channel_id, [zone.key]);
     const id = await postIn(api, d.channel_id, cardMessage(await cardData(c.db, raid!), c.guild.id));
     if (!id) {
-      // The card was refused: the raid closes at once, so the next /dkp raid is not refused as "already open".
-      await c.db.prepare("UPDATE dkp_raid SET closed_at = ?1, closed_by = 'bot', close_reason = 'officer' WHERE id = ?2 AND closed_at IS NULL").bind(now(), raid!.id).run();
+      // The card was refused: the raid closes at once, so the next /dkp raid is not refused as "already open". Order 34: a
+      // raid nobody saw never held its event, which the next /dkp raid can link.
+      await c.db.prepare("UPDATE dkp_raid SET closed_at = ?1, closed_by = 'bot', close_reason = 'officer', event_id = NULL WHERE id = ?2 AND closed_at IS NULL").bind(now(), raid!.id).run();
       return ephemeral(RAID_COPY.cannotPost);
     }
     await c.db.prepare('UPDATE dkp_raid SET message_id = ? WHERE id = ?').bind(id, raid!.id).run();
     c.effects.dkpTimers = { guildId: c.guild.id, items: [{ key: `close:${raid!.id}`, due: Date.parse(closes) }] };
-    return ephemeral(RAID_COPY.opened(zone.name, link(c.guild.id, d.channel_id, id)));
+    return ephemeral([RAID_COPY.opened(zone.name, link(c.guild.id, d.channel_id, id)), picked.note].filter(Boolean).join('\n'));
   } finally {
     c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
   }
@@ -468,7 +510,7 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
       return tap(c, raid, prefix === PRESENT_PREFIX ? 'present' : prefix === STANDBY_PREFIX ? 'standby' : 'absent');
     case WHO_HERE_PREFIX: {
       const data = await cardData(c.db, raid);
-      const list = (state: string) => data.people.filter((p) => p.state === state).map((p) => memberTag(p.member_id, p.name)).join(', ') || RAID_COPY.nobody;
+      const list = (state: string) => data.people.filter((p) => p.state === state).map((p) => `${memberTag(p.member_id, p.name)}${marked(data.link, p.member_id) ? RAID_COPY.notSignedUp : ''}`).join(', ') || RAID_COPY.nobody;
       return ephemeral(truncate(`**${RAID_COPY.present}:** ${list('present')}\n**${RAID_COPY.standby}:** ${list('standby')}`, 2000));
     }
     case WHO_EARNED_PREFIX: {
@@ -509,6 +551,7 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
       const api = apiFor(c);
       try {
         const closed = await closeRaid(c.db, api, c.guild.id, d.channel_id, raid.id, c.userId, 'officer', Date.now(), d.settings);
+        if (closed?.eventId) c.effects.dkpTimers = { guildId: c.guild.id, items: [...(c.effects.dkpTimers?.items ?? []), { key: `evcard:${closed.eventId}`, due: Date.now() }] };
         return ephemeral(closed ? RAID_COPY.closedReply : RAID_COPY.raidClosed);
       } finally {
         if (api) c.effects.discordCalls = (c.effects.discordCalls ?? 0) + api.budget.discord;
@@ -522,6 +565,10 @@ export async function raidComponent(c: Ctx, id: string, values: string[], d: Dkp
 async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'): Promise<MessageReply> {
   // A raid button refreshes the member's row as a command does (a frozen member thaws).
   await touchMember(c.db, c.guild.id, c.member);
+  // Order 34: the Present check, read fresh at each tap. An unlinked raid, and Leaving, read nothing more.
+  const link = raid.event_id && state !== 'absent' ? await tapLink(c.db, c.guild.id, raid.event_id, c.userId) : null;
+  const verdict = link ? presentVerdict({ check: link.check, status: link.signup, eventOpen: link.status === 'open', leaving: false }) : 'ok';
+  if (verdict === 'refused') return ephemeral(RAID_COPY.tapRefused(link!.title));
   const at = now();
   await c.db.batch([
     c.db
@@ -539,7 +586,8 @@ async function tap(c: Ctx, raid: Raid, state: 'present' | 'standby' | 'absent'):
       .bind(raid.id, c.userId, at, state),
   ]);
   rerender(c, raid.id);
-  return ephemeral(state === 'present' ? RAID_COPY.youPresent : state === 'standby' ? (raid.standby_once ? RAID_COPY.youStandby : RAID_COPY.youStandbyEach) : RAID_COPY.youLeft);
+  const reply = state === 'present' ? RAID_COPY.youPresent : state === 'standby' ? (raid.standby_once ? RAID_COPY.youStandby : RAID_COPY.youStandbyEach) : RAID_COPY.youLeft;
+  return ephemeral(verdict === 'flag' ? `${reply}\n${RAID_COPY.tapFlagged(link!.title)}` : reply);
 }
 
 // ---------------------------------------------------------------- timers (src/dkp/due.ts)
@@ -592,17 +640,22 @@ export const standbyPayouts = (db: D1Database, guildId: string, raid: Pick<Raid,
       ]
     : [];
 
-/** Closes a raid (Close raid, or close:<raid id> at closes_at): standby pay, the card, the night's summary, the standings. Idempotent. */
-export async function closeRaid(db: D1Database, api: BotApi | null, guildId: string, channelId: string | null, raidId: number, by: string, reason: 'officer' | 'auto', nowMs: number, s: Settings): Promise<boolean> {
+/**
+ * Closes a raid (Close raid, or close:<raid id> at closes_at): standby pay, a linked event (order 34), the card, the night's
+ * summary, the standings. Idempotent. Returns null when this call closed nothing; otherwise the linked event, whose card
+ * the caller asks for.
+ */
+export async function closeRaid(db: D1Database, api: BotApi | null, guildId: string, channelId: string | null, raidId: number, by: string, reason: 'officer' | 'auto', nowMs: number, s: Settings): Promise<{ eventId: number | null } | null> {
   const at = new Date(nowMs).toISOString();
   const open = await raidById(db, guildId, raidId);
-  if (!open || open.closed_at) return false;
+  if (!open || open.closed_at) return null;
   const [res] = await db.batch<Raid>([
     db.prepare(`UPDATE dkp_raid SET closed_at = ?1, closed_by = ?2, close_reason = ?3 WHERE id = ?4 AND guild_id = ?5 AND closed_at IS NULL AND (?3 = 'officer' OR closes_at <= ?1) RETURNING ${RAID_COLS}`).bind(at, by, reason, raidId, guildId),
     ...standbyPayouts(db, guildId, open, s, at),
+    ...(open.event_id ? closeWithRaid(db, guildId, raidId, open.event_id, at) : []),
   ]);
   const closed = res.results[0];
-  if (!closed) return false;
+  if (!closed) return null;
   if (api && channelId) {
     const data = await cardData(db, closed);
     if (closed.message_id) await editCard(db, api, guildId, `render:${closed.id}`, channelId, closed.message_id, cardMessage(data, guildId));
@@ -619,7 +672,7 @@ export async function closeRaid(db: D1Database, api: BotApi | null, guildId: str
     await postIn(api, channelId, { content: RAID_COPY.summary(data.zone, data.kills.length, earners.size, (paid?.points ?? 0) + (paid?.standby_points ?? 0), reason, paid?.standby ?? 0) });
     await refreshStandings(db, api, guildId, channelId, [closed.pool, POOL_GUILD]);
   }
-  return true;
+  return { eventId: closed.event_id && (await closedEvent(db, closed.event_id)) ? closed.event_id : null };
 }
 
 /** Remove DKP mid-raid: the card shows the raid closed (src/dkp/setup.ts closed it in D1). */

@@ -13,7 +13,7 @@ import { MISSING_ACCESS, UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, type ApiResult } from
 import type { Env } from '../env.ts';
 
 /** The timer items that draw a card. Each draws from the current rows, so running one late is always right. */
-export const CARD_KINDS = ['render', 'acard', 'scard', 'evcard'] as const;
+export const CARD_KINDS = ['render', 'acard', 'scard', 'pcard', 'evcard'] as const;
 export const isCardItem = (key: string) => (CARD_KINDS as readonly string[]).includes(key.split(':')[0]);
 const STOPS: readonly number[] = [UNKNOWN_CHANNEL, UNKNOWN_MESSAGE, MISSING_ACCESS];
 

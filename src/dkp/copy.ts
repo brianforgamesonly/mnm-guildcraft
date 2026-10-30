@@ -251,6 +251,17 @@ export const RAID_COPY = {
   /** A raid opened before order 29 keeps order 27's rule. */
   youStandbyEach: "You're on **Standby**: you earn every kill from now on until you tap **Leaving**.",
   youLeft: "You've left the raid: you earn nothing more from it unless you tap **Present** again.",
+  // Order 34: the link to an event, the Present check and the Bench. Times are Discord's, in each reader's own zone.
+  linked: (title: string, start: number) => `Linked to **${md(title)}**, <t:${start}:t>.`,
+  notLinkedNone: "Not linked to an event: no open Raid event in this zone starts within an hour of now. A link can't be added later; to link one, close this raid and open it again with `event:`.",
+  notLinkedSeveral: (n: number) => `Not linked to an event: ${n} open Raid events fit. A link can't be added later; to pick one, close this raid and open it again with \`event:\`.`,
+  notLinkable: 'That event can\'t be linked: pick an open Raid event from the list, or leave `event:` out.',
+  eventLine: (title: string, link: string | null) => `Event: ${link ? `[${md(title)}](${link})` : md(title)}`,
+  eventCancelled: (title: string) => `Event: ${md(title)} was cancelled, so this raid is no longer linked to it. The raid carries on.`,
+  notSignedUp: ' (not signed up)',
+  benchLine: (names: string) => `**Standby (bench, not confirmed):** ${names}`,
+  tapFlagged: (title: string) => `You're not on **${md(title)}**'s roster, and officers can see that.`,
+  tapRefused: (title: string) => `You're not on **${md(title)}**'s roster. An officer can add you with \`/event roster\`.`,
   reason: DKP_COPY.adjustReason,
   corrected: (member: string, action: 'add' | 'remove', kills: number, by: string, reason: string) =>
     `**Correction:** ${member} ${action === 'add' ? 'added to' : 'removed from'} ${plural(kills, 'kill')}. By ${by}. Reason: ${md(reason)}`,

@@ -15,6 +15,16 @@ export const DEFAULT_TIME_ZONE = 'America/New_York';
 export const EVENTS_ROLE = 'events_role';
 export const SIGNUP_ROLE = 'signup_role';
 export const SUPPORT_ON = 'support_on';
+/** Order 34: what a Present or Standby tap on a linked raid does for someone not on the event's roster. */
+export const PRESENT_CHECK = 'present_check';
+export const PRESENT_CHECKS = [
+  { value: 'flag', label: 'Flag' },
+  { value: 'require', label: 'Require' },
+  { value: 'off', label: 'Off' },
+] as const;
+export type PresentCheck = (typeof PRESENT_CHECKS)[number]['value'];
+export const presentCheckOf = (v: string | null | undefined): PresentCheck => PRESENT_CHECKS.find((c) => c.value === v)?.value ?? 'flag';
+export const presentCheckLabel = (v: PresentCheck) => PRESENT_CHECKS.find((c) => c.value === v)!.label;
 export const roleLabelKey = (r: Role) => `role_label_${r}`;
 export const typeLabelKey = (t: EventType) => `type_label_${t}`;
 export const LABEL_MAX = 32;
@@ -26,6 +36,7 @@ export type EventSettings = Record<NumberKey, number> & {
   /** The sign-up role a new event starts with; null: none. */
   signup_role: string | null;
   support_on: boolean;
+  present_check: PresentCheck;
   role_labels: Record<Role, string>;
   type_labels: Record<EventType, string>;
 };
@@ -55,6 +66,7 @@ export function eventSettingsOf(rows: Record<string, string> | null | undefined)
     events_role: rows?.[EVENTS_ROLE] || null,
     signup_role: rows?.[SIGNUP_ROLE] || null,
     support_on: rows?.[SUPPORT_ON] !== '0',
+    present_check: presentCheckOf(rows?.[PRESENT_CHECK]),
     role_labels: Object.fromEntries(ROLES.map((r) => [r, rows?.[roleLabelKey(r)] || ROLE_DEFAULTS[r]])) as Record<Role, string>,
     type_labels: Object.fromEntries(TYPES.map((t) => [t, rows?.[typeLabelKey(t)] || TYPE_DEFAULTS[t]])) as Record<EventType, string>,
   };

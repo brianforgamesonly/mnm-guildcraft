@@ -458,3 +458,19 @@ Order 33 is the Events module, part 2 (docs/PRD.md, "Events module"; the owner a
 - A chunk of direct messages is derived from the alarm's cap (src/events/dm.ts `chunkSize`), and its cursor names the start it belongs to. A change or a cancel landing during a run wins over the run's own progress (src/dkp/timers.ts `save`).
 - Remove module never switches a module off by mistake. A refused Add or Remove leaves the state exactly as it was, for DKP and Events. A refused Add saves only the channel it kept or made, through a statement that can't name the switch (src/dkp/setup.ts `keepChannel`).
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 34
+
+Order 34 is the Events module, part 3: the DKP link (docs/PRD.md, "Events module"; the owner approved its specification on 2026-10-30). Its explicit overrides each quote the earlier rule in full.
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1, 2 and 4; PR B: ITEM 3.
+- Override 1, of the PRD's "`/dkp adjust member: pool: points: reason:` takes a reason, which is required, and the change is posted publicly in GC-DKP." and of order 27's "Nobody changes, or approves a change to, their own DKP. One function decides this (src/access.ts `dkpSelfConflict`), and every route calls it. It covers adjustments, approvals and corrections."
+  - `/dkp adjust` gains an `event:` option, for a whole event's roster as one batch (PR B). Every existing rule still applies to each member.
+- Override 2, of order 2's "A member's command never reveals another member's private data. Replies about the caller are ephemeral. A name that resolves to another member's character returns the same "not found" a missing name would, unless the caller is an officer.", as order 29's override 4 and order 32's override 5 extend it: a raid's no-shows (names) are guild-public on the event card (the owner's decision 11).
+- Override 3, of the PRD's "The event closes 8 hours after start (a setting) by a due-list item.": it also closes when its linked raid closes, whichever comes first (src/events/link.ts `closeWithRaid`).
+- Kept, not changed: order 29's "Who was at a kill is read only from dkp_kill_member, never from the ledger." Events attendance reads it and never the ledger.
+- A raid links to at most one event, and an event to at most one raid. The link is set when the raid opens and never changes, except that cancelling the event unlinks it.
+- A raid with no linked event behaves exactly as today. No check and no marks.
+- Events never pays or removes points by itself. The Present check only marks or refuses taps. Points still come from kills, flat payouts, standby and adjustments.
+- One function decides who is on an event's roster (src/events/eligible.ts `onRoster`), and every route calls it.
+- Failed runs: every one is listed in the FINAL (order 12).

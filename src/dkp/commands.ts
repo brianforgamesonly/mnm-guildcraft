@@ -8,7 +8,7 @@ import { button, ephemeral, memberTag, optInt, optString, row, STYLE_SUCCESS, tr
 import { zoneKey } from '../zone/names.ts';
 import { DKP_COPY } from './copy.ts';
 import { payStatement, POOL_GUILD, registerPool, dkpRead } from './ledger.ts';
-import { FULL_PAGE, FULL_STANDINGS_PREFIX, poolNames, postIn, refreshStandings, standingLine } from './messages.ts';
+import { FULL_PAGE, FULL_STANDINGS_PREFIX, poolNames, postIn, refreshStandings, showDecision, standingLine } from './messages.ts';
 import { RUNNER_ROLE, settingOf, SETTINGS } from './settings.ts';
 import type { DkpState } from './state.ts';
 import { correctCommand, correctionStatements, historyCommand, killCommand, raidCommand } from './raid.ts';
@@ -170,7 +170,7 @@ export async function approveButton(c: Ctx, id: string, d: DkpState): Promise<Me
   const api = apiFor(c);
   try {
     if (api && d.channel_id) {
-      if (p.message_id) await api.call('PATCH', `/channels/${d.channel_id}/messages/${p.message_id}`, { content: DKP_COPY.approved(by(c)), components: [], allowed_mentions: { parse: [] } });
+      if (p.message_id) await showDecision(c.db, api, c.guild.id, d.channel_id, pid, p.message_id, 'approved', c.userId, c.member.nick || c.member.user.global_name || c.member.user.username);
       await refreshStandings(c.db, api, c.guild.id, d.channel_id, p.kind === 'correction' ? [p.pool, POOL_GUILD] : [p.pool]);
     }
   } finally {

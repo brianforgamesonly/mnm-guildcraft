@@ -2,7 +2,8 @@
 // lock, frozen and left. Every route calls it: a press, Change character, Change role and /event roster. "Frozen" is DKP's
 // word for a member whose status is 'left' (docs/PRD.md); they thaw with their own next command. Can't make it is never
 // gated: a member can always say they aren't coming.
-import type { Status } from './types.ts';
+import type { PresentCheck } from './settings.ts';
+import { ON_ROSTER, type Status } from './types.ts';
 
 /** Changes a member may make to one event in a minute (a press, Change character, Change role); officers' don't count. */
 export const SPAM_LIMIT = 10;
@@ -42,3 +43,19 @@ export function signupRefusal(a: Asking): SignupRefusal | null {
   if (a.event.signup_role && !a.roles.includes(a.event.signup_role)) return { code: 'signup_role', role: a.event.signup_role };
   return null;
 }
+
+/** Order 33's roster: Signed up, Tentative, Bench and Waitlist. Every route that asks whether a member is on it comes here. */
+export const onRoster = (status: Status | null | undefined) => (ON_ROSTER as readonly (Status | null | undefined)[]).includes(status);
+
+/**
+ * Order 34: the Present check, at each tap. It only marks or refuses a tap; points still come from kills, flat payouts,
+ * standby and adjustments. Leaving is never refused. A closed event's roster is final and no officer can add to it, so
+ * nobody is refused any more; they are only marked.
+ */
+export function presentVerdict(a: { check: PresentCheck; status: Status | null; eventOpen: boolean; leaving: boolean }): 'ok' | 'flag' | 'refused' {
+  if (a.leaving || a.check === 'off' || onRoster(a.status)) return 'ok';
+  return a.check === 'require' && a.eventOpen ? 'refused' : 'flag';
+}
+
+/** Order 34: whether a card marks this member "(not signed up)". Worked out each time it is drawn. */
+export const rosterMark = (check: PresentCheck, status: Status | null | undefined) => check !== 'off' && !onRoster(status);

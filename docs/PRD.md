@@ -802,7 +802,7 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 - Switching roles: a member may switch to a role with room until the lock.
 - Members who left: at the lock, each member on the roster is checked with Get Guild Member. A 404 (Unknown Member) marks them Left, and the waitlist promotes. This needs no privileged intent. Checks run in batches of at most 40 per alarm, inside the Free plan's 50 subrequests per invocation.
 
-**Closing.** The event closes 8 hours after start (a setting) by a due-list item. Part 3 adds closing with its raid. A closed card shows the final roster with no buttons.
+**Closing.** The event closes 8 hours after start (a setting) by a due-list item, or when its linked raid closes, whichever comes first (order 34). A closed card shows the final roster with no buttons.
 
 **Settings** (`/event settings`, admins, posted publicly):
 
@@ -814,6 +814,7 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 | Reminder before start | 30 minutes (0 = off) |
 | Who creates events (events_role) | the officer role |
 | Default sign-up role | none |
+| Present check | Flag (the others: Require, Off) |
 | Role labels; Support on/off | Tank, Healer, DPS, Support; on |
 | Type labels | Raid, Group, Social, Other |
 | Class default roles | none |
@@ -838,6 +839,44 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 - An attached .ics file, which Outlook and Apple Calendar open: VCALENDAR with VERSION:2.0, PRODID and METHOD:PUBLISH; one VEVENT with UID ev-\<id>-\<guild>@guildcraft, DTSTAMP, DTSTART and DTEND in UTC, SUMMARY, LOCATION and a URL to the card; CRLF line endings.
 - Nothing is served from a public web route. If the event is later moved or cancelled, the member's calendar entry doesn't change by itself; the time-changed or cancelled message tells them.
 
+**Linking a raid to an event** (order 34; approved by the owner on 2026-10-30; both modules on).
+
+- `/dkp raid` links to the one open Raid event in that zone, or with no zone, that starts between 60 minutes before and 60 minutes after now (compared in UTC). The reply names it ("Linked to Test raid, 8:00 PM").
+- If none or several fit, `/dkp raid` takes a new optional `event:` option. Its autocomplete lists open Raid events in this server not already linked, labelled with the server time zone. An `event:` option overrides the automatic match. Without the option, the raid opens unlinked and says why.
+- An event created after its raid opened can't be linked to it.
+- The raid card shows "Event: \<title>" with a link to the event card.
+- Cancelling an event while its raid is open unlinks it; the raid carries on, and the card says so.
+- Closing the raid closes the event.
+
+**The Present check** (an Events setting, default Flag; the others are Require and Off).
+
+- On the roster: Signed up, Tentative, Bench and Waitlist. Not on it: Can't make it, Left, or no sign-up.
+- Flag: the tap counts as today. The raid card's Present line and Who's here mark the member "(not signed up)". The member's own reply says they weren't on the event's roster and officers can see that.
+- Require: a Present or Standby tap from someone not on the roster is refused: "You're not on \<event>'s roster. An officer can add you with `/event roster`." Once an officer adds them, the tap works. Leaving is never refused.
+- The check is made at each tap, so a late sign-up or an officer's addition is picked up at once.
+
+**The Bench, shown as Standby.** The linked raid card's Standby line lists the event's Bench members as "Standby (bench, not confirmed): …". They earn nothing until they tap Standby themselves.
+
+Marks are derived: "(not signed up)" and the bench list are worked out each time the card is drawn, never stored.
+
+**No-shows.**
+
+- When a linked raid closes, the event card gains "No-shows: …". These are members Signed up (only that status) who were neither Present nor Standby at any kill of the raid, nor paid by a flat Pay attendance.
+- Names are shown with memberTag; nobody is pinged. None means "No-shows: none".
+- No-shows are written to the event card when the linked raid closes, even if the event already closed.
+- A raid with no kills and no flat payout records "No-shows: not recorded (no kills)".
+
+**Attendance on `/me`.** A line under Events, "Raid events (30 days): signed up N · attended M · no-shows K". It covers linked raids only. "Attended" means Present or Standby at least once.
+
+**Adjusting a whole event.** `/dkp adjust event: points: reason:`, with pool defaulting to the linked raid's zone pool, or the guild pool when the event has none.
+
+- It applies to everyone on the event's roster (Signed up, Tentative, Bench and Waitlist), as one batch: one ledger row per member, and one public post listing everyone and the reason.
+- The officer running it is skipped. Nobody changes their own points, and the reply says they were skipped.
+- The cap applies to each member, and the post names anyone capped.
+- Second officer: if points exceeds the "Second officer needed over" setting, the whole batch waits for a second officer (one approval card for the batch, lapsing after the usual 24 hours), as order 27's single adjustments do.
+- A batch waiting for approval: its members are fixed when it is requested; an approver who is in the batch can't approve it; frozen members are skipped and named.
+- An event with no one eligible is refused with a short reply. A closed event can be adjusted; a cancelled one can't.
+
 **Data.** The events, sign-ups and history tables are in the per-guild export and the backup, and are never shown on another server.
 
 **Departures from this section, named (order 32).**
@@ -854,4 +893,14 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 **Departures from this section, named (order 33).**
 
 - If Discord refuses the .ics file on a private reply, the reply still goes, with the Google link and a line saying the file couldn't be attached. Discord's documents don't say whether a private reply needs Attach Files, and the install permissions don't include it (order 24, PR C).
-- A chunk is 10 recipients with the Left lookup and 15 without (or when the lock just did it), not the order's "about 13": the alarm's 40 calls hold D1 as well as Discord, so 9 calls are kept for a chunk's other work.
+- A chunk is 10 recipients with the Left lookup and 15 without (or when the lock just did it), not the order's "about 13": the alarm's 40 calls hold D1 as well as Discord, so 9 calls are kept for a chunk's other work. Order 34: a reminder re-checks the event before each message, so a reminder chunk is 7 and 10.
+
+**Departures from this section, named (order 34).**
+
+- The link stays in dkp_raid.event_id after a cancel, and every reader takes a cancelled event as no link: the raid card has to say what happened, and a second column would hold the same fact.
+- An `event:` option that names nothing linkable opens no raid: the officer asked for that link, and it can't be added later.
+- With the Events module off, the link is kept but ignored. Closing the raid still closes the event, and its card is put right when the module comes back (`card_stale`).
+- The card's "(not signed up)" mark shows under Require as well as Flag, and on the Standby line as well as Present: such a member may have tapped before Require was set, or been taken off the roster after.
+- Once an event has closed, Require only marks: its roster is final and no officer can add to it, so the refusal's own advice couldn't work.
+- The bench list is shown only while the raid is open.
+- A sign-up or a roster change shows on the raid card at its next redraw (a tap or a kill), not at once, so an event's button presses cost the raid card nothing. The check at each tap always reads the current roster.

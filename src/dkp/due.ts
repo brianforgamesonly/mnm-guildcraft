@@ -2,9 +2,9 @@
 // it acts only on a row that D1 still shows as due and open, in a statement that checks that state itself.
 import { botApi, type BotApi } from '../board/api.ts';
 import type { Env } from '../env.ts';
-import { DKP_COPY, SHOP_COPY } from './copy.ts';
+import { SHOP_COPY } from './copy.ts';
 import { decayStatement } from './ledger.ts';
-import { editIn } from './messages.ts';
+import { renderPending, showDecision } from './messages.ts';
 import { closeCheck, closeRaid, renderCard } from './raid.ts';
 import { announceResult, closeAuction, nudge, openNext, renderAuction, reopen } from './auction.ts';
 import { renderListing } from './shop.ts';
@@ -27,10 +27,16 @@ const lapse: Handler = async (env, guildId, id, _due, now, api) => {
   if (!p?.message_id || !api) return null;
   const state = await loadDkp(env.DB, guildId);
   if (!state.channel_id) return null;
-  // The card's text is its embed, which the edit keeps (order 22: an edit keeps every field it does not send); the
-  // status line is the content, and the Approve button goes.
-  await editIn(api, state.channel_id, p.message_id, { content: DKP_COPY.lapsed, components: [] });
+  // The status line is the content, and the Approve button goes. Order 34: a refused edit is flagged for the sweep.
+  await showDecision(env.DB, api, guildId, state.channel_id, Number(id), p.message_id, 'lapsed', null, null);
   return null;
+};
+
+/** Order 34 (ITEM 4): pcard:<pending id>, an approval card the sweep redraws. */
+const pcard: Handler = async (env, guildId, id, _due, _now, api) => {
+  const state = await loadDkp(env.DB, guildId);
+  if (!api || !state.channel_id) return null;
+  return { headers: await renderPending(env.DB, api, guildId, state.channel_id, Number(id)) };
 };
 
 /** check:<kill id>: the Kill roll call window closes; then the card shows it. */
@@ -45,8 +51,8 @@ const check: Handler = async (env, guildId, id, _due, now) => {
 const close: Handler = async (env, guildId, id, _due, now, api) => {
   const state = await loadDkp(env.DB, guildId);
   if (!state.enabled) return null;
-  await closeRaid(env.DB, api, guildId, state.channel_id, Number(id), 'bot', 'auto', now, state.settings);
-  return null;
+  const closed = await closeRaid(env.DB, api, guildId, state.channel_id, Number(id), 'bot', 'auto', now, state.settings);
+  return closed?.eventId ? { schedule: [{ key: `evcard:${closed.eventId}`, due: now }] } : null;
 };
 
 /** render:<raid id>: the raid card, edited in place. */
@@ -136,7 +142,7 @@ const decay: Handler = async (env, guildId, _id, _due, now) => {
 };
 
 /** DKP's handlers by item kind. */
-export const DKP_HANDLERS: Record<string, Handler> = { lapse, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, scard, decay };
+export const DKP_HANDLERS: Record<string, Handler> = { lapse, pcard, check, close, render, auction, result, next, reopen: reopenItem, nudge: nudgeItem, acard, scard, decay };
 /** The handlers by item kind ("kind:id"). Order 32: the Events module's items share the guild's due-list. */
 export const HANDLERS: Record<string, Handler> = { ...DKP_HANDLERS, ...EVENT_HANDLERS };
 

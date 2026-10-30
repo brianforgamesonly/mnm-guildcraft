@@ -34,8 +34,10 @@ export const LOOKUP_CALLS = 1;
  * names, the notice, the recipients moved up, and the count. D1 and Discord share the alarm's 40 calls.
  */
 export const CHUNK_OVERHEAD = 9;
+/** Order 34 (ITEM 4): the event's status and start, read again just before each reminder. */
+export const RECHECK_CALLS = 1;
 /** Recipients a chunk holds: derived from the alarm's cap. */
-export const chunkSize = (lookups: boolean) => Math.floor((TIMER_CALL_CAP - CHUNK_OVERHEAD) / (CALLS_PER_DM + (lookups ? LOOKUP_CALLS : 0)));
+export const chunkSize = (lookups: boolean, recheck = false) => Math.floor((TIMER_CALL_CAP - CHUNK_OVERHEAD) / (CALLS_PER_DM + (lookups ? LOOKUP_CALLS : 0) + (recheck ? RECHECK_CALLS : 0)));
 /** A lock this recent already looked everyone up: the reminder reuses its Left result. */
 const LEFT_FRESH_MS = 300_000;
 /** A chunk's calls after its recipients are chosen: the Left batch, their names, the notice, those moved up, the count. */
@@ -87,16 +89,33 @@ const tallyOf = (): Record<Sent, number> => ({ sent: 0, refused: 0, failed: 0, r
 const walkOf = (mark: string, cursor: string | undefined) => (cursor?.startsWith(`${mark}|`) ? cursor.slice(mark.length + 1) : null);
 
 /**
- * One chunk of a walk, in user-id order: each member, a message, and the cursor stored after it (never moved back). Returns
- * why it stopped short, or null when every row was handled.
+ * Order 34 (ITEM 4): a reminder's cursor is <start>|<last member>|<owed>. Owed: members who moved up where the walk has
+ * already passed. They stay in the cursor until each has had their message, so a transient failure can't drop them.
  */
-async function walk<T extends { member_id: string }>(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, kind: string, id: number, mark: string, after: string, rows: T[], text: (r: T) => string, save: (c: string) => Promise<void>): Promise<'budget' | 'retry' | null> {
+const reminderCursor = (start: string, after: string, owed: string[]) => `${start}|${after}${owed.length ? `|${owed.join(',')}` : ''}`;
+const reminderWalk = (text: string | null) => {
+  if (text === null) return null;
+  const [after, owed] = text.split('|');
+  return { after, owed: owed ? owed.split(',') : [] };
+};
+
+type Stopped = 'budget' | 'retry' | 'changed' | null;
+
+/**
+ * One chunk of a walk: each member, a message, and `done` after it. `still`, before each message: false stops the walk.
+ * Returns why it stopped short, or null when every row was handled.
+ */
+async function walk<T extends { member_id: string }>(env: Pick<Env, 'DB'>, api: BotApi, guildId: string, kind: string, id: number, rows: T[], text: (r: T) => string, done: (member: string) => Promise<void>, still?: () => Promise<boolean>): Promise<Stopped> {
   const tally = tallyOf();
-  let stopped: 'budget' | 'retry' | null = null;
+  let stopped: Stopped = null;
   for (const r of rows) {
-    // This message, and the count after it.
-    if (budgetLeft(api.budget) < CALLS_PER_DM + 1) {
+    // This message, its re-check, and the count after it.
+    if (budgetLeft(api.budget) < CALLS_PER_DM + 1 + (still ? RECHECK_CALLS : 0)) {
       stopped = 'budget';
+      break;
+    }
+    if (still && !(await still())) {
+      stopped = 'changed';
       break;
     }
     const sent = await sendDm(api, r.member_id, text(r));
@@ -105,13 +124,13 @@ async function walk<T extends { member_id: string }>(env: Pick<Env, 'DB'>, api: 
       break;
     }
     tally[sent]++;
-    if (r.member_id > after) await save(`${mark}|${r.member_id}`);
+    await done(r.member_id);
   }
   if (tally.sent || tally.refused || tally.failed) await counted(env, guildId, kind, id, tally);
   return stopped;
 }
-/** The item's next run after a chunk. */
-const nextRun = (stopped: 'budget' | 'retry' | null, more: boolean, now: number): DueResult | null => (stopped === 'retry' ? { again: now + RETRY_MS } : stopped || more ? { again: now + 1_000 } : null);
+/** The item's next run after a chunk. A change ends this walk: an edit has re-armed the item, and a cancel has removed it. */
+const nextRun = (stopped: Stopped, more: boolean, now: number): DueResult | null => (stopped === 'changed' ? null : stopped === 'retry' ? { again: now + RETRY_MS } : stopped || more ? { again: now + 1_000 } : null);
 
 export const promoItems = (eventId: number, members: string[], now: number) => members.map((m) => ({ key: `evpromo:${eventId}.${m}`, due: now }));
 
@@ -151,22 +170,22 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
   const lockDue = !!e.lock_at && Date.parse(e.lock_at) <= now;
   if (lockDue && !e.lock_done_at && now - Date.parse(e.lock_at!) < LOCK_WAIT_MAX_MS) return { again: now + LOCK_WAIT_MS };
   const lookups = !(lockDue && e.lock_done_at && now - Date.parse(e.lock_done_at) < LEFT_FRESH_MS);
-  const walked = walkOf(e.start_at, run.cursor);
-  if (!walked) {
+  const walked = reminderWalk(walkOf(e.start_at, run.cursor));
+  if (!walked?.after) {
     // The cursor first: a stored cursor means this walk is ours, so a run that died before the claim claims now; with none,
     // a claim already held means this start has had its reminder.
     if (walked === null) await run.save(`${e.start_at}|`);
     const took = await env.DB.prepare('UPDATE event SET reminded_start = ?1 WHERE id = ?2 AND reminded_start IS NOT ?1').bind(e.start_at, eventId).run();
     if (walked === null && took.meta.changes !== 1) return null;
   }
-  const after = walked ?? '';
-  const size = chunkSize(lookups);
+  const after = walked?.after ?? '';
+  const size = chunkSize(lookups, true);
   const { results: chosen } = await env.DB
     .prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id > ? AND coalesce(p.reminders_off, 0) = 0 ORDER BY s.member_id LIMIT ${size}`)
     .bind(eventId, after)
     .all<Recipient>();
   // Other items may have shared this alarm: a smaller chunk now, rather than a notice or a count refused at the cap.
-  const room = Math.floor((budgetLeft(api.budget) - CHUNK_TAIL) / (CALLS_PER_DM + (lookups ? LOOKUP_CALLS : 0)));
+  const room = Math.floor((budgetLeft(api.budget) - CHUNK_TAIL) / (CALLS_PER_DM + RECHECK_CALLS + (lookups ? LOOKUP_CALLS : 0)));
   if (chosen.length && room < 1) return { again: now + 1_000 };
   const results = chosen.slice(0, room);
   const link = cardLink(e, state);
@@ -181,20 +200,38 @@ export const evremind: DueHandler = async (env, guildId, id, _due, now, api, run
     recipients = results.filter((r) => !left.includes(r.member_id));
   }
   const promoted = await leftAndPromoted(env, api, e, state, left, new Date(now).toISOString(), EVENT_COPY.leftLineReminder);
+  const last = results.at(-1)?.member_id ?? after;
+  const more = chosen.length === size || results.length < chosen.length;
+  // A member who moved up where the walk won't reach them gets both messages. Behind the cursor, they go in it before anything
+  // else can fail. Ahead of it, they join this chunk in their place: the cursor passes them, or the next chunk finds them.
+  const missed = promoted.filter((m) => !more || m <= last);
+  const behind = missed.filter((m) => m <= after);
+  const owing = [...new Set([...(walked?.owed ?? []), ...behind])];
+  if (behind.length) await run.save(reminderCursor(e.start_at, after, owing));
   // At once: these rows are committed, and whatever happens below, the card and the message are owed.
   const follow = [...(left.length ? [{ key: `evcard:${id}`, due: now }] : []), ...promoItems(eventId, promoted, now)];
   if (follow.length) await run.schedule?.(follow);
-  // A member who moved up where the walk won't reach them is picked up here: they get both messages.
-  const last = results.at(-1)?.member_id ?? after;
-  const more = chosen.length === size || results.length < chosen.length;
-  const missed = promoted.filter((m) => !more || m <= last);
-  if (missed.length) {
-    const found = await env.DB.prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id IN (SELECT value FROM json_each(?)) AND coalesce(p.reminders_off, 0) = 0`).bind(eventId, JSON.stringify(missed)).all<Recipient>();
-    recipients = [...recipients, ...found.results].sort((a, b) => (a.member_id < b.member_id ? -1 : 1));
-  }
-  const stopped = await walk(env, api, guildId, 'reminder', eventId, e.start_at, after, recipients, (x) => reminderText(e, state, x, link), run.save);
+  // Those owed go first, while they still qualify. One message goes out only if the event is still as this run read it.
+  const wanted = [...owing, ...missed.filter((m) => m > after)];
+  const found = wanted.length
+    ? (await env.DB.prepare(`SELECT ${RECIPIENT_COLS} FROM event_signup s ${OPTED_IN} WHERE s.event_id = ? AND s.status IN ${IN_REMINDER} AND s.member_id IN (SELECT value FROM json_each(?)) AND coalesce(p.reminders_off, 0) = 0`).bind(eventId, JSON.stringify(wanted)).all<Recipient>()).results
+    : [];
+  const first = found.filter((r) => r.member_id <= after);
+  const owed = new Set(first.map((r) => r.member_id));
+  recipients = [...recipients, ...found.filter((r) => r.member_id > after)].sort((a, b) => (a.member_id < b.member_id ? -1 : 1));
+  let cursor = after;
+  const save = run.save;
+  const done = async (m: string) => {
+    if (!owed.delete(m)) cursor = m > cursor ? m : cursor;
+    await save(reminderCursor(e.start_at, cursor, [...owed]));
+  };
+  const same = async () => {
+    const live = await env.DB.prepare('SELECT status, start_at FROM event WHERE id = ?').bind(eventId).first<{ status: string; start_at: string }>();
+    return live?.status === 'open' && live.start_at === e.start_at;
+  };
+  const stopped = await walk(env, api, guildId, 'reminder', eventId, [...first, ...recipients], (x) => reminderText(e, state, x, link), done, same);
   // Those who left move the cursor too: the next chunk starts after the last one looked up.
-  if (!stopped && last > after) await run.save(`${e.start_at}|${last}`);
+  if (!stopped && last > cursor) await run.save(reminderCursor(e.start_at, last, [...owed]));
   return nextRun(stopped, more, now);
 };
 
@@ -212,7 +249,8 @@ const toRoster = (kind: 'moved' | 'cancelled', mark: (e: EventRow) => string, re
     .bind(eventId, after)
     .all<{ member_id: string }>();
   const message = text(e, cardLink(e, state));
-  return nextRun(await walk(env, api, guildId, kind, eventId, mark(e), after, results, () => message, run.save), results.length === size, now);
+  const save = run.save;
+  return nextRun(await walk(env, api, guildId, kind, eventId, results, () => message, (m) => save(`${mark(e)}|${m}`)), results.length === size, now);
 };
 
 export const evmoved = toRoster('moved', (e) => e.start_at, (e) => e.status === 'open', (e, link) => EVENT_COPY.dmMoved(md(e.title), whenOf(e), link));
