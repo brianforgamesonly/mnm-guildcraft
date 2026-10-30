@@ -380,11 +380,13 @@ Order 29 is the DKP add-on, part 2: spending points (docs/PRD.md, "Order 29: spe
 
 ## Order 30
 
-Order 30 clears four small items: forum post guidelines, a building line on boards, the "DKP module" wording and a guard on the weekly decay timer. Nothing earlier is overridden.
+Order 30 clears four small items: forum post guidelines, a building line on boards, the "DKP module" wording and a guard on the weekly decay timer. Nothing earlier is overridden except override 1 below.
+
+- Override 1, of order 27's override 5, "It is a new schedule; its expected usage is in order 27's FINAL REPORT. It never writes sweep_run, and never touches the cron or the health check.": the cron's daily slot calls the object's `ensureDecay`, as ITEM 4 orders. The object itself still never writes sweep_run or touches the health check.
 
 - Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1–2; PR B: ITEMs 3–4.
 - Forum defaults are set at creation and by one backfill, then never touched again. GuildCraft sets a forum's guidelines when it creates the forum, plus one backfill of forums that already exist (scripts/forum/backfill.ts: dry run, then the test copy, then production; it sets a field only if it's empty at that moment; PR B removes it). After that GuildCraft never reads or writes these fields, so an officer who changes or clears them keeps their choice.
 - Order 24's member-post denial on GuildCraft forums stands. The guidelines text says why.
 - The DKP switch is called the "DKP module" on its buttons, its confirmations and in help. No button, reply or help text uses "Add DKP" or "Remove DKP" unless the word "module" follows, because the bare phrase reads like awarding points.
-- A guild with DKP on always has exactly one decay item on its Durable Object. One idempotent function ensures it, and every path that can find it missing calls that function.
+- A guild with DKP on always has exactly one decay item on its Durable Object. One idempotent function ensures it (src/dkp/timers.ts `ensureDecay`), and every path that can find it missing calls that function: Add DKP module, the cron's daily slot (09:00 UTC, src/dkp/guard.ts) and, because a runner can't reach a Durable Object, the post-deploy step through the Worker's signed route `POST /ops/decay-guard` (`register-commands.yml`, or `decay-guard.yml` by dispatch). The route is signed with an HMAC under the copy's bot token, needs no new credential, and answers counts only.
 - Failed runs: every one is listed in the FINAL (order 12).

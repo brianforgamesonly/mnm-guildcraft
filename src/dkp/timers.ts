@@ -3,7 +3,7 @@
 // in its storage, one key per item (value: due, epoch ms), and its single alarm ("Each Durable Object is able to schedule
 // a single alarm at a time") is set to the earliest. "Alarms have guaranteed at-least-once execution", so every handler
 // is idempotent: it acts only while D1 still says the item is due (src/dkp/due.ts). It never writes sweep_run and never
-// touches the cron or the health check.
+// touches the health check. Order 30: the cron's daily slot calls ensureDecay here (src/dkp/guard.ts), and nothing else.
 //
 // Items: lapse:<pending id> (an approval's lapse), check:<kill id> (a Check again window), close:<raid id> (auto-close),
 // render:<raid id> (a coalesced card edit, at the pace Discord's last answer allows: src/dkp/pace.ts). Order 29:
@@ -13,7 +13,8 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env.ts';
 import { budgetLeft } from '../board/api.ts';
 import { countD1 } from '../telemetry.ts';
-import { runDue, timerApi } from './due.ts';
+import { DECAY_KEY, runDue, timerApi, WEEK_MS } from './due.ts';
+import type { EnsureResult } from './guard.ts';
 import { afterEdit, nextEditAt, START, type Pace } from './pace.ts';
 
 const GUILD_KEY = '!guild';
@@ -61,6 +62,38 @@ export class DkpTimers extends DurableObject<Env> {
       return;
     }
     await this.arm();
+  }
+
+  /**
+   * Order 30: the one function that keeps "DKP on means exactly one decay item". The fixed key rules out a second copy; an
+   * item already there keeps its time (the usual path: one storage read, no D1). Only when it is missing does the object
+   * ask D1, which holds the on/off flag, and then writes the item a week out and re-arms to the earliest item, so an
+   * earlier alarm stands. A D1 call is not storage, so an input gate would let Remove DKP's cancel() run during it and the
+   * write below would outlive the cancel: blockConcurrencyWhile holds that cancel until after the write, and it clears
+   * the item. If the read says off, Remove DKP has committed, so nothing is written. "If the callback throws an exception,
+   * the object will be terminated and reset", hence the catch.
+   */
+  async ensureDecay(guildId: string, dry = false): Promise<EnsureResult> {
+    const s = this.ctx.storage;
+    if (await s.get<Item>(DECAY_KEY)) {
+      // Review: an item with no alarm would never run. Re-arming keeps its time; storage calls alone, so nothing interleaves.
+      if (!dry && (await s.getAlarm()) === null) await this.arm();
+      return 'kept';
+    }
+    return this.ctx.blockConcurrencyWhile(async (): Promise<EnsureResult> => {
+      try {
+        const row = await this.env.DB.prepare('SELECT enabled FROM dkp_guild WHERE guild_id = ?').bind(guildId).first<{ enabled: number }>();
+        if (row?.enabled !== 1) return 'off';
+        if (await s.get<Item>(DECAY_KEY)) return 'kept';
+        if (dry) return 'would-add';
+        await s.put<Item | string>({ [GUILD_KEY]: guildId, [DECAY_KEY]: { due: Date.now() + WEEK_MS } });
+        await this.arm();
+        return 'added';
+      } catch (e) {
+        console.error('dkp ensureDecay failed', e instanceof Error ? e.message : String(e));
+        return 'failed';
+      }
+    });
   }
 
   /** The due-list, for tests and the cost bench. */

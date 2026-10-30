@@ -11,7 +11,7 @@ import { deflateSync } from 'node:zlib';
 import { commandLimitProblems, commandsWith } from '../../src/commands/definitions.ts';
 import { currentCopy } from '../copies.ts';
 import { copyDatabaseId, remoteDb } from '../import/db.ts';
-import { DKP_ON_SQL, upsertDkp } from './dkp.ts';
+import { callDecayGuard, DKP_ON_SQL, upsertDkp, workerUrl } from './dkp.ts';
 
 const COPY = currentCopy();
 const GLOBAL = COPY.name === 'production';
@@ -53,16 +53,6 @@ async function discord(method: string, path: string, body?: unknown): Promise<un
   const { status, text } = await call(method, path, body);
   if (status < 200 || status > 299) throw new Error(`Discord ${method} ${hide(path)}: HTTP ${status} ${text.slice(0, 500)}`);
   return text ? JSON.parse(text) : null;
-}
-
-async function workerUrl(): Promise<string> {
-  const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${need('CLOUDFLARE_ACCOUNT_ID')}/workers/subdomain`, {
-    headers: { Authorization: `Bearer ${need('CLOUDFLARE_API_TOKEN')}` },
-  });
-  const body = (await res.json()) as { success: boolean; result?: { subdomain?: string }; errors?: { code: number; message: string }[] };
-  const sub = body.result?.subdomain;
-  if (!body.success || !sub) throw new Error(`workers.dev subdomain lookup failed: ${(body.errors ?? []).map((e) => `${e.code} ${e.message}`).join('; ')}`);
-  return `https://${COPY.worker}.${sub}.workers.dev/`;
 }
 
 /** A plain square PNG of one colour, as a data URI (Discord's "image data"). No file, no tool: zlib and a CRC. */
@@ -144,7 +134,7 @@ if (process.env.READ_ONLY === '1') {
 
 // The live Worker must reject bad signatures before Discord is pointed at it: Discord sends invalid
 // signatures on save and afterwards, and removes the URL if one is accepted.
-const url = await workerUrl();
+const url = await workerUrl(COPY.worker, need('CLOUDFLARE_ACCOUNT_ID'), need('CLOUDFLARE_API_TOKEN'));
 for (const [label, headers] of [
   ['invalid signature', { 'X-Signature-Ed25519': '00'.repeat(64), 'X-Signature-Timestamp': String(Math.floor(Date.now() / 1000)) }],
   ['no signature headers', {}],
@@ -166,6 +156,18 @@ const dkpOn = hasDkp ? (await db.all<{ guild_id: string }>(DKP_ON_SQL)).map((r) 
 const dkp = await upsertDkp(call, appId, dkpOn);
 console.log(`/dkp upserted on ${dkpOn.length - dkp.failed} of ${dkpOn.length} server(s) with DKP on`);
 for (const l of dkp.lines) console.log(l);
+// Order 30 (ITEM 4): each DKP-on server's decay item. A warning only: the cron's daily slot covers it, and a registration
+// from a reviewed branch can reach a Worker that doesn't have this route yet.
+try {
+  const guard = await callDecayGuard(url, botToken, false);
+  if ('status' in guard) console.log(`::warning::the decay guard answered HTTP ${guard.status}`);
+  else {
+    console.log('decay guard:', JSON.stringify(guard));
+    if (guard.counts.failed) console.log(`::warning::the decay guard failed on ${guard.counts.failed} server(s)`);
+  }
+} catch (e) {
+  console.log(`::warning::the decay guard could not be reached: ${e instanceof Error ? e.message : String(e)}`);
+}
 
 // Discord sends the Worker a PING to validate the URL; the Worker answers it with this copy's public key.
 console.log('setting interactions_endpoint_url:', url);

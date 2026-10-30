@@ -5,7 +5,6 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { FACTIONS, TRADESKILLS } from '../../src/board/kinds.ts';
 import { CALL_CAP, CATEGORY_NAME, CHANNELS_COPY, FORUM_SORT_CREATION, LAYOUT, OFFICER_ALLOW, storedName } from '../../src/commands/channels.ts';
-import { planForum } from '../../scripts/forum/plan.ts';
 import { CREATE_CHANNELS_LABEL, CREATE_CHANNELS_PREFIX, setupButtons } from '../../src/commands/setup.ts';
 import { ADMIN_ONLY } from '../../src/interactions.ts';
 import {
@@ -111,15 +110,6 @@ describe('order 30: forum defaults', () => {
     fake.channels.push({ id: '700000000000009001', name: 'gc-tradeskills', type: GUILD_FORUM, parent_id: '700000000000009000', permission_overwrites: [], default_sort_order: 0, default_reaction_emoji: ours });
     await pressCreate();
     expect(fake.calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ default_sort_order: FORUM_SORT_CREATION }]);
-  });
-
-  it('the backfill fills only an empty field, and offers nothing for a forum with both set', () => {
-    const emoji = { emoji_id: '1', emoji_name: null };
-    expect(planForum({ topic: null, default_reaction_emoji: null }, 'text', '1')).toEqual({ topic: 'text', default_reaction_emoji: emoji });
-    expect(planForum({ topic: '', default_reaction_emoji: emoji }, 'text', '1')).toEqual({ topic: 'text' });
-    expect(planForum({ topic: "An officer's own", default_reaction_emoji: null }, 'text', '1')).toEqual({ default_reaction_emoji: emoji });
-    expect(planForum({ topic: "An officer's own", default_reaction_emoji: null }, 'text', null)).toBeNull();
-    expect(planForum({ topic: "An officer's own", default_reaction_emoji: { emoji_id: null, emoji_name: '🔥' } }, 'text', '1')).toBeNull();
   });
 });
 

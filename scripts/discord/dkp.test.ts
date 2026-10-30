@@ -8,7 +8,8 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { COMMANDS } from '../../src/commands/definitions.ts';
 import { DKP_COMMAND, DKP_NAME } from '../../src/dkp/definition.ts';
-import { DKP_ON_SQL, upsertDkp } from './dkp.ts';
+import { GUARD_PATH, verifyGuard } from '../../src/dkp/guard.ts';
+import { callDecayGuard, DKP_ON_SQL, upsertDkp } from './dkp.ts';
 
 const APP = '1';
 const TEST_GUILD = '900';
@@ -55,6 +56,30 @@ test('register.ts upserts /dkp on the copy\'s DKP-on servers after the PUT, and 
   // upsertDkp only ever calls the guild route.
   const calls: string[] = [];
   return upsertDkp(async (_m, p) => (calls.push(p), { status: 201, text: '' }), APP, ['5', '6']).then(() => assert.deepEqual(calls, [`/applications/${APP}/guilds/5/commands`, `/applications/${APP}/guilds/6/commands`]));
+});
+
+test('order 30: register.ts asks the live Worker for the decay guard after the upserts, and a refusal only warns', () => {
+  const src = readFileSync(new URL('./register.ts', import.meta.url), 'utf8');
+  assert.ok(src.indexOf('callDecayGuard(url, botToken, false)') > src.indexOf('upsertDkp(call, appId, dkpOn)'));
+  assert.match(src, /::warning::the decay guard answered/);
+});
+
+test('order 30: the guard call is signed, pages through every guild and adds up; a refusal is returned, never thrown', async () => {
+  const seen: { url: string; time: string | null; signature: string | null }[] = [];
+  const pages = [
+    { guilds: 40, checked: 39, counts: { kept: 38, added: 1, 'would-add': 0, off: 0, failed: 0 }, next: 39 },
+    { guilds: 40, checked: 1, counts: { kept: 1, added: 0, 'would-add': 0, off: 0, failed: 0 }, next: null },
+  ];
+  const fetcher = (async (url: string, init: RequestInit) => {
+    const h = new Headers(init.headers);
+    seen.push({ url, time: h.get('X-Guard-Time'), signature: h.get('X-Guard-Signature') });
+    return new Response(JSON.stringify(pages[seen.length - 1]));
+  }) as typeof fetch;
+  const r = await callDecayGuard('https://w.example/', 'token', false, fetcher);
+  assert.deepEqual(r, { guilds: 40, checked: 40, counts: { kept: 39, added: 1, 'would-add': 0, off: 0, failed: 0 } });
+  assert.deepEqual(seen.map((s) => s.url), [`https://w.example${GUARD_PATH}?dry=0&offset=0`, `https://w.example${GUARD_PATH}?dry=0&offset=39`]);
+  assert.equal(await verifyGuard('token', Number(seen[1].time), false, 39, seen[1].signature!, Date.now()), true);
+  assert.deepEqual(await callDecayGuard('https://w.example/', 'token', true, (async () => new Response('', { status: 404 })) as typeof fetch), { status: 404 });
 });
 
 test('register-commands.yml runs register.ts, so each registration after a deploy carries the upserts', () => {

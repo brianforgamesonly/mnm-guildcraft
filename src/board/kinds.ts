@@ -28,8 +28,9 @@ export interface BoardKind {
   /** The thread name of the pinned index post. */
   indexTitle: string;
   /**
-   * Order 30: the forum's post guidelines (its `topic`). Set when GuildCraft creates the forum, and once by the backfill;
-   * never read or written after that, so an officer's edit or clear stands. Discord: "0-4096 characters" on a forum.
+   * Order 30: the forum's post guidelines (its `topic`). Set only when GuildCraft creates the forum (one backfill covered
+   * those that existed); never read or written after that, so an officer's edit or clear stands. Discord: "0-4096
+   * characters" on a forum.
    */
   guidelines: string;
 }

@@ -1,7 +1,8 @@
-# Order 30 (ITEM 1): the one backfill of existing forums' post guidelines (scripts/forum/backfill.ts). It fills only an
-# empty field. Dry run first, then dev, then production; order 30's PR B removes this workflow and the script.
+# Order 30 (ITEM 4): the DKP decay guard on one copy, by dispatch (scripts/discord/decay-guard.ts): asks the live Worker to
+# ensure each DKP-on server's weekly decay item. The cron does this daily and register-commands after a registration;
+# this is for a dry run and for proving it. Prints counts only.
 # Dispatch only. Expected: <1 billed minute per run.
-name: forum-backfill
+name: decay-guard
 on:
   workflow_dispatch:
     inputs:
@@ -11,14 +12,14 @@ on:
         options: [dev, production]
         default: dev
       dry_run:
-        description: 'Read and print only; nothing is written'
+        description: 'Report what it finds; nothing is written'
         type: boolean
         default: true
 permissions:
   contents: read
-concurrency: forum-backfill-${{ inputs.copy }}
+concurrency: decay-guard-${{ inputs.copy }}
 jobs:
-  backfill:
+  guard:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     env:
@@ -32,10 +33,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - name: Backfill (dry run = ${{ inputs.dry_run }})
+      - name: Decay guard (dry run = ${{ inputs.dry_run }})
         env:
           DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
-          # The copy's own secrets only, as register-commands.yml.
+          # The copy's own secret only, as register-commands.yml.
           DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', inputs.copy == 'production' && 'PROD_' || '')] }}
-          DISCORD_APPLICATION_ID: ${{ secrets[format('{0}DISCORD_APPLICATION_ID', inputs.copy == 'production' && 'PROD_' || '')] }}
-        run: node scripts/forum/backfill.ts
+        run: node scripts/discord/decay-guard.ts
