@@ -120,6 +120,9 @@ export const RAID_COPY = {
   corrected: (member: string, action: 'add' | 'remove', kills: number, by: string, reason: string) =>
     `**Correction:** ${member} ${action === 'add' ? 'added to' : 'removed from'} ${plural(kills, 'kill')}. By ${by}. Reason: ${md(reason)}`,
   correctedReply: 'Done. The correction is posted in GC-DKP.',
+  /** Order 29 (review of PR A): nothing to change. */
+  nothingCorrected: (action: 'add' | 'remove') =>
+    action === 'add' ? 'Nothing changed: they are already on those kills (Present or Standby).' : 'Nothing changed: they are not on those kills.',
   historyTitle: (pool: string) => `DKP history: ${pool}`,
   historyLine: (t: number, amount: number, cut: number, balance: number, kind: string, kill: string | null, reason: string | null) =>
     `<t:${t}:d> ${amount > 0 ? '+' : ''}${amount}${cut > 0 ? ` (${cut} over the cap)` : ''} · ${kind === 'kill' ? `kill${kill ? `: ${md(kill)}` : ''}` : kind === 'flat' ? 'flat payout' : kind}${reason ? ` · ${md(truncate(reason, 80))}` : ''} · now ${balance}`,

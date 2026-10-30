@@ -12,8 +12,15 @@ export const LEDGER_PROOF_SQL = `SELECT ${LEDGER_0021_COLUMNS.join(', ')} FROM d
 /** The text hashed: one JSON array per row, columns in LEDGER_0021_COLUMNS order, one row per line. */
 export const proofText = (rows: Record<string, unknown>[]) => rows.map((r) => JSON.stringify(LEDGER_0021_COLUMNS.map((c) => r[c] ?? null))).join('\n');
 
-/** After 0023: the rows of a kind 0021 did not allow (0 right after the rebuild), and the kill rosters it backfilled. */
+/**
+ * After 0023: the rows of a kind 0021 did not allow (0 right after the rebuild), the kill rosters it backfilled, and the
+ * kills that paid someone yet have no roster (review of PR A: a kill recorded by the old code between the migration and
+ * the Worker's deploy; read again after the deploy, it must be 0 or those kills need their rosters backfilled).
+ */
 export const AFTER_SQL = `SELECT (SELECT count(*) FROM dkp_ledger WHERE kind NOT IN ('kill', 'flat', 'adjust', 'correction') OR auction_id IS NOT NULL OR purchase_id IS NOT NULL) AS new_rows,
   (SELECT count(*) FROM dkp_kill_member) AS roster_rows, (SELECT count(DISTINCT kill_id) FROM dkp_kill_member) AS roster_kills, (SELECT count(*) FROM dkp_kill) AS kills,
   (SELECT count(*) FROM dkp_kill_member WHERE state IS NOT NULL) AS roster_with_state,
+  (SELECT count(*) FROM dkp_ledger WHERE kill_id IS NOT NULL) AS kill_ledger_rows,
+  (SELECT count(*) FROM dkp_kill k WHERE EXISTS (SELECT 1 FROM dkp_ledger l WHERE l.kill_id = k.id AND l.kind IN ('kill', 'flat'))
+     AND NOT EXISTS (SELECT 1 FROM dkp_kill_member km WHERE km.kill_id = k.id)) AS paid_kills_without_roster,
   (SELECT count(*) FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'dkp_ledger') AS triggers`;

@@ -492,8 +492,14 @@ describe('order 29, ITEM 1: Standby earns the standby value once, at close; the 
     const rev = await all<{ amount: number; corrects: number; kind: string }>("SELECT amount, corrects, (SELECT kind FROM dkp_ledger s WHERE s.id = l.corrects) AS kind FROM dkp_ledger l WHERE kind = 'correction' AND raid_id = ? ORDER BY pool", second.id);
     expect(rev.map((r) => [r.amount, r.kind])).toEqual([[-2, 'standby'], [-30, 'standby']]);
     // Once: the same correction again changes nothing.
-    await dkp(officer, 'correct', { member: pip.user.id, action: 'remove', reason: 'was not there' });
+    expect((await dkp(officer, 'correct', { member: pip.user.id, action: 'remove', reason: 'was not there' })).data.content).toBe(RAID_COPY.nothingCorrected('remove'));
     expect(await count('dkp_ledger', "kind = 'correction' AND raid_id = ?", second.id)).toBe(2);
+    // Review of PR A: adding a member already on the kill (here on Standby) changes nothing, and says so.
+    await open();
+    const third = await raid();
+    await pressAs(pip, `${STANDBY_PREFIX}${third.id}`);
+    await dkp(officer, 'kill', { named: 'Goblin King' });
+    expect((await dkp(officer, 'correct', { member: pip.user.id, action: 'add', reason: 'was present' })).data.content).toBe(RAID_COPY.nothingCorrected('add'));
   });
 
   it('a raid opened before order 29 (open across the deploy) keeps the old rule: Standby earns each kill, and nothing at close', async () => {

@@ -86,7 +86,7 @@ export function migrationCheck(dir: string) {
   const before = proof();
   wrangler(['d1', 'migrations', 'apply', DATABASE, '--local', '--env', 'dev', '--persist-to', dir], true);
   const after = proof();
-  const [counts] = localQuery<{ new_rows: number; roster_rows: number; roster_kills: number; kills: number; roster_with_state: number; triggers: number }>(dir, AFTER_SQL);
+  const [counts] = localQuery<{ new_rows: number; roster_rows: number; roster_kills: number; kills: number; roster_with_state: number; kill_ledger_rows: number; paid_kills_without_roster: number; triggers: number }>(dir, AFTER_SQL);
   return { applied: names().filter((n) => !had.includes(n)), before, after, match: before.rows === after.rows && before.sha256 === after.sha256, ...counts };
 }
 

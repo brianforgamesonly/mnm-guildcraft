@@ -100,6 +100,8 @@ function withoutSpans(s: string, open: string, close: string, starts: (at: numbe
           if (!depth) break;
         } else j++;
       }
+      // An unclosed span is not markup: the rest stays as text (review of PR A).
+      if (depth) return out + s.slice(i);
       i = j;
       continue;
     }
@@ -118,7 +120,9 @@ const NON_PROSE_LINK = /^\[\[\s*:?\s*(file|image|media|category)\s*:/i;
  * tags, link markup, entities and bold/italic quotes. NULL when nothing is left (never guessed).
  */
 export function leadText(page: string): string | null {
-  const noTemplates = withoutSpans(page, '{{', '}}');
+  // Comments first (a commented-out heading or table never cuts the lead); an external link [url label] is its label.
+  const noComments = page.replace(/<!--[\s\S]*?(-->|$)/g, '').replace(/(?<!\[)\[(?:https?:)?\/\/[^\s\]]+\s*([^\]]*)\]/g, '$1');
+  const noTemplates = withoutSpans(noComments, '{{', '}}');
   const lines = noTemplates.split('\n');
   // A table starts with "{|"; a line starting "|" is table markup too (a stray "|}" on Blind Midden's page).
   const end = lines.findIndex((l) => /^\s*=+[^=].*=+\s*$/.test(l) || /^\s*(\{\||\|)/.test(l));

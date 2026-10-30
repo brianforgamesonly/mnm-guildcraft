@@ -291,6 +291,9 @@ async function recordKill(c: Ctx, d: DkpState, raid: Raid, name: string | null, 
   if (results.length)
     await c.db.batch([
       rosterAddStatement(c.db, kill!.id, results),
+      // Review of PR A: a Close that slipped in between the kill and this batch paid Standby without this kill; paid here
+      // (nothing while the raid is open, and never twice).
+      ...standbyPayouts(c.db, c.guild.id, raid, s, at),
       ...(earners.length
         ? [
             payStatement(c.db, { guildId: c.guild.id, pool: raid.pool, members: earners, asked: points, cap: s.cap, kind, raidId: raid.id, killId: kill!.id, actor: 'bot', at }),
@@ -378,10 +381,11 @@ export const correctCommand: DkpRun = async (c, opts, d) => {
       correction: { action, raidId: scope.raid.id, killId },
     });
   }
-  await c.db.batch([
-    ...(await correctionStatements(c.db, c.guild.id, d.settings.cap, { member, action, raidId: scope.raid.id, killId, reason, actor: c.userId, at: now() })),
-    audit(c.db, c.guild.id, c.userId, `dkp.correct.${action}`, `member:${member}`, null, { raid: scope.raid.id, kill: killId }),
-  ]);
+  const statements = await correctionStatements(c.db, c.guild.id, d.settings.cap, { member, action, raidId: scope.raid.id, killId, reason, actor: c.userId, at: now() });
+  const done = await c.db.batch([...statements, audit(c.db, c.guild.id, c.userId, `dkp.correct.${action}`, `member:${member}`, null, { raid: scope.raid.id, kill: killId })]);
+  // Review of PR A: a correction that changes nothing (added where they already are, Standby included; removed where they
+  // are not) says so, and posts nothing.
+  if (!done.slice(0, statements.length).some((r) => (r.meta.changes ?? 0) > 0)) return ephemeral(RAID_COPY.nothingCorrected(action));
   const api = apiFor(c);
   try {
     if (api && d.channel_id) {

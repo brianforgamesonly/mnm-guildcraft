@@ -472,6 +472,9 @@ test('order 29 ITEM 2: a zone’s description is its page’s lead text, markup 
   assert.equal(leadText('Closed.\n* <span>No date yet.</span>\n# Second'), 'Closed. No date yet. Second', 'list markers are markup');
   assert.equal(leadText('{{Multi\n|a = == not a heading ==\n}}\nProse.'), 'Prose.', 'a template spanning lines never cuts the lead');
   assert.equal(TEMPLATE_FIELDS.zoneDescription, 'lead text');
+  // Review of PR A: comments, external links, an unclosed template.
+  assert.equal(leadText('<!-- == old == -->A port [https://example.org the guide] says.\n== Next =='), 'A port the guide says.');
+  assert.equal(leadText('A cave {{broken and more.'), 'A cave {{broken and more.', 'an unclosed {{ is left as text');
 });
 
 test('order 28b ITEM 1: the snapshot waits for deploys every 15 s, at most 10 minutes, and lists those that overlapped', async () => {
