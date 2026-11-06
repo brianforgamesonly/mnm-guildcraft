@@ -2,6 +2,7 @@
 import { env } from 'cloudflare:test';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
+import { NOT_YET } from '../../src/interactions.ts';
 import { defaultWeights, weightsFor, WEIGHT_KEYS } from '../../src/gear/score.ts';
 import { RACE_NAMES, raceLabel } from '../../src/gear/vocab.ts';
 import { WEIGHTS_COPY } from '../../src/gear/weights.ts';
@@ -48,9 +49,9 @@ afterEach(() => botApi.reset());
 const weights = (m: Member, o: Record<string, unknown>) => send(rawCmd(m, 'gear', 'weights', o), TOKEN);
 const settings = (m: Member, o: Record<string, unknown> = {}) => send(rawCmd(m, 'gear', 'settings', o), TOKEN);
 const chest = async () => (await send(rawCmd(ann, 'gear', 'upgrades', { slot: 'chest' }), TOKEN)).data.embeds![0].description!;
-/** The Around results, in order. */
+/** The listed results (before Level unknown), in order. */
 const order = (desc: string) => {
-  const d = desc.split('__Above your level__')[0];
+  const d = desc.split('__Level unknown__')[0];
   return ['Plate Vest', 'Stamina Vest', 'Far Vest'].filter((n) => d.includes(`**${n}**`)).sort((a, b) => d.indexOf(`**${a}**`) - d.indexOf(`**${b}**`));
 };
 const stored = () => all<{ class: string; stat: string; value: number; set_by: string }>('SELECT class, stat, value, set_by FROM gear_weight ORDER BY class, stat');
@@ -75,7 +76,7 @@ describe('order 36, ITEM 4: /gear weights', () => {
 
   it('one weight change: stored as the absolute value with who, posted with who and old → new, and it changes the ranking', async () => {
     await testchar();
-    expect(order(await chest())).toEqual(['Stamina Vest', 'Plate Vest']); // +2.00, +3.50 (Far Vest is above, Lv 30)
+    expect(order(await chest())).toEqual(['Far Vest', 'Stamina Vest', 'Plate Vest']); // +1.00, +2.00, +3.50 (no cap)
     const r = await weights(officer, { class: 'INQ', stat: 'AC', value: 0.05 });
     expect(r.data.content).toBe(WEIGHTS_COPY.saved('Inquisitor', 'posted'));
     expect(await stored()).toEqual([{ class: 'INQ', stat: 'AC', value: 5, set_by: OFFICER }]);
@@ -84,9 +85,9 @@ describe('order 36, ITEM 4: /gear weights', () => {
     expect(posted[0].body.content).toBe(`**/gear upgrades weights:** <@${OFFICER}> (Joegandomi) set AC for **Inquisitor**.\nAC: 0.35 → 0.05`);
     expect(posted[0].body.allowed_mentions).toEqual({ parse: [] });
     // Plate Vest is now +0.50: the order changes. With AC 0, it goes.
-    expect(order(await chest())).toEqual(['Plate Vest', 'Stamina Vest']);
+    expect(order(await chest())).toEqual(['Plate Vest', 'Far Vest', 'Stamina Vest']);
     await weights(officer, { class: 'INQ', stat: 'AC', value: 0 });
-    expect(order(await chest())).toEqual(['Stamina Vest']);
+    expect(order(await chest())).toEqual(['Far Vest', 'Stamina Vest']);
     expect(field(await weights(officer, { class: 'INQ' }), 'AC')).toMatch(/^\*\*0\*\* \(default 0\.35\) · changed by <@100000000000000009> \(Joegandomi\), <t:\d+:d>$/);
   });
 
@@ -115,7 +116,6 @@ describe('order 36, ITEM 4: /gear weights', () => {
     await testchar();
     expect((await weights(ann, { class: 'INQ' })).data.content).toBe(OFFICER_ONLY);
     expect((await weights(ann, { class: 'INQ', stat: 'AC', value: 0 })).data.content).toBe(OFFICER_ONLY);
-    expect((await settings(ann, { window: 5 })).data.content).toBe(OFFICER_ONLY);
     expect((await weights(officer, { class: 'INQ', stat: 'AC', value: 2.05 })).data.content).toBe(WEIGHTS_COPY.range);
     expect((await weights(officer, { class: 'INQ', stat: 'AC', value: 0.07 })).data.content).toBe(WEIGHTS_COPY.step);
     for (const o of [{ stat: 'AC' }, { value: 1 }, { preset: 'Tank', stat: 'AC', value: 1 }, { preset: 'Tank', reset: true }, { reset: false }, { stat: 'AC', value: 1, reset: true }])
@@ -166,23 +166,15 @@ describe('order 36, ITEM 4: /gear weights', () => {
   });
 });
 
-describe('order 36, ITEM 4: /gear settings', () => {
-  it('the window: shown, set (stored, posted), used by /gear upgrades, and back to the default (row deleted)', async () => {
+describe('order 36 follow-up: /gear settings is retired', () => {
+  it('answers "not available" for anyone, writes nothing, posts nothing; a saved window row is ignored and kept', async () => {
     await testchar();
-    expect((await settings(officer)).data.content).toBe(WEIGHTS_COPY.settingsNow(10, null));
-    expect(order(await chest())).toEqual(['Stamina Vest', 'Plate Vest']);
-    const r = await settings(officer, { window: 20 });
-    expect(r.data.content).toBe(WEIGHTS_COPY.windowSaved(10, 20, 'posted'));
-    expect(posted.at(-1)!.body.content).toBe(`**/gear upgrades window:** <@${OFFICER}> (Joegandomi) changed it from 10 to 20 levels.`);
-    expect(await all('SELECT key, value, set_by FROM gear_setting')).toEqual([{ key: 'window', value: 20, set_by: OFFICER }]);
-    // Testchar is 15: Far Vest (Lv 30) is Around at window 20; levels: still overrides it.
-    expect(await chest()).not.toContain('Above your level');
+    await env.DB.prepare("INSERT INTO gear_setting (guild_id, key, value, set_at, set_by) VALUES (?, 'window', 0, 't', ?)").bind(GUILD_ID, OFFICER).run();
+    for (const m of [officer, ann]) expect((await settings(m, { window: 5 })).data.content).toBe(NOT_YET);
+    expect(posted).toEqual([]);
+    // No cap: the stored window of 0 changes nothing; Far Vest (Lv 30) is listed.
     expect(order(await chest())).toEqual(['Far Vest', 'Stamina Vest', 'Plate Vest']);
-    expect(await (async () => (await send(rawCmd(ann, 'gear', 'upgrades', { slot: 'chest', levels: 0 }), TOKEN)).data.embeds![0].description!)()).toContain('Above your level');
-    expect((await settings(officer, { window: 61 })).data.content).toBe(WEIGHTS_COPY.windowRange);
-    await settings(officer, { window: 10 });
-    expect(await all('SELECT * FROM gear_setting')).toEqual([]);
-    expect(posted).toHaveLength(2);
+    expect(await all('SELECT key, value FROM gear_setting')).toEqual([{ key: 'window', value: 0 }]);
   });
 });
 

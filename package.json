@@ -30,6 +30,7 @@
     "bench:import-writes": "node scripts/bench/import-writes.ts",
     "bench:gear-search": "node scripts/bench/gear-search.mjs",
     "bench:gear-upgrades": "node scripts/bench/gear-upgrades.mjs",
+    "quest-sites": "node scripts/gear/quest-sites.ts",
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "commands:register": "node scripts/discord/register.ts"
   },

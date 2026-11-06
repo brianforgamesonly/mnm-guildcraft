@@ -1,4 +1,5 @@
-// Order 36, PR B (ITEM 4; docs/PRD.md "Gear upgrades", officer weights and settings): /gear weights and /gear settings.
+// Order 36, PR B (ITEM 4; docs/PRD.md "Gear upgrades", officer weights): /gear weights. (/gear settings, the window, was
+// retired by the owner on 2026-11-06 with the window itself: /gear upgrades has no cap unless max_level: is given.)
 //
 // - Officers only, checked when the command runs (src/interactions.ts ROUTES access 'officer'); both commands are visible to
 //   everyone in Discord's list (no default_member_permissions on /gear).
@@ -14,7 +15,7 @@ import { botApi } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, md, memberTag, optBool, optInt, optString, truncate, type Embed, type MessageReply, type Option } from '../discord.ts';
 import {
-  applyRows, CLASSES, classKey, className, defaultWeights, fmtWeight, GEAR_SETTINGS, PRESETS, presetWeights, WEIGHT_KEYS, WEIGHT_LABEL, WEIGHT_ROWS_SQL, WINDOW_SQL,
+  applyRows, CLASSES, classKey, className, defaultWeights, fmtWeight, PRESETS, presetWeights, WEIGHT_KEYS, WEIGHT_LABEL, WEIGHT_ROWS_SQL,
   type Preset, type WeightKey, type WeightRow, type Weights,
 } from './score.ts';
 
@@ -50,12 +51,6 @@ export const WEIGHTS_COPY = {
   presetWhat: (p: Preset) => `applied the ${p} preset`,
   resetWhat: 'reset to the defaults',
   change: (stat: string, from: string, to: string) => `${stat}: ${from} → ${to}`,
-  // /gear settings
-  settingsNow: (w: number, changed: string | null) => `**Upgrade window:** ${w} levels above a character's level count as "around your level"${changed ? ` (${changed})` : ' (default)'}.`,
-  windowRange: `window: is a number from ${GEAR_SETTINGS.window.min} to ${GEAR_SETTINGS.window.max}.`,
-  windowSame: (w: number) => `The upgrade window already is ${w}. Nothing changed.`,
-  windowSaved: (from: number, to: number, post: PostResult) => `Upgrade window: ${from} → ${to}.${POSTED[post]}`,
-  windowPost: (who: string, from: number, to: number) => `**/gear upgrades window:** ${who} changed it from ${from} to ${to} levels.`,
 } as const;
 
 const display = (c: Ctx) => c.member.nick ?? c.member.user.global_name ?? c.member.user.username;
@@ -202,30 +197,3 @@ export async function gearWeights(c: Ctx, opts: Option[]): Promise<MessageReply>
   const posted = await postReview(c, [WEIGHTS_COPY.postHead(who(c), cls, what), ...lines].join('\n'));
   return ephemeral(WEIGHTS_COPY.saved(cls, posted), { embeds: [weightsEmbed(code, await rowsFor(c, code))] });
 }
-
-// ---------------------------------------------------------------- /gear settings
-
-/** /gear settings [window:] (officers): shows the window, or sets it (0 to 60). */
-export async function gearSettings(c: Ctx, opts: Option[]): Promise<MessageReply> {
-  const row = await c.db
-    .prepare("SELECT s.value, s.set_at, s.set_by, m.display_name AS by_name FROM gear_setting s LEFT JOIN member m ON m.guild_id = s.guild_id AND m.discord_user_id = s.set_by WHERE s.guild_id = ? AND s.key = 'window'")
-    .bind(c.guild.id)
-    .first<{ value: number; set_at: string; set_by: string; by_name: string | null }>();
-  const S = GEAR_SETTINGS.window;
-  const current = row ? Number(row.value) : S.default;
-  const window = optInt(opts, 'window');
-  if (window === undefined) return ephemeral(WEIGHTS_COPY.settingsNow(current, row ? WEIGHTS_COPY.changed(setter(row.set_by, row.by_name), row.set_at) : null));
-  if (window < S.min || window > S.max) return ephemeral(WEIGHTS_COPY.windowRange);
-  if (window === current) return ephemeral(WEIGHTS_COPY.windowSame(current));
-  const at = now();
-  await c.db.batch([
-    window === S.default
-      ? c.db.prepare("DELETE FROM gear_setting WHERE guild_id = ? AND key = 'window'").bind(c.guild.id)
-      : c.db.prepare("INSERT INTO gear_setting (guild_id, key, value, set_at, set_by) VALUES (?1, 'window', ?2, ?3, ?4) ON CONFLICT (guild_id, key) DO UPDATE SET value = ?2, set_at = ?3, set_by = ?4").bind(c.guild.id, window, at, c.userId),
-    audit(c.db, c.guild.id, c.userId, 'gear.setting', 'setting:window', { value: current }, { value: window }),
-  ]);
-  const posted = await postReview(c, WEIGHTS_COPY.windowPost(who(c), current, window));
-  return ephemeral(WEIGHTS_COPY.windowSaved(current, window, posted));
-}
-
-export { WINDOW_SQL };

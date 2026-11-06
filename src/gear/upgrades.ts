@@ -26,11 +26,13 @@ import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../zone/names.ts';
 import { parseLevel } from '../../scripts/import/levels.ts';
 import { gearIndex, VERSION_SQL, type GearIndex } from './index.ts';
 import {
-  breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, DEFAULT_WINDOW, GEAR_SETTINGS, WINDOW_SQL, fmtHundredths, groupByKey, grouped, GROUPS, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
+  breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, fmtHundredths, groupByKey, grouped, GROUPS, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
 import { raceLabel } from './vocab.ts';
+// Order 36 follow-up: quest pages on monstersandmemories.wiki, each verified to exist (scripts/gear/quest-sites.ts).
+import QUEST_SITES from './quest-sites.json' with { type: 'json' };
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
@@ -50,8 +52,16 @@ export { FIND_UPGRADES_PREFIX };
 
 export const PER_PAGE = 5;
 export const SUMMARY_LINES = 8;
-export const LEVELS_MAX = 60;
-const ZONE_ROW_BUTTONS = 5;
+
+/**
+ * Order 36 follow-up (the owner, 2026-11-06): a level cap, or none (null: the default). In a custom_id it is "c" (none) or
+ * "c<level>". A control sent before this carries a window number there; it reads as no cap (order 18: still handled).
+ */
+export type Cap = number | null;
+export const capState = (cap: Cap) => (cap === null ? 'c' : `c${cap}`);
+export const capOf = (s: string | undefined): Cap => (s && /^c\d+$/.test(s) ? Number(s.slice(1)) : null);
+/** An item name, linked to its wiki page when it has one (https only). */
+const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${it.wiki})` : `**${md(it.name)}**`);
 
 // ---------------------------------------------------------------- copy (order 36; listed for approval in docs/COPY.md)
 
@@ -62,10 +72,9 @@ export const UPGRADES_COPY = {
   slotTitle: (slot: string, name: string) => `${slot} upgrades for ${name}`,
   who: (ch: Character) => `**${md(ch.name)}** · ${md(className(ch.class))}${ch.level !== null ? ` ${ch.level}` : ''} · ${ch.race ? md(raceLabel(ch.race)) : 'any race'}`,
   weights: (cls: string) => `Uses your guild's ${cls} weights.`,
-  noLevel: (name: string) => `Save a level for ${md(name)} on \`/me\` to group this list by level.`,
-  window: (level: number, window: number) => `Around your level means up to Lv ${level + window} (your level + ${window}).`,
-  aroundLine: (slot: string, u: Upgrade) => `**${slot}:** ${md(u.item.name)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}`,
-  aboveLine: (slot: string, u: Upgrade) => `**${slot}:** nothing around your level · next: ${md(u.item.name)} **${fmtHundredths(u.gain)}** (${levelText(u.item)})`,
+  capNote: (cap: number) => `Items up to Lv ${cap}.`,
+  hidden: (n: number, cap: number) => `${plural(n, 'more')} above Lv ${cap} not shown.`,
+  listedLine: (slot: string, u: Upgrade) => `**${slot}:** ${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}`,
   unknownLine: (slot: string) => `**${slot}:** only level-unknown upgrades`,
   footer: (more: number, none: number) =>
     [more ? `${plural(more, 'more slot')} with upgrades: pick a slot below` : null, none ? `${plural(none, 'slot')} with nothing better` : null].filter(Boolean).join(' · '),
@@ -74,11 +83,7 @@ export const UPGRADES_COPY = {
   emptySlot: (slot: string) => `an empty ${slot}`,
   pickSlot: 'Pick a slot',
   pickSlotOption: (u: Upgrade) => truncate(`smallest: ${u.item.name} ${fmtHundredths(u.gain)}`, 100),
-  head: {
-    around: 'Around your level',
-    above: 'Above your level',
-    unknown: 'Level unknown',
-  } satisfies Record<LevelGroup, string>,
+  head: { listed: 'Upgrades', unknown: 'Level unknown' } satisfies Record<(typeof GROUPS)[number], string>,
   worn: (slot: string, item: string, score: string) => `${slot}: ${item} (score ${score})`,
   wornEmpty: (slot: string) => `${slot}: empty (score 0.00)`,
   notCounted: { gone: 'counts 0: no longer listed', cantUse: (name: string) => `counts 0: ${md(name)} can't use it` },
@@ -95,7 +100,8 @@ export const UPGRADES_COPY = {
   wearingNow: "I'm wearing it now",
   requestCraft: 'Request a craft',
   moreZones: (n: number) => `+${plural(n, 'more zone')}`,
-  levelsRange: `levels: is a number from 0 to ${LEVELS_MAX}.`,
+  capRange: `max_level: is a number from 1 to ${MAX_LEVEL_CAP}.`,
+  forSlot: (ch: string, slot: string) => `for ${md(ch)}'s ${slot}`,
   unknownSlot: 'Pick a slot from the list.',
   gone: 'That item is no longer in the data.',
   // How to get it.
@@ -111,6 +117,8 @@ export const UPGRADES_COPY = {
   vendorUnnamed: 'Vendor: where not recorded · any level',
   harvest: 'Harvested, any level',
   quest: (level: string) => `Quest: the quest's name isn't recorded · ${level}`,
+  questNamed: (name: string, level: string, more: number) => `Quest: ${name} · ${level}${more ? ` · +${more} more` : ''}`,
+  mnmWiki: 'monstersandmemories.wiki',
   unknown: 'Source not recorded',
 } as const;
 
@@ -169,51 +177,48 @@ const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx
 
 // ---------------------------------------------------------------- the summary
 
-export function summaryView(L: Loaded, window: number): { embed: Embed; components: unknown[] } {
-  // ITEM 5: one pass per slot for what the summary shows (no sort of every candidate): the smallest Around candidate (the
-  // list's own order, byGain), the Above candidate with the lowest level (then the smallest gain), and whether any is unknown.
-  const nextAbove = (a: Upgrade, b: Upgrade) => (a.item.levelLow ?? 0) - (b.item.levelLow ?? 0) || byGain(a, b);
+export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: unknown[] } {
+  // ITEM 5: one pass per slot for what the summary shows (no sort of every candidate): the smallest listed candidate (the
+  // list's own order, byGain), whether any is level-unknown, and (with a cap) how many are above it, hidden.
+  let hidden = 0;
   const per = SLOT_GROUPS.map((g) => {
     const r = compareGroup(g, L.ctx, L.wearer, L.idx.items);
-    let around: Upgrade | null = null;
-    let above: Upgrade | null = null;
+    let listed: Upgrade | null = null;
     let unknown = false;
-    let smallest: Upgrade | null = null;
+    let shownCount = 0;
     for (const u of r.upgrades) {
-      if (!smallest || byGain(u, smallest) < 0) smallest = u;
-      const lg = levelGroup(u.item, L.ch.level, window);
-      if (lg === 'around') around = !around || byGain(u, around) < 0 ? u : around;
-      else if (lg === 'above') above = !above || nextAbove(u, above) < 0 ? u : above;
+      const lg = levelGroup(u.item, cap);
+      if (lg === 'above') {
+        hidden++;
+        continue;
+      }
+      shownCount++;
+      if (lg === 'listed') listed = !listed || byGain(u, listed) < 0 ? u : listed;
       else unknown = true;
     }
-    return { g, r, around, above, unknown, smallest };
+    return { g, r, listed, unknown, shownCount };
   });
-  const around = per.filter((p) => p.around).map((p) => ({ p, u: p.around! })).sort((a, b) => a.u.gain - b.u.gain || a.p.g.label.localeCompare(b.p.g.label));
-  const above = per.filter((p) => !p.around && p.above).map((p) => ({ p, u: p.above! })).sort((a, b) => nextAbove(a.u, b.u));
-  const unknown = per.filter((p) => !p.around && !p.above && p.unknown);
-  const none = per.filter((p) => !p.r.upgrades.length).length;
-  const lines = [
-    ...around.map((x) => UPGRADES_COPY.aroundLine(x.p.g.label, x.u)),
-    ...above.map((x) => UPGRADES_COPY.aboveLine(x.p.g.label, x.u)),
-    ...unknown.map((p) => UPGRADES_COPY.unknownLine(p.g.label)),
-  ];
+  const listed = per.filter((p) => p.listed).map((p) => ({ p, u: p.listed! })).sort((a, b) => a.u.gain - b.u.gain || a.p.g.label.localeCompare(b.p.g.label));
+  const unknown = per.filter((p) => !p.listed && p.unknown);
+  const none = per.filter((p) => !p.shownCount).length;
+  const lines = [...listed.map((x) => UPGRADES_COPY.listedLine(x.p.g.label, x.u)), ...unknown.map((p) => UPGRADES_COPY.unknownLine(p.g.label))];
   const shown = lines.slice(0, SUMMARY_LINES);
-  const notes = [UPGRADES_COPY.who(L.ch), L.ch.level === null ? UPGRADES_COPY.noLevel(L.ch.name) : UPGRADES_COPY.window(L.ch.level, window)];
-  const footer = UPGRADES_COPY.footer(lines.length - shown.length, none);
+  const notes = [UPGRADES_COPY.who(L.ch), ...(cap !== null ? [UPGRADES_COPY.capNote(cap)] : [])];
+  const footer = [UPGRADES_COPY.footer(lines.length - shown.length, none), ...(cap !== null && hidden ? [UPGRADES_COPY.hidden(hidden, cap)] : [])].filter(Boolean).join(' · ');
   const embed: Embed = {
     title: truncate(UPGRADES_COPY.title(L.ch.name), EMBED_LIMITS.title),
     description: truncate([...notes, '', ...(shown.length ? shown : [UPGRADES_COPY.nothingAnywhere(L.ch.name, L.cls)])].join('\n'), EMBED_LIMITS.description),
     footer: { text: [footer, UPGRADES_COPY.weights(L.cls)].filter(Boolean).join(' · ') },
   };
-  const withUps = per.filter((p) => p.r.upgrades.length);
+  const withUps = per.filter((p) => p.shownCount);
   const components = withUps.length
     ? [
         row([
           {
             type: MessageComponentTypes.STRING_SELECT,
-            custom_id: `${SLOT_PREFIX}${L.ch.id}:${window}`,
+            custom_id: `${SLOT_PREFIX}${L.ch.id}:${capState(cap)}`,
             placeholder: UPGRADES_COPY.pickSlot,
-            options: withUps.slice(0, 25).map((p) => ({ label: p.g.label, value: p.g.key, description: UPGRADES_COPY.pickSlotOption(p.smallest!) })),
+            options: withUps.slice(0, 25).map((p) => ({ label: p.g.label, value: p.g.key, ...(p.listed ? { description: UPGRADES_COPY.pickSlotOption(p.listed) } : {}) })),
           },
         ]),
       ]
@@ -247,6 +252,8 @@ interface Origin {
   from?: string[];
   wikiZones?: string[];
   soldBy?: { vendors?: string[] };
+  /** Order 36 follow-up (scripts/import/core.ts questsByItem). */
+  quests?: { name: string; level: number | null; wiki: string | null }[];
 }
 const originOf = (s: string | null): Origin => (s ? JSON.parse(s) : {}) as Origin;
 
@@ -303,7 +310,18 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
       const v = o.soldBy?.vendors ?? [];
       lines.push(v.length ? UPGRADES_COPY.vendor(v.slice(0, 3), v.length - 3) : UPGRADES_COPY.vendorUnnamed);
     } else if (w === 'harvest') lines.push(UPGRADES_COPY.harvest);
-    else if (w === 'quest') lines.push(UPGRADES_COPY.quest(it.levelKind === 'quest' && it.levelLow !== null ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown'));
+    else if (w === 'quest') {
+      // Order 36 follow-up: the quest's name (the import keeps it, origin_json.quests, lowest level first), linked to its
+      // page on the Monsters and Memories Wiki when the snapshot holds one, and to monstersandmemories.wiki when that page
+      // was verified (src/gear/quest-sites.json). Neither link is offered for a page not known to exist (order 17b).
+      const q = o.quests?.[0];
+      if (!q) lines.push(UPGRADES_COPY.quest(it.levelKind === 'quest' && it.levelLow !== null ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown'));
+      else {
+        const mnm = (QUEST_SITES.quests as Record<string, string>)[q.name];
+        const name = `${q.wiki?.startsWith('https://') ? `[${md(q.name)}](${q.wiki})` : md(q.name)}${mnm ? ` ([${UPGRADES_COPY.mnmWiki}](${mnm}))` : ''}`;
+        lines.push(UPGRADES_COPY.questNamed(name, q.level !== null ? `Lv ${q.level}+` : 'level unknown', (o.quests?.length ?? 1) - 1));
+      }
+    }
     else lines.push(UPGRADES_COPY.unknown);
   }
   // Review fix: Request a craft only where the data holds a recipe (/request needs one; requestFromFind checks it too).
@@ -313,7 +331,7 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
 /** One result's lines: its name and gain, the side or note, the breakdown, then how to get it. */
 function resultLines(u: Upgrade, L: Loaded, how: string[]): string[] {
   const note = u.side ? UPGRADES_COPY.replaces(sideLabel(u.side)) : u.note === 'secondaryFree' ? UPGRADES_COPY.secondaryFree : u.note === 'needsOneHand' ? UPGRADES_COPY.needsOneHand : null;
-  return [`**${md(u.item.name)}** **${fmtHundredths(u.gain)}** · ${levelText(u.item)}${note ? ` · ${note}` : ''}`, breakdown(upgradeDiff(u, L.ctx), L.weights), ...how.map((l) => `-# ${l}`)].filter(Boolean);
+  return [`${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}${note ? ` · ${note}` : ''}`, breakdown(upgradeDiff(u, L.ctx), L.weights), ...how.map((l) => `-# ${l}`)].filter(Boolean);
 }
 
 /** The header lines: what's worn in each slot compared with, and each one's score (0 with the reason it counts 0). */
@@ -338,22 +356,22 @@ function headerLines(L: Loaded, r: GroupResult): string[] {
   return out;
 }
 
-/** The candidates in display order: the three groups in order, each sorted; each tagged with its group. */
-const ordered = (r: GroupResult, level: number | null, window: number) => {
-  const by = grouped(r.upgrades, level, window);
-  return GROUPS.flatMap((g) => by[g].map((u) => ({ g, u })));
+/** The candidates in display order (listed, then level unknown, each sorted), and how many a cap hid. */
+const ordered = (r: GroupResult, cap: Cap) => {
+  const by = grouped(r.upgrades, cap);
+  return { all: GROUPS.flatMap((g) => by[g].map((u) => ({ g, u }))), hidden: by.above.length };
 };
 
 /** One page of one slot's list: the embed, and (unless `posted`) its controls. Pages count from 0. */
-async function slotPage(c: Ctx, L: Loaded, key: string, window: number, page: number, posted = false, note?: string): Promise<{ embed: Embed; components: unknown[] }> {
+async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, posted = false, note?: string): Promise<{ embed: Embed; components: unknown[] }> {
   const r = compare(L, key);
-  const all = ordered(r, L.ch.level, window);
+  const { all, hidden } = ordered(r, cap);
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const n = Math.min(Math.max(0, page), pages - 1);
   const shown = all.slice(n * PER_PAGE, n * PER_PAGE + PER_PAGE);
   const x = await extras(c, shown.map((s) => s.u.item));
   const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L.ch), ...headerLines(L, r)];
-  if (L.ch.level === null) body.push(UPGRADES_COPY.noLevel(L.ch.name));
+  if (cap !== null) body.push(UPGRADES_COPY.capNote(cap));
   if (!all.length) {
     const worn = r.worn.filter((g) => g.reason === null && g.item);
     const what = worn.length ? worn.map((g) => md(g.item!.name)).join(' and ') : UPGRADES_COPY.emptySlot(r.group.label);
@@ -361,17 +379,19 @@ async function slotPage(c: Ctx, L: Loaded, key: string, window: number, page: nu
   }
   let last: LevelGroup | null = null;
   for (const s of shown) {
-    if (s.g !== last) body.push('', `__${UPGRADES_COPY.head[s.g]}__`);
+    if (s.g !== last) body.push('', `__${UPGRADES_COPY.head[s.g as (typeof GROUPS)[number]]}__`);
     last = s.g;
     body.push(...resultLines(s.u, L, howToGet(s.u.item, x, c.userId, c.guild.learning_window).lines));
   }
+  // The owner (2026-11-06): with a cap, a quiet count of what it hid, at the end of the list.
+  if (cap !== null && hidden && n === pages - 1) body.push('', `-# ${UPGRADES_COPY.hidden(hidden, cap)}`);
   const embed: Embed = {
     title: truncate(UPGRADES_COPY.slotTitle(r.group.label, L.ch.name), EMBED_LIMITS.title),
     description: truncate(body.join('\n'), EMBED_LIMITS.description),
     footer: { text: [all.length > PER_PAGE ? UPGRADES_COPY.page(n + 1, pages) : null, UPGRADES_COPY.weights(L.cls)].filter(Boolean).join(' · ') },
   };
   if (posted || !shown.length) return { embed, components: [] };
-  const state = `${L.ch.id}:${key}:${window}`;
+  const state = `${L.ch.id}:${key}:${capState(cap)}`;
   const own = L.ch.owner_user_id === c.userId;
   const nav = [
     ...(pages > 1
@@ -394,12 +414,17 @@ async function slotPage(c: Ctx, L: Loaded, key: string, window: number, page: nu
 
 // ---------------------------------------------------------------- the command and Find upgrades
 
-/** /gear upgrades [character:] [slot:] [levels:]: the caller's own characters. */
+/**
+ * /gear upgrades [character:] [slot:] [max_level:]: the caller's own characters. No cap unless max_level: is given. A client
+ * still holding the earlier definition may send levels: (a window above the character's level): it is read as the cap
+ * level + levels for a character with a level, and ignored otherwise (order 35: the new code answers the old shape).
+ */
 export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply> {
   const name = optString(opts, 'character');
   const key = optString(opts, 'slot');
-  const levels = optInt(opts, 'levels');
-  if (levels !== undefined && (levels < 0 || levels > LEVELS_MAX)) return ephemeral(UPGRADES_COPY.levelsRange);
+  const max = optInt(opts, 'max_level');
+  const oldLevels = optInt(opts, 'levels');
+  if (max !== undefined && (max < 1 || max > MAX_LEVEL_CAP)) return ephemeral(UPGRADES_COPY.capRange);
   if (key !== undefined && !groupByKey(key)) return ephemeral(UPGRADES_COPY.unknownSlot);
   let ch: Character | null;
   if (name !== undefined) {
@@ -411,9 +436,9 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
     if (live.length > 1) return ephemeral(WEAR_COPY.severalCharacters(live.map((x) => x.name)));
     ch = live[0];
   }
-  const window = levels ?? (await windowOf(c));
+  const cap: Cap = max ?? (oldLevels !== undefined && ch.level !== null ? Math.min(MAX_LEVEL_CAP, ch.level + oldLevels) : null);
   const L = await load(c, ch);
-  const v = key ? await slotPage(c, L, key, window, 0) : summaryView(L, window);
+  const v = key ? await slotPage(c, L, key, cap, 0) : summaryView(L, cap);
   return ephemeral('', { embeds: [v.embed], components: v.components });
 }
 
@@ -421,15 +446,8 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
 async function findUpgrades(c: Ctx, id: string): Promise<MessageReply> {
   const t = await characterFor(c, id.slice(FIND_UPGRADES_PREFIX.length));
   if ('reply' in t) return t.reply;
-  const v = summaryView(await load(c, t.ch), await windowOf(c));
+  const v = summaryView(await load(c, t.ch), null);
   return ephemeral('', { embeds: [v.embed], components: v.components });
-}
-
-/** Order 36, PR B: the server's window (/gear settings window:), else the default. One indexed read. */
-export async function windowOf(c: Pick<Ctx, 'db' | 'guild'>): Promise<number> {
-  const r = await c.db.prepare(WINDOW_SQL).bind(c.guild.id).first<{ value: number }>();
-  const w = Number(r?.value);
-  return r && Number.isInteger(w) && w >= GEAR_SETTINGS.window.min && w <= GEAR_SETTINGS.window.max ? w : DEFAULT_WINDOW;
 }
 
 const parts = (id: string, prefix: string) => id.slice(prefix.length).split(':');
@@ -442,17 +460,17 @@ async function slotPicked(c: Ctx, id: string, values: string[]): Promise<Message
   if ('reply' in t) return t.reply;
   const key = values[0] ?? '';
   if (!groupByKey(key)) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, int(w) ?? DEFAULT_WINDOW, 0);
+  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), 0);
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
-/** gup:<character id>:<group>:<window>:<page>: paging, in place. */
+/** gup:<character id>:<group>:<cap>:<page>: paging, in place. */
 async function pagePressed(c: Ctx, id: string): Promise<MessageReply> {
   const [charId, key, w, p] = parts(id, PAGE_PREFIX);
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
   if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, int(w) ?? DEFAULT_WINDOW, int(p) ?? 0);
+  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), int(p) ?? 0);
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
@@ -462,32 +480,38 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
   if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const window = int(w) ?? DEFAULT_WINDOW;
   const L = await load(c, t.ch);
   const u = compare(L, key).upgrades.find((x) => x.item.id === Number(values[0]));
   if (!u) return ephemeral(UPGRADES_COPY.gone);
-  return resultReply(c, L, key, window, u);
+  return resultReply(c, L, key, capOf(w), u);
 }
 
-async function resultReply(c: Ctx, L: Loaded, key: string, window: number, u: Upgrade): Promise<MessageReply> {
-  const x = await extras(c, [u.item]);
+/**
+ * The owner (2026-11-06): Pick a result opens the item's full /item card. Above it, the upgrade itself (its gain for this
+ * character's slot, the breakdown and how to get it); under it, I'm wearing it now and Request a craft, then a button for
+ * each zone the text and the card show (src/zone/buttons.ts, in the rows left; the rest named as "+N more zones").
+ */
+async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade): Promise<MessageReply> {
+  const [x, k] = await Promise.all([extras(c, [u.item]), itemCard(c, u.item.id)]);
+  if (!k) return ephemeral(UPGRADES_COPY.gone);
   const how = howToGet(u.item, x, c.userId, c.guild.learning_window);
   const slot = u.side ?? (key === 'secondary' ? 'secondary' : groupByKey(key)!.sides[0]);
-  const actions = row([
-    button(`${OPEN_PREFIX}${u.item.id}`, UPGRADES_COPY.openItem),
+  const buttons = [
     // Review fix: not under a two-hander (order 35's saved gear refuses Secondary there); the result says why instead.
-    ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${window}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
+    ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${capState(cap)}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
     ...(how.craftable ? [button(`${FROM_FIND_PREFIX}${u.item.id}`, UPGRADES_COPY.requestCraft)] : []),
-  ]);
-  const z = await zoneButtons(c.db, how.zones, 4);
-  const more = z.zones - Math.min(z.shown, ZONE_ROW_BUTTONS);
-  const zoneRows = z.rows.slice(0, 1);
-  const embed: Embed = {
-    title: truncate(u.item.name, EMBED_LIMITS.title),
-    description: truncate([UPGRADES_COPY.who(L.ch), ...resultLines(u, L, how.lines), ...(more > 0 ? [`-# ${UPGRADES_COPY.moreZones(more)}`] : [])].join('\n'), EMBED_LIMITS.description),
-    footer: { text: UPGRADES_COPY.weights(L.cls) },
-  };
-  return ephemeral('', { embeds: [embed], components: [actions, ...zoneRows] });
+  ];
+  const own = buttons.length ? [row(buttons)] : [];
+  const z = await zoneButtons(c.db, [...how.zones, ...k.zones], own.length);
+  const more = z.zones - z.shown;
+  const label = sideLabel(slot);
+  const content = [
+    `${UPGRADES_COPY.who(L.ch)} · ${UPGRADES_COPY.forSlot(L.ch.name, label)}`,
+    ...resultLines(u, L, how.lines),
+    ...(more > 0 ? [`-# ${UPGRADES_COPY.moreZones(more)}`] : []),
+    `-# ${UPGRADES_COPY.weights(L.cls)}`,
+  ].join('\n');
+  return ephemeral(truncate(content, 2000), { embeds: k.embeds, components: [...own, ...z.rows] });
 }
 
 /** guw:<character id>:<slot>:<window>:<item id>: saved through order 35's rules; then the slot's updated list, in place. */
@@ -500,7 +524,7 @@ async function wearNow(c: Ctx, id: string): Promise<MessageReply> {
   // The character as it is now (a class or level change since the list was drawn applies).
   const ch = (await findById(c.db, c.guild.id, t.ch.id)) ?? t.ch;
   const key = SLOT_GROUPS.find((g) => g.sides.includes(slot ?? ''))!.key;
-  const v = await slotPage(c, await load(c, ch), key, int(w) ?? DEFAULT_WINDOW, 0, false, saved.data.content);
+  const v = await slotPage(c, await load(c, ch), key, capOf(w), 0, false, saved.data.content);
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
@@ -518,7 +542,7 @@ export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> 
   const t = await characterFor(c, charId ?? '', true);
   if ('reply' in t) return t.reply;
   if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, int(w) ?? DEFAULT_WINDOW, int(p) ?? 0, true);
+  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), int(p) ?? 0, true);
   return postedReply({ embeds: [v.embed] }, c.userId);
 }
 

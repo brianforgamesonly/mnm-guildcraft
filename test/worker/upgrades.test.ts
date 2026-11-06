@@ -5,6 +5,7 @@ import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREF
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
 import { statVector, type GearItem } from '../../src/gear/score.ts';
 import { GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
+import { questsByItem, withQuests } from '../../scripts/import/core.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 import { FROM_FIND_PREFIX } from '../../src/requests.ts';
 import { MOB_ZONES_SOURCE } from '../../src/zone/names.ts';
@@ -76,26 +77,34 @@ describe('order 36, ITEM 3: the slot list', () => {
     expect(r.data.flags).toBe(64);
     const t = text(r);
     const at = (s: string) => t.indexOf(s);
-    expect(at('Around your level')).toBeLessThan(at('Above your level'));
-    expect(at('Above your level')).toBeLessThan(at('Level unknown'));
-    expect([at('Low Tie'), at('High Tie'), at('Big Plate'), at('Far Plate'), at('Mystery Vest')].every((x, i, a) => x > 0 && (i === 0 || x > a[i - 1]))).toBe(true);
+    // Order 36 follow-up: no cap by default: every level in one list, smallest first, then Level unknown.
+    expect(at('__Upgrades__')).toBeLessThan(at('__Level unknown__'));
+    expect(t).not.toContain('above Lv');
+    expect([at('Far Plate'), at('Low Tie'), at('High Tie'), at('Big Plate'), at('Mystery Vest')].every((x, i, a) => x > 0 && (i === 0 || x > a[i - 1]))).toBe(true);
     expect(t).toContain('**Low Tie** **+2.10** · Lv 8 (drop)');
     expect(t).toContain('+6 AC');
     expect(t).toContain("Uses your guild's Inquisitor weights.");
     expect(t).toContain('Chest: empty (score 0.00)');
   });
 
-  it('levels: sets this search\'s window; a character with no level puts every level in Around, says so once, and ignores levels:', async () => {
+  it('max_level: hides what is above it, with a quiet count; level-unknown items stay; an old-shape levels: reads as level + levels', async () => {
     await testchar();
-    // Window 20: Far Plate (Lv 30 ≤ 15 + 20) joins Around.
-    expect(text(await upgrades(ann, { slot: 'chest', levels: 20 }))).not.toContain('Above your level');
-    // Window 0: Lv 10 ≤ 15 stays, Far Plate stays above.
-    expect(text(await upgrades(ann, { slot: 'chest', levels: 0 }))).toContain('Above your level');
-    await setChar('Testchar', 'INQ', null);
-    const t = text(await upgrades(ann, { slot: 'chest', levels: 0 }));
-    expect(t).not.toContain('Above your level');
-    expect(t.split(UPGRADES_COPY.noLevel('Testchar')).length - 1).toBe(1);
-    expect(t).toContain('Level unknown');
+    const capped = text(await upgrades(ann, { slot: 'chest', max_level: 20 }));
+    expect(capped).not.toContain('Far Plate');
+    expect(capped).toContain(UPGRADES_COPY.capNote(20));
+    expect(capped).toContain(UPGRADES_COPY.hidden(1, 20)); // "1 more above Lv 20 not shown."
+    expect(capped).toContain('Mystery Vest');
+    expect(text(await upgrades(ann, { slot: 'chest', max_level: 30 }))).toContain('Far Plate');
+    expect((await upgrades(ann, { slot: 'chest', max_level: 81 })).data.content).toBe(UPGRADES_COPY.capRange);
+    // A client with the earlier definition: levels: 0 for a level-15 character is a cap of 15.
+    expect(text(await upgrades(ann, { slot: 'chest', levels: 0 }))).toContain(UPGRADES_COPY.hidden(1, 15));
+    // The summary counts what the cap hid, and its Pick a slot keeps the cap.
+    const s = await upgrades(ann, { max_level: 20 });
+    expect(s.data.embeds![0].footer!.text).toContain(UPGRADES_COPY.hidden(1, 20));
+    expect(comps(s).find((c) => c.custom_id?.startsWith(SLOT_PREFIX)).custom_id).toMatch(/:c20$/);
+    // A control sent before (a window number in its id) reads as no cap.
+    const id = await charId('Testchar');
+    expect(text(await send(select(ann, `${SLOT_PREFIX}${id}:10`, ['chest'])))).toContain('Far Plate');
   });
 
   it('pages of 5, ◀ Smaller and Bigger ▶ in place; every component within Discord\'s limits', async () => {
@@ -129,7 +138,7 @@ describe('order 36, ITEM 3: the slot list', () => {
 });
 
 describe('order 36, ITEM 3: the summary', () => {
-  it('at most 8 lines, Around lines smallest first, then "nothing around your level · next", then unknown-only; a footer counts the rest', async () => {
+  it('at most 8 lines, smallest first, then unknown-only; a footer counts the rest (no cap: every level listed)', async () => {
     await add('Testchar');
     await setChar('Testchar', 'FTR', 10);
     const tokens: Tok[] = ['HEAD', 'FACE', 'NECK', 'SHOULDERS', 'BACK', 'CHEST', 'SHIRT', 'HANDS', 'WAIST', 'LEGS'];
@@ -145,7 +154,7 @@ describe('order 36, ITEM 3: the summary', () => {
     expect(lines).toHaveLength(8);
     // Smallest gain first: Thing 10 (1 AC) leads.
     expect(lines[0]).toContain('Thing 10');
-    // 10 Around + 1 above + 1 unknown = 12 lines; 8 shown, 4 more; 17 − 12 = 5 slots with nothing better.
+    // 11 listed (Far Boots too: no cap) + 1 unknown = 12 lines; 8 shown, 4 more; 17 − 12 = 5 slots with nothing better.
     expect(r.data.embeds![0].footer!.text).toContain('4 more slots with upgrades');
     expect(r.data.embeds![0].footer!.text).toContain('5 slots with nothing better');
     const pick = comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX));
@@ -153,13 +162,16 @@ describe('order 36, ITEM 3: the summary', () => {
     limits(r);
   });
 
-  it('a slot with only above-level candidates: "nothing around your level · next: <item> +<gain> (Lv …)"', async () => {
+  it('a slot whose candidates are all above the cap is left out of the lines and the menu, and counted', async () => {
     await add('Testchar');
     await setChar('Testchar', 'FTR', 10);
-    await seed([{ name: 'Far Boots', slots: ['FEET'], stats: { ac: 3 }, low: 40, high: 42 }, { name: 'Farther Boots', slots: ['FEET'], stats: { ac: 9 }, low: 50 }]);
+    await seed([{ name: 'Far Boots', slots: ['FEET'], stats: { ac: 3 }, low: 40, high: 42 }, { name: 'Farther Boots', slots: ['FEET'], stats: { ac: 9 }, low: 50 }, { name: 'Cap', slots: ['HEAD'], stats: { ac: 1 } }]);
     await markImported();
-    const d = (await upgrades(ann)).data.embeds![0].description!;
-    expect(d).toContain('**Feet:** nothing around your level · next: Far Boots **+1.05** (Lv 40–42 (drop))');
+    expect((await upgrades(ann)).data.embeds![0].description).toContain('**Feet:** **Far Boots** **+1.05** · Lv 40–42 (drop)');
+    const r = await upgrades(ann, { max_level: 30 });
+    expect(r.data.embeds![0].description).not.toContain('Feet');
+    expect(r.data.embeds![0].footer!.text).toContain(UPGRADES_COPY.hidden(2, 30));
+    expect(comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX)).options.map((o: any) => o.value)).toEqual(['head']);
   });
 
   it('with several characters, leaving character: out is refused with the list; Find upgrades on the Gear panel opens the summary', async () => {
@@ -172,7 +184,8 @@ describe('order 36, ITEM 3: the summary', () => {
     expect(find.label).toBe('Find upgrades');
     const s = await send(press(ann, find.custom_id));
     expect(s.data.embeds![0].title).toBe('Upgrades for Testchar');
-    expect(s.data.embeds![0].description).toContain('**Chest:** Low Tie **+2.10** · Lv 8 (drop)');
+    // No cap: Far Plate (Lv 30, +1.40) is the smallest Chest upgrade.
+    expect(s.data.embeds![0].description).toContain('**Chest:** **Far Plate** **+1.40** · Lv 30 (drop)');
   });
 });
 
@@ -198,8 +211,12 @@ describe('order 36, ITEM 3: the controls', () => {
     const r = await send(select(ann, pick.custom_id, [String(await itemId('Low Tie'))]));
     expect(r.type).toBe(4);
     expect(r.data.flags).toBe(64);
+    // Order 36 follow-up: the full /item card, under the upgrade's own lines; no Open item (it is the card).
+    expect(r.data.embeds![0].title).toBe('Low Tie');
+    expect(r.data.content).toContain("for Testchar's Chest");
+    expect(r.data.content).toContain('**Low Tie** **+2.10**');
     const labels = comps(r).map((c) => c.label);
-    expect(labels).toEqual(['Open item', "I'm wearing it now"]); // not crafted: no Request a craft
+    expect(labels).toEqual(["I'm wearing it now"]); // not crafted: no Request a craft
     limits(r);
     const now = comps(r).find((c) => c.custom_id?.startsWith(WEAR_NOW_PREFIX));
     const after = await send(press(ann, now.custom_id));
@@ -225,7 +242,7 @@ describe('order 36, ITEM 3: the controls', () => {
     expect(ids(r)).toContain(`${FROM_FIND_PREFIX}${id}`);
     const noRecipe = await send(select(ann, pick.custom_id, [String(await itemId('High Tie'))]));
     expect(comps(noRecipe).map((c) => c.label)).not.toContain('Request a craft');
-    expect(ids(r)).toContain(`${OPEN_PREFIX}${id}`);
+    // A guo: button sent before the follow-up still opens the card (order 18: every sent custom_id stays handled).
     const card = await send(press(ann, `${OPEN_PREFIX}${id}`));
     expect(card.data.embeds![0].title).toBe('Low Tie');
     // With no request channel set, Request a craft answers as /request's button does everywhere.
@@ -261,7 +278,8 @@ describe('order 36, ITEM 3: the controls', () => {
     expect(text(list)).toContain('needs a one-handed Primary');
     const pick = comps(list).find((c) => c.custom_id?.startsWith(RESULT_PREFIX));
     const r = await send(select(ann, pick.custom_id, [String(await itemId('Tower Shield'))]));
-    expect(comps(r).map((c) => c.label)).toEqual(['Open item']);
+    expect(comps(r).map((c) => c.label)).not.toContain("I'm wearing it now");
+    expect(r.data.embeds![0].title).toBe('Tower Shield');
   });
 
   it('the gear index is read again after an import, and never cached while the newest import has no finish time', async () => {
@@ -338,6 +356,36 @@ describe('order 36, ITEM 3: how to get it', () => {
     const h = howToGet(it, extras({ soldBy: { vendors: ['Night Harbor', 'Rais Alyssum', 'Evershade Weald', 'Ilyra Luthielle'] }, from: [] }), ANN, 25);
     expect(h.lines).toEqual(['Vendor: Night Harbor, Rais Alyssum, Evershade Weald +1 more · any level', 'Harvested, any level', "Quest: the quest's name isn't recorded · level unknown", 'Drop: creature not recorded · level unknown']);
     expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 12 }), extras({}), ANN, 25).lines).toEqual(["Quest: the quest's name isn't recorded · Lv 12+"]);
+  });
+
+  it("order 36 follow-up: a quest's name, linked to its wiki page, and to monstersandmemories.wiki only when verified; +N more", () => {
+    const quests = [
+      { name: 'Armor from Vex', level: 12, wiki: 'https://monstersandmemories.miraheze.org/wiki/Armor_from_Vex' },
+      { name: 'A Second Errand', level: null, wiki: null },
+    ];
+    const h = howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 12 }), extras({ quests }), ANN, 25);
+    // quest-sites.json holds no verified page in this checkout's test: the name links to the wiki only.
+    expect(h.lines).toEqual(['Quest: [Armor from Vex](https://monstersandmemories.miraheze.org/wiki/Armor_from_Vex) · Lv 12+ · +1 more']);
+    expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest' }), extras({ quests: [quests[1]] }), ANN, 25).lines).toEqual(['Quest: A Second Errand · level unknown']);
+  });
+
+  it('order 36 follow-up: the import keeps each gear item\'s quests (name, level, a wiki link only for a page the snapshot holds)', () => {
+    const snap = {
+      pages: { 'Armor from Vex': { content: '' } },
+      buckets: { quests: { schema: null, fields: [], rows: [
+        { quest_name: 'Armor from Vex', quest_min_level: 12, quest_rewards: ['Vex Plate', 'Not Gear'] },
+        { quest_name: 'Plate Errand', quest_min_level: 'soon', quest_rewards: ['vex plate'] },
+        { quest_name: 'Armor from Vex', quest_min_level: 12, quest_rewards: ['Vex Plate'] },
+      ] } },
+    } as any;
+    const q = questsByItem(snap, new Set(['vex plate']));
+    expect(q.get('vex plate')).toEqual([
+      { name: 'Armor from Vex', level: 12, wiki: 'https://monstersandmemories.miraheze.org/wiki/Armor_from_Vex' },
+      { name: 'Plate Errand', level: null, wiki: null },
+    ]);
+    expect(q.has('not gear')).toBe(false);
+    expect(withQuests('{"from":["a rat"]}', q.get('vex plate'))).toContain('"quests":[');
+    expect(withQuests('{"from":["a rat"],"quests":[{"name":"x"}]}', undefined)).toBe('{"from":["a rat"]}');
   });
 
   it('a level always carries its kind', () => {

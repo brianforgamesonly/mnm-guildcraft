@@ -10,9 +10,9 @@
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
 import { ALL_CLASSES, ALL_RACES, MOUNT_SLOTS, QUEST_CATEGORIES, RACE_NAMES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
-import { questBucket } from '../wiki/parse.ts';
+import { questBucket, wikiPageUrl } from '../wiki/parse.ts';
 import type { WikiSnapshot } from '../wiki/types.ts';
-import { computeLevels, type ItemLevel, type Kind, type LevelSummary } from './levels.ts';
+import { computeLevels, LEVEL_CEILING, LEVEL_FLOOR, type ItemLevel, type Kind, type LevelSummary } from './levels.ts';
 import type { QuestLineRow } from './quests.ts';
 import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type MobForZones, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
@@ -311,6 +311,46 @@ export function originJson(it: WikiItem): string | null {
   for (const k of ORIGIN_KEYS) if (!isEmpty(it[k])) out[k] = it[k];
   return Object.keys(out).length ? stableStringify(out) : null;
 }
+
+/**
+ * Order 36 follow-up (the owner, 2026-11-06): the quests that reward an item, kept in its origin_json under `quests` so
+ * /gear upgrades can name them. From the wiki snapshot's quest bucket, matched as levels.ts matches quest levels (a reward
+ * names the item exactly, case-insensitive). `level`: the quest's recorded minimum level when it is a whole number from
+ * LEVEL_FLOOR to LEVEL_CEILING, else null. `wiki`: the quest's page on the Monsters and Memories Wiki, only when the
+ * snapshot holds a page with exactly that title (a link to a page the site doesn't have is never offered: order 17b).
+ */
+export interface ItemQuest {
+  name: string;
+  level: number | null;
+  wiki: string | null;
+}
+export function questsByItem(snap: WikiSnapshot, keys: Set<string>): Map<string, ItemQuest[]> {
+  const out = new Map<string, ItemQuest[]>();
+  for (const q of questBucket(snap)) {
+    const name = q.title.trim();
+    if (!name) continue;
+    const level = typeof q.minLevel === 'number' && Number.isInteger(q.minLevel) && q.minLevel >= LEVEL_FLOOR && q.minLevel <= LEVEL_CEILING ? q.minLevel : null;
+    const wiki = snap.pages[name] ? wikiPageUrl(name) : null;
+    for (const r of q.rewards) {
+      const k = r.trim().toLowerCase();
+      if (!keys.has(k)) continue;
+      const list = out.get(k) ?? [];
+      if (!list.some((x) => x.name === name)) list.push({ name, level, wiki });
+      out.set(k, list);
+    }
+  }
+  // The lowest level first (none last), then the name: the order /gear upgrades shows them in.
+  for (const list of out.values()) list.sort((a, b) => (a.level ?? Infinity) - (b.level ?? Infinity) || a.name.localeCompare(b.name, 'en'));
+  return out;
+}
+/** origin_json with `quests` set (or removed when none), written the same stable way as originJson. */
+export function withQuests(origin: string | null, quests: ItemQuest[] | undefined): string | null {
+  const o = (origin ? JSON.parse(origin) : {}) as Record<string, unknown>;
+  delete o.quests;
+  if (quests?.length) o.quests = quests;
+  return Object.keys(o).length ? stableStringify(o) : null;
+}
+const questsOf = (origin: string | null | undefined): ItemQuest[] | undefined => (origin ? ((JSON.parse(origin) as { quests?: ItemQuest[] }).quests ?? undefined) : undefined);
 
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 export const slotTokens = (slot: string | null | undefined): string[] => (slot ?? '').trim().toUpperCase().split(/\s+/).filter(Boolean);
@@ -1030,8 +1070,15 @@ export function applyLevels(plan: Plan, data: WikiData, existing: ExistingState,
       row.level_high = o.level_high;
       row.level_kind = o.level_kind as Kind | null;
       row.level_kinds = o.level_kinds;
+      // Order 36 follow-up: the quest names are kept with the levels on a night without the wiki.
+      row.origin_json = withQuests(row.origin_json, questsOf(o.origin_json));
     }
     return undefined;
+  }
+  // Order 36 follow-up: each gear item's quests (none without a snapshot, as its quest levels).
+  if (opts.snapshot) {
+    const quests = questsByItem(opts.snapshot, gear);
+    for (const row of plan.items) if (gear.has(row.name_key)) row.origin_json = withQuests(row.origin_json, quests.get(row.name_key));
   }
   const json = (v: string | null): string[] => (v ? (JSON.parse(v) as string[]) : []);
   const z = opts.zones;
