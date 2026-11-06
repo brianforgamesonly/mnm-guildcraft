@@ -41,6 +41,16 @@ export const ALL_RACES = -1;
 export const MOUNT_SLOTS = ['BARDING', 'SADDLEBAG', 'RIGGING'] as const;
 
 /**
+ * Order 36: race display names, by game_race code, from the Monsters and Memories Wiki's Races page
+ * (https://monstersandmemories.miraheze.org/wiki/Races, CC BY-SA 4.0). Only a name confirmed on that page goes here; no
+ * runtime fetch. Empty in order 36: the page is not in the committed snapshot (data/wiki-snapshot/), order 28's rule
+ * keeps the session off the live wiki, and no archived copy could be read, so every code shows as itself (raceLabel).
+ */
+export const RACE_NAMES: Readonly<Record<string, string>> = {};
+/** A race's label in menus and panels: its confirmed name, else the code. */
+export const raceLabel = (code: string) => RACE_NAMES[code.toUpperCase()] ?? code;
+
+/**
  * Order 35: the one reading of an item's `handed` (item.handed, generated from stats_json). The source spells it
  * "Two Handed", "TWO HANDED", "2", "One Handed" and "1" (mnm-tools wiki.json bb1a703, 2026-11-05). Two-handed means
  * the text says two (any case, with a space, hyphen or nothing between) or is "2"; anything else, or none, is not.

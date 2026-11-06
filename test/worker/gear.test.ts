@@ -73,7 +73,8 @@ describe('the command definition (Discord limits)', () => {
     // Order 35: /gear's search is its subcommand "search" (beside "wear"); the options are as order 13 set them.
     type Sub = { name: string; options: { name: string; required?: boolean; choices?: { value: string }[] }[] };
     const gear = COMMANDS.find((c) => c.name === 'gear') as unknown as { options: Sub[] };
-    expect(gear.options.map((o) => o.name)).toEqual(['search', 'wear']);
+    // Order 36: and "upgrades".
+    expect(gear.options.map((o) => o.name)).toEqual(['search', 'wear', 'upgrades']);
     const find = gear.options[0];
     expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort', 'zone']);
     expect(find.options[0]).toMatchObject({ required: true });

@@ -912,7 +912,7 @@ Marks are derived: "(not signed up)" and the bench list are worked out each time
 
 ## Gear upgrades
 
-Approved by the owner on 2026-11-05 ("GuildCraft Gear Upgrades — spec"). A member records what each character wears; `/gear upgrades` lists what beats it, smallest upgrade first, with how to get each item. **Part 1 (order 35)** builds the data and the saved gear. **Part 2** (scoring, `/gear upgrades`, the weights, `/gear settings`, Find upgrades) is not built yet; nothing scores or ranks.
+Approved by the owner on 2026-11-05 ("GuildCraft Gear Upgrades — spec"). A member records what each character wears; `/gear upgrades` lists what beats it, smallest upgrade first, with how to get each item. **Part 1 (order 35)** builds the data and the saved gear. **Part 2** (order 36) adds scoring, `/gear upgrades` and Find upgrades (PR A), then the officer weights and `/gear settings` (PR B).
 
 ### Race
 
@@ -968,3 +968,44 @@ Rules: levels are derived, never typed (no command sets an item's level). A leve
 - `item.handed`'s one reading is `isTwoHanded` (src/gear/vocab.ts): "Two Handed", "TWO HANDED" and "2" are two-handed.
 - **`/gear search`** (PR B): Discord lets no command with subcommands take options of its own, so `/gear wear` (and part 2's `/gear upgrades`, `/gear settings`) moves the search to a subcommand. It is `/gear search`, not /gear find, because order 18 retired that old name ("not available"). A flat `/gear` from a client that hasn't loaded the new definition is still answered as the search.
 - **Saved gear (PR B):** `character_gear` (migrations/0030), keyed by character and slot, naming `item.name_key`. Removal deletes the character's rows in the same batch as the soft delete (Remove character, `/officer remove-member`, the departure notice's Remove, all an officer's or member's press, never a schedule); a restored character gets its skills back, not its gear. The box matches items that fit the slot and contain the typed text; an exact name saves at once. No two items share a name (item.name_key is unique), so "two items with the same name" cannot reach the menu. An item whose data names no class (class_mask 0) or only race codes outside the list (race_mask 0) is not refused for class or race. `character.race` holds a game_race code or NULL.
+
+### Part 2: scoring, `/gear upgrades` and the officer weights (order 36; Brian-approved 2026-11-05)
+
+**Scoring.** An item's score is each stat it carries times the class's weight for that stat, added up; the gain is the candidate's score minus the score of what's worn. Scores are integer hundredths (weight × 100 × stat), so "gain above 0" is an integer test and equal items are never upgrades; gains are shown to two decimals ("+0.03"). Negative stats count negatively. Stats that count: STR, STA, AGI, DEX, INT, WIS, CHA; AC; HP; Mana; the eight resists (each its own weight); HP regeneration; mana regeneration; damage ÷ delay × 100 in Primary and Range always and in Secondary only for the Melee and Tank presets (shields have no ratio); haste as an integer percent, not stacking: a candidate's haste counts as max(0, its haste − the highest haste worn in any other slot), and the worn item's the same way.
+
+**Default weights** come from a role preset, then the class's stat priority:
+
+| Weight | Tank | Melee | Caster | Healer |
+|---|---|---|---|---|
+| Stats in 1st place | 1 | 1 | 1 | 1 |
+| Stats in 2nd place | 0.5 | 0.5 | 0.5 | 0.5 |
+| Stats in 3rd or 4th place | 0.25 | 0.25 | 0.25 | 0.25 |
+| Other attributes (STR … CHA) | 0 | 0 | 0 | 0 |
+| AC | 0.35 | 0.1 | 0.03 | 0.08 |
+| HP | 0.1 | 0.05 | 0.05 | 0.05 |
+| Mana | 0.03 | 0 | 0.08 | 0.08 |
+| Each resist | 0.1 | 0.05 | 0.05 | 0.05 |
+| Damage ÷ delay × 100 | 0.1 | 0.3 | 0 | 0 |
+| Haste (per %) | 0.5 | 1 | 0 | 0 |
+| HP regeneration | 1 | 0.5 | 0.5 | 0.5 |
+| Mana regeneration | 0 | 0 | 2 | 2 |
+
+Hybrid casters (a class on the Tank or Melee preset whose priority includes INT or WIS: Inquisitor, Paladin, Shadow Knight, Ranger, Spellblade) also get Mana 0.05 and mana regeneration 1. Class priorities (from the class guides on Stories of Monsters and Memories; "&" shares a place, and places are dense): Archer Melee DEX › AGI › STR › STA · Bard Melee CHA › STA › DEX › STR · Beastmaster Melee STR & STA › DEX & AGI · Cleric Healer WIS › STA · Druid Healer WIS › STA › CHA · Elementalist Caster INT › STA · Enchanter Caster CHA › INT › WIS & STA · Fighter Tank STA › STR › AGI · Inquisitor Tank STA › INT › STR › WIS · Monk Melee AGI & STR › STA & DEX · Necromancer Caster INT › STA · Paladin Tank STA › STR › WIS · Ranger Melee STR & DEX › AGI › STA › WIS · Rogue Melee DEX › AGI › STR › STA · Shadow Knight Tank STA › STR › INT · Shaman Healer WIS › STA › DEX · Spellblade Melee INT & AGI › STR & STA · Wizard Caster INT › STA › DEX. A class with no row gets the Melee preset with no priorities.
+
+**Comparing.** An empty slot scores 0; so does a worn item no longer listed or no longer usable (the header says why). Paired slots (Ear, Wrist, Finger) are one slot each (17 in all); a candidate compares with the weaker side and says which side it replaces; an item worn on the other side is still a candidate. An item that fits several slots is a candidate in each. A two-handed Primary candidate compares with Primary plus Secondary; a one-handed one under a worn two-hander compares with the two-hander alone ("Secondary is then free"); a Secondary candidate under a worn two-hander compares with the two-hander's score and notes "needs a one-handed Primary". Candidates fit the slot, suit the class and race (no race = any), are not the item worn there, are not Removed Items, and gain more than 0. Scoring reads weights only through `weightsFor(server, class)`.
+
+**Grouping and order.** Around your level: level_low at most level + the window (default 10; any-level kinds count as 0). Above your level: higher. Level unknown: no level_low. Each group sorts by gain, smallest first; ties go to the lower level_low, then the name. A character with no level saved has everything with a level in Around; `levels:` is ignored and the reply says once that saving a level groups the list.
+
+**`/gear upgrades`** `character:` (the member's own; required when they have several) `slot:` (17 choices) `levels:` (0–60). Find upgrades on the Gear panel opens the same summary. The summary (no slot) has at most 8 lines: the Around slots' smallest candidate with its gain and source kind, smallest first; then "nothing around your level · next: <item> +<gain> (Lv …)" slots, by that level; then "only level-unknown upgrades"; a footer counts what didn't fit and the slots with nothing better; Pick a slot opens a list. One slot's list: 5 a page, the three groups in order, each headed, under a header of what's worn and its score; each result has its name and gain, up to three stat differences (largest weighted effect first, signed), and how to get it by its level kinds, primary first (Drop: the lowest-level mob, its zone and level, "+N more"; Crafted: tradeskill, trivial, up to three Reliable members with their skill, or "You can make this (…)" first, or "No Reliable crafter in the guild yet"; a floor "Lv 14+"; Vendor: any level; Harvest: any level; Quest: its level). Pick a result opens a private reply with Open item, I'm wearing it now (saved through order 35's rules, the weaker side for a pair; the list then compares against it) and Request a craft (crafted items), then up to 5 zone buttons. ◀ Smaller and Bigger ▶ page; Post to channel posts the page publicly with no buttons, and not from an officer's view of a member. Nothing to show: "Nothing beats <item> for a <Class> in <slot>." Race names show in place of codes where a confirmed name is held (src/gear/vocab.ts `RACE_NAMES`). Every result says it uses "your guild's <Class> weights".
+
+**Officer weights and settings (PR B).** `/gear weights class:` shows a class's weights (each value, default or changed by whom, when; one embed); `preset:` replaces them with a preset plus the class's default priorities; `stat: value:` sets one weight (0 to 2, steps of 0.05); `reset:True` returns the defaults. `/gear settings window:` sets the server's default window (0–60). Every change posts in the review channel with who, the class, old and new. Storage: per server and class, one row per stat that differs from the default (the absolute value, who, when); a preset is expanded and only its differences stored; reset deletes the class's rows. Any other option mix is refused; the officer check is made when the command runs.
+
+### As built in order 36 (named readings and departures)
+
+- **The gear index** (src/gear/index.ts): every gear item is read once per import and kept in the Worker's memory, keyed by the newest data_import row; D1 extracts each item's 22 stat values (src/gear/score.ts `STAT_VECTOR_SQL`), so the Worker parses no JSON. A request reads one version row plus the character's gear.
+- **Damage ÷ delay × 100 is rounded to a whole number** per item (`round(dmg × 100 ÷ delay)`), so a score stays in integer hundredths.
+- **Two-handers are never Secondary candidates** (one takes both hands from Primary; order 35's saved gear empties Secondary under one).
+- **Vendor lines show the source's soldBy list as recorded:** it mixes zones, shops and merchants ("Night Harbor", "Mining Supplies", "a miner") with nothing saying which is which, so no merchant or zone is picked out of it (order 4).
+- **Quest lines give the level but not the quest's name:** order 35 computed quest levels in memory from the snapshot and stored only `level_low`; no table names an item's quest.
+- **Race names:** none is confirmed (the wiki's Races page is not in the snapshot), so codes show as codes.
+- **Gains show two decimals everywhere**, the slot list included.

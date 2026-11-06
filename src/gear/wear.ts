@@ -18,7 +18,7 @@ import { button, ephemeral, md, optString, row, STYLE_PRIMARY, truncate, updateM
 import { findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { modalValues } from '../commands/reports.ts';
 import { slotByKey, WEAR_MASK, WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
-import { ALL_CLASSES, bitOf, isTwoHanded, SLOTS } from './vocab.ts';
+import { ALL_CLASSES, bitOf, isTwoHanded, raceLabel, SLOTS } from './vocab.ts';
 
 export { slotByKey, WEAR_MASK, WEAR_SLOTS };
 const fits = (slotMask: number, w: WearSlot) => (slotMask & bitOf(SLOTS, w.token)) !== 0;
@@ -45,6 +45,8 @@ export const WEARING_PREFIX = 'wri:';
 export const WEARING_CHAR_PREFIX = 'wrc:';
 /** wrz:<character id>:<item id>: which slot (select; values: a slot key or a pair group). */
 export const SLOT_PICK_PREFIX = 'wrz:';
+/** Order 36: guf:<character id>: Find upgrades on the panel (src/gear/upgrades.ts answers it). */
+export const FIND_UPGRADES_PREFIX = 'guf:';
 /** The controls that answer with a modal, at once (src/interactions.ts OPENS_MODAL). */
 export const WEAR_OPENS_MODAL = [SLOT_PREFIX, AGAIN_PREFIX];
 
@@ -60,7 +62,7 @@ export const WEAR_COPY = {
   notYours: "That's another member's character. Only they, or an officer, can change its gear.",
   ownOnly: 'I\'m wearing this saves gear for your own characters only.',
   head: (ch: Character) =>
-    `**${md(ch.name)}** · ${ch.class ? md(ch.class) : 'no class'} · ${ch.level !== null ? `level ${ch.level}` : 'no level'} · ${ch.race ? `race ${md(ch.race)}` : 'any race'}`,
+    `**${md(ch.name)}** · ${ch.class ? md(ch.class) : 'no class'} · ${ch.level !== null ? `level ${ch.level}` : 'no level'} · ${ch.race ? `race ${md(raceLabel(ch.race))}` : 'any race'}`,
   filled: (n: number) => `${n} of ${WEAR_SLOTS.length} slots filled`,
   empty: '—',
   noLongerListed: '*(no longer listed)*',
@@ -93,6 +95,8 @@ export const WEAR_COPY = {
   severalCharacters: (names: string[]) => `You have several characters: ${names.map((n) => `**${md(n)}**`).join(', ')}. Pick one with \`character:\`.`,
   changedBy: (who: string) => `-# Changed by ${md(who)}.`,
   wearingButton: "I'm wearing this",
+  /** Order 36. */
+  findUpgrades: 'Find upgrades',
 } as const;
 
 // ---------------------------------------------------------------- reading
@@ -146,8 +150,8 @@ export function refusal(ch: Pick<Character, 'class' | 'race'>, item: Pick<WearIt
 /** Review fix: an item the source no longer lists (gone_at) is never saved anew, by any path. */
 const loadItem = (c: Ctx, id: number) => c.db.prepare(`SELECT ${ITEM_COLS} FROM item i WHERE i.id = ? AND i.source = 'wiki' AND i.gone_at IS NULL`).bind(id).first<WearItem>();
 
-/** The character a custom_id names, if it still exists and the presser may act on it. */
-async function characterFor(c: Ctx, id: string, ownOnly = false): Promise<{ ch: Character } | { reply: MessageReply }> {
+/** The character a custom_id names, if it still exists and the presser may act on it (order 36's controls use it too). */
+export async function characterFor(c: Ctx, id: string, ownOnly = false): Promise<{ ch: Character } | { reply: MessageReply }> {
   const n = Number(id);
   const ch = Number.isInteger(n) ? await findById(c.db, c.guild.id, n) : null;
   if (!ch) return { reply: ephemeral(WEAR_COPY.gone) };
@@ -182,7 +186,8 @@ export async function gearPanel(c: Ctx, ch: Character, note?: string): Promise<M
       }),
     },
   ]);
-  return ephemeral(truncate(content, 2000), { components: [select] });
+  // Order 36: Find upgrades opens /gear upgrades' summary for this character (the same owner-or-officer check).
+  return ephemeral(truncate(content, 2000), { components: [select, row([button(`${FIND_UPGRADES_PREFIX}${ch.id}`, WEAR_COPY.findUpgrades, STYLE_PRIMARY)])] });
 }
 
 /** wrp:<character id>: the panel, as a new private message. */
@@ -318,6 +323,16 @@ async function emptySlot(c: Ctx, ch: Character, slot: WearSlot): Promise<Message
   if (!g) return reply(c, ch, [WEAR_COPY.alreadyEmpty(slot.label)]);
   await remove(c, ch, slot.key).run();
   return reply(c, ch, [WEAR_COPY.emptied(slot.label, nameOf(g))]);
+}
+
+/**
+ * Order 36: I'm wearing it now, from /gear upgrades. The item (still listed) into that one slot, through wear()'s rules;
+ * null when the item is no longer in the data or the slot key is not one of the 20.
+ */
+export async function wearById(c: Ctx, ch: Character, itemId: number, slotKey: string): Promise<MessageReply | null> {
+  const slot = slotByKey(slotKey);
+  const item = slot ? await loadItem(c, itemId) : null;
+  return slot && item ? wear(c, ch, item, slot) : null;
 }
 
 /** Saves the item in that one slot, with every rule; the reply names the slot, the item and what it replaced. */

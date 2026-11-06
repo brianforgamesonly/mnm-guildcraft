@@ -18,6 +18,7 @@ import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
 import { CHARACTER_RACES_SQL, characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
 import { PANEL_PREFIX as GEAR_PANEL_PREFIX, PANEL_PICK_PREFIX as GEAR_PANEL_PICK_PREFIX } from '../gear/wear.ts';
+import { raceLabel } from '../gear/vocab.ts';
 import { OFFICER_ONLY } from './members.ts';
 import { craftForget } from './recipes.ts';
 import { modalValues } from './reports.ts';
@@ -304,7 +305,7 @@ const raceSelect = (races: string[], current: string | null) => ({
     // saving the form for another change never clears it silently.
     options: [
       { label: ME_COPY.noRace, value: NO_RACE, ...(current === null ? { default: true } : {}) },
-      ...[...(current !== null && !races.includes(current) ? [current] : []), ...races].slice(0, SELECT_MAX - 1).map((r) => ({ label: r, value: r, ...(r === current ? { default: true } : {}) })),
+      ...[...(current !== null && !races.includes(current) ? [current] : []), ...races].slice(0, SELECT_MAX - 1).map((r) => ({ label: raceLabel(r), value: r, ...(r === current ? { default: true } : {}) })),
     ],
   },
 });

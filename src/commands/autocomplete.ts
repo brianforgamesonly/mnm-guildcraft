@@ -188,6 +188,8 @@ export const LISTS: Record<string, Lister> = {
   '/gear search zone': game('zones'),
   '/gear wear item': ({ db, i, options, typed }) => wearItemChoices(db, i.guild_id, i.member.user.id, optString(options, 'character'), typed),
   '/gear wear character': ownCharacters,
+  // Order 36: /gear upgrades acts on the caller's own characters only.
+  '/gear upgrades character': ownCharacters,
   '/roster skill skill': game('skills'),
   '/roster recipes skill': game('skills'),
   '/skills skill': game('skills'),
