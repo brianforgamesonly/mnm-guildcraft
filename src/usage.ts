@@ -163,8 +163,6 @@ export async function usageAlerts(db: D1Database, api: BotApi, copy: string | un
           continue;
         }
         const state = stateOf(m, row.value);
-        const content = render(copy, [alertText(m, row, state)]);
-        if (!content) continue;
         const last = alerts.find((a) => a.target === `usage:${m}`);
         const lastState = (() => {
           try {
@@ -174,6 +172,10 @@ export async function usageAlerts(db: D1Database, api: BotApi, copy: string | un
           }
         })();
         if (state === lastState || last?.at.slice(0, 10) === today) continue;
+        // Order 38 (ITEM 2): the line is rendered only once it is owed. Rendering it first, on every run, was 22.6% of a cold
+        // quiet sweep's CPU in the profile: its numbers' toLocaleString starts ICU number formatting on a new isolate.
+        const content = render(copy, [alertText(m, row, state)]);
+        if (!content) continue;
         // `keep`: calls left for whatever runs after (a post and the final write need 2 of their own).
         if (budgetLeft(api.budget) < keep + 2 || Date.now() >= api.budget.deadline) return log;
         const sent = await api.call('POST', `/channels/${g.review_channel_id}/messages`, { content, allowed_mentions: { parse: [] } });

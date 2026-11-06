@@ -16,7 +16,8 @@ import { summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { remoteReadD1 } from '../import/db.ts';
 import { ALARM_IMPORT, FINISHED_IMPORT } from '../../src/import-status.ts';
-import { CONSECUTIVE_FAIL, cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeQuestSites, judgeSweeps, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
+import { CONSECUTIVE_FAIL, cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeQuestSites, judgeSweeps, judgeWorkerStatuses, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
+import { workerDay } from './workers.ts';
 
 const args = process.argv.slice(2);
 const opt = (name: string) => {
@@ -126,6 +127,8 @@ const failedRunsOf = async (file: string): Promise<number | null> => {
 // ---------------------------------------------------------------- the day's records
 console.log(`copy: ${COPY.name} (Worker ${COPY.worker}); judging ${day} (UTC); crons from wrangler.jsonc: ${JSON.stringify(COPY.crons)}`);
 const lines: Line[] = [];
+/** Order 38: the day's own sweep_run rows, the cron's expected population for the invocation-status check. */
+let sweepsOnDay: number | undefined;
 
 const [{ n: hasTable }] = await select<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'sweep_run'");
 if (!hasTable) {
@@ -134,6 +137,7 @@ if (!hasTable) {
   const [{ first }] = await select<{ first: number | null }>('SELECT min(scheduled_ms) AS first FROM sweep_run');
   // The day, and the slots before it that a run of misses across midnight needs (judge.ts judgeSweeps).
   const sweepRows = await select<SweepRow>('SELECT scheduled_ms, started_at, finished_at FROM sweep_run WHERE scheduled_ms >= ? AND scheduled_ms < ? ORDER BY scheduled_ms', dayStart - (CONSECUTIVE_FAIL + 1) * 60 * 60_000, dayEnd);
+  sweepsOnDay = sweepRows.filter((r) => r.scheduled_ms >= dayStart && r.scheduled_ms < dayEnd).length;
   const deploys = await deployWindows();
   if (deploys.length) console.log(`deploys of ${COPY.name} considered: ${deploys.map((d) => `${iso(d.start).slice(0, 19)}→${iso(d.end).slice(11, 19)}`).join(', ')}`);
   lines.push(...judgeSweeps({ crons: COPY.crons, dayStart, rows: sweepRows, trackStart: first, deploys }));
@@ -156,6 +160,11 @@ lines.push(judgeNightly({ job: 'usage', rows: measured ? [{ ok: true, status: `$
 const [{ n: questTable }] = await select<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'quest_site_run'");
 const questLast = questTable ? (await select<{ last: string | null }>("SELECT max(finished_at) AS last FROM quest_site_run WHERE event IN ('schedule', 'seed')"))[0].last : null;
 lines.push(judgeQuestSites(!!questTable, questLast, dayEnd));
+// Order 38, ITEM 4: the Worker's invocation statuses (any CPU-limit error alerts within one daily run), and its CPU figures.
+const worker = await workerDay({ token: apiToken, account: accountId, script: COPY.worker, from: dayStart, to: dayEnd });
+lines.push(judgeWorkerStatuses(COPY.worker, worker.statuses, sweepsOnDay, worker.outcomes));
+summary(`\n### ${COPY.name} Worker (${COPY.worker}), ${day} (UTC): the schema's own field descriptions, then CPU (figures only, no alert)`);
+for (const n of worker.notes) summary(`- ${n}`);
 
 // ---------------------------------------------------------------- ITEM 4's evidence, on request
 const evFrom = opt('--evidence');

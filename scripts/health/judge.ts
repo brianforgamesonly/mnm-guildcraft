@@ -280,6 +280,54 @@ export function judgeQuestSites(hasTable: boolean, last: string | null, nowMs: n
     : { rule, verdict: 'pass', text: `last succeeded ${last} (${Math.floor(days)} days ago)` };
 }
 
+// ---------------------------------------------------------------- order 38, ITEM 4: invocation statuses
+
+/**
+ * The statuses that are not an error: the invocation succeeded, or the client went away first. Every other status alerts,
+ * one nobody expected included (exceededResources is the CPU limit's: Cloudflare's metrics page maps errors 1102 and 1027
+ * to it). Statuses are compared as the API returns them, so a renamed or new status alerts rather than passing.
+ */
+export const OK_STATUSES: ReadonlySet<string> = new Set(['success', 'clientDisconnected']);
+
+/** Invocations of one Worker on the judged day, per GraphQL dataset and status. */
+export interface StatusCount {
+  dataset: string;
+  status: string;
+  count: number;
+}
+
+/**
+ * Order 38: any invocation that ended in a status outside OK_STATUSES fails the check on that day (the health alarm: the run
+ * fails and GitHub mails the owner), naming the Worker, the status, the count and the dataset. A read that failed, or one
+ * that found no invocations at all for a Worker whose cron runs every day, fails too: never a silent pass.
+ */
+/** Workers Logs' per-invocation outcomes that are not an error (Logpush's list: ok, canceled, exception, unknown). */
+export const OK_OUTCOMES: ReadonlySet<string> = new Set(['ok', 'canceled']);
+
+export function judgeWorkerStatuses(worker: string, read: { rows: StatusCount[] } | { error: string }, sweeps?: number, outcomes?: Map<string, number>): Line {
+  const rule = 'invocation statuses';
+  if ('error' in read) return { rule, verdict: 'fail', text: `${worker}: statuses unread (${read.error}); a failed read is never a pass` };
+  const total = read.rows.reduce((n, r) => n + r.count, 0);
+  if (!(total > 0)) return { rule, verdict: 'fail', text: `${worker}: no invocations read for the day, though its cron runs every day: the query is presumed broken` };
+  // Review fix: any count but exactly 0 alerts on a bad status (a NaN or a string read wrongly never hides one).
+  const bad = read.rows.filter((r) => r.count !== 0 && !OK_STATUSES.has(r.status));
+  const all = read.rows.map((r) => `${r.dataset} ${r.status} ${r.count}`).join(', ');
+  if (bad.length) return { rule, verdict: 'fail', text: `${worker}: ${bad.map((r) => `${r.count} ${r.status} (${r.dataset})`).join('; ')} — alerts on any status but ${[...OK_STATUSES].join(' or ')} (all: ${all})` };
+  // Review fix: GraphQL's adaptive counts are sampled estimates, so one error could go uncounted. Workers Logs records each
+  // invocation's outcome; when that read succeeded, any outcome outside OK_OUTCOMES alerts too.
+  const badLogs = [...(outcomes ?? [])].filter(([o, n]) => n !== 0 && !OK_OUTCOMES.has(o));
+  if (badLogs.length) return { rule, verdict: 'fail', text: `${worker}: Workers Logs outcomes ${badLogs.map(([o, n]) => `${n} ${o}`).join(', ')} — alerts on any outcome but ${[...OK_OUTCOMES].join(' or ')} (GraphQL: ${all})` };
+  // A lower bound on cron coverage, derived each day: some dataset must count at least half as many invocations as the day's
+  // own sweep_run rows. It cannot prove coverage on a busy day (interactions count too); it catches a read that plainly holds
+  // no cron runs. On 2026-11-05 the adaptive dataset counted 94 of production's 96 sweeps, with no other invocation in Logs.
+  const perDataset = new Map<string, number>();
+  for (const r of read.rows) perDataset.set(r.dataset, (perDataset.get(r.dataset) ?? 0) + r.count);
+  const most = Math.max(...perDataset.values());
+  if (sweeps && most < sweeps / 2) return { rule, verdict: 'fail', text: `${worker}: cron runs not covered: the most any dataset counted is ${most}, against ${sweeps} sweeps recorded (sweep_run) — ${all}` };
+  const logs = outcomes ? `; Workers Logs outcomes: ${[...outcomes].map(([o, n]) => `${o} ${n}`).join(', ') || 'none'}` : '; Workers Logs outcomes unread';
+  return { rule, verdict: 'pass', text: `${worker}: ${all}${sweeps ? ` (${most} counted against ${sweeps} sweeps recorded)` : ''}${logs}` };
+}
+
 export const failed = (lines: Line[]) => lines.some((l) => l.verdict === 'fail');
 
 /** The UTC day before `nowMs`, as its start (ms). */

@@ -562,3 +562,13 @@ Order 37 is gear polish: the right creature on drop lines, readable vendor lines
 - A schedule that must keep running is watched by the health check: no scheduled success of the quest-page check in 35 days fails it (scripts/health/judge.ts `judgeQuestSites`).
 - How to get an item is decided in one place (src/gear/howto.ts `sourceWays`: the level kinds, then source_mask, then the recorded data) and its lines are built in one place (`howToGet`); /gear upgrades, the /item card, /gear find's result lines and the recipes a page loads (pageData) all read them. Scarab Helm's card said "Unknown — source not recorded" from source_mask while its upgrade line named the quest. Not yet moved: /gear find's `source:` filter, a bitmask on the gear index (src/gear/search.ts, order 13's measured query), still reads source_mask alone; changing it is a query-cost change for its own order.
 - A pull request's migration is applied before its merge by dispatching deploy.yml on the branch with `migrations_only` (it deploys no Worker), after the backup's migration dry run (backup.yml `migration_check`).
+
+## Order 38
+
+Order 38 profiles and fixes the Worker's CPU: the board sweep, the cold upgrade summary, and an alert on any CPU-limit error (Workers Free: 10 ms of CPU per invocation, cron included).
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1, 2 and 4; PR B: ITEM 3.
+- CPU is measured in workerd or from Cloudflare's records. The Node proxy is not used for CPU decisions.
+- A CPU fix names the function the profile showed, with its share of CPU before and after.
+- Any CPU-limit error is an alert, within one daily run: the health check fails on any invocation status outside `success` and `clientDisconnected`, in either GraphQL invocation dataset, and (because GraphQL's adaptive counts are sampled) on any Workers Logs outcome outside `ok` and `canceled` when that read succeeds (scripts/health/judge.ts `judgeWorkerStatuses`, `OK_STATUSES`, `OK_OUTCOMES`). A failed GraphQL read, or one counting fewer than half the day's sweep_run rows, fails too.
+- Failed runs: every one is listed in the FINAL (order 12).
