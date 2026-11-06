@@ -300,9 +300,11 @@ const raceSelect = (races: string[], current: string | null) => ({
     required: false,
     min_values: 0,
     max_values: 1,
+    // Review fix: the character's own race is always offered (and picked), even when the list no longer holds it, so
+    // saving the form for another change never clears it silently.
     options: [
       { label: ME_COPY.noRace, value: NO_RACE, ...(current === null ? { default: true } : {}) },
-      ...races.slice(0, SELECT_MAX - 1).map((r) => ({ label: r, value: r, ...(r === current ? { default: true } : {}) })),
+      ...[...(current !== null && !races.includes(current) ? [current] : []), ...races].slice(0, SELECT_MAX - 1).map((r) => ({ label: r, value: r, ...(r === current ? { default: true } : {}) })),
     ],
   },
 });

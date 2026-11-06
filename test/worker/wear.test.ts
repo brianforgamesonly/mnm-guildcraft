@@ -2,7 +2,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ME_COPY } from '../../src/commands/me.ts';
-import { WEAR_COPY, WEAR_SLOTS, MATCH_MAX, PANEL_PREFIX, wearImmediate } from '../../src/gear/wear.ts';
+import { WEAR_COPY, WEAR_SLOTS, MATCH_MAX, PANEL_PICK_PREFIX, PANEL_PREFIX } from '../../src/gear/wear.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 import { planFor } from '../../src/interactions.ts';
 import { count, one, reset } from '../db.ts';
@@ -146,7 +146,7 @@ describe('order 35, ITEM 4: the Gear panel and changing a slot', () => {
     const none = await box(ann, 'Testchar', 'chest', 'zzz');
     expect(none.data.content).toBe(WEAR_COPY.noMatch('Chest', 'zzz'));
     expect((none.data.components as any)[0].components[0].label).toBe(WEAR_COPY.typeAgain);
-    expect(wearImmediate({} as never, `wrt:${await charId('Testchar')}:chest`, [])!.type).toBe(9);
+    expect((await send(press(ann, `wrt:${await charId('Testchar')}:chest`))).type).toBe(9);
     // Two items can't share a name: item.name_key is unique (the import keeps the first of a case-only pair).
     await expect(env.DB.prepare("INSERT INTO item (name, name_key, source, imported_at) VALUES ('copper BREASTPLATE', 'copper breastplate', 'wiki', 't')").run()).rejects.toThrow(/UNIQUE/);
   });
@@ -171,6 +171,33 @@ describe('order 35, ITEM 4: the Gear panel and changing a slot', () => {
     await send(cmd(ann, 'character', 'remove', { name: 'Testchar' }));
     expect((await send(press(ann, `${PANEL_PREFIX}${id}`))).data.content).toBe(WEAR_COPY.gone);
     expect((await send(submit(ann, `wrm:${id}:chest`, { item: 'buckler' }))).data.content).toBe(WEAR_COPY.gone);
+    // Review fix: the slot select and Type again check first, before any box opens.
+    expect((await send(select(ann, `wrs:${id}`, ['chest']))).data.content).toBe(WEAR_COPY.gone);
+    expect((await send(press(ann, `wrt:${id}:chest`))).data.content).toBe(WEAR_COPY.gone);
+  });
+
+  it('wrg: (more than 5 characters): /me offers one Gear select; the pick opens that character\'s panel, re-checked', async () => {
+    for (const n of ['Aa', 'Bb', 'Cc', 'Dd', 'Ee', 'Ff']) await add(n);
+    const r = await send(rawCmd(ann, 'me', undefined));
+    const sel = (r.data.components as any).flatMap((x: any) => x.components).find((c: any) => c.custom_id?.startsWith(PANEL_PICK_PREFIX));
+    expect(sel.custom_id).toBe(`${PANEL_PICK_PREFIX}${ANN}`);
+    expect(sel.options.length).toBe(6);
+    expect((await send(select(ann, sel.custom_id, [String(await charId('Ff'))]))).data.content).toContain('**Ff**');
+    expect((await send(select(bo, sel.custom_id, [String(await charId('Ff'))]))).data.content).toBe(WEAR_COPY.notYours);
+  });
+
+  it('review fixes: a race the list no longer offers is kept by an unrelated edit; a gone item is never saved anew', async () => {
+    await add('Testchar');
+    const id = await charId('Testchar');
+    await set('Testchar', null, 'OLD');
+    const form = await send(press(ann, `mee:${ANN}`));
+    const race = (form.data as any).components.find((c: any) => c.component?.custom_id === 'race').component;
+    expect(race.options.find((o: any) => o.default).value).toBe('OLD');
+    await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: '', level: '20', main: '', race: 'OLD' }));
+    expect(await one('SELECT race, level FROM character WHERE id = ?', id)).toEqual({ race: 'OLD', level: 20 });
+    await env.DB.prepare("UPDATE item SET gone_at = 't' WHERE name = 'Buckler'").run();
+    expect((await wear(ann, { item: 'Buckler' })).data.content).toBe(WEAR_COPY.noItem('Buckler'));
+    expect((await send(press(ann, `wri:${await itemId('Buckler')}`))).data.content).toBe(WEAR_COPY.itemGone);
   });
 });
 

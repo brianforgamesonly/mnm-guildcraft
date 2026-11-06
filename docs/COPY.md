@@ -1292,5 +1292,8 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/commands/me.ts:102-106 | (Add/Edit character form) Race · Optional. Codes from the wiki data; no race means any race · No race (any) · (panel button) Gear: \<name> · Gear: pick a character | DRAFT |
 | src/commands/skills.ts:278 | (character card) race \<code> | DRAFT |
 | src/commands/character.ts:41 | **\<race>** isn't a race in the list taken from the wiki data. | DRAFT |
+| src/commands/gear.ts:56 | That item is no longer in the data. Run `/gear search` again. (was `/gear`) | DRAFT |
+| src/commands/zone.ts:41 | No classes are loaded yet. Try `/gear search` once the nightly import has run. (was `/gear`) | DRAFT |
+| src/gear/wear.ts:59 | That item is no longer in the data. (I'm wearing this on an item gone upstream) | DRAFT |
 | src/commands/character.ts:311 | (Remove character, appended) Its saved gear is removed. | DRAFT |
 | src/gear/wear.ts:57-95 | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT |

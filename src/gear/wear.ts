@@ -56,6 +56,7 @@ export const MATCH_MAX = 24;
 
 export const WEAR_COPY = {
   gone: 'That character no longer exists.',
+  itemGone: 'That item is no longer in the data.',
   notYours: "That's another member's character. Only they, or an officer, can change its gear.",
   ownOnly: 'I\'m wearing this saves gear for your own characters only.',
   head: (ch: Character) =>
@@ -142,7 +143,8 @@ export function refusal(ch: Pick<Character, 'class' | 'race'>, item: Pick<WearIt
   return null;
 }
 
-const loadItem = (c: Ctx, id: number) => c.db.prepare(`SELECT ${ITEM_COLS} FROM item i WHERE i.id = ? AND i.source = 'wiki'`).bind(id).first<WearItem>();
+/** Review fix: an item the source no longer lists (gone_at) is never saved anew, by any path. */
+const loadItem = (c: Ctx, id: number) => c.db.prepare(`SELECT ${ITEM_COLS} FROM item i WHERE i.id = ? AND i.source = 'wiki' AND i.gone_at IS NULL`).bind(id).first<WearItem>();
 
 /** The character a custom_id names, if it still exists and the presser may act on it. */
 async function characterFor(c: Ctx, id: string, ownOnly = false): Promise<{ ch: Character } | { reply: MessageReply }> {
@@ -213,18 +215,24 @@ const box = (charId: string, slot: WearSlot): InteractionReply => ({
   },
 });
 
-/** wrs:<character id>: the picked slot's item box (a modal, at once: Discord allows no deferral before one). */
-export function slotPicked(c: Ctx, id: string, values: string[]): InteractionReply {
+/**
+ * wrs:<character id>: the picked slot's item box (a modal, at once: Discord allows no deferral before one). Review fix:
+ * the character is checked first (one indexed read), so a removed one's panel answers "no longer exists" here.
+ */
+export async function slotPicked(c: Ctx, id: string, values: string[]): Promise<InteractionReply> {
   const slot = slotByKey(values[0] ?? '');
-  if (!slot) return ephemeral(WEAR_COPY.gone);
-  return box(id.slice(SLOT_PREFIX.length), slot);
+  const t = await characterFor(c, id.slice(SLOT_PREFIX.length));
+  if ('reply' in t) return t.reply;
+  return slot ? box(String(t.ch.id), slot) : ephemeral(WEAR_COPY.gone);
 }
 
-/** wrt:<character id>:<slot>: the box again. */
-export function againButton(c: Ctx, id: string): InteractionReply {
+/** wrt:<character id>:<slot>: the box again, after the same check. */
+export async function againButton(c: Ctx, id: string): Promise<InteractionReply> {
   const [charId, key] = id.slice(AGAIN_PREFIX.length).split(':');
   const slot = slotByKey(key ?? '');
-  return slot ? box(charId, slot) : ephemeral(WEAR_COPY.gone);
+  const t = await characterFor(c, charId);
+  if ('reply' in t) return t.reply;
+  return slot ? box(String(t.ch.id), slot) : ephemeral(WEAR_COPY.gone);
 }
 
 const againRow = (charId: number, slot: WearSlot) => row([button(`${AGAIN_PREFIX}${charId}:${slot.key}`, WEAR_COPY.typeAgain, STYLE_PRIMARY)]);
@@ -368,13 +376,13 @@ async function place(c: Ctx, ch: Character, item: WearItem, choice?: string): Pr
 const slotMenu = (ch: Character, item: WearItem, content: string, options: { label: string; value: string }[]) =>
   ephemeral(content, { components: [row([{ type: MessageComponentTypes.STRING_SELECT, custom_id: `${SLOT_PICK_PREFIX}${ch.id}:${item.id}`, options }])] });
 
-/** wrz:<character id>:<item id>: the picked slot (or pair). Own characters or, from an officer's panel, theirs. */
+/** wrz:<character id>:<item id>: the picked slot (or pair). Only /gear wear and I'm wearing this send it: own characters only. */
 export async function slotPickedForItem(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
   const [charId, itemId] = id.slice(SLOT_PICK_PREFIX.length).split(':');
-  const t = await characterFor(c, charId);
+  const t = await characterFor(c, charId, true);
   if ('reply' in t) return asEdit(t.reply);
   const item = await loadItem(c, Number(itemId));
-  if (!item) return asEdit(ephemeral(WEAR_COPY.gone));
+  if (!item) return asEdit(ephemeral(WEAR_COPY.itemGone));
   return asEdit(await place(c, t.ch, item, values[0]));
 }
 
@@ -394,7 +402,7 @@ export async function gearWear(c: Ctx, opts: Option[]): Promise<MessageReply> {
     if (live.length > 1) return ephemeral(WEAR_COPY.severalCharacters(live.map((x) => x.name)));
     ch = live[0];
   }
-  const item = await c.db.prepare(`SELECT ${ITEM_COLS} FROM item i WHERE i.name_key = ? AND i.source = 'wiki'`).bind(typed.toLowerCase()).first<WearItem>();
+  const item = await c.db.prepare(`SELECT ${ITEM_COLS} FROM item i WHERE i.name_key = ? AND i.source = 'wiki' AND i.gone_at IS NULL`).bind(typed.toLowerCase()).first<WearItem>();
   if (!item) return ephemeral(WEAR_COPY.noItem(typed || '(nothing)'));
   if ((Number(item.slot_mask) & WEAR_MASK) === 0) return ephemeral(WEAR_COPY.notWearable(item.name));
   const slot = optString(opts, 'slot');
@@ -407,7 +415,7 @@ export const wearingButton = (itemId: number, slotMask: number) => ((Number(slot
 /** wri:<item id>: for the presser's own characters, never the card owner's: one, placed; several, which one first. */
 export async function wearingPressed(c: Ctx, id: string): Promise<MessageReply> {
   const item = await loadItem(c, Number(id.slice(WEARING_PREFIX.length)));
-  if (!item) return ephemeral(WEAR_COPY.notWearable('That item'));
+  if (!item) return ephemeral(WEAR_COPY.itemGone);
   const live = await liveCharacters(c.db, c.guild.id, c.userId);
   if (!live.length) return ephemeral(noCharacters(c, c.userId));
   if (live.length === 1) return place(c, live[0], item);
@@ -436,7 +444,7 @@ export async function wearingCharacterPicked(c: Ctx, id: string, values: string[
 // ---------------------------------------------------------------- routing (src/interactions.ts)
 
 /** The saved-gear controls answered at once (modals). */
-export function wearImmediate(c: Ctx, id: string, values: string[]): InteractionReply | null {
+export function wearImmediate(c: Ctx, id: string, values: string[]): Promise<InteractionReply> | null {
   if (id.startsWith(SLOT_PREFIX)) return slotPicked(c, id, values);
   if (id.startsWith(AGAIN_PREFIX)) return againButton(c, id);
   return null;
