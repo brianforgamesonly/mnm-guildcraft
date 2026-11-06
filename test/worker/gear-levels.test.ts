@@ -99,6 +99,8 @@ describe('order 35, ITEM 1: race_mask and the derived race list', () => {
     expect(first.warnings).toContainEqual(expect.objectContaining({ kind: 'vocab_drift', list: 'race', values: [{ value: 'GIE', items: 1 }] }));
     const second = await load(f);
     expect(second.written!.game_race.rows_written + second.written!.item.rows_written).toBe(0);
+    // Order 36 review fix: the dry run predicts what the write does (names included): nothing on a second run.
+    expect(second.predicted!.game_race).toEqual({ insert: 0, update: 0, deactivate: 0 });
     // A new race on two items: kept, with the next free bit (no other race's bit moves), and the list change is a drift warning.
     f.items['Ring C'] = { slot: 'FINGER', race: 'TRL' };
     f.items['Ring D'] = { slot: 'FINGER', race: 'TRL' };

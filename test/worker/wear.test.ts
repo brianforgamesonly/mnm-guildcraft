@@ -71,7 +71,7 @@ describe('order 35, ITEM 1: race on characters', () => {
     const form = await send(press(ann, `mea:${ANN}`));
     expect(form.type).toBe(9);
     const race = (form.data as any).components.find((c: any) => c.component?.custom_id === 'race').component;
-    expect(race.options.map((o: any) => o.value)).toEqual(['none', 'ELF', 'HUM']); // HRS is a mount race
+    expect(race.options.map((o: any) => o.value)).toEqual(['none', 'HUM', 'ELF']); // HRS is a mount race; order 36: by name (Human, Wood Elf)
     expect((form.data as any).components.length).toBeLessThanOrEqual(5);
     await send(submit(ann, `meam:${ANN}`, { name: 'Testchar', class: 'INQ', level: '15', race: 'HUM' }));
     expect(await one('SELECT race FROM character WHERE name = ?', 'Testchar')).toEqual({ race: 'HUM' });

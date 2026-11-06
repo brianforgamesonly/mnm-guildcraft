@@ -1714,7 +1714,8 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
         },
       ]),
     ),
-    races: new Map(races.map((r) => [r.code, { item_count: Number(r.item_count), bit: r.bit === null ? null : Number(r.bit), mount: Number(r.mount) }])),
+    // Order 36 review fix: name too, so the dry run's prediction and the write's guard compare the same fields.
+    races: new Map(races.map((r) => [r.code, { item_count: Number(r.item_count), bit: r.bit === null ? null : Number(r.bit), mount: Number(r.mount), name: r.name }])),
     recipes,
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
     classes: new Map(cls.map((c) => [c.code, { item_count: Number(c.item_count), bit: c.bit === null ? null : Number(c.bit) }])),

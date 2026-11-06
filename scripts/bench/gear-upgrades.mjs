@@ -52,6 +52,10 @@ const db = {
 // ---------------------------------------------------------------- the bench's own rows (local only)
 const at = new Date().toISOString();
 await raw.batch([
+  // Order 36 review fix: a run that died before its own cleanup leaves weight, setting and audit rows naming the guild.
+  raw.prepare('DELETE FROM gear_weight WHERE guild_id = ?').bind(BENCH_GUILD),
+  raw.prepare('DELETE FROM gear_setting WHERE guild_id = ?').bind(BENCH_GUILD),
+  raw.prepare('DELETE FROM audit_log WHERE guild_id = ?').bind(BENCH_GUILD),
   raw.prepare('DELETE FROM character_gear WHERE guild_id = ?').bind(BENCH_GUILD),
   raw.prepare('DELETE FROM character WHERE guild_id = ?').bind(BENCH_GUILD),
   raw.prepare('DELETE FROM member WHERE guild_id = ?').bind(BENCH_GUILD),

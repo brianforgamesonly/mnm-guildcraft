@@ -77,7 +77,7 @@ describe('order 36, ITEM 4: /gear weights', () => {
     await testchar();
     expect(order(await chest())).toEqual(['Stamina Vest', 'Plate Vest']); // +2.00, +3.50 (Far Vest is above, Lv 30)
     const r = await weights(officer, { class: 'INQ', stat: 'AC', value: 0.05 });
-    expect(r.data.content).toBe(WEIGHTS_COPY.saved('Inquisitor', true));
+    expect(r.data.content).toBe(WEIGHTS_COPY.saved('Inquisitor', 'posted'));
     expect(await stored()).toEqual([{ class: 'INQ', stat: 'AC', value: 5, set_by: OFFICER }]);
     expect(posted).toHaveLength(1);
     expect(posted[0].path).toBe(`/channels/${REVIEW}/messages`);
@@ -136,9 +136,33 @@ describe('order 36, ITEM 4: /gear weights', () => {
 
   it('with no review channel set, the change applies and the reply says nothing was posted', async () => {
     const r = await weights(officer, { class: 'WIZ', stat: 'INT', value: 2 });
-    expect(r.data.content).toBe(WEIGHTS_COPY.saved('Wizard', false));
+    expect(r.data.content).toBe(WEIGHTS_COPY.saved('Wizard', 'unset'));
     expect(posted).toEqual([]);
     expect(await stored()).toEqual([{ class: 'WIZ', stat: 'INT', value: 200, set_by: OFFICER }]);
+  });
+
+  it('a refused post is reported as refused (the change is saved), not as "no review channel"', async () => {
+    await testchar();
+    botApi.handle = () => new Response(JSON.stringify({ message: 'Missing Permissions', code: 50013 }), { status: 403 });
+    const r = await weights(officer, { class: 'INQ', stat: 'AC', value: 0 });
+    expect(r.data.content).toBe(WEIGHTS_COPY.saved('Inquisitor', 'refused'));
+    expect(await stored()).toEqual([{ class: 'INQ', stat: 'AC', value: 0, set_by: OFFICER }]);
+  });
+
+  it("reset deletes every row of the class, even a stale one (a retired stat, a value the default has become); a setter with no name shows as the mention", async () => {
+    await testchar();
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO gear_weight (guild_id, class, stat, value, set_at, set_by) VALUES (?, 'INQ', 'SPELLHASTE', 50, 't', '1'), (?, 'INQ', 'AC', 35, '2026-11-06T00:00:00Z', '42')").bind(GUILD_ID, GUILD_ID),
+    ]);
+    // Weights equal the defaults, yet rows remain: reset still clears them.
+    expect(field(await weights(officer, { class: 'INQ' }), 'AC')).toMatch(/^\*\*0\.35\*\* \(default 0\.35\) · changed by <@42>, <t:\d+:d>$/);
+    const r = await weights(officer, { class: 'INQ', reset: true });
+    expect(r.data.content).not.toBe(WEIGHTS_COPY.noChange('Inquisitor'));
+    expect(await stored()).toEqual([]);
+    // With nothing stored, a second reset changes nothing and posts nothing more.
+    const n = posted.length;
+    expect((await weights(officer, { class: 'INQ', reset: true })).data.content).toBe(WEIGHTS_COPY.noChange('Inquisitor'));
+    expect(posted).toHaveLength(n);
   });
 });
 
@@ -148,7 +172,7 @@ describe('order 36, ITEM 4: /gear settings', () => {
     expect((await settings(officer)).data.content).toBe(WEIGHTS_COPY.settingsNow(10, null));
     expect(order(await chest())).toEqual(['Stamina Vest', 'Plate Vest']);
     const r = await settings(officer, { window: 20 });
-    expect(r.data.content).toBe(WEIGHTS_COPY.windowSaved(10, 20, true));
+    expect(r.data.content).toBe(WEIGHTS_COPY.windowSaved(10, 20, 'posted'));
     expect(posted.at(-1)!.body.content).toBe(`**/gear upgrades window:** <@${OFFICER}> (Joegandomi) changed it from 10 to 20 levels.`);
     expect(await all('SELECT key, value, set_by FROM gear_setting')).toEqual([{ key: 'window', value: 20, set_by: OFFICER }]);
     // Testchar is 15: Far Vest (Lv 30) is Around at window 20; levels: still overrides it.

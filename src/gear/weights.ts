@@ -23,6 +23,14 @@ export const VALUE_STEP = 5;
 
 // ---------------------------------------------------------------- copy (order 36; listed for approval in docs/COPY.md)
 
+/** What became of a change's review-channel post (review fix: a refused post is not "no channel set"). */
+export type PostResult = 'posted' | 'unset' | 'refused';
+const POSTED: Record<PostResult, string> = {
+  posted: ' The review channel has the change.',
+  unset: ' No review channel is set, so nothing was posted.',
+  refused: " The review channel didn't accept the post (check GuildCraft can send messages there); the change is saved.",
+};
+
 export const WEIGHTS_COPY = {
   title: (cls: string) => `${cls} weights`,
   about: (preset: Preset, priority: string) => `Default preset: **${preset}** · priority: ${priority || 'none'}. Used by \`/gear upgrades\` in this server.`,
@@ -36,7 +44,7 @@ export const WEIGHTS_COPY = {
   range: `A weight is from 0 to 2.`,
   step: 'A weight goes in steps of 0.05 (0, 0.05, 0.1 … 2).',
   noChange: (cls: string) => `${cls}'s weights already are that. Nothing changed.`,
-  saved: (cls: string, posted: boolean) => `${cls}'s weights changed.${posted ? ' The review channel has the change.' : ' No review channel is set, so nothing was posted.'}`,
+  saved: (cls: string, post: PostResult) => `${cls}'s weights changed.${POSTED[post]}`,
   postHead: (who: string, cls: string, what: string) => `**/gear upgrades weights:** ${who} ${what} for **${cls}**.`,
   setWhat: (stat: string) => `set ${stat}`,
   presetWhat: (p: Preset) => `applied the ${p} preset`,
@@ -46,21 +54,23 @@ export const WEIGHTS_COPY = {
   settingsNow: (w: number, changed: string | null) => `**Upgrade window:** ${w} levels above a character's level count as "around your level"${changed ? ` (${changed})` : ' (default)'}.`,
   windowRange: `window: is a number from ${GEAR_SETTINGS.window.min} to ${GEAR_SETTINGS.window.max}.`,
   windowSame: (w: number) => `The upgrade window already is ${w}. Nothing changed.`,
-  windowSaved: (from: number, to: number, posted: boolean) => `Upgrade window: ${from} → ${to}.${posted ? ' The review channel has the change.' : ' No review channel is set, so nothing was posted.'}`,
+  windowSaved: (from: number, to: number, post: PostResult) => `Upgrade window: ${from} → ${to}.${POSTED[post]}`,
   windowPost: (who: string, from: number, to: number) => `**/gear upgrades window:** ${who} changed it from ${from} to ${to} levels.`,
 } as const;
 
 const display = (c: Ctx) => c.member.nick ?? c.member.user.global_name ?? c.member.user.username;
 const who = (c: Ctx) => memberTag(c.userId, display(c));
+/** A setter as a mention with their saved name beside it (order 16), or the mention alone when no name is saved. */
+const setter = (id: string, name: string | null) => (name ? memberTag(id, name) : `<@${id}>`);
 
-/** Posts one line in the review channel (pings nobody); false when none is set or Discord refuses. */
-async function postReview(c: Ctx, content: string): Promise<boolean> {
-  if (!c.guild.review_channel_id || !c.botToken) return false;
+/** Posts one line in the review channel (pings nobody), after the change is written. */
+async function postReview(c: Ctx, content: string): Promise<PostResult> {
+  if (!c.guild.review_channel_id || !c.botToken) return 'unset';
   const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 });
   const sent = await api.call('POST', `/channels/${c.guild.review_channel_id}/messages`, { content: truncate(content, 2000), allowed_mentions: { parse: [] } });
   c.effects.discordCalls = (c.effects.discordCalls ?? 0) + 1;
   if (!sent.ok) console.error('gear weights post refused', JSON.stringify(api.log));
-  return sent.ok;
+  return sent.ok ? 'posted' : 'refused';
 }
 
 // ---------------------------------------------------------------- /gear weights
@@ -112,7 +122,7 @@ export function weightsEmbed(code: string, rows: WeightRow[]): Embed {
       const r = rows.find((x) => x.stat === key);
       return {
         name: WEIGHT_LABEL[key],
-        value: r ? `**${fmtWeight(w[key])}** ${WEIGHTS_COPY.defaultWas(fmtWeight(d[key]))} · ${WEIGHTS_COPY.changed(memberTag(r.set_by, r.by_name ?? r.set_by), r.set_at)}` : `${fmtWeight(w[key])} · ${WEIGHTS_COPY.isDefault}`,
+        value: r ? `**${fmtWeight(w[key])}** ${WEIGHTS_COPY.defaultWas(fmtWeight(d[key]))} · ${WEIGHTS_COPY.changed(setter(r.set_by, r.by_name), r.set_at)}` : `${fmtWeight(w[key])} · ${WEIGHTS_COPY.isDefault}`,
         inline: true,
       };
     }),
@@ -135,6 +145,17 @@ function storeStatements(c: Ctx, code: string, target: Weights, before: Weights,
       );
   }
   return out;
+}
+
+/** A preset or a reset: every row of the class goes, then one row per stat where `target` differs from the default. */
+function rewriteStatements(c: Ctx, code: string, target: Weights, at: string): D1PreparedStatement[] {
+  const d = defaultWeights(code);
+  return [
+    c.db.prepare('DELETE FROM gear_weight WHERE guild_id = ? AND class = ?').bind(c.guild.id, code),
+    ...WEIGHT_KEYS.filter((k) => target[k] !== d[k]).map((k) =>
+      c.db.prepare('INSERT INTO gear_weight (guild_id, class, stat, value, set_at, set_by) VALUES (?, ?, ?, ?, ?, ?)').bind(c.guild.id, code, k, target[k], at, c.userId),
+    ),
+  ];
 }
 
 /** /gear weights class: [preset: | stat: value: | reset: True] (officers). */
@@ -165,10 +186,18 @@ export async function gearWeights(c: Ctx, opts: Option[]): Promise<MessageReply>
   }
   const changes = WEIGHT_KEYS.filter((k) => target[k] !== before[k]);
   const cls = className(code);
-  if (!changes.length) return ephemeral(WEIGHTS_COPY.noChange(cls), { embeds: [weightsEmbed(code, rows)] });
+  // Review fix: a preset or a reset rewrites the class's rows whole (delete them all, then insert the target's differences
+  // from the default), so no row survives that a snapshot missed: one another officer just wrote, one for a stat no longer
+  // in WEIGHT_KEYS, or one whose value the code's default has since become.
+  const whole = shape.kind !== 'set';
+  const d = defaultWeights(code);
+  const wanted = WEIGHT_KEYS.filter((k) => target[k] !== d[k]);
+  const exact = rows.length === wanted.length && rows.every((r) => wanted.includes(r.stat as WeightKey) && Number(r.value) === target[r.stat as WeightKey]);
+  if (!changes.length && (!whole || exact)) return ephemeral(WEIGHTS_COPY.noChange(cls), { embeds: [weightsEmbed(code, rows)] });
   const at = now();
   const diff = Object.fromEntries(changes.map((k) => [k, { from: before[k], to: target[k] }]));
-  await c.db.batch([...storeStatements(c, code, target, before, at), audit(c.db, c.guild.id, c.userId, 'gear.weights', `class:${code}`, { kind: shape.kind }, diff)]);
+  const writes = whole ? rewriteStatements(c, code, target, at) : storeStatements(c, code, target, before, at);
+  await c.db.batch([...writes, audit(c.db, c.guild.id, c.userId, 'gear.weights', `class:${code}`, { kind: shape.kind }, diff)]);
   const lines = changes.map((k) => WEIGHTS_COPY.change(WEIGHT_LABEL[k], fmtWeight(before[k]), fmtWeight(target[k])));
   const posted = await postReview(c, [WEIGHTS_COPY.postHead(who(c), cls, what), ...lines].join('\n'));
   return ephemeral(WEIGHTS_COPY.saved(cls, posted), { embeds: [weightsEmbed(code, await rowsFor(c, code))] });
@@ -185,7 +214,7 @@ export async function gearSettings(c: Ctx, opts: Option[]): Promise<MessageReply
   const S = GEAR_SETTINGS.window;
   const current = row ? Number(row.value) : S.default;
   const window = optInt(opts, 'window');
-  if (window === undefined) return ephemeral(WEIGHTS_COPY.settingsNow(current, row ? WEIGHTS_COPY.changed(memberTag(row.set_by, row.by_name ?? row.set_by), row.set_at) : null));
+  if (window === undefined) return ephemeral(WEIGHTS_COPY.settingsNow(current, row ? WEIGHTS_COPY.changed(setter(row.set_by, row.by_name), row.set_at) : null));
   if (window < S.min || window > S.max) return ephemeral(WEIGHTS_COPY.windowRange);
   if (window === current) return ephemeral(WEIGHTS_COPY.windowSame(current));
   const at = now();
