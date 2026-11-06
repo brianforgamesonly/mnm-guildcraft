@@ -66,6 +66,20 @@ describe('order 35, ITEM 1: race_mask and the derived race list', () => {
     expect(r.dropped).toEqual([{ code: 'ELD', items: 1 }]);
   });
 
+  it('review fixes: NONE is no race; case-only duplicate items count once; bits running out fails the run cleanly', async () => {
+    expect(deriveRaces(data({ 'Cap A': { slot: 'HEAD', race: 'NONE' }, 'Cap B': { slot: 'HEAD', race: 'none' } })).kept).toEqual([]);
+    expect(deriveRaces(data({ 'Odd Hat': { slot: 'HEAD', race: 'GIE' }, 'odd hat': { slot: 'HEAD', race: 'GIE' } })).kept).toEqual([]);
+    const f = data({});
+    for (let i = 0; i < 32; i++) {
+      const code = `R${String.fromCharCode(65 + Math.floor(i / 26))}${String.fromCharCode(65 + (i % 26))}`;
+      f.items[`Hat ${i} a`] = { slot: 'HEAD', race: code };
+      f.items[`Hat ${i} b`] = { slot: 'HEAD', race: code };
+    }
+    const res = await load(f);
+    expect(res.status).toBe('failed');
+    expect(res.error).toMatch(/more than 30/);
+  });
+
   it('the import writes game_race and race_mask; a new race token raises vocab_drift; a second run writes 0', async () => {
     const f = data({
       'Ring A': { slot: 'FINGER', race: 'HUM DEF' },

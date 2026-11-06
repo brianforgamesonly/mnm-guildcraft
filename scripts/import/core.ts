@@ -377,7 +377,8 @@ export function assignClassBits(kept: string[], existing: Map<string, { item_cou
     const held = existing.get(code)?.bit;
     if (held !== null && held !== undefined) bits.set(code, held);
     else {
-      if (next > MAX_CLASS_BIT) throw new Error(`no class bit left for ${code}: bits 0..${MAX_CLASS_BIT} are taken`);
+      // Order 35 (review fix): a StructureError, so runImport records the run as failed instead of crashing.
+      if (next > MAX_CLASS_BIT) throw new StructureError([`no bit left for ${code}: bits 0..${MAX_CLASS_BIT} are taken (bits are never reused)`]);
       bits.set(code, next++);
     }
   }
@@ -391,6 +392,8 @@ export const RACE_MIN_ITEMS = 2;
 /** More races than this stops the import (order 35, B8): the bits 0..MAX_CLASS_BIT would not hold them. */
 export const MAX_RACES = 30;
 const RACE_ALL = 'ALL';
+/** As for classes, NONE names no race (review fix: it would otherwise be kept as a race code). */
+const RACE_NONE = 'NONE';
 
 /**
  * An item's race text as tokens (order 35). The source's text sometimes runs on into the template's next line
@@ -421,9 +424,14 @@ export function deriveRaces(data: WikiData): RaceDerivation {
   let carrying = 0;
   let all = 0;
   const codes = new Map<string, { items: number; mountOnly: boolean }>();
-  for (const it of Object.values(data.items)) {
+  // As buildPlan keeps items: on a case-only name collision, the first name in sorted order (review fix: no double count).
+  const seenKeys = new Set<string>();
+  for (const name of Object.keys(data.items).sort()) {
+    if (seenKeys.has(nameKey(name))) continue;
+    seenKeys.add(nameKey(name));
+    const it = data.items[name];
     if (typeof it.race !== 'string') continue;
-    const tokens = raceTokens(it.race);
+    const tokens = raceTokens(it.race).filter((t) => t !== RACE_NONE);
     if (!tokens.length) continue;
     carrying++;
     if (tokens.includes(RACE_ALL)) {
@@ -900,7 +908,11 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     row.slot_mask = slotMask(it);
     row.source_mask = sourceMask(it, crafted.has(row.name_key));
     row.race_mask = raceMask(it, raceBits);
-    if (typeof it.race === 'string') for (const t of new Set(raceTokens(it.race))) if (t !== RACE_ALL && !raceBits.has(t)) bump(raceDrift, t);
+    if (typeof it.race === 'string') {
+      const rt = new Set(raceTokens(it.race));
+      // An item that also says ALL is every race: its other tokens are not drift (review fix: counts match deriveRaces).
+      if (!rt.has(RACE_ALL)) for (const t of rt) if (t !== RACE_NONE && !raceBits.has(t)) bump(raceDrift, t);
+    }
     if (typeof it.class === 'string')
       for (const t of new Set(classTokens(it.class))) if (!CLASS_IGNORED.has(t) && !classBits.has(t)) bump(unrecognised, t);
     for (const t of new Set(slotTokens(it.slot))) if (!(SLOTS as readonly string[]).includes(t)) bump(drift.slot, t);
