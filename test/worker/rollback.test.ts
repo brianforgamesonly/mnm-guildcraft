@@ -40,6 +40,8 @@ import down24 from '../../scripts/rollback/0024_events.down.sql?raw';
 import down31 from '../../scripts/rollback/0031_gear_weights.down.sql?raw';
 import up31 from '../../migrations/0031_gear_weights.sql?raw';
 import up24 from '../../migrations/0024_events.sql?raw';
+import down32 from '../../scripts/rollback/0032_quest_sites_npc_indexes.down.sql?raw';
+import up32 from '../../migrations/0032_quest_sites_npc_indexes.sql?raw';
 
 const schema = async () =>
   (await env.DB.prepare("SELECT type, name, sql FROM sqlite_master WHERE name NOT LIKE '_cf_%' ORDER BY type, name").all<{ type: string; name: string; sql: string | null }>())
@@ -213,7 +215,8 @@ it('order 19: 0014 down, then up again, restores the schema; down leaves no trac
 });
 
 it('order 17: 0013 down, then up again, restores the schema; down leaves no trace of it', async () => {
-  // Order 28: 0022 adds npc's columns, so it comes off first and goes back last.
+  // Order 28: 0022 adds npc's columns, so it comes off first and goes back last; order 37's 0032 indexes npc before it.
+  await run(down32);
   await run(down22);
   const before = await schema();
   await run(down13);
@@ -221,6 +224,17 @@ it('order 17: 0013 down, then up again, restores the schema; down leaves no trac
   await run(up13);
   expect(await schema()).toEqual(before);
   await run(up22);
+  await run(up32);
+});
+
+it('order 37, PR B: 0032 down, then up again, restores the schema and the 48 seeded links; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down32);
+  expect((await schema()).some((r) => ['npc_by_name', 'npc_loot', 'quest_site', 'quest_site_run'].includes(r.name))).toBe(false);
+  await run(up32);
+  expect(await schema()).toEqual(before);
+  expect(await env.DB.prepare('SELECT count(*) AS n FROM quest_site WHERE linked = 1').first('n')).toBe(48);
+  expect(await env.DB.prepare("SELECT event FROM quest_site_run").first('event')).toBe('seed');
 });
 
 it('order 16: 0012 down, then up again, restores the schema; down leaves no trace of it', async () => {

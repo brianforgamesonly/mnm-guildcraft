@@ -13,26 +13,22 @@
 // src/discord.ts EMBED_LIMITS. The largest reply here is Pick a result's: 2 rows, 3 + 5 buttons.
 import { MessageComponentTypes } from 'discord-interactions';
 import type { Ctx } from '../context.ts';
-import { tierCrafters, type CrafterRow } from '../crafters.ts';
-import { button, EMBED_LIMITS, ephemeral, md, memberTag, optInt, optString, plural, row, STYLE_PRIMARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, plural, row, STYLE_PRIMARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { pageData } from '../commands/gear.ts';
 import type { GearRow } from './search.ts';
 import { itemCard, POST_WHAT as ITEM_POST } from '../commands/item.ts';
 import { POST_PREFIX, postedReply, searchReply } from '../commands/share.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
-import { zoneButtons, withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
-import { WIKI_ZONES_SOURCE } from '../zone/names.ts';
+import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
 import { gearIndex, VERSION_SQL, type GearIndex } from './index.ts';
-import { dropPick, sourceIndex, vendorParts, type SourceIndex } from './sources.ts';
+import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
   breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, fmtHundredths, groupByKey, grouped, GROUPS, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
 import { raceLabel } from './vocab.ts';
-// Order 36 follow-up: quest pages on monstersandmemories.wiki, each verified to exist (scripts/gear/quest-sites.ts).
-import QUEST_SITES from './quest-sites.json' with { type: 'json' };
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
@@ -52,8 +48,7 @@ export { FIND_UPGRADES_PREFIX };
 
 export const PER_PAGE = 5;
 export const SUMMARY_LINES = 8;
-/** Order 37, ITEM 2: merchants named on a vendor line before "+N more". */
-export const VENDOR_MERCHANTS = 2;
+export { VENDOR_MERCHANTS, linkUrl, howToGet, type Extras };
 
 /**
  * Order 36 follow-up (the owner, 2026-11-06): a level cap, or none (null: the default). In a custom_id it is "c" (none) or
@@ -62,17 +57,10 @@ export const VENDOR_MERCHANTS = 2;
 export type Cap = number | null;
 export const capState = (cap: Cap) => (cap === null ? 'c' : `c${cap}`);
 export const capOf = (s: string | undefined): Cap => (s && /^c\d+$/.test(s) ? Number(s.slice(1)) : null);
-/**
- * A link's address with its parentheses encoded (review fix: wiki titles such as "Archer Starter Quest (Faelindral)" put
- * them in the address, which would end a markdown link early; src/board/factions.ts encodes them the same way).
- */
-export const linkUrl = (url: string) => url.replace(/\(/g, '%28').replace(/\)/g, '%29');
 /** An item name, linked to its wiki page when it has one (https only). */
 const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${linkUrl(it.wiki)})` : `**${md(it.name)}**`);
 
 // ---------------------------------------------------------------- copy (order 36; listed for approval in docs/COPY.md)
-
-const range = (lo: number, hi: number | null) => (hi === null ? `${lo}+` : hi === lo ? `${lo}` : `${lo}–${hi}`);
 
 export const UPGRADES_COPY = {
   title: (name: string) => `Upgrades for ${name}`,
@@ -80,7 +68,8 @@ export const UPGRADES_COPY = {
   who: (ch: Character) => `**${md(ch.name)}** · ${md(className(ch.class))}${ch.level !== null ? ` ${ch.level}` : ''} · ${ch.race ? md(raceLabel(ch.race)) : 'any race'}`,
   weights: (cls: string) => `Uses your guild's ${cls} weights.`,
   capNote: (cap: number) => `Items up to Lv ${cap}.`,
-  hidden: (n: number, cap: number) => `${plural(n, 'more')} above Lv ${cap} not shown.`,
+  // Order 37, PR B (Brian's check): "more" takes no plural ("69 more above Lv 15 not shown", "1 more …").
+  hidden: (n: number, cap: number) => `${n} more above Lv ${cap} not shown.`,
   listedLine: (slot: string, u: Upgrade) => `**${slot}:** ${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}`,
   unknownLine: (slot: string) => `**${slot}:** only level-unknown upgrades`,
   footer: (more: number, none: number) =>
@@ -111,27 +100,8 @@ export const UPGRADES_COPY = {
   forSlot: (ch: string, slot: string) => `for ${md(ch)}'s ${slot}`,
   unknownSlot: 'Pick a slot from the list.',
   gone: 'That item is no longer in the data.',
-  // How to get it.
-  drop: (mob: string, zone: string | null, level: string, more: number) => `Drop: ${md(mob)}${zone ? ` in ${md(zone)}` : ''} · ${level}${more ? ` · +${more} more` : ''}`,
-  dropZones: (zones: string[], level: string) => `Drop: in ${zones.map(md).join(', ')} · ${level}`,
-  dropNoMob: (level: string) => `Drop: creature not recorded · ${level}`,
-  crafted: (skill: string, trivial: number | null, floor: string | null) => `Crafted: ${skill}, ${trivial === null ? 'trivial unknown' : `trivial ${trivial}`}${floor ? ` · ${floor}` : ''}`,
-  craftedNoRecipe: 'Crafted (no recipe in the data)',
-  youCanMake: (character: string, level: number) => `You can make this (${md(character)} ${level})`,
-  reliable: (who: string[]) => `Reliable in your guild: ${who.join(', ')}`,
-  noReliable: 'No Reliable crafter in the guild yet',
-  // Order 37, ITEM 2: "Vendor: Master Tailor Sansha, Night Harbor · any level"; merchants "Name, Zone" or "Name (N zones)",
-  // the first VENDOR_MERCHANTS, then "+N more" (merchants only); then what matched no table, as recorded.
-  vendor: (merchants: string[], more: number, rest: string[]) => {
-    const named = merchants.length ? `${merchants.map(md).join('; ')}${more > 0 ? ` +${more} more` : ''}` : '';
-    return `Vendor: ${[named, rest.map(md).join(', ')].filter(Boolean).join('; ')} · any level`;
-  },
-  vendorUnnamed: 'Vendor: where not recorded · any level',
-  harvest: 'Harvested, any level',
-  quest: (level: string) => `Quest: the quest's name isn't recorded · ${level}`,
-  questNamed: (name: string, level: string, more: number) => `Quest: ${name} · ${level}${more ? ` · +${more} more` : ''}`,
-  mnmWiki: 'monstersandmemories.wiki',
-  unknown: 'Source not recorded',
+  // How to get it (order 37, PR B: src/gear/howto.ts, shared with the item cards).
+  ...HOW_COPY,
 } as const;
 
 // ---------------------------------------------------------------- levels, always with their kind (order 35)
@@ -244,109 +214,24 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
 
 // ---------------------------------------------------------------- one slot's list
 
-export interface Extras {
-  rows: Map<number, { origin_json: string | null; source_mask: number }>;
-  d: Awaited<ReturnType<typeof pageData>>;
-  /** Order 37: the creatures, NPCs and zones the drop and vendor lines read (src/gear/sources.ts), per import version. */
-  src: SourceIndex | null;
-}
-
 /**
- * The page's items' sources: their rows, then their recipes and crafters (pageData's batch), and the source index (read only
- * when the import version changed). Order 37: the drop line's creatures and the vendor line's merchants come from the source
- * index, so pageData reads no mob rows here.
+ * The page's items' sources: their rows, then their recipes and crafters (pageData's batch), and what the lines read
+ * besides (src/gear/howto.ts sourceExtras). pageData reads no mob rows here.
  */
 export async function extrasFor(c: Pick<Ctx, 'db' | 'guild'>, items: GearItem[], version: string | null): Promise<Extras> {
   if (!items.length) return { rows: new Map(), d: { classes: [], mobs: [], recipes: [], crafters: [], version: null }, src: null };
-  const [{ results }, src] = await Promise.all([
-    c.db
-      .prepare('SELECT id, origin_json, source_mask FROM item WHERE id IN (SELECT value FROM json_each(?1))')
-      .bind(JSON.stringify(items.map((i) => i.id)))
-      .all<{ id: number; origin_json: string | null; source_mask: number }>(),
-    sourceIndex(c.db, version),
+  const { results } = await c.db
+    .prepare('SELECT id, origin_json, source_mask, name_key, level_low, level_high, level_kind, level_kinds FROM item WHERE id IN (SELECT value FROM json_each(?1))')
+    .bind(JSON.stringify(items.map((i) => i.id)))
+    .all<{ id: number; origin_json: string | null; source_mask: number }>();
+  const byId = new Map(results.map((r) => [r.id, r]));
+  const [d, s] = await Promise.all([
+    pageData(c, results as unknown as GearRow[], 0),
+    sourceExtras(c, items.map((it) => ({ key: it.key, origin_json: byId.get(it.id)?.origin_json ?? null })), version),
   ]);
-  const d = await pageData(c, results as unknown as GearRow[], 0);
-  return { rows: new Map(results.map((r) => [r.id, r])), d, src };
+  return { rows: byId, d, ...s };
 }
 const extras = (c: Ctx, L: Loaded, items: GearItem[]) => extrasFor(c, items, L.idx.version);
-
-interface Origin {
-  from?: string[];
-  wikiZones?: string[];
-  soldBy?: { vendors?: string[] };
-  /** Order 36 follow-up (scripts/import/core.ts questsByItem). */
-  quests?: { name: string; level: number | null; wiki: string | null }[];
-}
-const originOf = (s: string | null): Origin => (s ? JSON.parse(s) : {}) as Origin;
-
-/** How to get it, by its level kinds, primary first (one line per way), and the zone names the lines show. */
-export function howToGet(it: GearItem, x: Extras, searcher: string, window: number): { lines: string[]; zones: ZoneRef[]; craftable: boolean } {
-  const o = originOf(x.rows.get(it.id)?.origin_json ?? null);
-  const kinds = (it.levelKinds ?? 'unknown').split(',');
-  const ways = [...new Set(kinds.map((k) => (k === 'mob' || k === 'zone' ? 'drop' : k === 'crafted_floor' ? 'crafted' : k)))];
-  const lines: string[] = [];
-  const zones: ZoneRef[] = [];
-  const recipes = x.d.recipes.filter((r) => r.item_id === it.id);
-  for (const w of ways) {
-    if (w === 'drop') {
-      // The item's own drop level (order 35: a mob's, or the zone fallback, named as such) when no creature row has one.
-      const zoneLevel =
-        it.levelLow === null ? 'level unknown' : it.levelKind === 'zone' ? `zone Lv ${range(it.levelLow, it.levelHigh)}` : it.levelKind === 'mob' ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown';
-      // Order 37, ITEM 1: the creature with the lowest level, read as the import reads it (src/gear/sources.ts dropPick).
-      const pick = x.src ? dropPick(x.src, it.key, o.from ?? [], o.wikiZones ?? []) : null;
-      if (pick) {
-        if (pick.zone?.ref) zones.push(pick.zone.ref);
-        const level = pick.range ? `Lv ${range(pick.range.low, pick.range.high)}` : zoneLevel;
-        lines.push(UPGRADES_COPY.drop(pick.name, pick.zone?.name ?? null, level, pick.more));
-      } else if (o.wikiZones?.length) {
-        zones.push(...o.wikiZones.map((name): ZoneRef => ({ source: WIKI_ZONES_SOURCE, name })));
-        lines.push(UPGRADES_COPY.dropZones(o.wikiZones.slice(0, 3), zoneLevel));
-      } else lines.push(UPGRADES_COPY.dropNoMob(zoneLevel));
-    } else if (w === 'crafted') {
-      const r = recipes[0];
-      if (!r) {
-        lines.push(UPGRADES_COPY.craftedNoRecipe);
-        continue;
-      }
-      const floor = it.levelKind === 'crafted_floor' && it.levelLow !== null ? `Lv ${it.levelLow}+` : null;
-      lines.push(UPGRADES_COPY.crafted(r.tradeskill, r.trivial, floor));
-      const reliable = tierCrafters(x.d.crafters as CrafterRow[], r, window).reliable;
-      const own = reliable.filter((k) => k.owner_user_id === searcher);
-      const others: string[] = [];
-      for (const k of reliable) {
-        if (k.owner_user_id === searcher || others.length >= 3) continue;
-        if (others.some((t) => t.startsWith(`<@${k.owner_user_id}>`))) continue;
-        others.push(`${memberTag(k.owner_user_id, k.member)}: ${md(k.character)} ${k.level}`);
-      }
-      if (own.length) lines.push(UPGRADES_COPY.youCanMake(own[0].character, own[0].level));
-      if (others.length) lines.push(UPGRADES_COPY.reliable(others));
-      else if (!own.length) lines.push(UPGRADES_COPY.noReliable);
-    } else if (w === 'vendor') {
-      // Order 37, ITEM 2: merchants and zones picked out by an exact lookup in npc and zone_name (src/gear/sources.ts
-      // vendorParts); anything matching neither is shown as recorded.
-      const v = o.soldBy?.vendors ?? [];
-      const p = v.length && x.src ? vendorParts(x.src, v) : null;
-      if (p && (p.merchants.length || p.rest.length)) {
-        lines.push(UPGRADES_COPY.vendor(p.merchants.slice(0, VENDOR_MERCHANTS), p.merchants.length - VENDOR_MERCHANTS, p.rest));
-      } else lines.push(UPGRADES_COPY.vendorUnnamed);
-    } else if (w === 'harvest') lines.push(UPGRADES_COPY.harvest);
-    else if (w === 'quest') {
-      // Order 36 follow-up: the quest's name (the import keeps it, origin_json.quests, lowest level first), linked to its
-      // page on the Monsters and Memories Wiki when the snapshot holds one, and to monstersandmemories.wiki when that page
-      // was verified (src/gear/quest-sites.json). Neither link is offered for a page not known to exist (order 17b).
-      const q = o.quests?.[0];
-      if (!q) lines.push(UPGRADES_COPY.quest(it.levelKind === 'quest' && it.levelLow !== null ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown'));
-      else {
-        const mnm = (QUEST_SITES.quests as Record<string, string>)[q.name];
-        const name = `${q.wiki?.startsWith('https://') ? `[${md(q.name)}](${linkUrl(q.wiki)})` : md(q.name)}${mnm ? ` ([${UPGRADES_COPY.mnmWiki}](${linkUrl(mnm)}))` : ''}`;
-        lines.push(UPGRADES_COPY.questNamed(name, q.level !== null ? `Lv ${q.level}+` : 'level unknown', (o.quests?.length ?? 1) - 1));
-      }
-    }
-    else lines.push(UPGRADES_COPY.unknown);
-  }
-  // Review fix: Request a craft only where the data holds a recipe (/request needs one; requestFromFind checks it too).
-  return { lines, zones, craftable: recipes.length > 0 };
-}
 
 /** One result's lines: its name and gain, the side or note, the breakdown, then how to get it. */
 function resultLines(u: Upgrade, L: Loaded, how: string[]): string[] {

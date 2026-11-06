@@ -9,8 +9,15 @@
 //     recipe_component, ...): its rows whose every such key points at a kept row, and at least one does;
 //   - the game data the import writes (scripts/import/core.ts IMPORT_WRITES) and d1_migrations: whole, because the
 //     guild's rows point into it by id, and a fresh copy needs it to load;
+//   - the tables a migration seeds with literal rows (order 37, PR B: quest_site, quest_site_run; seededTables, read from
+//     the migrations themselves): whole, so the export loads with the same counts into a copy whose migrations already ran;
 //   - every other table (the operator's backup_status, usage_daily, and anything added later): emptied.
 // A table that cannot be scoped (no guild_id, only a composite key to a guild table) stops the export.
+
+/** The tables migrations seed with literal rows (INSERT … VALUES; an INSERT … SELECT copies rows and seeds nothing). */
+export const seededTables = (migrations: string[]): string[] => [
+  ...new Set(migrations.flatMap((sql) => [...sql.replace(/--.*$/gm, '').matchAll(/INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(\w+)\s*\([^)]*\)\s*VALUES/gi)].map((m) => m[1]))),
+];
 
 export interface TableSql {
   name: string;

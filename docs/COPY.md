@@ -1338,3 +1338,11 @@ The Drop line's wording is unchanged (order 36's "Drop: \<mob> in \<zone> · Lv 
 | src/gear/upgrades.ts:125-128 | Several merchants: "Vendor: \<merchant>, \<zone>; \<merchant>, \<zone> +\<n> more · any level" (the first two; "+\<n> more" counts merchants only) | DRAFT |
 | src/gear/sources.ts (vendorParts) | A merchant in several zones, none named in the record: "\<merchant> (\<n> zones)" | DRAFT |
 | src/gear/upgrades.ts:125-128 | What matched neither table, and zones not shown with a merchant, as recorded after the merchants: "Vendor: \<merchant>, \<zone>; \<as recorded>, … · any level"; a record of zones only: "Vendor: \<zone> · any level" | DRAFT |
+
+PR B: the how-to-get lines moved to src/gear/howto.ts (HOW_COPY), unchanged.
+
+| Where | Text | Status |
+|---|---|---|
+| src/gear/howto.ts (HOW_COPY.cardField) | /item card field: "How to get it" (the same lines as /gear upgrades; replaces the card's "Quest" and "Unknown — source not recorded" fields; the Vendor field now shows the price only) | DRAFT |
+| src/gear/upgrades.ts (UPGRADES_COPY.hidden) | "\<n> more above Lv \<n> not shown." (fixes "69 mores …") | DRAFT |
+| src/commands/gear.ts (sourceLines) | /gear find result line for a harvested item: "Harvested, any level" | DRAFT |

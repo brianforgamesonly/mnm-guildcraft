@@ -32,6 +32,8 @@
     "bench:gear-upgrades": "node scripts/bench/gear-upgrades.mjs",
     "bench:gear-sources": "node scripts/bench/gear-sources.ts",
     "quest-sites": "node scripts/gear/quest-sites.ts",
+    "test:quest-sites": "node --test scripts/gear/quest-sites.test.ts",
+    "bench:cold-slot-list": "node scripts/bench/cold-slot-list.mjs",
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "commands:register": "node scripts/discord/register.ts"
   },

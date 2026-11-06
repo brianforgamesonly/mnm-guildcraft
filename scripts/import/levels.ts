@@ -151,7 +151,7 @@ const choose = (kinds: Map<Kind, Range | null>): { kind: Kind; range: Range | nu
  * parses every row's loot to draw one page: a row is parsed only when its text holds the item's name (lower-cased; a name
  * holding `"` or `\`, which JSON escapes, parses every row), and then matched exactly, as the lists are.
  */
-type Loot = string[] | { json: string | null };
+type Loot = string[] | { json: string | null; lower?: string | null };
 export interface CreatureInput {
   mobs: (Omit<LevelInput['mobs'][number], 'loot'> & { loot: Loot })[];
   npcs: (Omit<LevelInput['npcs'][number], 'loot'> & { loot: Loot })[];
@@ -175,6 +175,8 @@ export interface CreatureIndex {
   creaturesOf: (itemKey: string, from: string[]) => string[];
   /** A creature's name as the data writes it: a mob's title, else an NPC row's name. */
   display: (name: string) => string | undefined;
+  /** Its mob row's own level, when that parses: then its NPC rows decide nothing (level, spots). */
+  mobLevel: (name: string) => Range | null;
 }
 
 /**
@@ -250,7 +252,8 @@ export function creatureIndex(
         const json = o.loot.json;
         if (!json) continue;
         if (!escaped) {
-          if (!lowerText.has(o)) lowerText.set(o, json.toLowerCase());
+          // The caller may pass the text already lower-cased (src/gear/sources.ts keeps it per import).
+          if (!lowerText.has(o)) lowerText.set(o, o.loot.lower ?? json.toLowerCase());
           if (!lowerText.get(o)!.includes(itemKey)) continue;
         }
         const v = JSON.parse(json) as unknown;
@@ -273,7 +276,11 @@ export function creatureIndex(
   }
   const creaturesOf = (itemKey: string, from: string[]) => [...new Set([...from.map(lower), ...(looted ? looted.get(itemKey) ?? [] : lootedBy(itemKey))])];
   const display = (name: string) => mobOf(name)?.title ?? npcsByName.get(name)?.[0]?.name;
-  return { level, zones, spots, creaturesOf, display };
+  const mobLevel = (name: string) => {
+    const mob = mobOf(name);
+    return mob ? levelOf(mob) : null;
+  };
+  return { level, zones, spots, creaturesOf, display, mobLevel };
 }
 
 // ---------------------------------------------------------------- the computation

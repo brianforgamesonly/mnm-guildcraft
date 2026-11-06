@@ -7,19 +7,25 @@
 // - The vendor line picks merchants and zones out of the source's vendor list by an exact lookup in data already held
 //   (npc.name, zone_name.name), trimmed and case-insensitive, never by a partial match or a guess from names (order 4;
 //   order 37's override 1). Anything that matches neither table is shown as recorded.
-// The tables change only when an import writes them, so they are read once per import version (src/gear/index.ts's rule:
-// the newest data_import row's id, status and finish time; nothing is cached while it has no finish time).
-import { creatureIndex, type CreatureIndex, type Range } from '../../scripts/import/levels.ts';
+// Cost (order 37, PR B: the owner, 2026-11-06): a new isolate's first slot list stays under order 36's 5,000 rows. Read
+// once per import version (src/gear/index.ts's rule: the newest data_import row's id, status and finish time; nothing is
+// cached while it has no finish time): the mobs, the NPC rows whose loot names something (migrations/0032 npc_loot covers
+// that read) and the zones. Read per page, by name (npc_by_name): every NPC row named as a creature or a vendor on the
+// page. So each creature on the page has all its NPC rows, as the import does, without reading every NPC row.
+import { creatureIndex, type CreatureIndex, type CreatureInput, type Range } from '../../scripts/import/levels.ts';
 import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../zone/names.ts';
 import type { ZoneRef } from '../zone/buttons.ts';
 
 export const SOURCE_SQL = {
   mobs: 'SELECT key, title, level, zones_json, loot_json FROM mob WHERE active = 1',
-  npcs: 'SELECT name, zone_key, level, loot_json FROM npc WHERE active = 1',
+  lootNpcs: 'SELECT name, zone_key, level, loot_json FROM npc WHERE active = 1 AND loot_json IS NOT NULL',
   zoneNames: 'SELECT source, name, zone_key FROM zone_name WHERE active = 1 AND zone_key IS NOT NULL',
   zones: 'SELECT key, name FROM zone WHERE active = 1',
+  /** Per page: NOCASE, like the column (ASCII case only). */
+  npcsByName: 'SELECT name, zone_key, level FROM npc WHERE active = 1 AND name IN (SELECT value FROM json_each(?1))',
 } as const;
 
+/** What a page's lines read: every creature and vendor name on it, with all its rows. */
 export interface SourceIndex {
   version: string | null;
   creatures: CreatureIndex;
@@ -35,14 +41,32 @@ export interface SourceIndex {
   rowsRead: number;
 }
 
-let cached: SourceIndex | null = null;
-/** Tests only: forget the cached index. */
+/** Read once per import version. */
+export interface SourceCache {
+  version: string | null;
+  mobs: CreatureInput['mobs'];
+  lootNpcs: CreatureInput['npcs'];
+  zoneNames: ZoneNameRow[];
+  zones: Zones;
+  /** Over the mobs and the NPC rows with loot: which creatures the loot links to an item. */
+  base: CreatureIndex;
+  /** D1 rows_read for reading it (0 when it came from memory). */
+  rowsRead: number;
+}
+interface Zones {
+  zoneKeysByName: Map<string, string[]>;
+  zoneName: Map<string, string>;
+  refs: Map<string, ZoneRef[]>;
+}
+
+let cached: SourceCache | null = null;
+/** Tests only: forget the cached rows. */
 export const clearSourceIndex = () => {
   cached = null;
 };
 
 interface MobRow { key: string; title: string; level: string | null; zones_json: string | null; loot_json: string | null }
-interface NpcRow { name: string; zone_key: string; level: string | null; loot_json: string | null }
+interface NpcRow { name: string; zone_key: string; level: string | null; loot_json?: string | null }
 interface ZoneNameRow { source: string; name: string; zone_key: string }
 interface ZoneRow { key: string; name: string }
 
@@ -52,24 +76,33 @@ const list = (json: string | null): string[] => {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
 };
 const lower = (s: string) => s.toLowerCase();
+// Loot is kept as stored, lower-cased once here (scripts/import/levels.ts reads it per item).
+const rawLoot = (json: string | null | undefined) => ({ json: json ?? null, lower: json ? json.toLowerCase() : null });
+const mobIn = (m: MobRow): CreatureInput['mobs'][number] => ({ key: m.key, title: m.title, level: m.level, zones: list(m.zones_json), loot: rawLoot(m.loot_json) });
+const npcIn = (n: NpcRow): CreatureInput['npcs'][number] => ({ name: n.name, zone_key: n.zone_key, level: n.level, loot: rawLoot(n.loot_json) });
 
+/** A page's index: every row given (the tests and the bench pass whole tables). */
 export function buildSourceIndex(version: string | null, rows: { mobs: MobRow[]; npcs: NpcRow[]; zoneNames: ZoneNameRow[]; zones: ZoneRow[] }, rowsRead = 0): SourceIndex {
-  const zoneName = new Map(rows.zones.map((z) => [z.key, z.name]));
-  const creatures = creatureIndex({
-    mobs: rows.mobs.map((m) => ({ key: m.key, title: m.title, level: m.level, zones: list(m.zones_json), loot: { json: m.loot_json } })),
-    npcs: rows.npcs.map((n) => ({ name: n.name, zone_key: n.zone_key, level: n.level, loot: { json: n.loot_json } })),
-    zoneNames: rows.zoneNames,
-  });
+  return { ...assemble(rows.mobs.map(mobIn), rows.npcs.map(npcIn), rows.zoneNames, zonesOf(rows.zoneNames, rows.zones)), version, rowsRead };
+}
+
+function assemble(mobs: CreatureInput['mobs'], npcs: CreatureInput['npcs'], zoneNames: ZoneNameRow[], z: Zones): Omit<SourceIndex, 'version' | 'rowsRead'> {
+  const creatures = creatureIndex({ mobs, npcs, zoneNames });
   const npcZones = new Map<string, string[]>();
-  for (const n of rows.npcs) {
+  for (const n of npcs) {
     const k = lower(n.name.trim());
     const zs = npcZones.get(k) ?? [];
-    if (zoneName.has(n.zone_key) && !zs.includes(n.zone_key)) zs.push(n.zone_key);
+    if (z.zoneName.has(n.zone_key) && !zs.includes(n.zone_key)) zs.push(n.zone_key);
     npcZones.set(k, zs);
   }
+  return { creatures, npcZones, ...z };
+}
+
+function zonesOf(zoneNames: ZoneNameRow[], zones: ZoneRow[]): Zones {
+  const zoneName = new Map(zones.map((z) => [z.key, z.name]));
   const zoneKeysByName = new Map<string, string[]>();
   const refs = new Map<string, ZoneRef[]>();
-  for (const z of rows.zoneNames) {
+  for (const z of zoneNames) {
     if (!zoneName.has(z.zone_key)) continue;
     const k = lower(z.name.trim());
     const ks = zoneKeysByName.get(k) ?? [];
@@ -82,21 +115,58 @@ export function buildSourceIndex(version: string | null, rows: { mobs: MobRow[];
     }
   }
   for (const r of refs.values()) r.sort((a, b) => Number(b.source === WIKI_ZONES_SOURCE) - Number(a.source === WIKI_ZONES_SOURCE));
-  return { version, creatures, npcZones, zoneKeysByName, zoneName, refs, rowsRead };
+  return { zoneKeysByName, zoneName, refs };
 }
 
-/** The index for this import version: from memory when the key matches, else read (one batch of four statements). */
-export async function sourceIndex(db: D1Database, version: string | null): Promise<SourceIndex> {
+/** The rows read once per import version: from memory when the key matches, else read (one batch of four statements). */
+export async function sourceCache(db: D1Database, version: string | null): Promise<SourceCache> {
   const cacheable = version !== null && !version.endsWith(':');
   if (cacheable && cached?.version === version) return { ...cached, rowsRead: 0 };
-  const r = await db.batch([db.prepare(SOURCE_SQL.mobs), db.prepare(SOURCE_SQL.npcs), db.prepare(SOURCE_SQL.zoneNames), db.prepare(SOURCE_SQL.zones)]);
-  const idx = buildSourceIndex(
+  const r = await db.batch([db.prepare(SOURCE_SQL.mobs), db.prepare(SOURCE_SQL.lootNpcs), db.prepare(SOURCE_SQL.zoneNames), db.prepare(SOURCE_SQL.zones)]);
+  const mobs = (r[0].results as MobRow[]).map(mobIn);
+  const lootNpcs = (r[1].results as NpcRow[]).map(npcIn);
+  const zoneNames = r[2].results as ZoneNameRow[];
+  const c: SourceCache = {
     version,
-    { mobs: r[0].results as MobRow[], npcs: r[1].results as NpcRow[], zoneNames: r[2].results as ZoneNameRow[], zones: r[3].results as ZoneRow[] },
-    r.reduce((n, x) => n + (x.meta?.rows_read ?? 0), 0),
-  );
-  if (cacheable) cached = idx;
-  return idx;
+    mobs,
+    lootNpcs,
+    zoneNames,
+    zones: zonesOf(zoneNames, r[3].results as ZoneRow[]),
+    base: creatureIndex({ mobs, npcs: lootNpcs, zoneNames }),
+    rowsRead: r.reduce((n, x) => n + (x.meta?.rows_read ?? 0), 0),
+  };
+  if (cacheable) cached = c;
+  return c;
+}
+
+/** Every run of neighbouring parts of a vendor list, joined with ", " (vendorParts tries them, longest first). */
+export function vendorRuns(vendors: string[]): string[] {
+  const parts = vendors.flatMap((v) => v.split(',')).map((p) => p.trim()).filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) for (let j = i + 1; j <= parts.length; j++) out.push(parts.slice(i, j).join(', '));
+  return out;
+}
+
+/**
+ * The index a page's lines read: the cached rows, plus every NPC row named (case-insensitive) as one of the page's creatures
+ * (its items' `from` lists and loot links) or vendor parts. One statement, by name (npc_by_name).
+ */
+export async function pageSources(db: D1Database, c: SourceCache, items: { key: string; from: string[]; vendors: string[] }[]): Promise<{ src: SourceIndex; rowsRead: number }> {
+  // A creature whose mob row's own level parses is decided by that row (its level and its zones), so its NPC rows aren't read.
+  const creatures = items.flatMap((it) => [...it.from, ...c.base.creaturesOf(it.key, [])]).filter((n) => !c.base.mobLevel(n.toLowerCase()));
+  const names = [...new Set([...creatures, ...items.flatMap((it) => vendorRuns(it.vendors))])];
+  let found: NpcRow[] = [];
+  let rowsRead = 0;
+  if (names.length) {
+    const r = await db.prepare(SOURCE_SQL.npcsByName).bind(JSON.stringify(names)).all<NpcRow>();
+    found = r.results;
+    rowsRead = r.meta?.rows_read ?? 0;
+  }
+  // The loot rows already held, then the rows found that are not among them (an NPC row is one zone × name).
+  const id = (n: { zone_key: string; name: string }) => `${n.zone_key}\u0000${lower(n.name)}`;
+  const held = new Set(c.lootNpcs.map(id));
+  const npcs = [...c.lootNpcs, ...found.filter((n) => !held.has(id(n))).map(npcIn)];
+  return { src: { ...assemble(c.mobs, npcs, c.zoneNames, c.zones), version: c.version, rowsRead }, rowsRead };
 }
 
 // ---------------------------------------------------------------- ITEM 1: the drop line's creature

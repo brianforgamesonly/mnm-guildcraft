@@ -1,6 +1,16 @@
 // Order 20 (ITEM 2) and order 21: the health check's rules (scripts/health/judge.ts). Run: npm run test:health.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { judgeQuestSites, QUEST_SITES_STALE_DAYS } from './judge.ts';
+
+test('order 37, PR B: the monthly quest-page check fails once its last scheduled success is 35 days old', () => {
+  const now = Date.parse('2026-12-11T00:00:00Z');
+  const ago = (d: number) => new Date(now - d * 86_400_000).toISOString();
+  assert.equal(judgeQuestSites(true, ago(QUEST_SITES_STALE_DAYS - 1), now).verdict, 'pass');
+  assert.equal(judgeQuestSites(true, ago(QUEST_SITES_STALE_DAYS), now).verdict, 'fail');
+  assert.equal(judgeQuestSites(true, null, now).verdict, 'fail');
+  assert.equal(judgeQuestSites(false, null, now).verdict, 'fail');
+});
 import { copies } from '../copies.ts';
 import { cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeSweeps, previousUtcDay, SLOT_MATCH_MS, slotOf, type SweepRow } from './judge.ts';
 

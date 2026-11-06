@@ -9,7 +9,8 @@
 /// <reference types="@cloudflare/workers-types" />
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { cardFields, parseQuery, resultsPage } from '../../src/commands/gear.ts';
+import { cardFields, howItem, parseQuery, resultsPage } from '../../src/commands/gear.ts';
+import { sourceWays } from '../../src/gear/howto.ts';
 import { statFields } from '../../src/commands/find.ts';
 import { layoutZoneButtons, CUSTOM_ID_MAX, matchZones, OPEN_PREFIX, type ZoneMatch, type ZoneRef } from '../../src/zone/buttons.ts';
 import { loadZone } from '../../src/zone/card.ts';
@@ -114,7 +115,10 @@ try {
     const from = (JSON.parse(r.origin_json ?? '{}') as { from?: string[] }).from ?? [];
     const d = { classes: [], mobs: [...new Set(from.flatMap((f) => byName.get(f.toLowerCase()) ?? []))], recipes: [], crafters: [], version: null };
     const item = { id: r.id, name: r.name, icon_url: r.icon_url, slot: r.slot, stats_json: r.stats_json, wiki_url: r.wiki_url, source: r.source };
-    const { zones: refs } = cardFields(statFields(item), r, d);
+    // Order 37, PR B: the card's detail fields by its ways (src/gear/howto.ts sourceWays); the How to get it line's own
+    // zone (one per card) needs the live source reads, so it is not counted here.
+    const how = { lines: [], zones: [], ways: sourceWays(howItem(r), r.source_mask, JSON.parse(r.origin_json ?? '{}')) };
+    const { zones: refs } = cardFields(statFields(item), r, d, how);
     const z = layoutZoneButtons(refs, matches, ITEM_CARD_ROWS);
     if (z.zones) perItem.push({ name: r.name, zones: z.zones, shown: z.shown, refs });
   }

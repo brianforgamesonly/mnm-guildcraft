@@ -16,7 +16,7 @@ import { summary } from '../ci/alarm.ts';
 import { currentCopy } from '../copies.ts';
 import { remoteReadD1 } from '../import/db.ts';
 import { ALARM_IMPORT, FINISHED_IMPORT } from '../../src/import-status.ts';
-import { CONSECUTIVE_FAIL, cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeSweeps, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
+import { CONSECUTIVE_FAIL, cronSlots, DAY_MS, failed, judgeCommands, judgeNightly, judgeQuestSites, judgeSweeps, previousUtcDay, type Line, type SweepRow, type Window } from './judge.ts';
 
 const args = process.argv.slice(2);
 const opt = (name: string) => {
@@ -152,6 +152,10 @@ const backups = await select<{ result: string }>('SELECT result FROM backup_stat
 lines.push(judgeNightly({ job: 'backup', rows: backups.map((r) => ({ ok: r.result === 'ok', status: r.result })), failedRuns: backups.length ? 0 : await failedRunsOf('backup.yml') }));
 const [{ n: measured }] = await select<{ n: number }>('SELECT count(*) AS n FROM usage_daily WHERE measured_at >= ? AND measured_at < ?', from, to);
 lines.push(judgeNightly({ job: 'usage', rows: measured ? [{ ok: true, status: `${measured} metric row(s) measured` }] : [], failedRuns: measured ? 0 : await failedRunsOf('usage.yml') }));
+// Order 37, PR B: the monthly quest-page check, judged at the end of the judged day.
+const [{ n: questTable }] = await select<{ n: number }>("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'quest_site_run'");
+const questLast = questTable ? (await select<{ last: string | null }>("SELECT max(finished_at) AS last FROM quest_site_run WHERE event IN ('schedule', 'seed')"))[0].last : null;
+lines.push(judgeQuestSites(!!questTable, questLast, dayEnd));
 
 // ---------------------------------------------------------------- ITEM 4's evidence, on request
 const evFrom = opt('--evidence');

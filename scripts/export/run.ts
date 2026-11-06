@@ -18,8 +18,8 @@ import { createHash } from 'node:crypto';
 import { summary } from '../ci/alarm.ts';
 import { commitToBackupRepo, confirmPrivate, wrangler } from '../backup/lib.ts';
 import { currentCopy } from '../copies.ts';
-import { IMPORT_WRITES } from '../import/core.ts';
 import { guildDump } from './dump.ts';
+import { wholeTables } from './whole.ts';
 
 const { values: args } = parseArgs({ options: { 'dry-run': { type: 'boolean', default: false } } });
 const guildId = process.env.EXPORT_GUILD_ID ?? '';
@@ -34,7 +34,7 @@ const COPY = currentCopy();
 wrangler(['d1', 'export', COPY.database, '--remote', '--env', COPY.name, '--output', full]);
 console.log(JSON.stringify({ copy: COPY.name, database: COPY.database, export_ms: Date.now() - t0 }));
 
-const out = guildDump(readFileSync(full, 'utf8'), guildId, IMPORT_WRITES);
+const out = guildDump(readFileSync(full, 'utf8'), guildId, wholeTables());
 rmSync(full);
 console.log('table\trule\trows');
 for (const p of [...out.plan].sort((a, b) => a.table.localeCompare(b.table))) console.log([p.table, p.scope, out.counts[p.table] ?? 0].join('\t'));

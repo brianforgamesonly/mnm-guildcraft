@@ -68,6 +68,9 @@ describe('schema (migrations/0001_init.sql)', () => {
       // Order 36 (0031): an officer's weight and setting changes for /gear upgrades, per server (defaults stay in code).
       'gear_weight',
       'gear_setting',
+      // Order 37, PR B (0032): the quest lines' monstersandmemories.wiki links, kept by the monthly check, and its runs.
+      'quest_site',
+      'quest_site_run',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
@@ -85,8 +88,11 @@ describe('schema (migrations/0001_init.sql)', () => {
       // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.
       'faction_changed', 'faction_post_dirty', 'faction_post_rendered',
       'game_class_bit', 'game_race_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+      // Order 37, PR B (0032): NPC rows by name, and the rows with loot (/gear upgrades' drop and vendor lines).
+      'npc_by_name',
       // Order 24 (0018): a faction's links.
       'npc_faction_by_faction',
+      'npc_loot',
       // Order 19 (0014): /item's "used in" statement.
       'recipe_component_by_item',
     ]);
