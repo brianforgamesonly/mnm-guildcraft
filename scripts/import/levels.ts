@@ -144,6 +144,138 @@ const choose = (kinds: Map<Kind, Range | null>): { kind: Kind; range: Range | nu
   return first ? { kind: first, range: kinds.get(first) ?? null } : { kind: 'unknown', range: null };
 };
 
+// ---------------------------------------------------------------- creatures (order 37: shared with the drop line)
+
+/**
+ * The import passes loot as lists. The Worker (src/gear/sources.ts) passes each row's loot_json as stored, so it never
+ * parses every row's loot to draw one page: a row is parsed only when its text holds the item's name (lower-cased; a name
+ * holding `"` or `\`, which JSON escapes, parses every row), and then matched exactly, as the lists are.
+ */
+type Loot = string[] | { json: string | null };
+export interface CreatureInput {
+  mobs: (Omit<LevelInput['mobs'][number], 'loot'> & { loot: Loot })[];
+  npcs: (Omit<LevelInput['npcs'][number], 'loot'> & { loot: Loot })[];
+  zoneNames: LevelInput['zoneNames'];
+}
+
+/** Where a creature is, and its level there: a mob row's zones (each at the mob's level), or each NPC row's zone. */
+export interface Spot {
+  zone_key: string;
+  range: Range | null;
+}
+
+export interface CreatureIndex {
+  /** A creature's level by lower-cased name: its mob row's when that parses, else the union of its NPC rows' (order 35). */
+  level: (name: string) => Range | null;
+  /** The zone keys a creature is in: its mob row's zones through zone_name (mobs' source), and its NPC rows' zones. */
+  zones: (name: string) => string[];
+  /** Where it is: the mob row's zones when the mob row's own level is the level, else the NPC rows (zone, level). */
+  spots: (name: string) => Spot[];
+  /** Every creature the data links to an item as a drop, lower-cased: its `from` list, then mobs and NPCs whose loot names it. */
+  creaturesOf: (itemKey: string, from: string[]) => string[];
+  /** A creature's name as the data writes it: a mob's title, else an NPC row's name. */
+  display: (name: string) => string | undefined;
+}
+
+/**
+ * Order 35's creature rules, in one place, so the import's item level and /gear upgrades' drop line read the same creatures
+ * the same way (order 37, ITEM 1). `parse` is order 35's level parser (parseLevel); the import passes a counting wrapper.
+ * Nothing is matched by anything but the name, case-insensitive.
+ */
+export function creatureIndex(
+  input: CreatureInput,
+  parse: (text: string | null) => Range | null = (t) => parseLevel(t).range,
+  /** The import parses every level once, up front, so its summary counts every level text (order 35's report). */
+  eager = false,
+): CreatureIndex {
+  const lower = (s: string) => s.toLowerCase();
+  type Mob = CreatureInput['mobs'][number];
+  type Npc = CreatureInput['npcs'][number];
+  const mobZoneKey = new Map(input.zoneNames.filter((n) => n.source === MOB_ZONES_SOURCE && n.zone_key).map((n) => [n.name, n.zone_key as string]));
+  const mobByKey = new Map(input.mobs.map((m) => [lower(m.key), m]));
+  const mobByTitle = new Map<string, Mob>();
+  for (const m of input.mobs) if (!mobByTitle.has(lower(m.title))) mobByTitle.set(lower(m.title), m);
+  const npcsByName = new Map<string, Npc[]>();
+  for (const n of input.npcs) {
+    const k = lower(n.name);
+    if (!npcsByName.has(k)) npcsByName.set(k, []);
+    npcsByName.get(k)!.push(n);
+  }
+  // Each row's level is parsed once (parse is order 35's parser, or the import's counting wrapper of it).
+  const parsed = new Map<Mob | Npc, Range | null>();
+  const levelOf = (row: Mob | Npc) => {
+    if (!parsed.has(row)) parsed.set(row, parse(row.level));
+    return parsed.get(row) ?? null;
+  };
+  if (eager) {
+    for (const m of input.mobs) levelOf(m);
+    for (const n of input.npcs) levelOf(n);
+  }
+  const mobOf = (name: string) => mobByKey.get(name) ?? mobByTitle.get(name);
+  const level = (name: string): Range | null => {
+    const mob = mobOf(name);
+    const own = mob ? levelOf(mob) : null;
+    if (own) return own;
+    return union((npcsByName.get(name) ?? []).map(levelOf).filter((r): r is Range => r !== null));
+  };
+  const zones = (name: string): string[] => {
+    const mob = mobOf(name);
+    const keys = new Set<string>();
+    for (const z of mob?.zones ?? []) {
+      const k = mobZoneKey.get(z);
+      if (k) keys.add(k);
+    }
+    for (const n of npcsByName.get(name) ?? []) keys.add(n.zone_key);
+    return [...keys];
+  };
+  const spots = (name: string): Spot[] => {
+    const mob = mobOf(name);
+    const own = mob ? levelOf(mob) : null;
+    const mobSpots = () => [...new Set((mob?.zones ?? []).map((z) => mobZoneKey.get(z)).filter((k): k is string => !!k))].map((zone_key) => ({ zone_key, range: own }));
+    if (mob && own) return mobSpots();
+    const npcs = (npcsByName.get(name) ?? []).map((n) => ({ zone_key: n.zone_key, range: levelOf(n) }));
+    // No level anywhere and no NPC rows: the mob row's own zones.
+    return npcs.length ? npcs : mobSpots();
+  };
+  // Loot naming an item: mobs (by key), then NPC rows (by name), in the data's order, each name lower-cased.
+  const owners: { loot: Loot; who: string }[] = [...input.mobs.map((m) => ({ loot: m.loot, who: m.key })), ...input.npcs.map((n) => ({ loot: n.loot, who: n.name }))];
+  const lowerText = new Map<(typeof owners)[number], string>();
+  const lootedBy = (itemKey: string): string[] => {
+    const out: string[] = [];
+    const escaped = itemKey.includes('"') || itemKey.includes('\\');
+    for (const o of owners) {
+      let list: string[];
+      if (Array.isArray(o.loot)) list = o.loot;
+      else {
+        const json = o.loot.json;
+        if (!json) continue;
+        if (!escaped) {
+          if (!lowerText.has(o)) lowerText.set(o, json.toLowerCase());
+          if (!lowerText.get(o)!.includes(itemKey)) continue;
+        }
+        const v = JSON.parse(json) as unknown;
+        list = Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+      }
+      if (list.some((l) => lower(l) === itemKey)) out.push(lower(o.who));
+    }
+    return out;
+  };
+  // Eager input (the import's lists) builds the reverse map once; raw JSON is looked up per item.
+  let looted: Map<string, string[]> | null = null;
+  if (input.mobs.every((m) => Array.isArray(m.loot)) && input.npcs.every((n) => Array.isArray(n.loot))) {
+    looted = new Map();
+    for (const o of owners)
+      for (const l of o.loot as string[]) {
+        const k = lower(l);
+        if (!looted.has(k)) looted.set(k, []);
+        looted.get(k)!.push(lower(o.who));
+      }
+  }
+  const creaturesOf = (itemKey: string, from: string[]) => [...new Set([...from.map(lower), ...(looted ? looted.get(itemKey) ?? [] : lootedBy(itemKey))])];
+  const display = (name: string) => mobOf(name)?.title ?? npcsByName.get(name)?.[0]?.name;
+  return { level, zones, spots, creaturesOf, display };
+}
+
 // ---------------------------------------------------------------- the computation
 
 export function computeLevels(input: LevelInput, gearKeys: Set<string>): { levels: Map<string, ItemLevel>; summary: LevelSummary; recipes: Map<string, string> } {
@@ -158,47 +290,17 @@ export function computeLevels(input: LevelInput, gearKeys: Set<string>): { level
     return p.range;
   };
 
-  // Zones: their levels, and the mob zone names that map to them.
+  // Zones: their levels.
   const zoneLevel = new Map(input.zones.map((z) => [z.key, parseCounted(z.level)]));
-  const mobZoneKey = new Map(input.zoneNames.filter((n) => n.source === MOB_ZONES_SOURCE && n.zone_key).map((n) => [n.name, n.zone_key as string]));
 
-  // Creatures by lower-cased name: the mob row (by key, then title), and every NPC row with that name.
-  const mobByKey = new Map(input.mobs.map((m) => [lower(m.key), m]));
-  const mobByTitle = new Map<string, LevelInput['mobs'][number]>();
-  for (const m of input.mobs) if (!mobByTitle.has(lower(m.title))) mobByTitle.set(lower(m.title), m);
-  const mobLevel = new Map(input.mobs.map((m) => [m, parseCounted(m.level)]));
-  const npcsByName = new Map<string, { level: Range | null; zone_key: string }[]>();
-  for (const n of input.npcs) {
-    const k = lower(n.name);
-    if (!npcsByName.has(k)) npcsByName.set(k, []);
-    npcsByName.get(k)!.push({ level: parseCounted(n.level), zone_key: n.zone_key });
-  }
-  const creatureLevel = (name: string): Range | null => {
-    const mob = mobByKey.get(name) ?? mobByTitle.get(name);
-    const own = mob ? mobLevel.get(mob) ?? null : null;
-    if (own) return own;
-    return union((npcsByName.get(name) ?? []).map((n) => n.level).filter((r): r is Range => r !== null));
-  };
-  const creatureZones = (name: string): string[] => {
-    const mob = mobByKey.get(name) ?? mobByTitle.get(name);
-    const keys = new Set<string>();
-    for (const z of mob?.zones ?? []) {
-      const k = mobZoneKey.get(z);
-      if (k) keys.add(k);
-    }
-    for (const n of npcsByName.get(name) ?? []) keys.add(n.zone_key);
-    return [...keys];
-  };
+  // Creatures by lower-cased name: the mob row (by key, then title), and every NPC row with that name (creatureIndex, shared
+  // with /gear upgrades' drop line, order 37).
+  const creatures = creatureIndex(input, parseCounted, true);
+  const creatureLevel = creatures.level;
+  const creatureZones = creatures.zones;
 
-  // Drops: every creature name the data links to an item.
-  const drops = new Map<string, Set<string>>();
-  const addDrop = (item: string, creature: string) => {
-    if (!drops.has(item)) drops.set(item, new Set());
-    drops.get(item)!.add(lower(creature));
-  };
-  for (const it of input.items) for (const f of it.from) addDrop(it.key, f);
-  for (const m of input.mobs) for (const l of m.loot) addDrop(lower(l), m.key);
-  for (const n of input.npcs) for (const l of n.loot) addDrop(lower(l), n.name);
+  // Drops: every creature name the data links to an item (its from list, and loot naming it).
+  const drops = new Map(input.items.map((it) => [it.key, new Set(creatures.creaturesOf(it.key, it.from))]));
 
   // Quests: the lowest recorded minimum level of the quests that reward each item (exact name, case-insensitive).
   const questMin = new Map<string, number | null>();

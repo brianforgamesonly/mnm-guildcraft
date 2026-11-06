@@ -22,9 +22,9 @@ import { itemCard, POST_WHAT as ITEM_POST } from '../commands/item.ts';
 import { POST_PREFIX, postedReply, searchReply } from '../commands/share.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
 import { zoneButtons, withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
-import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../zone/names.ts';
-import { parseLevel } from '../../scripts/import/levels.ts';
+import { WIKI_ZONES_SOURCE } from '../zone/names.ts';
 import { gearIndex, VERSION_SQL, type GearIndex } from './index.ts';
+import { dropPick, sourceIndex, vendorParts, type SourceIndex } from './sources.ts';
 import {
   breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, fmtHundredths, groupByKey, grouped, GROUPS, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
@@ -52,6 +52,8 @@ export { FIND_UPGRADES_PREFIX };
 
 export const PER_PAGE = 5;
 export const SUMMARY_LINES = 8;
+/** Order 37, ITEM 2: merchants named on a vendor line before "+N more". */
+export const VENDOR_MERCHANTS = 2;
 
 /**
  * Order 36 follow-up (the owner, 2026-11-06): a level cap, or none (null: the default). In a custom_id it is "c" (none) or
@@ -118,7 +120,12 @@ export const UPGRADES_COPY = {
   youCanMake: (character: string, level: number) => `You can make this (${md(character)} ${level})`,
   reliable: (who: string[]) => `Reliable in your guild: ${who.join(', ')}`,
   noReliable: 'No Reliable crafter in the guild yet',
-  vendor: (sold: string[], more: number) => `Vendor: ${sold.map(md).join(', ')}${more > 0 ? ` +${more} more` : ''} · any level`,
+  // Order 37, ITEM 2: "Vendor: Master Tailor Sansha, Night Harbor · any level"; merchants "Name, Zone" or "Name (N zones)",
+  // the first VENDOR_MERCHANTS, then "+N more" (merchants only); then what matched no table, as recorded.
+  vendor: (merchants: string[], more: number, rest: string[]) => {
+    const named = merchants.length ? `${merchants.map(md).join('; ')}${more > 0 ? ` +${more} more` : ''}` : '';
+    return `Vendor: ${[named, rest.map(md).join(', ')].filter(Boolean).join('; ')} · any level`;
+  },
   vendorUnnamed: 'Vendor: where not recorded · any level',
   harvest: 'Harvested, any level',
   quest: (level: string) => `Quest: the quest's name isn't recorded · ${level}`,
@@ -237,25 +244,31 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
 
 // ---------------------------------------------------------------- one slot's list
 
-interface Extras {
+export interface Extras {
   rows: Map<number, { origin_json: string | null; source_mask: number }>;
   d: Awaited<ReturnType<typeof pageData>>;
+  /** Order 37: the creatures, NPCs and zones the drop and vendor lines read (src/gear/sources.ts), per import version. */
+  src: SourceIndex | null;
 }
 
 /**
- * The page's items' sources: their rows, then their mobs, recipes and crafters (pageData's batch). 2 round trips. A vendor
- * line shows soldBy's vendors as recorded: the source's list mixes zones, shops and merchants ("Night Harbor", "Mining
- * Supplies", "a miner") with nothing saying which is which, so nothing is picked out of it (order 4: no meaning from names).
+ * The page's items' sources: their rows, then their recipes and crafters (pageData's batch), and the source index (read only
+ * when the import version changed). Order 37: the drop line's creatures and the vendor line's merchants come from the source
+ * index, so pageData reads no mob rows here.
  */
-async function extras(c: Ctx, items: GearItem[]): Promise<Extras> {
-  if (!items.length) return { rows: new Map(), d: { classes: [], mobs: [], recipes: [], crafters: [], version: null } };
-  const { results } = await c.db
-    .prepare('SELECT id, origin_json, source_mask FROM item WHERE id IN (SELECT value FROM json_each(?1))')
-    .bind(JSON.stringify(items.map((i) => i.id)))
-    .all<{ id: number; origin_json: string | null; source_mask: number }>();
-  const d = await pageData(c, results as unknown as GearRow[], Infinity);
-  return { rows: new Map(results.map((r) => [r.id, r])), d };
+export async function extrasFor(c: Pick<Ctx, 'db' | 'guild'>, items: GearItem[], version: string | null): Promise<Extras> {
+  if (!items.length) return { rows: new Map(), d: { classes: [], mobs: [], recipes: [], crafters: [], version: null }, src: null };
+  const [{ results }, src] = await Promise.all([
+    c.db
+      .prepare('SELECT id, origin_json, source_mask FROM item WHERE id IN (SELECT value FROM json_each(?1))')
+      .bind(JSON.stringify(items.map((i) => i.id)))
+      .all<{ id: number; origin_json: string | null; source_mask: number }>(),
+    sourceIndex(c.db, version),
+  ]);
+  const d = await pageData(c, results as unknown as GearRow[], 0);
+  return { rows: new Map(results.map((r) => [r.id, r])), d, src };
 }
+const extras = (c: Ctx, L: Loaded, items: GearItem[]) => extrasFor(c, items, L.idx.version);
 
 interface Origin {
   from?: string[];
@@ -276,22 +289,15 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
   const recipes = x.d.recipes.filter((r) => r.item_id === it.id);
   for (const w of ways) {
     if (w === 'drop') {
-      const from = o.from ?? [];
       // The item's own drop level (order 35: a mob's, or the zone fallback, named as such) when no creature row has one.
       const zoneLevel =
         it.levelLow === null ? 'level unknown' : it.levelKind === 'zone' ? `zone Lv ${range(it.levelLow, it.levelHigh)}` : it.levelKind === 'mob' ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown';
-      if (from.length) {
-        const mobs = from.map((name) => {
-          const k = name.toLowerCase();
-          const m = x.d.mobs.find((r) => r.key.toLowerCase() === k) ?? x.d.mobs.find((r) => r.title.toLowerCase() === k);
-          return { name, m, lv: parseLevel(m?.level ?? null).range };
-        });
-        mobs.sort((a, b) => (a.lv?.low ?? Infinity) - (b.lv?.low ?? Infinity) || a.name.localeCompare(b.name));
-        const first = mobs[0];
-        const zone = first.m?.zones_json ? ((JSON.parse(first.m.zones_json) as string[])[0] ?? null) : null;
-        if (zone) zones.push({ source: MOB_ZONES_SOURCE, name: zone });
-        const level = first.lv ? `Lv ${range(first.lv.low, first.lv.high)}` : zoneLevel;
-        lines.push(UPGRADES_COPY.drop(first.name, zone, level, from.length - 1));
+      // Order 37, ITEM 1: the creature with the lowest level, read as the import reads it (src/gear/sources.ts dropPick).
+      const pick = x.src ? dropPick(x.src, it.key, o.from ?? [], o.wikiZones ?? []) : null;
+      if (pick) {
+        if (pick.zone?.ref) zones.push(pick.zone.ref);
+        const level = pick.range ? `Lv ${range(pick.range.low, pick.range.high)}` : zoneLevel;
+        lines.push(UPGRADES_COPY.drop(pick.name, pick.zone?.name ?? null, level, pick.more));
       } else if (o.wikiZones?.length) {
         zones.push(...o.wikiZones.map((name): ZoneRef => ({ source: WIKI_ZONES_SOURCE, name })));
         lines.push(UPGRADES_COPY.dropZones(o.wikiZones.slice(0, 3), zoneLevel));
@@ -316,8 +322,13 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
       if (others.length) lines.push(UPGRADES_COPY.reliable(others));
       else if (!own.length) lines.push(UPGRADES_COPY.noReliable);
     } else if (w === 'vendor') {
+      // Order 37, ITEM 2: merchants and zones picked out by an exact lookup in npc and zone_name (src/gear/sources.ts
+      // vendorParts); anything matching neither is shown as recorded.
       const v = o.soldBy?.vendors ?? [];
-      lines.push(v.length ? UPGRADES_COPY.vendor(v.slice(0, 3), v.length - 3) : UPGRADES_COPY.vendorUnnamed);
+      const p = v.length && x.src ? vendorParts(x.src, v) : null;
+      if (p && (p.merchants.length || p.rest.length)) {
+        lines.push(UPGRADES_COPY.vendor(p.merchants.slice(0, VENDOR_MERCHANTS), p.merchants.length - VENDOR_MERCHANTS, p.rest));
+      } else lines.push(UPGRADES_COPY.vendorUnnamed);
     } else if (w === 'harvest') lines.push(UPGRADES_COPY.harvest);
     else if (w === 'quest') {
       // Order 36 follow-up: the quest's name (the import keeps it, origin_json.quests, lowest level first), linked to its
@@ -378,7 +389,7 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const n = Math.min(Math.max(0, page), pages - 1);
   const shown = all.slice(n * PER_PAGE, n * PER_PAGE + PER_PAGE);
-  const x = await extras(c, shown.map((s) => s.u.item));
+  const x = await extras(c, L, shown.map((s) => s.u.item));
   const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L.ch), ...headerLines(L, r)];
   if (cap !== null) body.push(UPGRADES_COPY.capNote(cap));
   // Review fix: "Nothing beats" only when nothing does; when the cap hid every upgrade, the quiet count below says so.
@@ -502,7 +513,7 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
  * each zone the text and the card show (src/zone/buttons.ts, in the rows left; the rest named as "+N more zones").
  */
 async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade): Promise<MessageReply> {
-  const [x, k] = await Promise.all([extras(c, [u.item]), itemCard(c, u.item.id)]);
+  const [x, k] = await Promise.all([extras(c, L, [u.item]), itemCard(c, u.item.id)]);
   if (!k) return ephemeral(UPGRADES_COPY.gone);
   const how = howToGet(u.item, x, c.userId, c.guild.learning_window);
   const slot = u.side ?? (key === 'secondary' ? 'secondary' : groupByKey(key)!.sides[0]);

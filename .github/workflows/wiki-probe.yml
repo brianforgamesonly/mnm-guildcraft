@@ -62,8 +62,6 @@ jobs:
         if: always()
         shell: bash
         run: |
-          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
-          npx wrangler delete --config "$PROBE_CONFIG" --force || echo "::warning::wrangler delete exited $?"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-probe")
-          echo "Cloudflare API, the probe script after the delete: HTTP $code (404 = deleted)"
-          test "$code" = 404
+          # Order 37, ITEM 3: the same cleanup as the wiki job's relay (scripts/wiki/cleanup.ts): Cloudflare's script DELETE,
+          # then a 404 check with retries; the name from $PROBE_CONFIG; fails only when the Worker is confirmed still there.
+          node scripts/wiki/cleanup.ts --config "$PROBE_CONFIG"

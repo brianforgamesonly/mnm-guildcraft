@@ -22,7 +22,7 @@
     "test:health": "node --test scripts/health/judge.test.ts",
     "test:ci-reads": "node --test scripts/ci/ci-reads.test.ts",
     "test:emoji": "node scripts/emoji/build.ts --check",
-    "test:wiki": "node --test scripts/wiki/wiki.test.ts",
+    "test:wiki": "node --test scripts/wiki/wiki.test.ts scripts/wiki/cleanup.test.ts",
     "dev": "wrangler dev --env dev",
     "db:migrate:local": "wrangler d1 migrations apply mnm-guildcraft-dev --local --env dev",
     "import:local": "node scripts/import/run.ts --local",
@@ -30,6 +30,7 @@
     "bench:import-writes": "node scripts/bench/import-writes.ts",
     "bench:gear-search": "node scripts/bench/gear-search.mjs",
     "bench:gear-upgrades": "node scripts/bench/gear-upgrades.mjs",
+    "bench:gear-sources": "node scripts/bench/gear-sources.ts",
     "quest-sites": "node scripts/gear/quest-sites.ts",
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "commands:register": "node scripts/discord/register.ts"

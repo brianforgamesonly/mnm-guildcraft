@@ -3,7 +3,8 @@
 # the wiki (order 28's added rule), and only https://monstersandmemories.miraheze.org/w/api.php, through a temporary
 # relay Worker (override 3) because Miraheze challenges GitHub's runners (order 14's probe, run 40933712788). The relay is
 # deployed with a one-time token compiled in, called once per wiki request, one request at a time, then deleted; the
-# delete is verified by a 404 from the Cloudflare API. At most 200 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP,
+# delete is verified by a 404 from the Cloudflare API (order 37: scripts/wiki/cleanup.ts; confirmed still there fails the
+# job, an unconfirmed check only warns). At most 200 wiki requests (scripts/wiki/snapshot.ts REQUEST_CAP,
 # every attempt counted; 153 measured), maxlag=5, order 14's named User-Agent. A 403, a 429 or a challenge stops the run
 # and is reported, never retried or worked around (override 7).
 # Order 28b, ITEM 1: it starts only when no deploy.yml run is queued or running (every 15 s, at most 10 minutes, then it
@@ -112,11 +113,11 @@ jobs:
         shell: bash
         run: |
           rm -f "$RUNNER_TEMP/relay-token"
-          # The API check below is the verdict, whatever wrangler's exit (for example: the deploy never uploaded).
-          npx wrangler delete --config "$RELAY_CONFIG" --force || echo "::warning::wrangler delete exited $?"
-          code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/guildcraft-wiki-relay")
-          echo "Cloudflare API, the relay script after the delete: HTTP $code (404 = deleted)"
-          test "$code" = 404
+          # Order 37, ITEM 3: Cloudflare's script DELETE, then a 404 check with retries (scripts/wiki/cleanup.ts). The name is
+          # read from $RELAY_CONFIG, the config the deploy step used, and a name without the temporary prefix is refused.
+          # Not `wrangler delete`: after deleting the script it lists KV namespaces (a right this token lacks), and exited 1
+          # on every run with the relay already gone. Fails only when the relay is confirmed still deployed.
+          node scripts/wiki/cleanup.ts --config "$RELAY_CONFIG"
       - name: List the deploys that overlapped the snapshot (order 28b)
         if: always() && steps.deploy.outputs.since != ''
         # A record, never a gate: a GitHub API error here must not throw away a good snapshot.
