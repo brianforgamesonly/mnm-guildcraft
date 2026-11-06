@@ -9,6 +9,8 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DATABASE, loadAndCount, wrangler } from '../backup/lib.ts';
 import { IMPORT_WRITES } from '../import/core.ts';
+import { seededTables } from './lib.ts';
+import { wholeTables } from './whole.ts';
 import { counts, dump, guildDump, load } from './dump.ts';
 import { exportPlan, parseTable } from './lib.ts';
 
@@ -164,8 +166,13 @@ test("two guilds: guild B's rows never appear in guild A's export, and A's are a
   assert.throws(() => guildDump(sql, '333333333333333333', IMPORT_WRITES), /not in this database/);
 });
 
+test('order 37, PR B: the tables migrations seed are read from the migrations (an INSERT … SELECT seeds nothing)', () => {
+  assert.deepEqual(seededTables(['-- INSERT INTO nope (a) VALUES (1)\nINSERT INTO a (x) VALUES (1);', 'INSERT INTO b (x)\nSELECT x FROM c;', 'INSERT OR IGNORE INTO d (x) VALUES (2);']), ['a', 'd']);
+  assert.deepEqual(wholeTables().filter((t) => !(IMPORT_WRITES as readonly string[]).includes(t)), ['quest_site', 'quest_site_run']);
+});
+
 test('the import path: the export loads into an empty D1 (wrangler, local) with the same counts', () => {
-  const out = guildDump(fixture(), A, IMPORT_WRITES);
+  const out = guildDump(fixture(), A, wholeTables());
   const dir = mkdtempSync(join(tmpdir(), 'guild-export-'));
   try {
     const file = join(dir, 'guild.sql');
