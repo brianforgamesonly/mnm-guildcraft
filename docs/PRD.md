@@ -909,3 +909,60 @@ Marks are derived: "(not signed up)" and the bench list are worked out each time
 - A batch post that Discord refuses isn't retried: the points stand, the approver is told, and `/dkp history` holds each row. A batch of roughly 100 or more members can overflow the post's 6,000 characters; it lists those capped first and ends "+N more: `/dkp history`".
 - The no-show list takes at most 1,500 characters of the card, whole names only, then says how many it left out.
 - A sign-up or a roster change shows on the raid card at its next redraw (a tap or a kill), not at once, so an event's button presses cost the raid card nothing. The check at each tap always reads the current roster.
+
+## Gear upgrades
+
+Approved by the owner on 2026-11-05 ("GuildCraft Gear Upgrades — spec"). A member records what each character wears; `/gear upgrades` lists what beats it, smallest upgrade first, with how to get each item. **Part 1 (order 35)** builds the data and the saved gear. **Part 2** (scoring, `/gear upgrades`, the weights, `/gear settings`, Find upgrades) is not built yet; nothing scores or ranks.
+
+### Race
+
+- **Items:** `item.race_mask`, a bit per race, assigned once and never reused, held in `game_race` (code, name, bit), built the way `game_class` is. ALL in any case ("ALL", "All", "all") is every bit. The race list is derived from the data. More than 30 races stops the work.
+- **Characters:** a race, optional. Add character and Edit character on `/me` gain a race choice; `/officer edit-member` gets it too. If a select can't sit in that modal, a private race menu follows Save. Mount races (Horse, Donkey) are not offered for characters. A character with no race is treated as any race.
+
+### Item levels
+
+Rewritten on every import, computed in memory by the import script from tables read once (no D1 query per item or component). Columns on item: `level_low` INTEGER (NULL = no level), `level_high` INTEGER (NULL = open-ended or none), `level_kind` TEXT (the primary kind) and `level_kinds` TEXT (every kind that applies, comma-separated, for part 2 to show).
+
+Kinds, each worked out separately for an item, then the primary one chosen:
+
+- **mob:** the item's dropping mobs with a parseable level. A mob's level is mob.level when it parses, else the npc.level for the same name (case-insensitive) when that parses. Low = the lowest mob's low; high = the highest mob's high.
+- **zone:** no dropping mob has a level, but the dropping mobs' zones (mob.zone, mapped through zone_name) do: low = the lowest zone low, high = the highest zone high. Shown as "zone Lv 20–30".
+- **vendor:** sold by a vendor (the soldBy record). Level 0, shown as "any level", never "Lv 0".
+- **harvest:** harvested (the harvestedBy record). Level 0, "any level".
+- **crafted:** a recipe result (rules below). **crafted_floor:** a crafted item whose best recipe has a component with no source: the highest known component level is a floor, shown as "Lv 14+"; with no known component level at all, the floor is NULL and the item shows "level unknown".
+- **quest:** a quest reward. If the quest's minimum level and its reward link are already in the imported data, use the minimum level; otherwise kind quest with no level.
+- **unknown:** none of these.
+
+The primary kind is the one with the lowest level (any level counts as 0). Ties go mob, then vendor, then harvest, then crafted, then crafted_floor, then quest, then zone. Kinds with no level come after every kind with one.
+
+Crafted levels: a component's level is derived exactly as an item's is (all kinds above, recursively for a crafted component), and it uses its primary kind's low value. Stop at a cycle or depth 6; a component cut off there has no source. A recipe's level is the highest level among its components. Of an item's recipes, use the one with the lowest level among those where every component has a source. Use a floor recipe only when no such recipe exists. Ties: fewest components, then the lowest recipe id.
+
+Parsing level text: strip [[…]] link text and anything in parentheses first. Read every integer from 1 to 80 in what remains; low = the smallest, high = the largest. "~15" is 15–15. "N+" gives low N, high NULL. Text with no such integer is no level. Text with more than two integers is still parsed, and listed in the coverage report. Every distinct text that failed to parse is reported, with a count.
+
+Rules: levels are derived, never typed (no command sets an item's level). A level's kind is always shown with it; a zone-range fallback or a crafted floor is never presented as a mob's level.
+
+### Saved gear
+
+- **Slots (20):** Head, Face, Ear 1, Ear 2, Neck, Shoulders, Back, Chest, Shirt, Wrist 1, Wrist 2, Hands, Waist, Finger 1, Finger 2, Legs, Feet, Primary, Secondary, Range. No bags, belts, ammo or mount slots.
+- **Stored:** one row per filled slot (character, slot, item, when, by whom), written only when a slot changes, removed with the character (Remove character, `/officer remove-member`, the departure cleanup). It names the item by its stable key (item.name_key), never an autoincrement id, with no foreign-key cascade; never its stats. The import never deletes an item that saved gear names; it flags it, and the slot shows it as no longer listed until the member changes it.
+- **Gear on `/me`:** each character card gets a Gear button. It opens a private panel: the character's name, class, level and race; the 20 slots and what's in each; how many are filled; a Change a slot menu. (Part 2 adds Find upgrades.)
+- **Changing a slot from the panel:** pick the slot, then type the item name in a box (a Discord modal; autocomplete is not available in modals). The box is optional: submitting it blank empties the slot. One exact match (name, case-insensitive) that fits the slot and the character saves it. Several matches, including two items with the same name, answer with a menu of up to 24, sorted by name and told apart by slot and classes, plus "N more: type more of the name" when there are more. Never sorted by stats. No match says so and offers the box again.
+- **`/gear wear`** with `item:` (required; autocompleted, filtered to gear the character can use, reading the `character:` value when given), `character:` (optional; the member's own, autocompleted; with several characters, leaving it out is refused with the list) and `slot:` (optional; static choices of the 20 slots). With no `slot:` and an item that fits more than one slot, a private menu offers the slots that fit.
+- **I'm wearing this** on every `/item` card for wearable gear: asks which character when the member has more than one, and which slot when there's a choice.
+- Which slots an item fits comes only from its slot_mask. Part 1 has no dual-wield rule: a shield and a one-handed weapon are treated alike in Secondary. Paired slots (Ear, Wrist, Finger): fill the empty one of the pair; ask which only when both are filled.
+- **Rules:** an item the character's class or race can't use is refused, with the reason. A two-handed weapon in Primary empties Secondary, and the reply says so. Anything in Secondary while a two-hander is in Primary is refused, saying why.
+- **When a character changes:** a class or race change keeps saved gear; the panel marks each slot the character can no longer use ("Inquisitor can't use"). A level change has no effect.
+- Stale buttons: a panel or button whose character was removed replies "That character no longer exists."
+- **Officers:** `/officer edit-member` shows the same Gear button on that member's characters. A change by an officer says "changed by \<officer\>" in its reply, and the row records who.
+- Saved gear acts only on the presser's own characters: a button on a public `/item` card changes the presser's characters, never the card owner's. `character:` autocomplete lists only the caller's own. Saved gear is private like the rest of `/me`: only the member, and officers through `/officer edit-member`, see or change it.
+- Replies are private. Every change replies with the slot, the item and what it replaced.
+
+### As built in order 35 (named readings and departures)
+
+- **Race list rule:** a race code is kept when at least 2 items carry it (`RACE_MIN_ITEMS`, scripts/import/core.ts); a code on one item only is reported as a race vocab_drift warning and given no bit (2026-11-05: AKK, ELD, GIE). The race text is read up to the first line that starts with "|" (the source's text sometimes runs into the next template field). `game_race.name` is NULL: the data holds codes only (HUM, DEF, …), and no name is invented, so the race menu shows codes. A race is a mount race (`game_race.mount`) when every item carrying it fits only BARDING, SADDLEBAG or RIGGING (src/gear/vocab.ts `MOUNT_SLOTS`); on 2026-11-05 that is HRS and DNK.
+- **Dropping mobs** are every creature the data links to the item as a drop: its `from` list, a wiki.json mob whose loot names it, and an NPC row whose loot names it, matched by name only. A creature's NPC level is the union of its NPC rows' levels (they can sit in several zones).
+- **Quest levels** come from the wiki snapshot's Quests bucket (quest_min_level and quest_rewards), already in the snapshot the import reads (no new source). A reward is matched to an item by exact name, case-insensitive.
+- **A recipe with a floor component** is itself a floor recipe (a floor is not a full source).
+- **Levels are stored for gear (slot_mask ≠ 0) only**; other items' levels are worked out in memory as components. On a night the zone data is kept (order 28's override 9), the stored levels are kept too.
+- **The no-longer-listed flag** is `item.gone_at` (migrations/0029), set by the import for every wiki item the source stops listing and cleared when it returns.
+- `item.handed`'s one reading is `isTwoHanded` (src/gear/vocab.ts): "Two Handed", "TWO HANDED" and "2" are two-handed.

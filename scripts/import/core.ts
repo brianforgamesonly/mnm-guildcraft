@@ -9,7 +9,10 @@
 //   rows_written = 0 for a re-run on unchanged data.
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
-import { ALL_CLASSES, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
+import { ALL_CLASSES, ALL_RACES, MOUNT_SLOTS, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
+import { questBucket } from '../wiki/parse.ts';
+import type { WikiSnapshot } from '../wiki/types.ts';
+import { computeLevels, type ItemLevel, type Kind, type LevelSummary } from './levels.ts';
 import type { QuestLineRow } from './quests.ts';
 import { buildZonePlan, ZoneStructureError, type FactionLinkRow, type MobForZones, type NpcRow, type ZoneInput, type ZoneNameRow, type ZonePlan, type ZoneRow, type ZoneSummary, type ZoneWarning } from './zones.ts';
 
@@ -52,7 +55,8 @@ export type Warning =
   // Order 13: class tokens that match no game_class code (joined codes, typos), kept in stats_json and given no class bit.
   | { kind: 'unrecognised_class_tokens'; tokens: { token: string; items: number }[] }
   // Order 13: a value the data holds that a /gear find choice list lacks (or a class list change): re-register commands.
-  | { kind: 'vocab_drift'; list: 'class' | 'slot' | 'weapon_type' | 'stat' | 'resist'; values: { value: string; items: number }[]; note: string }
+  // Order 35: 'race' too: a race token the derived race list (game_race) lacks, or a change in that list.
+  | { kind: 'vocab_drift'; list: 'class' | 'slot' | 'weapon_type' | 'stat' | 'resist' | 'race'; values: { value: string; items: number }[]; note: string }
   // Order 13: the run stopped at the write ceiling; the rest is written by the next run (the differs guards resume it).
   | { kind: 'write_ceiling'; ceiling: number; written: number; deferredStatements: number; deferredBound: number }
   // Order 17: a zone source unchanged for 30 days, and zone names that map to no zone (scripts/import/zones.ts).
@@ -299,7 +303,8 @@ export function statsJson(it: WikiItem): string | null {
 // ---------------------------------------------------------------- gear (order 13)
 
 // Where an item comes from, as the source records it (item.origin_json): kept whole, read by /gear find's source line.
-const ORIGIN_KEYS = ['from', 'wikiZones', 'soldBy', 'categories'] as const;
+// Order 35: harvestedBy too (it was checked, core.ts KNOWN_FIELDS, but dropped), for the harvest level kind.
+const ORIGIN_KEYS = ['from', 'wikiZones', 'soldBy', 'categories', 'harvestedBy'] as const;
 
 export function originJson(it: WikiItem): string | null {
   const out: Record<string, unknown> = {};
@@ -372,11 +377,94 @@ export function assignClassBits(kept: string[], existing: Map<string, { item_cou
     const held = existing.get(code)?.bit;
     if (held !== null && held !== undefined) bits.set(code, held);
     else {
-      if (next > MAX_CLASS_BIT) throw new Error(`no class bit left for ${code}: bits 0..${MAX_CLASS_BIT} are taken`);
+      // Order 35 (review fix): a StructureError, so runImport records the run as failed instead of crashing.
+      if (next > MAX_CLASS_BIT) throw new StructureError([`no bit left for ${code}: bits 0..${MAX_CLASS_BIT} are taken (bits are never reused)`]);
       bits.set(code, next++);
     }
   }
   return bits;
+}
+
+// ---------------------------------------------------------------- races (order 35)
+
+/** A race code is kept when at least this many items carry it; a code on one item only (AKK, ELD, GIE on 2026-11-05) is reported. */
+export const RACE_MIN_ITEMS = 2;
+/** More races than this stops the import (order 35, B8): the bits 0..MAX_CLASS_BIT would not hold them. */
+export const MAX_RACES = 30;
+const RACE_ALL = 'ALL';
+/** As for classes, NONE names no race (review fix: it would otherwise be kept as a race code). */
+const RACE_NONE = 'NONE';
+
+/**
+ * An item's race text as tokens (order 35). The source's text sometimes runs on into the template's next line
+ * ("ALL\n| item_link_id-OLD = rusty_iron_scimitar"), or holds only that line: a line starting "|" is a template field, not a
+ * race value, so only the text before it is read (parsing, not a normalisation). Then as classTokens: markup removed,
+ * split on whitespace and commas, upper-cased; nothing joined or guessed.
+ */
+export const raceTokens = (text: string): string[] => {
+  const value = text.split(/\n\s*\|/)[0];
+  return /^\s*\|/.test(value) ? [] : classTokens(value);
+};
+
+export interface RaceDerivation {
+  /** Items whose race text holds a token (the denominator). */
+  carrying: number;
+  /** Items whose race text says ALL (any case). */
+  all: number;
+  kept: { code: string; item_count: number; mount: number }[];
+  /** Codes on fewer than RACE_MIN_ITEMS items, with the items carrying them. */
+  dropped: { code: string; items: number }[];
+}
+
+/**
+ * The game's races, derived from items' race tokens (never typed), dropping ALL, keeping a code carried by at least
+ * RACE_MIN_ITEMS items. A kept code is a mount race (mount = 1) when every item carrying it fits only MOUNT_SLOTS.
+ */
+export function deriveRaces(data: WikiData): RaceDerivation {
+  let carrying = 0;
+  let all = 0;
+  const codes = new Map<string, { items: number; mountOnly: boolean }>();
+  // As buildPlan keeps items: on a case-only name collision, the first name in sorted order (review fix: no double count).
+  const seenKeys = new Set<string>();
+  for (const name of Object.keys(data.items).sort()) {
+    if (seenKeys.has(nameKey(name))) continue;
+    seenKeys.add(nameKey(name));
+    const it = data.items[name];
+    if (typeof it.race !== 'string') continue;
+    const tokens = raceTokens(it.race).filter((t) => t !== RACE_NONE);
+    if (!tokens.length) continue;
+    carrying++;
+    if (tokens.includes(RACE_ALL)) {
+      all++;
+      continue;
+    }
+    const slots = slotTokens(it.slot);
+    const mountOnly = slots.length > 0 && slots.every((s) => (MOUNT_SLOTS as readonly string[]).includes(s));
+    for (const code of new Set(tokens)) {
+      const c = codes.get(code) ?? { items: 0, mountOnly: true };
+      codes.set(code, { items: c.items + 1, mountOnly: c.mountOnly && mountOnly });
+    }
+  }
+  const byCount = [...codes].sort((a, b) => b[1].items - a[1].items || a[0].localeCompare(b[0], 'en'));
+  return {
+    carrying,
+    all,
+    kept: byCount.filter(([, c]) => c.items >= RACE_MIN_ITEMS).map(([code, c]) => ({ code, item_count: c.items, mount: c.mountOnly ? 1 : 0 })),
+    dropped: byCount.filter(([, c]) => c.items < RACE_MIN_ITEMS).map(([code, c]) => ({ code, items: c.items })),
+  };
+}
+
+/** race_mask: ALL anywhere means every race (-1); otherwise the bit of each kept code; 0 = no race recorded or none kept. */
+export function raceMask(it: WikiItem, bits: Map<string, number>): number {
+  if (typeof it.race !== 'string') return 0;
+  const tokens = raceTokens(it.race);
+  if (tokens.includes(RACE_ALL)) return ALL_RACES;
+  let mask = 0;
+  for (const t of tokens) {
+    const b = bits.get(t);
+    if (b !== undefined) mask |= 1 << b;
+  }
+  return mask;
 }
 
 export interface MobRow {
@@ -430,11 +518,26 @@ export interface ItemRow {
   slot_mask: number;
   source_mask: number;
   origin_json: string | null;
+  // Order 35 (migrations/0029): rewritten on every import from data already held. Levels are written for gear
+  // (slot_mask <> 0) only; other items' levels are worked out in memory, as components, and stored as NULL.
+  race_mask: number;
+  level_low: number | null;
+  level_high: number | null;
+  /** The primary kind (scripts/import/levels.ts); NULL = not worked out (not gear, or new on a night the zone data was kept). */
+  level_kind: Kind | null;
+  /** Every kind that applies, comma-separated, primary first. */
+  level_kinds: string | null;
 }
-type StoredItem = Omit<ItemRow, 'name_key' | 'source'> & { source: string };
-const ITEM_FIELDS = ['name', 'icon_url', 'slot', 'stats_json', 'wiki_url', 'class_mask', 'slot_mask', 'source_mask', 'origin_json'] as const;
-/** The one comparison the dry run's prediction and the statements' row filter share. */
-export const itemDiffers = (o: StoredItem | undefined, it: ItemRow) => !o || o.source !== 'wiki' || ITEM_FIELDS.some((f) => o[f] !== it[f]);
+/** gone_at: when the item stopped being listed upstream (order 35); NULL while it is listed. Never deleted. */
+type StoredItem = Omit<ItemRow, 'name_key' | 'source' | 'level_kind'> & { source: string; level_kind: string | null; gone_at: string | null };
+const ITEM_FIELDS = ['name', 'icon_url', 'slot', 'stats_json', 'wiki_url', 'class_mask', 'slot_mask', 'source_mask', 'origin_json',
+  'race_mask', 'level_low', 'level_high', 'level_kind', 'level_kinds'] as const;
+/** The one comparison the dry run's prediction and the statements' row filter share. A flagged item that is listed again is written. */
+export const itemDiffers = (o: StoredItem | undefined, it: ItemRow) => !o || o.source !== 'wiki' || o.gone_at !== null || ITEM_FIELDS.some((f) => o[f] !== it[f]);
+
+/** Order 35: a stored game_race row against the plan's (the dry run and the statement's guard compare the same fields). */
+export const raceDiffers = (o: { item_count: number; bit: number | null; mount: number }, r: { item_count: number; mount: number }, bit: number | undefined) =>
+  o.item_count !== r.item_count || o.bit !== (bit ?? null) || o.mount !== r.mount;
 
 type StoredMob = MobRow & { active: number };
 const MOB_FIELDS = ['key', 'title', 'level', 'race', 'class', 'image_url', 'zones_json', 'loot_json'] as const;
@@ -480,6 +583,8 @@ export interface PlannedRecipe {
 }
 interface ExistingRecipe {
   source_key: string;
+  /** Order 35: recipe.id, the level rule's last tie-break. */
+  id?: number;
   variant: number;
   active: boolean;
   tradeskill: string;
@@ -496,6 +601,8 @@ export interface ExistingState {
   recipes: Map<string, ExistingRecipe>; // by source_key, source = 'wiki' only
   activeWikiRecipes: number;
   classes: Map<string, { item_count: number; bit: number | null }>; // game_class code (item_count 0 = no longer kept)
+  /** Order 35 (0029): game_race by code (item_count 0 = no longer kept). */
+  races: Map<string, { item_count: number; bit: number | null; mount: number }>;
   mobs: Map<string, StoredMob>; // by lower(key)
   // Order 17 (0013): zones by key, zone names by zoneNameId, npcs by npcId, source versions by name.
   zones: Map<string, StoredZone>;
@@ -547,6 +654,12 @@ export interface Plan {
   classDeactivate: string[];
   /** Each kept code's bit in item.class_mask (assignClassBits). */
   classBits: Map<string, number>;
+  /** Order 35: the race list, the codes no longer kept (item_count 0, never deleted), and each kept code's bit in race_mask. */
+  races: RaceDerivation;
+  raceDeactivate: string[];
+  raceBits: Map<string, number>;
+  /** Order 35: stored wiki items the source no longer lists: flagged (gone_at), never deleted (saved gear names them). */
+  itemsGone: string[];
   mobs: MobRow[];
   /** Stored active mobs missing upstream: set active = 0, never deleted (by key). */
   mobDeactivate: string[];
@@ -650,6 +763,12 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
       slot_mask: 0,
       source_mask: 0,
       origin_json: originJson(it),
+      // Order 35: race_mask below; the levels by applyLevels, once the zone plan is built (runImport).
+      race_mask: 0,
+      level_low: null,
+      level_high: null,
+      level_kind: null,
+      level_kinds: null,
     });
   }
 
@@ -770,6 +889,14 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
   const classDeactivate = [...existing.classes].filter(([code, c]) => c.item_count > 0 && !keptCodes.has(code)).map(([code]) => code).sort();
   const classBits = assignClassBits([...keptCodes], existing.classes);
 
+  // Order 35: races, as classes are: derived, each kept code's bit assigned once and never reused.
+  const races = deriveRaces(data);
+  if (races.kept.length > MAX_RACES) throw new StructureError([`the data holds ${races.kept.length} races, more than ${MAX_RACES}: the race list stops here (order 35, B8)`]);
+  const keptRaces = new Set(races.kept.map((r) => r.code));
+  const raceDeactivate = [...existing.races].filter(([code, r]) => r.item_count > 0 && !keptRaces.has(code)).map(([code]) => code).sort();
+  const raceBits = assignClassBits([...keptRaces], existing.races);
+  const raceDrift = new Map<string, number>();
+
   // Order 13: each wiki item's masks. Crafted = the result of an active recipe in this plan.
   const crafted = new Set(recipes.map((r) => r.result_key));
   const unrecognised = new Map<string, number>();
@@ -780,6 +907,12 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     row.class_mask = classMask(it, classBits);
     row.slot_mask = slotMask(it);
     row.source_mask = sourceMask(it, crafted.has(row.name_key));
+    row.race_mask = raceMask(it, raceBits);
+    if (typeof it.race === 'string') {
+      const rt = new Set(raceTokens(it.race));
+      // An item that also says ALL is every race: its other tokens are not drift (review fix: counts match deriveRaces).
+      if (!rt.has(RACE_ALL)) for (const t of rt) if (t !== RACE_NONE && !raceBits.has(t)) bump(raceDrift, t);
+    }
     if (typeof it.class === 'string')
       for (const t of new Set(classTokens(it.class))) if (!CLASS_IGNORED.has(t) && !classBits.has(t)) bump(unrecognised, t);
     for (const t of new Set(slotTokens(it.slot))) if (!(SLOTS as readonly string[]).includes(t)) bump(drift.slot, t);
@@ -799,6 +932,17 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
       list: 'class',
       values: [...newCodes.map((c) => ({ value: `+${c}`, items: classes.kept.find((k) => k.code === c)!.item_count })), ...classDeactivate.map((c) => ({ value: `-${c}`, items: 0 }))],
       note: 'the class list changed: re-register commands so /gear find offers it',
+    });
+  // Order 35: order 13's drift warning, extended to races: a token the race list lacks, and a change in the list.
+  if (raceDrift.size)
+    warnings.push({ kind: 'vocab_drift', list: 'race', values: counted(raceDrift).map(([value, items]) => ({ value, items })), note: `on fewer than ${RACE_MIN_ITEMS} items, so not in the race list (game_race): kept in stats_json, given no race bit` });
+  const newRaces = [...keptRaces].filter((c) => !((existing.races.get(c)?.item_count ?? 0) > 0));
+  if (existing.races.size && (newRaces.length || raceDeactivate.length))
+    warnings.push({
+      kind: 'vocab_drift',
+      list: 'race',
+      values: [...newRaces.map((c) => ({ value: `+${c}`, items: races.kept.find((k) => k.code === c)!.item_count })), ...raceDeactivate.map((c) => ({ value: `-${c}`, items: 0 }))],
+      note: 'the race list changed (game_race): the character race menu follows it',
     });
 
   // Order 13: mobs. name key is case-insensitive (mob.key COLLATE NOCASE); on a case-only collision keep the first.
@@ -836,10 +980,17 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     fromMatchTitle,
   };
 
+  // Order 35: stored wiki items this source no longer lists, not yet flagged.
+  const itemsGone = [...existing.items].filter(([k, o]) => o.source === 'wiki' && o.gone_at === null && !items.has(k)).map(([k]) => k).sort();
+
   return {
     classes,
     classDeactivate,
     classBits,
+    races,
+    raceDeactivate,
+    raceBits,
+    itemsGone,
     mobs: [...mobs.values()],
     mobDeactivate,
     gear,
@@ -859,12 +1010,70 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
   };
 }
 
+// ---------------------------------------------------------------- item levels (order 35)
+
+/**
+ * Sets each gear item's level columns (scripts/import/levels.ts), from tables already in memory: wiki.json's items, mobs
+ * and recipes; the zone plan's NPCs, zones and zone names (or, without one, the stored rows); the snapshot's quest bucket.
+ * With `kept` (order 28's override 9: the zone data was kept), the stored levels are kept too, so a night without the
+ * wiki rewrites nothing; an item new that night has none (level_kind NULL) until the next full run.
+ */
+export function applyLevels(plan: Plan, data: WikiData, existing: ExistingState, opts: { zones?: ZonePlan; snapshot?: WikiSnapshot; kept?: boolean } = {}): LevelSummary | undefined {
+  const gear = new Set(plan.items.filter((r) => r.slot_mask !== 0).map((r) => r.name_key));
+  if (opts.kept) {
+    for (const row of plan.items) {
+      const o = existing.items.get(row.name_key);
+      if (!gear.has(row.name_key) || !o) continue;
+      row.level_low = o.level_low;
+      row.level_high = o.level_high;
+      row.level_kind = o.level_kind as Kind | null;
+      row.level_kinds = o.level_kinds;
+    }
+    return undefined;
+  }
+  const json = (v: string | null): string[] => (v ? (JSON.parse(v) as string[]) : []);
+  const z = opts.zones;
+  const active = <T extends { active: number }>(m: Map<string, T>) => [...m.values()].filter((r) => r.active === 1);
+  const { levels, summary } = computeLevels(
+    {
+      items: plan.items.map((r) => {
+        const it = data.items[r.name];
+        return {
+          key: r.name_key,
+          from: strings(it.from),
+          sold: !isEmpty(it.soldBy),
+          harvested: isName(it.harvestedBy),
+          questCategory: strings(it.categories).some((c) => (QUEST_CATEGORIES as readonly string[]).includes(c)),
+        };
+      }),
+      mobs: plan.mobs.map((m) => ({ key: m.key, title: m.title, level: m.level, zones: json(m.zones_json), loot: json(m.loot_json) })),
+      npcs: (z ? z.npcs : active(existing.npcs)).map((n) => ({ name: n.name, zone_key: n.zone_key, level: n.level, loot: json(n.loot_json) })),
+      zones: (z ? z.zones : active(existing.zones)).map((r) => ({ key: r.key, level: r.level })),
+      zoneNames: z ? z.names : active(existing.zoneNames),
+      recipes: plan.recipes.map((r) => ({ ...r, id: existing.recipes.get(r.source_key)?.id ?? null })),
+      quests: opts.snapshot ? questBucket(opts.snapshot) : [],
+    },
+    gear,
+  );
+  for (const row of plan.items) {
+    const l: ItemLevel | undefined = levels.get(row.name_key);
+    if (!l) continue;
+    row.level_low = l.level_low;
+    row.level_high = l.level_high;
+    row.level_kind = l.level_kind;
+    row.level_kinds = l.level_kinds;
+  }
+  return summary;
+}
+
 // ---------------------------------------------------------------- predicted changes (dry run)
 
 export interface Predicted {
   tradeskill: { insert: number; update: number };
-  item: { insert: number; update: number };
+  /** Order 35: gone = stored wiki items the source no longer lists, flagged this run (never deleted). */
+  item: { insert: number; update: number; gone: number };
   stub: { insert: number };
+  game_race: { insert: number; update: number; deactivate: number };
   recipe: { insert: number; update: number; deactivate: number };
   recipe_component: { insert: number; update: number; delete: number };
   game_class: { insert: number; update: number; deactivate: number };
@@ -881,13 +1090,19 @@ export interface Predicted {
 export function predict(plan: Plan, ex: ExistingState): Predicted {
   const p: Predicted = {
     tradeskill: { insert: 0, update: 0 },
-    item: { insert: 0, update: 0 },
+    item: { insert: 0, update: 0, gone: plan.itemsGone.length },
     stub: { insert: 0 },
+    game_race: { insert: 0, update: 0, deactivate: plan.raceDeactivate.length },
     recipe: { insert: 0, update: 0, deactivate: plan.deactivate.length },
     recipe_component: { insert: 0, update: 0, delete: plan.componentDeletes.reduce((n, d) => n + d.item_keys.length, 0) },
     game_class: { insert: 0, update: 0, deactivate: plan.classDeactivate.length },
     mob: { insert: 0, update: 0, deactivate: plan.mobDeactivate.length },
   };
+  for (const r of plan.races.kept) {
+    const o = ex.races.get(r.code);
+    if (o === undefined) p.game_race.insert++;
+    else if (raceDiffers(o, r, plan.raceBits.get(r.code))) p.game_race.update++;
+  }
   for (const c of plan.classes.kept) {
     const o = ex.classes.get(c.code);
     if (o === undefined) p.game_class.insert++;
@@ -966,9 +1181,14 @@ const chunk = <T>(xs: T[], n: number): T[][] => {
  * writes exactly the table it names. The backup's must-hold-rows rule reads this list (scripts/backup/lib.ts).
  */
 export const IMPORT_TABLES = ['tradeskill', 'item', 'recipe', 'recipe_component', 'game_class', 'mob', 'zone', 'zone_name', 'npc', 'import_source', 'faction', 'npc_faction', 'faction_quest'] as const;
-export type Table = (typeof IMPORT_TABLES)[number];
+/**
+ * Order 35: game data the import writes that may legitimately hold no rows, so the backup's must-hold-rows rule (which
+ * reads IMPORT_TABLES) leaves it out: game_race is empty when every race list says ALL (and before its first import).
+ */
+export const IMPORT_MAY_BE_EMPTY = ['game_race'] as const;
+export type Table = (typeof IMPORT_TABLES)[number] | (typeof IMPORT_MAY_BE_EMPTY)[number];
 /** Everything the import writes: the game data and its own record of each run (data_import, runImport below). */
-export const IMPORT_WRITES = [...IMPORT_TABLES, 'data_import'] as const;
+export const IMPORT_WRITES = [...IMPORT_TABLES, ...IMPORT_MAY_BE_EMPTY, 'data_import'] as const;
 export interface Statement {
   table: Table;
   sql: string;
@@ -1021,6 +1241,22 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
       stmt('game_class', codes.length, `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`),
     ),
   ]);
+  // Order 35: races before items too (race_mask names game_race bits). name stays NULL: the data holds codes only.
+  const races = ex ? plan.races.kept.filter((r) => { const o = ex.races.get(r.code); return !o || raceDiffers(o, r, plan.raceBits.get(r.code)); }) : plan.races.kept;
+  groups.push([
+    ...chunk(races, ROWS_PER_STATEMENT).map((rows) =>
+      stmt(
+        'game_race',
+        rows.length,
+        `INSERT INTO game_race (code, item_count, bit, mount) VALUES ${rows.map((r) => `(${lit(r.code)}, ${r.item_count}, ${lit(plan.raceBits.get(r.code) ?? null)}, ${r.mount})`).join(', ')} ` +
+          `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count, bit = excluded.bit, mount = excluded.mount ` +
+          `WHERE game_race.item_count IS NOT excluded.item_count OR game_race.bit IS NOT excluded.bit OR game_race.mount IS NOT excluded.mount`,
+      ),
+    ),
+    ...chunk(plan.raceDeactivate, ROWS_PER_STATEMENT).map((codes) =>
+      stmt('game_race', codes.length, `UPDATE game_race SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`),
+    ),
+  ]);
   groups.push(...mobGroups(plan, ex, stmt));
   if (plan.zones) groups.push(...zoneGroups(plan.zones, ex, stmt));
   const items = ex ? plan.items.filter((i) => itemDiffers(ex.items.get(i.name_key), i)) : plan.items;
@@ -1029,23 +1265,32 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
       stmt(
         'item',
         rows.length,
-        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, wiki_url, source, imported_at, class_mask, slot_mask, source_mask, origin_json) VALUES ` +
+        `INSERT INTO item (name, name_key, icon_url, slot, stats_json, wiki_url, source, imported_at, class_mask, slot_mask, source_mask, origin_json, ` +
+          `race_mask, level_low, level_high, level_kind, level_kinds) VALUES ` +
           rows
             .map(
               (i) =>
                 `(${lit(i.name)}, ${lit(i.name_key)}, ${lit(i.icon_url)}, ${lit(i.slot)}, ${lit(i.stats_json)}, ${lit(i.wiki_url)}, 'wiki', ${at}, ` +
-                `${i.class_mask}, ${i.slot_mask}, ${i.source_mask}, ${lit(i.origin_json)})`,
+                `${i.class_mask}, ${i.slot_mask}, ${i.source_mask}, ${lit(i.origin_json)}, ` +
+                `${i.race_mask}, ${lit(i.level_low)}, ${lit(i.level_high)}, ${lit(i.level_kind)}, ${lit(i.level_kinds)})`,
             )
             .join(', ') +
           ` ON CONFLICT(name_key) DO UPDATE SET name = excluded.name, icon_url = excluded.icon_url, slot = excluded.slot, ` +
           `stats_json = excluded.stats_json, wiki_url = excluded.wiki_url, source = excluded.source, imported_at = excluded.imported_at, ` +
-          `class_mask = excluded.class_mask, slot_mask = excluded.slot_mask, source_mask = excluded.source_mask, origin_json = excluded.origin_json ` +
+          `class_mask = excluded.class_mask, slot_mask = excluded.slot_mask, source_mask = excluded.source_mask, origin_json = excluded.origin_json, ` +
+          `race_mask = excluded.race_mask, level_low = excluded.level_low, level_high = excluded.level_high, level_kind = excluded.level_kind, ` +
+          `level_kinds = excluded.level_kinds, gone_at = NULL ` +
           `WHERE item.name IS NOT excluded.name OR item.icon_url IS NOT excluded.icon_url OR item.slot IS NOT excluded.slot ` +
           `OR item.stats_json IS NOT excluded.stats_json OR item.wiki_url IS NOT excluded.wiki_url OR item.source IS NOT excluded.source ` +
           `OR item.class_mask IS NOT excluded.class_mask OR item.slot_mask IS NOT excluded.slot_mask ` +
-          `OR item.source_mask IS NOT excluded.source_mask OR item.origin_json IS NOT excluded.origin_json`,
+          `OR item.source_mask IS NOT excluded.source_mask OR item.origin_json IS NOT excluded.origin_json ` +
+          `OR item.race_mask IS NOT excluded.race_mask OR item.level_low IS NOT excluded.level_low OR item.level_high IS NOT excluded.level_high ` +
+          `OR item.level_kind IS NOT excluded.level_kind OR item.level_kinds IS NOT excluded.level_kinds OR item.gone_at IS NOT NULL`,
       ),
     ]);
+  // Order 35: an item the source no longer lists is flagged, never deleted (saved gear names it by name_key).
+  for (const keys of chunk(plan.itemsGone, ROWS_PER_STATEMENT))
+    groups.push([stmt('item', keys.length, `UPDATE item SET gone_at = ${at} WHERE source = 'wiki' AND gone_at IS NULL AND name_key IN (${keys.map(lit).join(', ')})`)]);
   // Stub rows are only created, never overwritten: a stored record (wiki or stub) always wins.
   const stubs = ex ? plan.stubs.filter((s) => !ex.items.has(s.name_key)) : plan.stubs;
   for (const rows of chunk(stubs, ROWS_PER_STATEMENT))
@@ -1402,16 +1647,18 @@ export const buildStatements = (plan: Plan, importedAt: string, ex?: ExistingSta
 export async function loadExisting(db: Db): Promise<ExistingState> {
   const ts = await db.all<{ name: string; kind: string; sort_order: number }>('SELECT name, kind, sort_order FROM tradeskill');
   const its = await db.all<StoredItem & { name_key: string }>(
-    'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source, class_mask, slot_mask, source_mask, origin_json FROM item',
+    'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source, class_mask, slot_mask, source_mask, origin_json, ' +
+      'race_mask, level_low, level_high, level_kind, level_kinds, gone_at FROM item',
   );
+  const races = await db.all<{ code: string; item_count: number; bit: number | null; mount: number }>('SELECT code, item_count, bit, mount FROM game_race');
   const ms = await db.all<StoredMob>('SELECT key, title, level, race, class, image_url, zones_json, loot_json, active FROM mob');
   // The live schema's indexes per table (the write bound): every index, partial or not, counts.
   const idx = await db.all<{ t: string; n: number }>("SELECT tbl_name AS t, count(*) AS n FROM sqlite_master WHERE type = 'index' GROUP BY tbl_name");
   const rs = await db.all<{
-    source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null;
+    id: number; source_key: string; active: number; tradeskill: string; result_key: string; result_qty: number; trivial: number | null;
     trivial_unconfirmed: number; unknown_components: number; item_key: string | null; qty: number | null;
   }>(
-    `SELECT r.source_key, r.active, t.name AS tradeskill, ri.name_key AS result_key, r.result_qty, r.trivial,
+    `SELECT r.id, r.source_key, r.active, t.name AS tradeskill, ri.name_key AS result_key, r.result_qty, r.trivial,
             r.trivial_unconfirmed, r.unknown_components, ci.name_key AS item_key, c.qty
      FROM recipe r JOIN tradeskill t ON t.id = r.tradeskill_id JOIN item ri ON ri.id = r.result_item_id
      LEFT JOIN recipe_component c ON c.recipe_id = r.id LEFT JOIN item ci ON ci.id = c.item_id
@@ -1431,6 +1678,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     if (!r) {
       r = {
         source_key: row.source_key,
+        id: Number(row.id),
         variant: parseSourceKey(row.source_key).variant,
         active: row.active === 1,
         tradeskill: row.tradeskill,
@@ -1450,8 +1698,21 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     tradeskills: new Map(ts.map((t) => [t.name, { kind: t.kind, sort_order: t.sort_order }])),
     // Masks read back as integers so the comparison with the plan is exact (second run writes 0).
     items: new Map(
-      its.map(({ name_key, ...i }) => [name_key, { ...i, class_mask: Number(i.class_mask), slot_mask: Number(i.slot_mask), source_mask: Number(i.source_mask) }]),
+      its.map(({ name_key, ...i }) => [
+        name_key,
+        {
+          ...i,
+          class_mask: Number(i.class_mask),
+          slot_mask: Number(i.slot_mask),
+          source_mask: Number(i.source_mask),
+          // Order 35: read back as integers (or NULL) so the comparison with the plan is exact (second run writes 0).
+          race_mask: Number(i.race_mask),
+          level_low: i.level_low === null ? null : Number(i.level_low),
+          level_high: i.level_high === null ? null : Number(i.level_high),
+        },
+      ]),
     ),
+    races: new Map(races.map((r) => [r.code, { item_count: Number(r.item_count), bit: r.bit === null ? null : Number(r.bit), mount: Number(r.mount) }])),
     recipes,
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
     classes: new Map(cls.map((c) => [c.code, { item_count: Number(c.item_count), bit: c.bit === null ? null : Number(c.bit) }])),
@@ -1520,6 +1781,9 @@ export interface ImportResult {
   written?: Record<Table, { statements: number; rows_written: number; changes: number }>;
   /** Order 13: gear sources, overlaps, classes and mob matches. */
   gear?: GearSummary;
+  /** Order 35: the race list as derived, and the gear levels' coverage (absent when the zone data was kept). */
+  races?: RaceDerivation;
+  levels?: LevelSummary;
   /** Order 17: the zone mapping (matched and unmatched names per source), the NPC merge and the map images. */
   zones?: ZoneSummary;
   /** Every row the run wrote (D1 rows_written, index writes included), its own data_import rows too. */
@@ -1593,8 +1857,18 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
   }
 
   const existing = await loadExisting(db);
-  const plan = buildPlan(data, existing);
+  let plan: Plan;
+  try {
+    plan = buildPlan(data, existing);
+  } catch (e) {
+    // Order 35: more races than the bits hold stops the run (B8), as a structure failure does.
+    if (e instanceof StructureError) return fail(e.message);
+    throw e;
+  }
   warnings.push(...plan.warnings);
+  const storedWiki = [...existing.items.values()].filter((i) => i.source === 'wiki' && i.gone_at === null).length;
+  if (storedWiki > 0 && plan.items.length < storedWiki * MIN_RECIPE_RATIO)
+    return fail(`implausible drop: ${plan.items.length} items against ${storedWiki} listed stored`);
   if (existing.activeWikiRecipes > 0 && plan.recipes.length < existing.activeWikiRecipes * MIN_RECIPE_RATIO)
     return fail(`implausible drop: ${plan.recipes.length} recipes against ${existing.activeWikiRecipes} active stored`);
   const activeMobs = [...existing.mobs.values()].filter((m) => m.active === 1).length;
@@ -1616,6 +1890,8 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     if (activeNpcs > 0 && plan.zones.npcs.length < activeNpcs * MIN_RECIPE_RATIO)
       return fail(`implausible drop: ${plan.zones.npcs.length} NPC rows against ${activeNpcs} active stored`);
   }
+  // Order 35: the gear levels, now that the zone plan (or the stored zone data) is known.
+  const levels = applyLevels(plan, data, existing, { zones: plan.zones, snapshot: opts.zones?.wiki, kept: !!opts.zonesKept });
 
   const counts: NonNullable<ImportResult['counts']> = {
     sourceItems: Object.keys(data.items).length,
@@ -1648,6 +1924,8 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
       warnings,
       classes: plan.classes,
       gear: plan.gear,
+      races: plan.races,
+      levels,
       zones: plan.zones?.summary,
       gatheringCandidates: plan.gatheringCandidates,
       predicted,
@@ -1660,7 +1938,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     `INSERT INTO data_import (source, source_version, status, warnings, started_at) VALUES (${lit(SOURCE)}, ${lit(sourceVersion)}, 'running', ${warningsJson()}, ${lit(startedAt)})`,
   ]);
   const runRow = `(SELECT max(id) FROM data_import WHERE status = 'running' AND started_at = ${lit(startedAt)})`;
-  const written = Object.fromEntries(IMPORT_TABLES.map((t) => [t, { statements: 0, rows_written: 0, changes: 0 }])) as NonNullable<ImportResult['written']>;
+  const written = Object.fromEntries([...IMPORT_TABLES, ...IMPORT_MAY_BE_EMPTY].map((t) => [t, { statements: 0, rows_written: 0, changes: 0 }])) as NonNullable<ImportResult['written']>;
   // Order 13, section D: spent counts every row this run writes, its own data_import rows included. A group runs only
   // when spent plus the group's bound stays within the ceiling; groups are sent together while their bounds fit.
   const ceiling = opts.writeCeiling ?? WRITE_CEILING;
@@ -1726,6 +2004,8 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     warnings,
     classes: plan.classes,
     gear: plan.gear,
+    races: plan.races,
+    levels,
     zones: plan.zones?.summary,
     gatheringCandidates: plan.gatheringCandidates,
     predicted,

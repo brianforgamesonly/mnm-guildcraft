@@ -44,7 +44,23 @@ export const TEMPLATE_FIELDS = {
   zoneDescription: 'lead text',
   /** Quest pages: the reward lines are the bullets under a level-2 heading that starts with "Reward". */
   questRewardHeading: /^reward/i,
+  /**
+   * Order 35: the snapshot's Quests bucket (read by order 28's job, already in the snapshot): each row's name, its minimum
+   * level and its reward names, for the quest level kind (scripts/import/levels.ts). A missing field is NULL or empty.
+   */
+  questBucket: { bucket: 'quests', name: 'quest_name', minLevel: 'quest_min_level', rewards: 'quest_rewards' },
 } as const;
+
+/** Order 35: the Quests bucket's rows as the level rule reads them (TEMPLATE_FIELDS.questBucket); none when it holds no rows. */
+export function questBucket(snap: WikiSnapshot): { title: string; minLevel: unknown; rewards: string[] }[] {
+  const F = TEMPLATE_FIELDS.questBucket;
+  const rows = snap.buckets?.[F.bucket]?.rows ?? [];
+  return rows.map((r) => ({
+    title: typeof r[F.name] === 'string' ? (r[F.name] as string) : '',
+    minLevel: r[F.minLevel] ?? null,
+    rewards: Array.isArray(r[F.rewards]) ? (r[F.rewards] as unknown[]).filter((x): x is string => typeof x === 'string') : [],
+  }));
+}
 
 export const wikiPageUrl = (title: string) => `${WIKI}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
 

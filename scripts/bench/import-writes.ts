@@ -23,11 +23,15 @@ const { values: args } = parseArgs({
     'wiki-snapshot': { type: 'string' },
     // Order 24: apply migrations only up to this one (inclusive), to build the remote copy's state on a fresh local database.
     until: { type: 'string' },
+    // Order 35: leave out the zone summary (long); print the races and the gear levels' coverage instead.
+    brief: { type: 'boolean', default: false },
   },
 });
 if (!args.file) throw new Error('--file is required');
 
-const { db, dispose } = await localDb();
+// Order 35: D1's rows_read for each import run, beside its rows written.
+const tally = { rowsRead: 0 };
+const { db, dispose } = await localDb(tally);
 try {
   // A fresh local database has no migrations table yet: wrangler's own definition.
   await db.run(['CREATE TABLE IF NOT EXISTS d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)']);
@@ -49,6 +53,7 @@ try {
   }
   const raw = JSON.parse(readFileSync(args.file, 'utf8')) as unknown;
   for (let i = 1; i <= Number(args.runs); i++) {
+    tally.rowsRead = 0;
     const res = await runImport(db, raw, {
       sourceSha: args.sha!,
       now: () => new Date().toISOString(),
@@ -57,14 +62,16 @@ try {
       zones: args['zones-dir'] ? withWiki(readZoneDir(args['zones-dir']), readSnapshot(args['wiki-snapshot'] ?? COMMITTED_SNAPSHOT)) : undefined,
     });
     console.log(
-      `import run ${i}: ${res.status} · rows written ${res.rowsWritten} of ceiling ${res.ceiling}` +
+      `import run ${i}: ${res.status} · rows written ${res.rowsWritten} of ceiling ${res.ceiling} · rows read ${tally.rowsRead}` +
         (res.error ? ` · ${res.error}` : '') +
         ` · per table ${JSON.stringify(Object.fromEntries(Object.entries(res.written ?? {}).map(([t, w]) => [t, w.rows_written])))}`,
     );
     if (i === 1) {
       console.log(`predicted: ${JSON.stringify(res.predicted)}`);
       console.log(`gear: ${JSON.stringify(res.gear)}`);
-      if (res.zones) console.log(`zones: ${JSON.stringify(res.zones, null, 1)}`);
+      if (res.zones && !args.brief) console.log(`zones: ${JSON.stringify(res.zones, null, 1)}`);
+      if (res.races) console.log(`races: ${JSON.stringify(res.races)}`);
+      if (res.levels) console.log(`levels: ${JSON.stringify(res.levels)}`);
       for (const w of res.warnings ?? []) if (w.kind !== 'scroll' && w.kind !== 'unmatched_component_names') console.log(`warning: ${JSON.stringify(w)}`);
     }
   }

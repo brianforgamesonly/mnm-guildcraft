@@ -90,7 +90,8 @@ describe('/help pages (order 18: derived from the definitions)', () => {
     expect(COMING.map((c) => c.cmd).sort()).toEqual(unbuilt.sort());
     expect(prdCommands.filter((c) => isDkp(c) && !DKP_DEFINED.has(c)).sort()).toEqual([...DKP_COMING].sort());
     expect([...DKP_DEFINED].filter((c) => !prdCommands.includes(c))).toEqual([]);
-    expect(all.split('\n').filter((l) => l.endsWith(COMING_SOON))).toEqual([expect.stringMatching(/^`\/recipe add`/)]);
+    // Order 35: each COMING entry once, and nothing else marked coming soon (this listed /recipe add alone).
+    expect(all.split('\n').filter((l) => l.endsWith(COMING_SOON)).sort()).toEqual(COMING.map((c) => `\`${c.cmd}\` ${c.text} ${COMING_SOON}`).sort());
   });
 
   it('every command the pages, the welcome and the board index name is registered', () => {

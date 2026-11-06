@@ -1273,3 +1273,11 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/dkp/copy.ts:70-74 | (GC-DKP post) **+\<n> in \<pool>** for \<n> members on **\<title>**. By \<officer>. Reason: \<reason> · Changed · \<member>: now \<balance>; \<n> over the cap was not added · Skipped (frozen) | DRAFT |
 | src/dkp/definition.ts:125 | (`/dkp adjust`) Officers: change a member's points, or a whole event's, with a reason (posted publicly) | DRAFT |
 | src/dkp/definition.ts:129-131 | (options) The member (or use event:) · The pool: a raid zone, or the guild pool (event: defaults to its raid's zone) · Everyone on this event's roster (or use member:) | DRAFT |
+
+## Work order 35, PR A: gear upgrades, the data (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/help.ts:37 | (`/help`, profile page) `/gear wear` save what one of your characters wears *(coming soon)* | DRAFT |
+| src/commands/help.ts:38 | (`/help`, find page) `/gear upgrades` what beats the gear a character wears, smallest upgrade first *(coming soon)* | DRAFT |
+| src/commands/help.ts:39 | (`/help`, find page) `/gear settings` how /gear upgrades weighs the stats *(coming soon)* | DRAFT |

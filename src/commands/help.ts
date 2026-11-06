@@ -31,7 +31,13 @@ export const PAGE_OF: Record<CommandName, PageKey> = {
 };
 
 /** The PRD's commands that are not built yet, each on the page it belongs to (test: these and only these are unbuilt). */
-export const COMING: { cmd: string; text: string; page: PageKey }[] = [{ cmd: '/recipe add', text: 'record a recipe the data is missing (officer-approved)', page: 'officers' }];
+export const COMING: { cmd: string; text: string; page: PageKey }[] = [
+  { cmd: '/recipe add', text: 'record a recipe the data is missing (officer-approved)', page: 'officers' },
+  // Order 35 (docs/PRD.md "Gear upgrades"): /gear wear arrives with order 35's PR B; upgrades and settings with part 2.
+  { cmd: '/gear wear', text: 'save what one of your characters wears', page: 'profile' },
+  { cmd: '/gear upgrades', text: 'what beats the gear a character wears, smallest upgrade first', page: 'find' },
+  { cmd: '/gear settings', text: 'how /gear upgrades weighs the stats', page: 'find' },
+];
 
 /** Each page: its button label, and the lines above and below its commands. */
 export const PAGES: { key: PageKey; label: string; before: string[]; after: string[] }[] = [

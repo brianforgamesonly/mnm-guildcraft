@@ -62,6 +62,8 @@ describe('schema (migrations/0001_init.sql)', () => {
       'event_member',
       // Order 34 (0028): who a batch adjustment waiting for approval covers.
       'dkp_pending_member',
+      // Order 35 (0029): the races, derived as the classes are.
+      'game_race',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([
@@ -78,7 +80,7 @@ describe('schema (migrations/0001_init.sql)', () => {
       'event_history_by_member', 'event_upcoming',
       // Order 26 (0020): the cron's "anything to do?" query for the factions board, from indexes.
       'faction_changed', 'faction_post_dirty', 'faction_post_rendered',
-      'game_class_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
+      'game_class_bit', 'game_race_bit', 'item_ac', 'item_delay', 'item_dmg', 'item_gear', 'item_handed', 'item_ratio', 'item_skill', 'mob_by_title',
       // Order 24 (0018): a faction's links.
       'npc_faction_by_faction',
       // Order 19 (0014): /item's "used in" statement.

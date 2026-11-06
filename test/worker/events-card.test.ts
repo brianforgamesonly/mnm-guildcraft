@@ -152,7 +152,11 @@ describe('/event create and its preview', () => {
   it('answers privately with Discord\'s local time, the full date, Post and Cancel, and posts nothing', async () => {
     const r = await event(officer, 'create', { ...raid, start: 'tomorrow 20:00' });
     expect(r.data.flags).toBe(64);
-    expect(r.data.content).toContain('Saturday, October 31');
+    // Order 35: "tomorrow" is read from the real clock, so the expected date is too (this said "Saturday, October 31",
+    // the day after it was written, and failed every day after 2026-10-30).
+    const [m, d, y] = new Intl.DateTimeFormat('en-US', { timeZone: NY, year: 'numeric', month: '2-digit', day: '2-digit' }).format(Date.now()).split('/').map(Number);
+    const tomorrow = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' }).format(Date.UTC(y, m - 1, d + 1, 12));
+    expect(r.data.content).toContain(tomorrow);
     expect(r.data.embeds![0].description).toMatch(/<t:\d+:F> \(<t:\d+:R>\)/);
     expect(r.data.components![0].components.map((b: any) => b.label)).toEqual([EVENT_COPY.post, EVENT_COPY.cancel]);
     expect(fake.messages).toEqual([]);
