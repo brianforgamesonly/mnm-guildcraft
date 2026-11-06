@@ -41,8 +41,9 @@ const PLACE = [100, 50, 25, 25] as const;
 const HYBRID = { MANA: 5, MANAREGEN: 100 } as const;
 
 /**
- * Section E's class table (Brian-approved, 2026-11-05; from the class guides on Stories of Monsters and Memories), keyed by
- * game_class's code. "›" separates places, "&" joins a shared place.
+ * Section E's class table (Brian-approved, 2026-11-05), keyed by game_class's code. "›" separates places, "&" joins a shared
+ * place. Source: the Stories of Monsters and Memories character planner's published priority list
+ * (https://storiesofmnm.com/character-planner/), against which Cowork verified all 18 rows on 2026-11-05 (the owner, order 36).
  */
 export const CLASSES: Record<string, { name: string; preset: Preset; priority: string }> = {
   ARC: { name: 'Archer', preset: 'Melee', priority: 'DEX › AGI › STR › STA' },
@@ -99,13 +100,41 @@ export function defaultWeights(code: string | null | undefined): Weights {
   return presetWeights(k?.preset ?? FALLBACK_PRESET, k?.priority ?? '');
 }
 
-/**
- * The one reader of a server's weights for a class. Part 2, PR A: the defaults (no server stores a change yet; PR B adds
- * the stored differences here, and nowhere else). `server` is the guild id.
- */
-export async function weightsFor(_db: D1Database, _server: string, code: string | null | undefined): Promise<Weights> {
-  return defaultWeights(code);
+/** A stored weight row (migrations/0031 gear_weight). */
+export interface WeightRow {
+  stat: string;
+  value: number;
+  set_at: string;
+  set_by: string;
+  /** The setter's name saved at their last command (member.display_name), when known. */
+  by_name: string | null;
 }
+export const WEIGHT_ROWS_SQL = `SELECT w.stat, w.value, w.set_at, w.set_by, m.display_name AS by_name FROM gear_weight w
+  LEFT JOIN member m ON m.guild_id = w.guild_id AND m.discord_user_id = w.set_by WHERE w.guild_id = ?1 AND w.class = ?2`;
+/** The class key a weight row is stored under: the game_class code, upper-cased. */
+export const classKey = (code: string | null | undefined) => (code ?? '').toUpperCase();
+
+/** The defaults with a server's stored values over them (a row naming a stat no longer in WEIGHT_KEYS is ignored). */
+export function applyRows(code: string | null | undefined, rows: Pick<WeightRow, 'stat' | 'value'>[]): Weights {
+  const w = defaultWeights(code);
+  for (const r of rows) if ((WEIGHT_KEYS as readonly string[]).includes(r.stat)) w[r.stat as WeightKey] = Number(r.value);
+  return w;
+}
+
+/**
+ * The one reader of a server's weights for a class (order 36): the class's defaults, with the server's stored changes over
+ * them (one indexed statement, the primary key's prefix). `server` is the guild id. A character with no class has none
+ * stored: the defaults.
+ */
+export async function weightsFor(db: D1Database, server: string, code: string | null | undefined): Promise<Weights> {
+  if (!code) return defaultWeights(code);
+  const { results } = await db.prepare(WEIGHT_ROWS_SQL).bind(server, classKey(code)).all<WeightRow>();
+  return applyRows(code, results);
+}
+
+/** Order 36: the server's settings for /gear upgrades, each at its default unless an officer changed it (gear_setting). */
+export const GEAR_SETTINGS = { window: { default: 10, min: 0, max: 60 } } as const;
+export const WINDOW_SQL = "SELECT value FROM gear_setting WHERE guild_id = ? AND key = 'window'";
 
 // ---------------------------------------------------------------- an item's stats
 
@@ -410,6 +439,7 @@ export const wornScore = (slot: string, token: SlotToken, ctx: Context) => score
 
 export const GROUPS = ['around', 'above', 'unknown'] as const;
 export type LevelGroup = (typeof GROUPS)[number];
+/** The window's default (an officer's change is stored per server: GEAR_SETTINGS, /gear settings window:). */
 export const DEFAULT_WINDOW = 10;
 
 /**

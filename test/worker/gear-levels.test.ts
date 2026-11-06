@@ -90,8 +90,9 @@ describe('order 35, ITEM 1: race_mask and the derived race list', () => {
     const first = await load(f);
     expect(first.status).toBe('ok');
     expect(await all('SELECT code, name, item_count, bit, mount FROM game_race ORDER BY code')).toEqual([
-      { code: 'DEF', name: null, item_count: 2, bit: 0, mount: 0 },
-      { code: 'HUM', name: null, item_count: 3, bit: 1, mount: 0 },
+      // Order 36: the import writes the name from src/gear/vocab.ts RACE_NAMES.
+      { code: 'DEF', name: 'Deep Elf', item_count: 2, bit: 0, mount: 0 },
+      { code: 'HUM', name: 'Human', item_count: 3, bit: 1, mount: 0 },
     ]);
     expect(await one("SELECT race_mask FROM item WHERE name = 'Ring A'")).toEqual({ race_mask: 0b11 });
     expect(await one("SELECT race_mask FROM item WHERE name = 'Plain Cap'")).toEqual({ race_mask: ALL_RACES });

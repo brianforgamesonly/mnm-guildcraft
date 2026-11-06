@@ -2,6 +2,7 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import { markSkillsDirty } from '../board/refresh.ts';
+import { raceLabel } from '../gear/vocab.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { findById, resolveCharacter, resolveOwner, type Character } from './character.ts';
@@ -275,7 +276,7 @@ export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ emb
   let anyStale = false;
   const embeds: Embed[] = shown.map((ch) => {
     // Order 35: the race (a game_race code), when set.
-    const head = [ch.class ? md(ch.class) : null, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${md(ch.race)}` : null].filter(Boolean).join(' · ');
+    const head = [ch.class ? md(ch.class) : null, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${md(raceLabel(ch.race))}` : null].filter(Boolean).join(' · ');
     const lines = results
       .filter((r) => r.character_id === ch.id)
       .map((r) => {

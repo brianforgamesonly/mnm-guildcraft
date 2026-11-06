@@ -26,7 +26,7 @@ import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../zone/names.ts';
 import { parseLevel } from '../../scripts/import/levels.ts';
 import { gearIndex, VERSION_SQL, type GearIndex } from './index.ts';
 import {
-  breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, DEFAULT_WINDOW, fmtHundredths, groupByKey, grouped, GROUPS, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
+  breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, DEFAULT_WINDOW, GEAR_SETTINGS, WINDOW_SQL, fmtHundredths, groupByKey, grouped, GROUPS, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
@@ -411,7 +411,7 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
     if (live.length > 1) return ephemeral(WEAR_COPY.severalCharacters(live.map((x) => x.name)));
     ch = live[0];
   }
-  const window = levels ?? DEFAULT_WINDOW;
+  const window = levels ?? (await windowOf(c));
   const L = await load(c, ch);
   const v = key ? await slotPage(c, L, key, window, 0) : summaryView(L, window);
   return ephemeral('', { embeds: [v.embed], components: v.components });
@@ -421,8 +421,15 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
 async function findUpgrades(c: Ctx, id: string): Promise<MessageReply> {
   const t = await characterFor(c, id.slice(FIND_UPGRADES_PREFIX.length));
   if ('reply' in t) return t.reply;
-  const v = summaryView(await load(c, t.ch), DEFAULT_WINDOW);
+  const v = summaryView(await load(c, t.ch), await windowOf(c));
   return ephemeral('', { embeds: [v.embed], components: v.components });
+}
+
+/** Order 36, PR B: the server's window (/gear settings window:), else the default. One indexed read. */
+export async function windowOf(c: Pick<Ctx, 'db' | 'guild'>): Promise<number> {
+  const r = await c.db.prepare(WINDOW_SQL).bind(c.guild.id).first<{ value: number }>();
+  const w = Number(r?.value);
+  return r && Number.isInteger(w) && w >= GEAR_SETTINGS.window.min && w <= GEAR_SETTINGS.window.max ? w : DEFAULT_WINDOW;
 }
 
 const parts = (id: string, prefix: string) => id.slice(prefix.length).split(':');

@@ -77,7 +77,7 @@ describe('order 35, ITEM 1: race on characters', () => {
     expect(await one('SELECT race FROM character WHERE name = ?', 'Testchar')).toEqual({ race: 'HUM' });
     const id = await charId('Testchar');
     // The card shows it.
-    expect((await send(rawCmd(ann, 'me', undefined))).data.embeds![0].description).toContain('race HUM');
+    expect((await send(rawCmd(ann, 'me', undefined))).data.embeds![0].description).toContain('race Human'); // order 36: the name, from the code map
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'INQ', level: '', main: '', race: 'ELF' }));
     expect(await one('SELECT race FROM character WHERE id = ?', id)).toEqual({ race: 'ELF' });
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'INQ', level: '', main: '', race: 'none' }));

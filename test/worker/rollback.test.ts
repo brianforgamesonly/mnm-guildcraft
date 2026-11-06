@@ -37,6 +37,8 @@ import up26 from '../../migrations/0026_event_messages.sql?raw';
 import down23 from '../../scripts/rollback/0023_dkp_auctions.down.sql?raw';
 import up23 from '../../migrations/0023_dkp_auctions.sql?raw';
 import down24 from '../../scripts/rollback/0024_events.down.sql?raw';
+import down31 from '../../scripts/rollback/0031_gear_weights.down.sql?raw';
+import up31 from '../../migrations/0031_gear_weights.sql?raw';
 import up24 from '../../migrations/0024_events.sql?raw';
 
 const schema = async () =>
@@ -112,6 +114,14 @@ it('order 29: 0023 down, then up again, restores the schema; down leaves no trac
   expect(withTriggers(up23).filter((s) => s.startsWith('CREATE TRIGGER')).length).toBe(2);
   await run(up27);
   await run(up28);
+});
+
+it('order 36: 0031 down, then up again, restores the schema; down leaves no trace of it', async () => {
+  const before = await schema();
+  await run(down31);
+  expect((await schema()).some((r) => r.name.startsWith('gear_weight') || r.name.startsWith('gear_setting'))).toBe(false);
+  await run(up31);
+  expect(await schema()).toEqual(before);
 });
 
 it('order 34: 0028 and 0027 down, then up again, restore the schema; down leaves no trace of them', async () => {

@@ -9,6 +9,7 @@
 import { getPlatformProxy } from 'wrangler';
 import { gearUpgrades, load, summaryView, upgradesComponent, PAGE_PREFIX, RESULT_PREFIX } from '../../src/gear/upgrades.ts';
 import { clearGearIndex, GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
+import { gearSettings, gearWeights } from '../../src/gear/weights.ts';
 import { compareGroup, groupByKey, grouped, levelGroup } from '../../src/gear/score.ts';
 import { WEAR_SLOTS } from '../../src/gear/slots.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
@@ -21,10 +22,13 @@ const SHOW = process.argv.includes('--show');
 
 // D1 with every statement's rows_read added up (first() is answered from all(), which carries meta).
 let rows = 0;
+/** Order 36, PR B: D1's rows_written (index writes included), for --weights. */
+let written = 0;
 let statements = 0;
 const count = (r) => {
   statements++;
   rows += r?.meta?.rows_read ?? 0;
+  written += r?.meta?.rows_written ?? 0;
   return r;
 };
 const wrapStmt = (s) => ({
@@ -166,6 +170,27 @@ if (process.argv.includes('--testchar')) {
   ac0.ctx = { ...ac0.ctx, weights: { ...ac0.ctx.weights, AC: 0 } };
   const r2 = compareGroup(groupByKey('chest'), ac0.ctx, ac0.wearer, ac0.idx.items);
   console.log(`  step 6 (AC weight 0), Chest after step 3: window 10 ${JSON.stringify(counts(r2, 10))}`);
+}
+// --weights (order 36, PR B): D1's rows written and read by each kind of weight change, with its audit row (no review
+// channel is set here, so nothing is posted).
+if (process.argv.includes('--weights')) {
+  console.log('\nWeight changes (Inquisitor; rows_written includes index writes and the audit row):');
+  const steps = [
+    ['view', [opt('class', 'INQ')]],
+    ['one stat (AC 0)', [opt('class', 'INQ'), opt('stat', 'AC'), opt('value', 0)]],
+    ['a second stat (STA 0.5)', [opt('class', 'INQ'), opt('stat', 'STA'), opt('value', 0.5)]],
+    ['preset Caster', [opt('class', 'INQ'), opt('preset', 'Caster')]],
+    ['reset', [opt('class', 'INQ'), { type: 5, name: 'reset', value: true }]],
+    ['settings window 5', null],
+  ];
+  for (const [label, o] of steps) {
+    rows = 0;
+    written = 0;
+    statements = 0;
+    o ? await gearWeights(ctx(), o) : await gearSettings(ctx(), [opt('window', 5)]);
+    console.log(`  ${label}: rows_written ${written}, rows_read ${rows} (${statements} statements)`);
+  }
+  await raw.batch([raw.prepare('DELETE FROM gear_weight WHERE guild_id = ?').bind(BENCH_GUILD), raw.prepare('DELETE FROM gear_setting WHERE guild_id = ?').bind(BENCH_GUILD), raw.prepare('DELETE FROM audit_log WHERE guild_id = ?').bind(BENCH_GUILD)]);
 }
 await raw.batch([
   raw.prepare('DELETE FROM character_gear WHERE guild_id = ?').bind(BENCH_GUILD),
