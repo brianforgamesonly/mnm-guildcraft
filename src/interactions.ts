@@ -8,6 +8,7 @@ import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } f
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
 import { gearWear, WEAR_OPENS_MODAL, wearComponent, wearImmediate } from './gear/wear.ts';
+import { gearUpgrades, POST_WHAT as UPGRADES_POST, postUpgrades, upgradesComponent } from './gear/upgrades.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, REJECT_PREFIX, statImage } from './commands/images.ts';
@@ -81,6 +82,8 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
   // the search (routeKey).
   'gear search': { access: 'member', audit: 'gear.find', run: gearFind },
   'gear wear': { access: 'member', run: gearWear },
+  // Order 36: /gear upgrades (src/gear/upgrades.ts), private; its controls re-check the character's owner or an officer.
+  'gear upgrades': { access: 'member', run: gearUpgrades },
   'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
   'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
   'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
@@ -328,6 +331,9 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
     // Order 35: saved gear (src/gear/wear.ts): each control re-checks the character's owner, or an officer.
     const gear = wearComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (gear) return gear;
+    // Order 36: /gear upgrades' controls and Find upgrades (the same owner-or-officer check, src/gear/wear.ts characterFor).
+    const upgrades = i.type === InteractionType.MODAL_SUBMIT ? null : upgradesComponent(c, id, i.data?.values ?? []);
+    if (upgrades) return upgrades;
     // The panel's Update skills leads to the skill form, which re-checks owner or officer itself (componentCharacter).
     if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
   }
@@ -376,6 +382,7 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
     if (what.startsWith('find:')) return postFind(c, Number(what.slice(5)));
     if (what.startsWith(GEAR_POST)) return postGear(c, Number(what.slice(GEAR_POST.length)));
     if (what.startsWith(ZONE_POST)) return postZone(c, what.slice(ZONE_POST.length));
+    if (what.startsWith(UPGRADES_POST)) return postUpgrades(c, what.slice(UPGRADES_POST.length));
     if (what.startsWith('rr:')) return postRosterRecipes(c, what.slice(3).split(':'));
     return (await postRoster(c, what)) ?? ephemeral(STALE_FORM);
   }

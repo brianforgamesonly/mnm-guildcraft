@@ -7,6 +7,7 @@
 import { BOARDS } from '../board/kinds.ts';
 import { gearFindOptions } from '../gear/options.ts';
 import { WEAR_SLOTS } from '../gear/slots.ts';
+import { SLOT_GROUPS } from '../gear/score.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
@@ -42,6 +43,17 @@ const gearOptions = (classes: readonly string[]) => [
       { type: STRING, name: 'item', description: 'The item: pick from the list (gear your character can use)', required: true, autocomplete: true, max_length: 100 },
       { type: STRING, name: 'character', description: 'Your character (needed when you have more than one)', autocomplete: true, max_length: 32 },
       { type: STRING, name: 'slot', description: 'The slot (asked when the item fits more than one)', choices: WEAR_SLOTS.map((w) => ({ name: w.label, value: w.key })) },
+    ],
+  },
+  {
+    // Order 36 (src/gear/upgrades.ts): the 17 slots, each pair (Ear, Wrist, Finger) as one.
+    type: SUBCOMMAND,
+    name: 'upgrades',
+    description: "What beats your character's saved gear, smallest upgrade first, and how to get each item",
+    options: [
+      { type: STRING, name: 'character', description: 'Your character (needed when you have more than one)', autocomplete: true, max_length: 32 },
+      { type: STRING, name: 'slot', description: 'One slot: its full list (leave out for every slot)', choices: SLOT_GROUPS.map((g) => ({ name: g.label, value: g.key })) },
+      { type: INTEGER, name: 'levels', description: 'Around your level means up to this many levels above it (default 10)', min_value: 0, max_value: 60 },
     ],
   },
 ];

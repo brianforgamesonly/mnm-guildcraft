@@ -10,6 +10,7 @@
     "test": "vitest run",
     "test:hook": "node --test .claude/hooks/check-bash.test.mjs",
     "test:actions": "node --test scripts/ci/action-runtimes.test.mjs",
+    "test:commit-claims": "node --test scripts/ci/commit-claims.test.mjs",
     "test:logs": "node --test scripts/bench/logs-check.test.mjs",
     "test:backup": "node --test scripts/backup/lib.test.ts",
     "test:export": "node --test scripts/export/lib.test.ts",
@@ -28,6 +29,7 @@
     "import:remote": "node scripts/import/run.ts --remote",
     "bench:import-writes": "node scripts/bench/import-writes.ts",
     "bench:gear-search": "node scripts/bench/gear-search.mjs",
+    "bench:gear-upgrades": "node scripts/bench/gear-upgrades.mjs",
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "commands:register": "node scripts/discord/register.ts"
   },
