@@ -13,7 +13,7 @@ import { isTwoHanded } from './vocab.ts';
 
 export const VERSION_SQL = "SELECT id || ':' || status || ':' || coalesce(finished_at, '') AS v FROM data_import ORDER BY id DESC LIMIT 1";
 /** Every gear item, its stats already a vector (STAT_VECTOR_SQL: D1 reads the JSON, so the Worker parses none). */
-export const GEAR_INDEX_SQL = `SELECT id, name, name_key, slot_mask, class_mask, race_mask, source_mask, gone_at, handed,
+export const GEAR_INDEX_SQL = `SELECT id, name, name_key, slot_mask, class_mask, race_mask, source_mask, gone_at, handed, wiki_url,
     level_low, level_high, level_kind, level_kinds, ${STAT_VECTOR_SQL} FROM item WHERE slot_mask <> 0`;
 export const CLASS_BITS_SQL = 'SELECT code, bit FROM game_class WHERE item_count > 0 AND bit IS NOT NULL';
 export const RACE_BITS_SQL = 'SELECT code, bit FROM game_race WHERE item_count > 0 AND bit IS NOT NULL';
@@ -38,6 +38,7 @@ interface Row {
   source_mask: number;
   gone_at: string | null;
   handed: string | null;
+  wiki_url: string | null;
   level_low: number | null;
   level_high: number | null;
   level_kind: string | null;
@@ -60,6 +61,8 @@ export const toItem = (r: Row): GearItem => ({
   sourceMask: Number(r.source_mask),
   gone: r.gone_at !== null,
   twoHanded: isTwoHanded(r.handed),
+  // Order 36 follow-up: item names in the lists link to the wiki, only an https address (order 17's rule for wiki links).
+  wiki: typeof r.wiki_url === 'string' && r.wiki_url.startsWith('https://') ? r.wiki_url : null,
   levelLow: r.level_low,
   levelHigh: r.level_high,
   levelKind: r.level_kind,

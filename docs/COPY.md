@@ -1315,3 +1315,15 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/commands/definitions.ts:63-80 | (`/gear weights`) Officers: how /gear upgrades weighs each stat for a class (show, preset, one stat, or reset) · `class`: The class (choices: Archer … Wizard) · `preset`: Replace the class's weights with a preset (its stat priority kept) · `stat`: With value: the stat to set (STR … Mana regen) · `value`: With stat: its weight, 0 to 2 in steps of 0.05 · `reset`: True: back to the defaults · (`/gear settings`) Officers: the server default for how many levels above a character count as "around your level" · `window`: Levels above a character that count as around its level (0 to 60; default 10) · (`/gear upgrades levels:`) …(default: your server's) | DRAFT |
 | src/gear/weights.ts:26-51 | Every weights string (WEIGHTS_COPY): "\<Class> weights", "Default preset: **\<preset>** · priority: …", "default", "changed by \<member>, \<date>", "(default \<n>)", the footer "Only changes are stored; reset: True returns the defaults.", the shapes refusal, not a class, pick a stat, "A weight is from 0 to 2.", "A weight goes in steps of 0.05 (0, 0.05, 0.1 … 2).", no change, saved (posted / no review channel), the review-channel post ("**/gear upgrades weights:** \<member> set \<stat> / applied the \<preset> preset / reset to the defaults for **\<Class>**." and "\<stat>: \<old> → \<new>" lines), and /gear settings' window lines (shown, range, same, saved, the post "**/gear upgrades window:** \<member> changed it from \<n> to \<m> levels.") | DRAFT |
 | src/gear/vocab.ts:49-52 | Race names in menus and cards: Human, Dwarf, Deep Dwarf, Gnome, Deep Gnome, High Elf, Wood Elf, Deep Elf, Halfling, Ogre, Troll, Goblin (was the code) | DRAFT |
+
+## Order 36 follow-up: quest names, item links, the level cap (DRAFT)
+
+Retired with `/gear settings`: its description and window lines above, and "Around your level", "Above your level", "nothing around your level · next: …", the window note and the "Save a level" note.
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/definitions.ts:59 | (`/gear upgrades max_level:`) Only items up to this level (leave out for no cap) | DRAFT |
+| src/gear/upgrades.ts:75-77 | "Items up to Lv \<n>." · "\<n> more above Lv \<n> not shown." · the summary line "**\<Slot>:** [\<item>](wiki) **+\<gain>** · \<level>" | DRAFT |
+| src/gear/upgrades.ts:86 | Group heads: Upgrades · Level unknown | DRAFT |
+| src/gear/upgrades.ts:103-104 | "max_level: is a number from 1 to 80." · (Pick a result's first line) "… · for \<character>'s \<Slot>" | DRAFT |
+| src/gear/upgrades.ts:120-121 | "Quest: [\<quest>](wiki) ([monstersandmemories.wiki](…)) · Lv \<n>+ · +\<n> more" | DRAFT |

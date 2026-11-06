@@ -257,16 +257,17 @@ describe('order 36, ITEM 2: groups and order', () => {
     expect(SLOT_GROUPS.filter((g) => g.sides.length === 2).map((g) => g.key)).toEqual(['ear', 'wrist', 'finger']);
   });
 
-  it('Around (level + window, any-level kinds as 0), Above, Level unknown; no level puts every level in Around', () => {
-    expect([levelGroup({ levelLow: 25 }, 15, 10), levelGroup({ levelLow: 26 }, 15, 10), levelGroup({ levelLow: 0 }, 15, 0), levelGroup({ levelLow: null }, 15, 10)]).toEqual(['around', 'above', 'around', 'unknown']);
-    expect([levelGroup({ levelLow: 60 }, null, 0), levelGroup({ levelLow: null }, null, 0)]).toEqual(['around', 'unknown']);
+  it('order 36 follow-up: no cap lists every level; a cap hides what is above it (any-level kinds are 0); no level is unknown', () => {
+    expect([levelGroup({ levelLow: 63 }, null), levelGroup({ levelLow: null }, null)]).toEqual(['listed', 'unknown']);
+    expect([levelGroup({ levelLow: 30 }, 30), levelGroup({ levelLow: 31 }, 30), levelGroup({ levelLow: 0 }, 1), levelGroup({ levelLow: null }, 1)]).toEqual(['listed', 'above', 'listed', 'unknown']);
   });
 
   it('smallest gain first; ties go to the lower level_low, then the name', () => {
     const u = (name: string, gain: number, low: number | null) => ({ item: mk(name, ['HEAD'], {}, { levelLow: low }), gain, score: 0, baseline: 0, against: [], token: 'HEAD' as const, except: [], side: null, note: null });
     const ups = [u('Zed', 200, 5), u('Bee', 100, 9), u('Ant', 100, 9), u('Cat', 100, 3), u('Dog', 50, 40), u('Elk', 10, null)];
-    const g = grouped(ups, 10, 10);
-    expect(g.around.map((x) => x.item.name)).toEqual(['Cat', 'Ant', 'Bee', 'Zed']);
+    const g = grouped(ups, 20);
+    expect(g.listed.map((x) => x.item.name)).toEqual(['Cat', 'Ant', 'Bee', 'Zed']);
+    expect(grouped(ups, null).listed.map((x) => x.item.name)).toEqual(['Dog', 'Cat', 'Ant', 'Bee', 'Zed']);
     expect(g.above.map((x) => x.item.name)).toEqual(['Dog']);
     expect(g.unknown.map((x) => x.item.name)).toEqual(['Elk']);
     expect([...ups].sort(byGain)[0].item.name).toBe('Elk');

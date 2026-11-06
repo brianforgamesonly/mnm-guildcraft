@@ -132,9 +132,8 @@ export async function weightsFor(db: D1Database, server: string, code: string | 
   return applyRows(code, results);
 }
 
-/** Order 36: the server's settings for /gear upgrades, each at its default unless an officer changed it (gear_setting). */
-export const GEAR_SETTINGS = { window: { default: 10, min: 0, max: 60 } } as const;
-export const WINDOW_SQL = "SELECT value FROM gear_setting WHERE guild_id = ? AND key = 'window'";
+// Order 36 follow-up (the owner, 2026-11-06): /gear settings (the server's window) is retired with the window itself;
+// migrations/0031's gear_setting table is kept, unread (an officer's saved row is never deleted automatically).
 
 // ---------------------------------------------------------------- an item's stats
 
@@ -149,6 +148,8 @@ export interface GearItem {
   sourceMask: number;
   gone: boolean;
   twoHanded: boolean;
+  /** Order 36 follow-up: the item's wiki page (https only), for a linked name; absent or null: no link. */
+  wiki?: string | null;
   levelLow: number | null;
   levelHigh: number | null;
   levelKind: string | null;
@@ -437,29 +438,29 @@ export const wornScore = (slot: string, token: SlotToken, ctx: Context) => score
 
 // ---------------------------------------------------------------- grouping and order
 
-export const GROUPS = ['around', 'above', 'unknown'] as const;
-export type LevelGroup = (typeof GROUPS)[number];
-/** The window's default (an officer's change is stored per server: GEAR_SETTINGS, /gear settings window:). */
-export const DEFAULT_WINDOW = 10;
-
 /**
- * Around: level_low at most level + window (any-level kinds are stored as 0). Above: higher. Level unknown: no level_low.
- * A character with no level: everything with a level is Around.
+ * Order 36 follow-up (the owner, 2026-11-06): no level cap by default. The shown groups, in order: items with a level
+ * ('listed'), then 'unknown' (no level_low). With a cap (`max_level:`), an item whose level_low is above it is 'above':
+ * not listed, only counted ("N more above Lv 30 not shown"). Any-level kinds are stored as 0, so always listed.
  */
-export function levelGroup(it: Pick<GearItem, 'levelLow'>, level: number | null, window: number): LevelGroup {
+export const GROUPS = ['listed', 'unknown'] as const;
+export type LevelGroup = (typeof GROUPS)[number] | 'above';
+/** The highest cap max_level: takes: the import's level ceiling (scripts/import/levels.ts LEVEL_CEILING), never typed twice. */
+export { LEVEL_CEILING as MAX_LEVEL_CAP } from '../../scripts/import/levels.ts';
+
+export function levelGroup(it: Pick<GearItem, 'levelLow'>, cap: number | null): LevelGroup {
   if (it.levelLow === null) return 'unknown';
-  if (level === null) return 'around';
-  return it.levelLow <= level + window ? 'around' : 'above';
+  return cap !== null && it.levelLow > cap ? 'above' : 'listed';
 }
 
 /** Smallest gain first; ties: the lower level_low (none last), then the name. */
 export const byGain = (a: Upgrade, b: Upgrade) =>
   a.gain - b.gain || (a.item.levelLow ?? Infinity) - (b.item.levelLow ?? Infinity) || a.item.name.localeCompare(b.item.name, 'en', { sensitivity: 'base' }) || a.item.id - b.item.id;
 
-/** The groups in order, each sorted: every candidate in exactly one. */
-export function grouped(ups: Upgrade[], level: number | null, window: number): Record<LevelGroup, Upgrade[]> {
-  const out: Record<LevelGroup, Upgrade[]> = { around: [], above: [], unknown: [] };
-  for (const u of ups) out[levelGroup(u.item, level, window)].push(u);
+/** The groups in order, each sorted: every candidate in exactly one ('above' only when a cap is given, and never shown). */
+export function grouped(ups: Upgrade[], cap: number | null): Record<LevelGroup, Upgrade[]> {
+  const out: Record<LevelGroup, Upgrade[]> = { listed: [], above: [], unknown: [] };
+  for (const u of ups) out[levelGroup(u.item, cap)].push(u);
   for (const g of GROUPS) out[g].sort(byGain);
   return out;
 }

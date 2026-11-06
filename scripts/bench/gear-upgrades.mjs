@@ -9,7 +9,7 @@
 import { getPlatformProxy } from 'wrangler';
 import { gearUpgrades, load, summaryView, upgradesComponent, PAGE_PREFIX, RESULT_PREFIX } from '../../src/gear/upgrades.ts';
 import { clearGearIndex, GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
-import { gearSettings, gearWeights } from '../../src/gear/weights.ts';
+import { gearWeights } from '../../src/gear/weights.ts';
 import { compareGroup, groupByKey, grouped, levelGroup } from '../../src/gear/score.ts';
 import { WEAR_SLOTS } from '../../src/gear/slots.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
@@ -135,8 +135,8 @@ for (const [label, name, charId] of [['Fighter 24, 15 slots filled', 'Benchfight
   // CPU: the pure work each interaction does on the warm index (the summary: 17 slot comparisons; a list, a page turn and
   // Pick a result: one slot's), and, once per isolate or import, building the index from its rows.
   const L = await load(ctx(), (await raw.prepare('SELECT * FROM character WHERE id = ?').bind(charId).first()));
-  console.log(`  CPU (Node, pure work) summary: ${fmt(cpu(() => summaryView(L, 10)))}`);
-  console.log(`  CPU (Node, pure work) one slot (list, page turn, Pick a result): ${fmt(cpu(() => grouped(compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items).upgrades, 24, 10)))}`);
+  console.log(`  CPU (Node, pure work) summary: ${fmt(cpu(() => summaryView(L, null)))}`);
+  console.log(`  CPU (Node, pure work) one slot (list, page turn, Pick a result): ${fmt(cpu(() => grouped(compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items).upgrades, null)))}`);
   if (charId === fighter) {
     const { results } = await raw.prepare(GEAR_INDEX_SQL).all();
     console.log(`  CPU (Node, pure work) building the index from ${results.length} rows (cold only): ${fmt(cpu(() => results.map(toItem), 5))}`);
@@ -160,20 +160,21 @@ if (process.argv.includes('--testchar')) {
     const L = await load(ctx(), tc);
     return compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items);
   };
-  const counts = (r, w) => Object.fromEntries(Object.entries(grouped(r.upgrades, 15, w)).map(([g, l]) => [g, l.length]));
+  // Order 36 follow-up: no cap by default; max_level: 15 hides what is above Lv 15 (counted as "above").
+  const counts = (r, cap) => Object.fromEntries(Object.entries(grouped(r.upgrades, cap)).map(([g, l]) => [g, l.length]));
   const r0 = await chest();
   const u = r0.upgrades.find((x) => x.item.name === 'Enchanted Copper Plate Breastplate');
-  console.log(`\nTestchar: breastplate level_kind ${bp.level_kind}, level_low ${bp.level_low}, level_high ${bp.level_high}; group at window 10: ${u ? levelGroup(u.item, 15, 10) : 'not a candidate'}, at 0: ${u ? levelGroup(u.item, 15, 0) : '-'}; gain on an empty Chest ${u ? u.gain / 100 : '-'}`);
-  console.log(`  Chest before step 3: window 10 ${JSON.stringify(counts(r0, 10))}, window 0 ${JSON.stringify(counts(r0, 0))}`);
-  const first = grouped(r0.upgrades, 15, 10).around[0];
-  console.log(`  step 3 wears the first Around result: ${first.item.name} (+${first.gain / 100}, ${first.item.levelKind} ${first.item.levelLow})`);
+  console.log(`\nTestchar: breastplate level_kind ${bp.level_kind}, level_low ${bp.level_low}, level_high ${bp.level_high}; group with no cap: ${u ? levelGroup(u.item, null) : 'not a candidate'}, at max_level 15: ${u ? levelGroup(u.item, 15) : '-'}; gain on an empty Chest ${u ? u.gain / 100 : '-'}`);
+  console.log(`  Chest before step 3: no cap ${JSON.stringify(counts(r0, null))}, max_level 15 ${JSON.stringify(counts(r0, 15))}`);
+  const first = grouped(r0.upgrades, null).listed[0];
+  console.log(`  step 3 wears the first listed result: ${first.item.name} (+${first.gain / 100}, ${first.item.levelKind} ${first.item.levelLow})`);
   await raw.prepare("INSERT INTO character_gear (character_id, guild_id, slot, item_key, set_at, set_by) VALUES (?, ?, 'chest', ?, ?, ?)").bind(tc.id, BENCH_GUILD, first.item.key, at, USER).run();
   const r1 = await chest();
-  console.log(`  Chest after step 3: window 10 ${JSON.stringify(counts(r1, 10))}, window 0 ${JSON.stringify(counts(r1, 0))}`);
+  console.log(`  Chest after step 3: no cap ${JSON.stringify(counts(r1, null))}, max_level 15 ${JSON.stringify(counts(r1, 15))}`);
   const ac0 = { ...(await load(ctx(), tc)) };
   ac0.ctx = { ...ac0.ctx, weights: { ...ac0.ctx.weights, AC: 0 } };
   const r2 = compareGroup(groupByKey('chest'), ac0.ctx, ac0.wearer, ac0.idx.items);
-  console.log(`  step 6 (AC weight 0), Chest after step 3: window 10 ${JSON.stringify(counts(r2, 10))}`);
+  console.log(`  step 6 (AC weight 0), Chest after step 3: no cap ${JSON.stringify(counts(r2, null))}`);
 }
 // --weights (order 36, PR B): D1's rows written and read by each kind of weight change, with its audit row (no review
 // channel is set here, so nothing is posted).
@@ -185,13 +186,12 @@ if (process.argv.includes('--weights')) {
     ['a second stat (STA 0.5)', [opt('class', 'INQ'), opt('stat', 'STA'), opt('value', 0.5)]],
     ['preset Caster', [opt('class', 'INQ'), opt('preset', 'Caster')]],
     ['reset', [opt('class', 'INQ'), { type: 5, name: 'reset', value: true }]],
-    ['settings window 5', null],
   ];
   for (const [label, o] of steps) {
     rows = 0;
     written = 0;
     statements = 0;
-    o ? await gearWeights(ctx(), o) : await gearSettings(ctx(), [opt('window', 5)]);
+    await gearWeights(ctx(), o);
     console.log(`  ${label}: rows_written ${written}, rows_read ${rows} (${statements} statements)`);
   }
   await raw.batch([raw.prepare('DELETE FROM gear_weight WHERE guild_id = ?').bind(BENCH_GUILD), raw.prepare('DELETE FROM gear_setting WHERE guild_id = ?').bind(BENCH_GUILD), raw.prepare('DELETE FROM audit_log WHERE guild_id = ?').bind(BENCH_GUILD)]);

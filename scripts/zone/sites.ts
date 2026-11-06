@@ -69,7 +69,7 @@ const TIMEOUT_MS = 20_000;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** One GET, redirects followed: the status and final address only (the body is discarded unread unless `body`). */
-async function get(url: string, body = false): Promise<{ status: number | null; finalUrl: string | null; text?: string; error?: string }> {
+export async function get(url: string, body = false): Promise<{ status: number | null; finalUrl: string | null; text?: string; error?: string }> {
   for (let attempt = 1; ; attempt++) {
     try {
       const res = await fetch(url, { headers: { 'User-Agent': USER_AGENT }, redirect: 'follow', signal: AbortSignal.timeout(TIMEOUT_MS) });
