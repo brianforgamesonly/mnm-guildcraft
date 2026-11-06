@@ -214,13 +214,17 @@ describe('order 36, ITEM 3: the controls', () => {
 
   it('Request a craft on a crafted result starts /request for it; Open item shows its /item card', async () => {
     await testchar();
-    await env.DB.prepare("UPDATE item SET source_mask = 2, level_kind = 'crafted_floor', level_kinds = 'crafted_floor' WHERE name = 'Low Tie'").run();
+    await env.DB.prepare("UPDATE item SET source_mask = 2, level_kind = 'crafted_floor', level_kinds = 'crafted_floor' WHERE name IN ('Low Tie', 'High Tie')").run();
+    const id = await itemId('Low Tie');
+    // Low Tie has a recipe; High Tie is marked crafted but the data holds no recipe for it.
+    await env.DB.prepare("INSERT INTO recipe (source_key, tradeskill_id, result_item_id, trivial, acquisition, source, imported_at) VALUES ('lt', (SELECT id FROM tradeskill WHERE name = 'Blacksmithing'), ?, 40, 'vendor', 'wiki', 't')").bind(id).run();
     await markImported();
     const list = await upgrades(ann, { slot: 'chest' });
     const pick = comps(list).find((c) => c.custom_id?.startsWith(RESULT_PREFIX));
-    const id = await itemId('Low Tie');
     const r = await send(select(ann, pick.custom_id, [String(id)]));
     expect(ids(r)).toContain(`${FROM_FIND_PREFIX}${id}`);
+    const noRecipe = await send(select(ann, pick.custom_id, [String(await itemId('High Tie'))]));
+    expect(comps(noRecipe).map((c) => c.label)).not.toContain('Request a craft');
     expect(ids(r)).toContain(`${OPEN_PREFIX}${id}`);
     const card = await send(press(ann, `${OPEN_PREFIX}${id}`));
     expect(card.data.embeds![0].title).toBe('Low Tie');
@@ -247,13 +251,39 @@ describe('order 36, ITEM 3: the controls', () => {
     expect((await send(press(officer, post.custom_id))).data.content).toBe(WEAR_COPY.ownOnly);
   });
 
+  it("a Secondary result under a worn two-hander offers no I'm wearing it now (saved gear would refuse it)", async () => {
+    await add('Testchar');
+    await setChar('Testchar', 'FTR', 20);
+    await seed([{ name: 'Greatsword', slots: ['PRIMARY'], stats: { stats: { STA: 1 }, handed: 'Two Handed' } }, { name: 'Tower Shield', slots: ['SECONDARY'], stats: { ac: 20 } }]);
+    await markImported();
+    await wearIt('Testchar', 'primary', 'Greatsword');
+    const list = await upgrades(ann, { slot: 'secondary' });
+    expect(text(list)).toContain('needs a one-handed Primary');
+    const pick = comps(list).find((c) => c.custom_id?.startsWith(RESULT_PREFIX));
+    const r = await send(select(ann, pick.custom_id, [String(await itemId('Tower Shield'))]));
+    expect(comps(r).map((c) => c.label)).toEqual(['Open item']);
+  });
+
+  it('the gear index is read again after an import, and never cached while the newest import has no finish time', async () => {
+    await testchar();
+    expect(text(await upgrades(ann, { slot: 'chest' }))).toContain('Low Tie');
+    await env.DB.prepare("UPDATE item SET name = 'Renamed Tie' WHERE name = 'Low Tie'").run();
+    // Same import key: still the cached list.
+    expect(text(await upgrades(ann, { slot: 'chest' }))).not.toContain('Renamed Tie');
+    await env.DB.prepare("INSERT INTO data_import (source, source_version, status, started_at) VALUES ('test', 'x', 'running', 't')").run();
+    expect(text(await upgrades(ann, { slot: 'chest' }))).toContain('Renamed Tie');
+    await env.DB.prepare("UPDATE item SET name = 'Again Tie' WHERE name = 'Renamed Tie'").run();
+    expect(text(await upgrades(ann, { slot: 'chest' }))).toContain('Again Tie');
+  });
+
   it("another member can't press someone else's buttons", async () => {
     await testchar();
     await add('Bochar', bo);
     const list = await upgrades(ann, { slot: 'chest' });
     const id = await charId('Testchar');
-    for (const custom_id of [`${FIND_UPGRADES_PREFIX}${id}`, `${PAGE_PREFIX}${id}:chest:10:0`, ...ids(list)]) {
-      const r = custom_id.startsWith(RESULT_PREFIX) || custom_id.startsWith(SLOT_PREFIX) ? await send(select(bo, custom_id, [String(await itemId('Low Tie'))])) : await send(press(bo, custom_id));
+    for (const custom_id of [`${FIND_UPGRADES_PREFIX}${id}`, `${PAGE_PREFIX}${id}:chest:10:0`, `${SLOT_PREFIX}${id}:10`, ...ids(list)]) {
+      const value = custom_id.startsWith(SLOT_PREFIX) ? 'chest' : String(await itemId('Low Tie'));
+      const r = custom_id.startsWith(RESULT_PREFIX) || custom_id.startsWith(SLOT_PREFIX) ? await send(select(bo, custom_id, [value])) : await send(press(bo, custom_id));
       expect([WEAR_COPY.notYours, WEAR_COPY.ownOnly], custom_id).toContain(r.data.content);
     }
     expect((await send(press(bo, `${WEAR_NOW_PREFIX}${id}:chest:10:${await itemId('Low Tie')}`))).data.content).toBe(WEAR_COPY.notYours);

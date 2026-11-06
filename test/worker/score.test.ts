@@ -1,7 +1,7 @@
 // Work order 36, ITEM 2: scoring (src/gear/score.ts). Pure: no D1.
 import { describe, expect, it } from 'vitest';
 import {
-  breakdown, byGain, CLASSES, compareGroup, upgradeDiff, defaultWeights, fmtHundredths, groupByKey, grouped, levelGroup, presetOf, SLOT_GROUPS, statVector, WEIGHT_KEYS, wornState,
+  breakdown, byGain, CLASSES, compareGroup, upgradeDiff, defaultWeights, presetWeights, fmtHundredths, groupByKey, grouped, levelGroup, presetOf, SLOT_GROUPS, statVector, WEIGHT_KEYS, wornState,
   type Context, type GearItem, type Wearer, type Weights,
 } from '../../src/gear/score.ts';
 import { bitOf, REMOVED_BIT, SLOTS } from '../../src/gear/vocab.ts';
@@ -217,6 +217,37 @@ describe('order 36, ITEM 2: comparing', () => {
     expect([r.baseline, r.worn[0].reason]).toEqual([0, 'cantUse']);
     // A key that names no item row at all.
     expect(compareGroup(groupByKey('head')!, ctxFor('FTR', { head: null }), anyone, [cand]).baseline).toBe(0);
+  });
+});
+
+describe('order 36, ITEM 2: review fixes', () => {
+  it('a 5th place or later weighs 0; a fractional stat is rounded, so scores stay whole hundredths', () => {
+    const w = presetWeights('Melee', 'STR › STA › DEX › AGI › INT');
+    expect([w.STR, w.STA, w.DEX, w.AGI, w.INT]).toEqual([100, 50, 25, 25, 0]);
+    expect(statVector(JSON.stringify({ hpRegen: 0.5, ac: 2.4 })).filter((x) => x !== 0)).toEqual([2, 1]);
+  });
+
+  it("a two-hander's baseline values the worn Secondary weapon by Secondary's rule (no ratio for a Caster)", () => {
+    const dagger = mk('Dagger', ['SECONDARY'], { dmg: 10, delay: 20 });
+    const staff = mk('Staff', ['PRIMARY'], { stats: { INT: 1 } }, { twoHanded: true });
+    const caster = { ...W('WIZ'), RATIO: 10 };
+    const r = compareGroup(groupByKey('primary')!, ctxFor('WIZ', { secondary: dagger }, anyone, caster), anyone, [staff]);
+    // The dagger's ratio (50 × 0.10) counts nothing in Secondary for a Caster: the baseline is 0.
+    expect(r.upgrades.map((u) => [u.baseline, u.gain])).toEqual([[0, 100]]);
+  });
+
+  it('a gone two-hander still takes both hands (saved gear refuses Secondary under it) and scores 0', () => {
+    const great = mk('Old Greatsword', ['PRIMARY'], { stats: { STA: 9 } }, { twoHanded: true, gone: true });
+    const shield = mk('Shield', ['SECONDARY'], { ac: 1 });
+    const r = compareGroup(groupByKey('secondary')!, ctxFor('FTR', { primary: great }), anyone, [shield]);
+    expect(r.upgrades.map((u) => [u.baseline, u.note])).toEqual([[0, 'needsOneHand']]);
+  });
+
+  it('two-handers are never Secondary candidates; a pair tie compares with the first side', () => {
+    const big = mk('Big Axe', ['PRIMARY', 'SECONDARY'], { stats: { STA: 9 } }, { twoHanded: true });
+    expect(compareGroup(groupByKey('secondary')!, ctxFor('FTR'), anyone, [big]).upgrades).toEqual([]);
+    const ring = mk('Ring', ['FINGER'], { stats: { STA: 1 } });
+    expect(compareGroup(groupByKey('finger')!, ctxFor('FTR'), anyone, [ring]).replaces).toEqual(['finger1']);
   });
 });
 

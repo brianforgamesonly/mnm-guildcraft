@@ -4,8 +4,10 @@
 // index (order 13 measured 6,260 rows_read for one search over all gear, src/gear/search.ts), over the order's 5,000-row
 // line. Items change only when an import writes them, so the list is cached at module level, keyed by the newest
 // data_import row (its id, status and finish time: a new run, and its end, each change the key). A request reads that one
-// row; the list is read again only when the key changes or the isolate is new. No key (no import row: a new database,
-// the tests) caches nothing.
+// row; the list is read again only when the key changes or the isolate is new. Nothing is cached with no import row (a new
+// database), or while the newest row has no finish time (review fix: an import still running, or one killed before it
+// could record its end, keeps writing items under an unchanged key, so each request reads the list afresh until a run
+// finishes). The tests' reset() writes a finished row each time, so each test gets a fresh key.
 import { STAT_VECTOR_SQL, vectorOf, type GearItem } from './score.ts';
 import { isTwoHanded } from './vocab.ts';
 
@@ -67,7 +69,8 @@ export const toItem = (r: Row): GearItem => ({
 
 /** The index for this version: from memory when the key matches, else read (one batch of three statements). */
 export async function gearIndex(db: D1Database, version: string | null): Promise<GearIndex> {
-  if (version !== null && cached?.version === version) return { ...cached, rowsRead: 0 };
+  const cacheable = version !== null && !version.endsWith(':');
+  if (cacheable && cached?.version === version) return { ...cached, rowsRead: 0 };
   const [items, classes, races] = await db.batch([db.prepare(GEAR_INDEX_SQL), db.prepare(CLASS_BITS_SQL), db.prepare(RACE_BITS_SQL)]);
   const list = (items.results as Row[]).map(toItem);
   const idx: GearIndex = {
@@ -78,6 +81,6 @@ export async function gearIndex(db: D1Database, version: string | null): Promise
     raceBits: new Map((races.results as { code: string; bit: number }[]).map((r) => [r.code, Number(r.bit)])),
     rowsRead: [items, classes, races].reduce((n, r) => n + (r.meta?.rows_read ?? 0), 0),
   };
-  if (version !== null) cached = idx;
+  if (cacheable) cached = idx;
   return idx;
 }

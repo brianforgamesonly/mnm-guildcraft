@@ -30,7 +30,7 @@ import {
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
-import { raceLabel, SOURCES } from './vocab.ts';
+import { raceLabel } from './vocab.ts';
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
@@ -249,7 +249,6 @@ interface Origin {
   soldBy?: { vendors?: string[] };
 }
 const originOf = (s: string | null): Origin => (s ? JSON.parse(s) : {}) as Origin;
-const CRAFTED_BIT = 1 << SOURCES.indexOf('Crafted');
 
 /** How to get it, by its level kinds, primary first (one line per way), and the zone names the lines show. */
 export function howToGet(it: GearItem, x: Extras, searcher: string, window: number): { lines: string[]; zones: ZoneRef[]; craftable: boolean } {
@@ -307,7 +306,8 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
     else if (w === 'quest') lines.push(UPGRADES_COPY.quest(it.levelKind === 'quest' && it.levelLow !== null ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown'));
     else lines.push(UPGRADES_COPY.unknown);
   }
-  return { lines, zones, craftable: recipes.length > 0 || (it.sourceMask & CRAFTED_BIT) !== 0 };
+  // Review fix: Request a craft only where the data holds a recipe (/request needs one; requestFromFind checks it too).
+  return { lines, zones, craftable: recipes.length > 0 };
 }
 
 /** One result's lines: its name and gain, the side or note, the breakdown, then how to get it. */
@@ -468,7 +468,8 @@ async function resultReply(c: Ctx, L: Loaded, key: string, window: number, u: Up
   const slot = u.side ?? (key === 'secondary' ? 'secondary' : groupByKey(key)!.sides[0]);
   const actions = row([
     button(`${OPEN_PREFIX}${u.item.id}`, UPGRADES_COPY.openItem),
-    button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${window}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY),
+    // Review fix: not under a two-hander (order 35's saved gear refuses Secondary there); the result says why instead.
+    ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${window}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
     ...(how.craftable ? [button(`${FROM_FIND_PREFIX}${u.item.id}`, UPGRADES_COPY.requestCraft)] : []),
   ]);
   const z = await zoneButtons(c.db, how.zones, 4);

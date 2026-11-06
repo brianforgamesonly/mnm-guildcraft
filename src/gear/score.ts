@@ -83,7 +83,7 @@ export function presetWeights(preset: Preset, priority: string): Weights {
   for (const r of RESISTS) w[r] = p.resist;
   const ps = places(priority);
   ps.forEach((stats, i) => {
-    for (const s of stats) if ((STATS as readonly string[]).includes(s)) w[s as WeightKey] = PLACE[Math.min(i, PLACE.length - 1)];
+    for (const s of stats) if ((STATS as readonly string[]).includes(s)) w[s as WeightKey] = PLACE[i] ?? 0; // review fix: a 5th place or later is "other": 0
   });
   const named = ps.flat();
   if ((preset === 'Tank' || preset === 'Melee') && (named.includes('INT') || named.includes('WIS'))) {
@@ -133,7 +133,11 @@ const RATIO_I = IDX.RATIO;
 const HASTE_I = IDX.HASTE;
 const KEYS_N = WEIGHT_KEYS.length;
 
-const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
+/**
+ * A stat as a whole number (review fix: the import checks only that it is a number, so a fraction is rounded here, and a
+ * score stays in integer hundredths). Every stat on gear in bb1a703 is already whole.
+ */
+const num = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : 0);
 
 /**
  * The stat vector of an item's stats_json (scripts/import/core.ts statsJson: ac, dmg, delay, hp, mana, hpRegen, manaRegen,
@@ -178,7 +182,7 @@ export const vectorOf = (r: Record<string, unknown>) => {
   const v = new Array<number>(KEYS_N);
   for (let i = 0; i < KEYS_N; i++) {
     const x = r[S_COLS[i]];
-    v[i] = typeof x === 'number' && Number.isFinite(x) ? x : 0;
+    v[i] = typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : 0;
   }
   return v;
 };
@@ -265,23 +269,27 @@ function hasteElsewhere(ctx: Context, except: string[]): number {
   return h;
 }
 
-/** Items scored together in one place (a two-hander's Primary + Secondary), with the slots they free for haste. */
-function scoreTogether(items: (GearItem | null)[], ctx: Context, token: SlotToken, except: string[]): { score: number; v: number[] } {
+/**
+ * Items scored together in one place (a two-hander's Primary + Secondary), with the slots they free for haste. Each item is
+ * valued by its own slot's ratio rule (`tokens[i]`, else `token`): review fix, a worn Secondary weapon's ratio counts only
+ * for the Tank and Melee presets even when compared with a two-hander.
+ */
+function scoreTogether(items: (GearItem | null)[], ctx: Context, token: SlotToken, except: string[], tokens?: SlotToken[]): { score: number; v: number[] } {
   const v = new Array<number>(WEIGHT_KEYS.length).fill(0);
   let score = 0;
   let haste = 0;
-  const ratio = ratioCounts(token, ctx.preset);
-  for (const it of items) {
-    if (!it) continue;
+  items.forEach((it, n) => {
+    if (!it) return;
+    const ratio = ratioCounts(tokens?.[n] ?? token, ctx.preset);
     score += baseScore(it.v, ctx.weights, ratio);
-    for (let i = 0; i < v.length; i++) v[i] += it.v[i];
+    for (let i = 0; i < v.length; i++) if (i !== RATIO_I || ratio) v[i] += it.v[i];
     haste = Math.max(haste, it.v[HASTE_I]);
-  }
+  });
   const effective = Math.max(0, haste - hasteElsewhere(ctx, except));
   v[HASTE_I] = effective;
-  if (!ratio) v[RATIO_I] = 0;
   return { score: score + ctx.weights.HASTE * effective, v };
 }
+const PAIR_TOKENS: SlotToken[] = ['PRIMARY', 'SECONDARY'];
 
 /** One candidate for a slot group. */
 export interface Upgrade {
@@ -306,7 +314,7 @@ export interface Upgrade {
  */
 export function upgradeDiff(u: Upgrade, ctx: Context): number[] {
   const cand = scoreTogether([u.item], ctx, u.token, u.except).v;
-  const base = scoreTogether(u.against, ctx, u.token, u.except).v;
+  const base = scoreTogether(u.against, ctx, u.token, u.except, u.against.length === 2 ? PAIR_TOKENS : undefined).v;
   return cand.map((x, i) => x - base[i]);
 }
 
@@ -320,7 +328,11 @@ export interface GroupResult {
   upgrades: Upgrade[];
 }
 
-const isTwoHand = (g: Worn | undefined) => !!(g?.item && g.reason === null && g.item.twoHanded);
+/**
+ * A two-hander in Primary takes both hands whether or not it counts (review fix: order 35's saved gear refuses Secondary
+ * under any saved two-hander, src/gear/wear.ts wear, so a gone or unusable one still blocks it; it then scores 0).
+ */
+const isTwoHand = (g: Worn | undefined) => !!g?.item?.twoHanded;
 
 /**
  * Every candidate that beats what's worn in one slot group (unsorted). The comparison:
@@ -357,7 +369,7 @@ export function compareGroup(group: SlotGroup, ctx: Context, wearer: Wearer, ite
     const both = ['primary', 'secondary'];
     const p = counts(worn('primary'));
     const pair = [p, counts(worn('secondary'))];
-    const pairBase = scoreTogether(pair, ctx, 'PRIMARY', both).score;
+    const pairBase = scoreTogether(pair, ctx, 'PRIMARY', both, PAIR_TOKENS).score;
     const twoBase = scoreTogether([p], ctx, 'PRIMARY', both).score;
     const oneBase = one('primary');
     const hBoth = hasteElsewhere(ctx, both);
