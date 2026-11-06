@@ -171,7 +171,37 @@ describe('order 36, ITEM 3: the summary', () => {
     const r = await upgrades(ann, { max_level: 30 });
     expect(r.data.embeds![0].description).not.toContain('Feet');
     expect(r.data.embeds![0].footer!.text).toContain(UPGRADES_COPY.hidden(2, 30));
+    // Review fix: Feet has upgrades (hidden), so it is not among the slots with nothing better: 17 − Head − Feet = 15.
+    expect(r.data.embeds![0].footer!.text).toContain('15 slots with nothing better');
     expect(comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX)).options.map((o: any) => o.value)).toEqual(['head']);
+    // And the Feet list with the cap says only what the cap hid, never "Nothing beats".
+    const feet = text(await upgrades(ann, { slot: 'feet', max_level: 30 }));
+    expect(feet).not.toContain('Nothing beats');
+    expect(feet).toContain(UPGRADES_COPY.hidden(2, 30));
+  });
+
+  it('review fix: an item above the cap that fits two slots counts once in the summary', async () => {
+    await add('Testchar');
+    await setChar('Testchar', 'FTR', 10);
+    await seed([{ name: 'Far Sword', slots: ['PRIMARY', 'SECONDARY'], stats: { ac: 3 }, low: 50 }]);
+    await markImported();
+    expect((await upgrades(ann, { max_level: 20 })).data.embeds![0].footer!.text).toContain(UPGRADES_COPY.hidden(1, 20));
+  });
+
+  it('the cap survives paging, and an old page id with a window number reads as no cap', async () => {
+    await add('Testchar');
+    await setChar('Testchar', 'FTR', 20);
+    await seed([...Array.from({ length: 7 }, (_, i) => ({ name: `Helm ${i + 1}`, slots: ['HEAD' as Tok], stats: { ac: i + 1 }, low: 5 })), { name: 'Far Helm', slots: ['HEAD'], stats: { ac: 1 }, low: 60 }]);
+    await markImported();
+    const p1 = await upgrades(ann, { slot: 'head', max_level: 30 });
+    const bigger = comps(p1).filter((c) => c.custom_id?.startsWith(PAGE_PREFIX))[1];
+    expect(bigger.custom_id).toMatch(/:c30:1$/);
+    const p2 = text(await send(press(ann, bigger.custom_id)));
+    expect(p2).not.toContain('Far Helm');
+    expect(p2).toContain(UPGRADES_COPY.hidden(1, 30)); // the last page carries the count
+    const id = await charId('Testchar');
+    // No cap: Far Helm (+0.35, the smallest gain) leads page 1.
+    expect(text(await send(press(ann, `${PAGE_PREFIX}${id}:head:10:0`)))).toContain('Far Helm');
   });
 
   it('with several characters, leaving character: out is refused with the list; Find upgrades on the Gear panel opens the summary', async () => {
@@ -364,8 +394,13 @@ describe('order 36, ITEM 3: how to get it', () => {
       { name: 'A Second Errand', level: null, wiki: null },
     ];
     const h = howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 12 }), extras({ quests }), ANN, 25);
-    // quest-sites.json holds no verified page in this checkout's test: the name links to the wiki only.
+    // "Armor from Vex" is not among quest-sites.json's verified pages: the name links to the wiki only.
     expect(h.lines).toEqual(['Quest: [Armor from Vex](https://monstersandmemories.miraheze.org/wiki/Armor_from_Vex) · Lv 12+ · +1 more']);
+    // A verified page gets its monstersandmemories.wiki link; parentheses in an address are encoded (review fix).
+    const archer = { name: 'Archer Starter Quest (Faelindral)', level: 1, wiki: 'https://monstersandmemories.miraheze.org/wiki/Archer_Starter_Quest_(Faelindral)' };
+    expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 1 }), extras({ quests: [archer] }), ANN, 25).lines).toEqual([
+      'Quest: [Archer Starter Quest (Faelindral)](https://monstersandmemories.miraheze.org/wiki/Archer_Starter_Quest_%28Faelindral%29) ([monstersandmemories.wiki](https://monstersandmemories.wiki/quests/archer-starter-quest-faelindral)) · Lv 1+',
+    ]);
     expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest' }), extras({ quests: [quests[1]] }), ANN, 25).lines).toEqual(['Quest: A Second Errand · level unknown']);
   });
 

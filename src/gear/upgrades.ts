@@ -60,8 +60,13 @@ export const SUMMARY_LINES = 8;
 export type Cap = number | null;
 export const capState = (cap: Cap) => (cap === null ? 'c' : `c${cap}`);
 export const capOf = (s: string | undefined): Cap => (s && /^c\d+$/.test(s) ? Number(s.slice(1)) : null);
+/**
+ * A link's address with its parentheses encoded (review fix: wiki titles such as "Archer Starter Quest (Faelindral)" put
+ * them in the address, which would end a markdown link early; src/board/factions.ts encodes them the same way).
+ */
+export const linkUrl = (url: string) => url.replace(/\(/g, '%28').replace(/\)/g, '%29');
 /** An item name, linked to its wiki page when it has one (https only). */
-const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${it.wiki})` : `**${md(it.name)}**`);
+const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${linkUrl(it.wiki)})` : `**${md(it.name)}**`);
 
 // ---------------------------------------------------------------- copy (order 36; listed for approval in docs/COPY.md)
 
@@ -180,7 +185,8 @@ const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx
 export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: unknown[] } {
   // ITEM 5: one pass per slot for what the summary shows (no sort of every candidate): the smallest listed candidate (the
   // list's own order, byGain), whether any is level-unknown, and (with a cap) how many are above it, hidden.
-  let hidden = 0;
+  // Review fix: items, not slot entries (a weapon above the cap that fits Primary and Secondary is one hidden item).
+  const hiddenIds = new Set<number>();
   const per = SLOT_GROUPS.map((g) => {
     const r = compareGroup(g, L.ctx, L.wearer, L.idx.items);
     let listed: Upgrade | null = null;
@@ -189,7 +195,7 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
     for (const u of r.upgrades) {
       const lg = levelGroup(u.item, cap);
       if (lg === 'above') {
-        hidden++;
+        hiddenIds.add(u.item.id);
         continue;
       }
       shownCount++;
@@ -200,7 +206,10 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
   });
   const listed = per.filter((p) => p.listed).map((p) => ({ p, u: p.listed! })).sort((a, b) => a.u.gain - b.u.gain || a.p.g.label.localeCompare(b.p.g.label));
   const unknown = per.filter((p) => !p.listed && p.unknown);
-  const none = per.filter((p) => !p.shownCount).length;
+  // Review fix: "nothing better" only where nothing beats what's worn at all; a slot whose upgrades the cap hid is counted
+  // by the hidden line instead.
+  const none = per.filter((p) => !p.r.upgrades.length).length;
+  const hidden = hiddenIds.size;
   const lines = [...listed.map((x) => UPGRADES_COPY.listedLine(x.p.g.label, x.u)), ...unknown.map((p) => UPGRADES_COPY.unknownLine(p.g.label))];
   const shown = lines.slice(0, SUMMARY_LINES);
   const notes = [UPGRADES_COPY.who(L.ch), ...(cap !== null ? [UPGRADES_COPY.capNote(cap)] : [])];
@@ -318,7 +327,7 @@ export function howToGet(it: GearItem, x: Extras, searcher: string, window: numb
       if (!q) lines.push(UPGRADES_COPY.quest(it.levelKind === 'quest' && it.levelLow !== null ? `Lv ${range(it.levelLow, it.levelHigh)}` : 'level unknown'));
       else {
         const mnm = (QUEST_SITES.quests as Record<string, string>)[q.name];
-        const name = `${q.wiki?.startsWith('https://') ? `[${md(q.name)}](${q.wiki})` : md(q.name)}${mnm ? ` ([${UPGRADES_COPY.mnmWiki}](${mnm}))` : ''}`;
+        const name = `${q.wiki?.startsWith('https://') ? `[${md(q.name)}](${linkUrl(q.wiki)})` : md(q.name)}${mnm ? ` ([${UPGRADES_COPY.mnmWiki}](${linkUrl(mnm)}))` : ''}`;
         lines.push(UPGRADES_COPY.questNamed(name, q.level !== null ? `Lv ${q.level}+` : 'level unknown', (o.quests?.length ?? 1) - 1));
       }
     }
@@ -372,7 +381,8 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   const x = await extras(c, shown.map((s) => s.u.item));
   const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L.ch), ...headerLines(L, r)];
   if (cap !== null) body.push(UPGRADES_COPY.capNote(cap));
-  if (!all.length) {
+  // Review fix: "Nothing beats" only when nothing does; when the cap hid every upgrade, the quiet count below says so.
+  if (!all.length && !hidden) {
     const worn = r.worn.filter((g) => g.reason === null && g.item);
     const what = worn.length ? worn.map((g) => md(g.item!.name)).join(' and ') : UPGRADES_COPY.emptySlot(r.group.label);
     body.push('', UPGRADES_COPY.nothing(what, L.cls, r.group.label));
@@ -509,6 +519,8 @@ async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade)
     `${UPGRADES_COPY.who(L.ch)} · ${UPGRADES_COPY.forSlot(L.ch.name, label)}`,
     ...resultLines(u, L, how.lines),
     ...(more > 0 ? [`-# ${UPGRADES_COPY.moreZones(more)}`] : []),
+    // Review fix: the card's own note ("Showing N of M recipes"), as /item shows it.
+    ...(k.note ? [k.note] : []),
     `-# ${UPGRADES_COPY.weights(L.cls)}`,
   ].join('\n');
   return ephemeral(truncate(content, 2000), { embeds: k.embeds, components: [...own, ...z.rows] });
