@@ -1,10 +1,10 @@
 import { fileURLToPath } from 'node:url';
 import { currentCopy } from '../copies.ts';
-import { bindingDb, type D1Like } from './binding.ts';
+import { bindingDb, type D1Like, type ReadTally } from './binding.ts';
 import type { Db, StatementMeta } from './core.ts';
 
-/** The local D1 that `wrangler d1 migrations apply --local --env dev` writes to. */
-export async function localDb(): Promise<{ db: Db; dispose: () => Promise<void> }> {
+/** The local D1 that `wrangler d1 migrations apply --local --env dev` writes to. Order 35: `tally` sums D1's rows_read. */
+export async function localDb(tally?: ReadTally): Promise<{ db: Db; dispose: () => Promise<void> }> {
   const { getPlatformProxy } = await import('wrangler');
   // Order 24: this checkout's own config and local state, from the script's location, never the working directory's
   // (order 23's bench run from another directory read that directory's config and left .wrangler/state there).
@@ -14,7 +14,7 @@ export async function localDb(): Promise<{ db: Db; dispose: () => Promise<void> 
     configPath: fileURLToPath(new URL('wrangler.jsonc', root)),
     persist: { path: fileURLToPath(new URL('.wrangler/state/v3', root)) },
   });
-  return { db: bindingDb(proxy.env.DB), dispose: () => proxy.dispose() };
+  return { db: bindingDb(proxy.env.DB, tally), dispose: () => proxy.dispose() };
 }
 
 /** database_id of the copy GUILDCRAFT_COPY names (default dev), read from wrangler.jsonc (committed; not secret). */

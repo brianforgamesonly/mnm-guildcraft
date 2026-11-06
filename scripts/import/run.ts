@@ -78,7 +78,8 @@ try {
   // Order 13: a new value for a /gear find choice list, or a stop at the write ceiling, shows in the run's summary as a
   // warning annotation; neither fails the run.
   for (const w of result.warnings ?? [])
-    if (w.kind === 'vocab_drift') console.log(`::warning::/gear find ${w.list} list: ${w.values.map((v) => `${v.value} (${v.items})`).join(', ')} — ${w.note}`);
+    if (w.kind === 'vocab_drift')
+      console.log(`::warning::${w.list === 'race' ? 'race list (game_race)' : `/gear find ${w.list} list`}: ${w.values.map((v) => `${v.value} (${v.items})`).join(', ')} — ${w.note}`);
     else if (w.kind === 'write_ceiling')
       console.log(`::warning::import stopped at the write ceiling (${w.written} of ${w.ceiling} rows); ${w.deferredStatements} statements left for the next run`);
     // Order 17: a source unchanged for 30 days (its maintainer refreshes it by hand), and zone names matching no zone.

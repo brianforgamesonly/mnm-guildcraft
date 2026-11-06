@@ -31,3 +31,19 @@ export const REMOVED_CATEGORY = 'Removed Items';
 export const bitOf = <T extends string>(list: readonly T[], token: T) => 1 << list.indexOf(token);
 /** A class mask for "every class" (the source's ALL): every bit set. */
 export const ALL_CLASSES = -1;
+
+/** Order 35: a race mask for "every race" (the source's ALL, in any case): every bit set. 0 = no race recorded. */
+export const ALL_RACES = -1;
+/**
+ * Order 35: the slots a mount wears (the source's BARDING, SADDLEBAG and RIGGING). A race is a mount race when every
+ * item carrying it fits only these slots (scripts/import/core.ts deriveRaces); mount races are never offered for characters.
+ */
+export const MOUNT_SLOTS = ['BARDING', 'SADDLEBAG', 'RIGGING'] as const;
+
+/**
+ * Order 35: the one reading of an item's `handed` (item.handed, generated from stats_json). The source spells it
+ * "Two Handed", "TWO HANDED", "2", "One Handed" and "1" (mnm-tools wiki.json bb1a703, 2026-11-05). Two-handed means
+ * the text says two (any case, with a space, hyphen or nothing between) or is "2"; anything else, or none, is not.
+ * Nothing is inferred from the weapon type (skill) or the name.
+ */
+export const isTwoHanded = (handed: unknown): boolean => typeof handed === 'string' && /^\s*(?:2|two[\s-]*handed)\s*$/i.test(handed);

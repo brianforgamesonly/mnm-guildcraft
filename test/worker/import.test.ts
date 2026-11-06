@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { bindingDb } from '../../scripts/import/binding.ts';
-import { buildPlan, buildStatements, IMPORT_TABLES, loadExisting, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
+import { applyLevels, buildPlan, buildStatements, IMPORT_MAY_BE_EMPTY, IMPORT_TABLES, loadExisting, previousImportFailing, runImport, type WikiData } from '../../scripts/import/core.ts';
 import { alarmOutcome } from '../../scripts/ci/alarm-outcome.ts';
 import { FINISHED_IMPORT, IMPORT_STATUS, isFailing, REAL_IMPORT } from '../../src/import-status.ts';
 import corrupt from '../fixtures/wiki-corrupt.json';
@@ -59,7 +59,11 @@ describe('import', () => {
     expect(second.rowsWritten).toBe(2); // its own data_import row, opened then closed
     expect(Object.values(second.predicted!).flatMap((x) => Object.values(x)).every((n) => n === 0)).toBe(true);
     // ... and when they are sent, the statements' own guards write 0: not a vacuous zero either.
-    const unfiltered = buildStatements(buildPlan(fixture(), await loadExisting(db)), now());
+    // Order 35: the plan gets its levels as runImport gives them (applyLevels, after the zone plan).
+    const ex = await loadExisting(db);
+    const fullPlan = buildPlan(fixture(), ex);
+    applyLevels(fullPlan, fixture(), ex);
+    const unfiltered = buildStatements(fullPlan, now());
     expect(unfiltered.filter((s) => s.table === 'item').length).toBeGreaterThan(0);
     expect((await db.run(unfiltered.map((s) => s.sql))).reduce((n, m) => n + m.rows_written, 0)).toBe(0);
     const runs = await all<{ status: string; source_version: string; items: number; recipes: number }>('SELECT status, source_version, items, recipes FROM data_import ORDER BY id');
@@ -99,7 +103,7 @@ describe('import', () => {
     await load(f);
     await env.DB.prepare('UPDATE item SET wiki_url = NULL').run();
     const dry = await load(f, true);
-    expect(dry.predicted!.item).toEqual({ insert: 0, update: 7 });
+    expect(dry.predicted!.item).toEqual({ insert: 0, update: 7, gone: 0 });
     const fill = await load(f);
     expect(fill.written!.item.changes).toBe(7);
     expect(await all("SELECT name, wiki_url FROM item WHERE name IN ('Arrow', 'Copper Bar', 'HIDE BOOTS', 'Rune of Fire', 'Feather') ORDER BY name")).toEqual([
@@ -110,7 +114,7 @@ describe('import', () => {
       { name: 'Rune of Fire', wiki_url: 'https://monstersandmemories.miraheze.org/wiki/Rune_of_Fire' },
     ]);
     const again = await load(f);
-    expect(again.predicted!.item).toEqual({ insert: 0, update: 0 });
+    expect(again.predicted!.item).toEqual({ insert: 0, update: 0, gone: 0 });
     expect(again.written!.item.rows_written).toBe(0);
   });
 
@@ -218,8 +222,9 @@ describe('import', () => {
     expect(res.status).toBe('dry-run');
     expect(res.predicted).toEqual({
       tradeskill: { insert: 5, update: 0 },
-      item: { insert: 8, update: 0 },
+      item: { insert: 8, update: 0, gone: 0 },
       stub: { insert: 4 },
+      game_race: { insert: 0, update: 0, deactivate: 0 },
       recipe: { insert: 6, update: 0, deactivate: 0 },
       recipe_component: { insert: 8, update: 0, delete: 0 },
       game_class: { insert: 0, update: 0, deactivate: 0 },
@@ -242,17 +247,20 @@ describe('game_class (classes derived at import)', () => {
 
   it('order 10: every statement writes exactly the table it names, and together they cover IMPORT_TABLES (the backup reads that list)', () => {
     const empty = {
-      tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), mobs: new Map(),
+      tradeskills: new Map(), items: new Map(), recipes: new Map(), activeWikiRecipes: 0, classes: new Map(), races: new Map(), mobs: new Map(),
       zones: new Map(), zoneNames: new Map(), npcs: new Map(), importSources: new Map(), factions: new Map(), factionLinks: new Map(), questLines: new Map(), indexes: {},
     };
     const f = withClasses();
     f.mobs['a test mob'] = { title: 'A test mob', zone: '[[Night Harbor]]' };
+    // Order 35: two items with a race list, so game_race (IMPORT_MAY_BE_EMPTY) is written too.
+    f.items['Race Ring A'] = { slot: 'FINGER', race: 'HUM DEF' };
+    f.items['Race Ring B'] = { slot: 'FINGER', race: 'HUM DEF' };
     const plan = buildPlan(f, empty);
     // Order 17: the zone tables are written by a run that read the zone sources.
     plan.zones = buildZonePlan(zoneInput(), [], [], '2026-10-20T00:00:00Z');
     const stmts = buildStatements(plan, '2026-10-20T00:00:00Z');
     for (const s of stmts) expect(/^(?:INSERT INTO|UPDATE|DELETE FROM) (\w+)/.exec(s.sql)?.[1], s.sql.slice(0, 60)).toBe(s.table);
-    expect([...new Set(stmts.map((s) => s.table))].sort()).toEqual([...IMPORT_TABLES].sort());
+    expect([...new Set(stmts.map((s) => s.table))].sort()).toEqual([...IMPORT_TABLES, ...IMPORT_MAY_BE_EMPTY].sort());
   });
 
   it('upper-cases, strips markup, drops ALL/NONE and keeps codes on at least 1% of class-carrying items', async () => {
