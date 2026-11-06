@@ -12,6 +12,7 @@ import { fitLines, findEmbeds, footerText, itemLinks, KNOW_PREFIX, loadFind, REP
 import { withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
 import { cardFields, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
 import { SCREENSHOTS_OFF } from './images.ts';
+import { wearingButton } from '../gear/wear.ts';
 import { ITEM_REPORT_PREFIX, missingId } from './reports.ts';
 import { postedReply, searchReply } from './share.ts';
 
@@ -78,10 +79,10 @@ export interface ItemCard {
  */
 export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Promise<ItemCard | null> {
   const [head, uses] = await c.db.batch([
-    c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId),
+    c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats, slot_mask FROM item WHERE id = ?`).bind(itemId),
     c.db.prepare(USED_IN_SQL).bind(itemId, c.guild.id),
   ]);
-  const r = (head.results as GearRow[])[0];
+  const r = (head.results as (GearRow & { slot_mask: number })[])[0];
   if (!r) return null;
   const usedIn = uses.results as UsedIn[];
   const [d, f] = await Promise.all([pageData(c, [r], Infinity, false), loadFind(c.db, c.guild.id, { id: itemId })]);
@@ -107,7 +108,7 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
   return {
     embeds: [top, ...recipes, ...used],
     links: itemLinks(item),
-    actions: actionRow(itemId, f.isResult),
+    actions: actionRow(itemId, f.isResult, r.slot_mask),
     note: total > recipes.length ? ITEM_COPY.showing(recipes.length, total) : null,
     craftable: f.isResult,
     zones,
@@ -120,17 +121,19 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
  * problem (item issues). Order 24: no Stat image (screenshots are off; an old card's Stat image still answers). The
  * custom_ids are /craft find's and /gear find's, so cards posted before order 18 keep working.
  */
-const actionRow = (itemId: number, craftable: boolean) =>
-  row(
-    craftable
+const actionRow = (itemId: number, craftable: boolean, slotMask: number) =>
+  row([
+    ...(craftable
       ? [
           button(`${KNOW_PREFIX}${itemId}`, ITEM_COPY.knowButton, STYLE_PRIMARY),
           button(`${REPORT_PREFIX}${itemId}`, ITEM_COPY.recipeReportButton),
           button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.itemReportButton),
           button(`${FROM_FIND_PREFIX}${itemId}`, ITEM_COPY.requestButton),
         ]
-      : [button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.reportButton)],
-  );
+      : [button(`${ITEM_REPORT_PREFIX}${itemId}`, ITEM_COPY.reportButton)]),
+    // Order 35: I'm wearing this, for gear worn in the 20 slots: it saves to the presser's own characters (src/gear/wear.ts).
+    ...wearingButton(itemId, slotMask),
+  ]);
 
 // ---------------------------------------------------------------- the command and Post to channel
 

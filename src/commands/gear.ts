@@ -53,7 +53,7 @@ export const GEAR_COPY = {
   sortOption: (label: string) => `Sort: ${label}`,
   previous: 'Previous',
   next: 'Next',
-  gone: 'That item is no longer in the data. Run `/gear` again.',
+  gone: 'That item is no longer in the data. Run `/gear search` again.',
   more: (n: number) => `+${n} more`,
   canMake: (n: number) => `${plural(n, 'guild character')} can make it`,
   withSkill: (n: number, skill: string) => `${plural(n, 'guild character')} with ${skill} (trivial unknown)`,

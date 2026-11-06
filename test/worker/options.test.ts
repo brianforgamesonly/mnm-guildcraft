@@ -9,6 +9,7 @@ import { BOARDS } from '../../src/board/kinds.ts';
 import { autocomplete } from '../../src/commands/autocomplete.ts';
 import { COMMANDS } from '../../src/commands/definitions.ts';
 import { gearFindOptions } from '../../src/gear/options.ts';
+import { WEAR_SLOTS } from '../../src/gear/slots.ts';
 import { ACQUISITIONS, REPORT_ISSUES } from '../../src/recipes.ts';
 import { ADMIN, as, auto } from '../discord.ts';
 
@@ -28,6 +29,8 @@ const CLOSED = [
   ...(gearFindOptions([]).filter((o) => o.choices) as { choices: { value: string }[] }[]).map((o) => o.choices.map((c) => c.value)),
   // Order 24: /guildcraft rebuild-board which:, the boards' own list (src/board/kinds.ts).
   BOARDS.map((b) => b.name),
+  // Order 35: /gear wear slot:, the 20 saved-gear slots (src/gear/slots.ts).
+  WEAR_SLOTS.map((w) => w.key),
 ].map((l) => JSON.stringify([...l].sort()));
 
 describe('string options against the client-side rules', () => {

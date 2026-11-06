@@ -49,6 +49,8 @@ function fixture(): string {
       `INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES ('${g}', '${u}9', 'Departed${n}', 'left', '${at}')`,
       `INSERT INTO character (id, guild_id, owner_user_id, name, name_key, created_at, updated_at) VALUES (${n}, '${g}', '${u}', 'Char${n}', 'char${n}', '${at}', '${at}')`,
       `INSERT INTO character_skill (character_id, tradeskill_id, level, updated_at, updated_by) VALUES (${n}, 1, ${n * 10}, '${at}', '${u}')`,
+      // Order 35: saved gear (guild_id of its own, and a child of character).
+      `INSERT INTO character_gear (character_id, guild_id, slot, item_key, set_at, set_by) VALUES (${n}, '${g}', 'chest', 'item${n}', '${at}', '${u}')`,
       `INSERT INTO recipe (id, source_key, tradeskill_id, result_item_id, source, guild_id, imported_at) VALUES (${10 + n}, 'private${n}', 1, 2, 'guild', '${g}', '${at}')`,
       `INSERT INTO recipe_component (recipe_id, item_id, qty) VALUES (${10 + n}, 1, ${n})`,
       `INSERT INTO character_recipe (character_id, recipe_id, created_at) VALUES (${n}, 1, '${at}'), (${n}, ${10 + n}, '${at}')`,

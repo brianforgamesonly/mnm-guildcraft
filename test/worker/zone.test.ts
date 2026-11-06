@@ -273,6 +273,8 @@ describe('/zone: More creatures, Gear here', () => {
 describe('/zone: autocomplete, definition, help', () => {
   it('autocomplete filters the zone list as the member types (25 at most), for /zone and /gear find zone', async () => {
     expect((await auto('zone', null, 'name', 'r')).data.choices!.map((c) => c.name)).toEqual(['Rothold', "Ail'Vorith", 'Evershade Weald', "Keeper's Bight", 'Sunken Resort']);
+    // Order 35: /gear search zone:, and a flat /gear (an old client) answered the same.
+    expect((await auto('gear', 'search', 'zone', 'sunk')).data.choices!.map((c) => c.value)).toEqual(['Sunken Resort']);
     expect((await auto('gear', null, 'zone', 'sunk')).data.choices!.map((c) => c.value)).toEqual(['Sunken Resort']);
   });
 

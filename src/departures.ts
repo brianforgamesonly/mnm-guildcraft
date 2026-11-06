@@ -296,7 +296,8 @@ export async function membersCharacters(db: D1Database, guildId: string, userId:
 
 /**
  * Removes a member: every live character is soft-deleted (deleted_at; skills kept), the member is marked 'left',
- * the posts that listed them are marked dirty, and one member.removed row records it. Nothing is deleted.
+ * the posts that listed them are marked dirty, and one member.removed row records it. Nothing else is deleted: order 35's
+ * saved gear goes with the characters (PRD "Gear upgrades"), on an officer's press only, never by a schedule.
  */
 export async function removeMember(c: Ctx, userId: string, via: 'command' | 'notice'): Promise<{ name: string; characters: CharacterBrief[] } | null> {
   const { member, characters } = await membersCharacters(c.db, c.guild.id, userId);
@@ -304,6 +305,9 @@ export async function removeMember(c: Ctx, userId: string, via: 'command' | 'not
   const at = now();
   await c.db.batch([
     dirtyFor(c.db, c.guild.id, [userId]),
+    c.db
+      .prepare('DELETE FROM character_gear WHERE character_id IN (SELECT id FROM character WHERE guild_id = ?1 AND owner_user_id = ?2 AND deleted_at IS NULL)')
+      .bind(c.guild.id, userId),
     c.db.prepare('UPDATE character SET deleted_at = ?1, is_main = 0, updated_at = ?1 WHERE guild_id = ?2 AND owner_user_id = ?3 AND deleted_at IS NULL').bind(at, c.guild.id, userId),
     c.db.prepare("UPDATE member SET status = 'left' WHERE guild_id = ? AND discord_user_id = ?").bind(c.guild.id, userId),
     auditRow(c.db, c.guild.id, c.userId, 'member.removed', `member:${userId}`, { via, characters: characters.map((x) => ({ id: x.id, name: x.name })), status_before: member.status }, at),

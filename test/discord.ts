@@ -188,7 +188,8 @@ const RENAMED: Record<string, (o: Record<string, unknown>) => [string, string | 
   'craft request': (o) => ['request', undefined, o],
   'craft help': () => ['help', undefined, {}],
   'item image': ({ item, image }) => ['item', undefined, { name: item, screenshot: image }],
-  'gear find': (o) => ['gear', undefined, o],
+  // Order 35: the search is /gear search (a flat /gear is answered the same: test/worker/wear.test.ts).
+  'gear find': (o) => ['gear', 'search', o],
   'recipe source': (o) => ['officer', 'recipe-source', o],
   'recipe override': (o) => ['officer', 'recipe-fix', o],
   'guildcraft remove-member': ({ user }) => ['officer', 'remove-member', { member: user }],
@@ -225,7 +226,7 @@ const AUTO_RENAMED: Record<string, [string, string | undefined, string]> = {
   'craft update character': ['skills', undefined, 'character'],
   'craft me character': ['me', undefined, 'character'],
   'craft know recipe': ['officer', 'recipe-source', 'item'],
-  'gear find zone': ['gear', undefined, 'zone'],
+  'gear find zone': ['gear', 'search', 'zone'],
   'recipe source item': ['officer', 'recipe-source', 'item'],
   'recipe source faction': ['officer', 'recipe-source', 'faction'],
   'recipe override item': ['officer', 'recipe-fix', 'item'],

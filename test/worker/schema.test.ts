@@ -62,8 +62,9 @@ describe('schema (migrations/0001_init.sql)', () => {
       'event_member',
       // Order 34 (0028): who a batch adjustment waiting for approval covers.
       'dkp_pending_member',
-      // Order 35 (0029): the races, derived as the classes are.
+      // Order 35 (0029): the races, derived as the classes are. (0030): saved gear, one row per filled slot.
       'game_race',
+      'character_gear',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

@@ -44,10 +44,15 @@ describe('/me', () => {
     expect(r.data.content).toContain('**Craft request notices:** off');
     expect(r.data.content).toContain(ME_COPY.noRequests);
     const rows = r.data.components!;
-    expect(rows.map((row: any) => row.components.map((b: any) => b.label))).toEqual([[ME_COPY.add, ME_COPY.edit, ME_COPY.remove, ME_COPY.update], [ME_COPY.notices, ME_COPY.forget]]);
+    // Order 35: a third row, Gear for each character shown.
+    expect(rows.map((row: any) => row.components.map((b: any) => b.label))).toEqual([
+      [ME_COPY.add, ME_COPY.edit, ME_COPY.remove, ME_COPY.update],
+      [ME_COPY.notices, ME_COPY.forget],
+      [ME_COPY.gear('Testchar'), ME_COPY.gear('Alt')],
+    ]);
     expect(rows.length).toBeLessThanOrEqual(5);
     for (const row of rows) expect(row.components.length).toBeLessThanOrEqual(5);
-    expect(buttons(r).length).toBe(6);
+    expect(buttons(r).length).toBe(8);
     // A custom_id is at most 100 characters.
     for (const b of buttons(r)) expect(b.custom_id.length).toBeLessThanOrEqual(100);
     // character: shows one.
@@ -148,7 +153,8 @@ describe('/officer edit-member: the member\'s panel for an officer, re-checked o
     await add('Testchar');
     const r = await send(cmd(officer, 'officer', 'edit-member', { member: ANN }));
     expect(r.data.content).toMatch(/^\*\*Acting for <@100000000000000001> \(Global 100000000000000001\)\.\*\*/);
-    expect(buttons(r).map((b: any) => b.label)).toEqual([ME_COPY.edit, ME_COPY.remove, ME_COPY.update]);
+    // Order 35: the same Gear button on the member's character.
+    expect(buttons(r).map((b: any) => b.label)).toEqual([ME_COPY.edit, ME_COPY.remove, ME_COPY.update, ME_COPY.gear('Testchar')]);
     const modal = await send(press(officer, byLabel(r, ME_COPY.edit).custom_id));
     expect(modal.type).toBe(9);
     await send(submit(officer, modal.data.custom_id!, { name: 'Testchar', class: '', level: '30', main: 'yes' }));

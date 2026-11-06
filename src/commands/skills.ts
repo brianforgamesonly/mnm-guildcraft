@@ -274,7 +274,8 @@ export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ emb
   const staleBefore = Date.now() - c.guild.stale_days * DAY_MS;
   let anyStale = false;
   const embeds: Embed[] = shown.map((ch) => {
-    const head = [ch.class ? md(ch.class) : null, ch.level !== null ? `level ${ch.level}` : null].filter(Boolean).join(' · ');
+    // Order 35: the race (a game_race code), when set.
+    const head = [ch.class ? md(ch.class) : null, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${md(ch.race)}` : null].filter(Boolean).join(' · ');
     const lines = results
       .filter((r) => r.character_id === ch.id)
       .map((r) => {

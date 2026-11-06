@@ -21,6 +21,7 @@ import { SQL_LINKABLE } from '../events/link.ts';
 import { eventSettingsOf, TIME_ZONE } from '../events/settings.ts';
 import { shortDate } from '../events/times.ts';
 import { zoneKey } from '../zone/names.ts';
+import { wearItemChoices } from '../gear/wear.ts';
 
 const CHOICE_MAX = 100;
 
@@ -94,6 +95,8 @@ const characters: Lister = async ({ db, i, options, typed }) => {
   return asChoices(matchChoices(results.map((r) => r.name), typed));
 };
 const allItems: Lister = async (a) => itemChoices(await gameList(a.db, 'allItems'), a.typed);
+/** Order 35: the caller's own characters, whatever else the options hold (saved gear acts only on one's own). */
+const ownCharacters: Lister = (a) => characters({ ...a, options: a.options.filter((o) => o.name !== 'member') });
 /** Order 27: a DKP pool: the guild pool first, then the zones (one statement: the cached zone list). */
 const dkpPools: Lister = async (a) => [{ name: DKP_COPY.guildPool, value: POOL_GUILD }, ...asChoices(matchChoices(await gameList(a.db, 'zones'), a.typed, 24))];
 /** Order 27: the zone's creatures (src/dkp/creatures.ts), for the zone already filled in; one statement. */
@@ -179,7 +182,12 @@ const rosterCharacters: Lister = async ({ db, i, options, typed }) => {
 export const LISTS: Record<string, Lister> = {
   // Order 17: the zone list (25 of the ~29 as the member types).
   '/zone name': game('zones'),
-  '/gear zone': game('zones'),
+  // Order 35: /gear's search is /gear search (a flat /gear's zone too, for a client still holding the old definition).
+  // /gear wear: gear the character can use (its character: value, else the caller's main), and the caller's own
+  // characters only (no member: option), each one statement per keystroke.
+  '/gear search zone': game('zones'),
+  '/gear wear item': ({ db, i, options, typed }) => wearItemChoices(db, i.guild_id, i.member.user.id, optString(options, 'character'), typed),
+  '/gear wear character': ownCharacters,
   '/roster skill skill': game('skills'),
   '/roster recipes skill': game('skills'),
   '/skills skill': game('skills'),
@@ -224,7 +232,9 @@ export const LISTS: Record<string, Lister> = {
 export const listKey = (command: string | undefined, sub: string | undefined, option: string) => `/${command}${sub ? ` ${sub}` : ''} ${option}`;
 
 export async function autocomplete(db: D1Database, i: Interaction): Promise<Choice[]> {
-  const { name: sub, options } = subcommand(i);
+  const { name: given, options } = subcommand(i);
+  // Order 35: a flat /gear (a client still holding the old definition) is the search, as src/interactions.ts routes it.
+  const sub = given === undefined && i.data?.name === 'gear' ? 'search' : given;
   const f = focused(options);
   if (!f || !i.member || !i.guild_id) return [];
   const list = LISTS[listKey(i.data?.name, sub, f.name)];
