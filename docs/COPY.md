@@ -1327,3 +1327,14 @@ Retired with `/gear settings`: its description and window lines above, and "Arou
 | src/gear/upgrades.ts:86 | Group heads: Upgrades · Level unknown | DRAFT |
 | src/gear/upgrades.ts:103-104 | "max_level: is a number from 1 to 80." · (Pick a result's first line) "… · for \<character>'s \<Slot>" | DRAFT |
 | src/gear/upgrades.ts:120-121 | "Quest: [\<quest>](wiki) ([monstersandmemories.wiki](…)) · Lv \<n>+ · +\<n> more" | DRAFT |
+
+## Work order 37: drop and vendor lines (DRAFT)
+
+The Drop line's wording is unchanged (order 36's "Drop: \<mob> in \<zone> · Lv \<a>–\<b> · +\<n> more"); it now names the creature with the lowest level, as the item's level is worked out. The Vendor line replaces order 36's "Vendor: \<vendors as recorded> +\<n> more · any level".
+
+| Where | Text | Status |
+|---|---|---|
+| src/gear/upgrades.ts:125-128 | "Vendor: \<merchant>, \<zone> · any level" (e.g. "Vendor: Master Tailor Sansha, Night Harbor · any level") | DRAFT |
+| src/gear/upgrades.ts:125-128 | Several merchants: "Vendor: \<merchant>, \<zone>; \<merchant>, \<zone> +\<n> more · any level" (the first two; "+\<n> more" counts merchants only) | DRAFT |
+| src/gear/sources.ts (vendorParts) | A merchant in several zones, none named in the record: "\<merchant> (\<n> zones)" | DRAFT |
+| src/gear/upgrades.ts:125-128 | What matched neither table, and zones not shown with a merchant, as recorded after the merchants: "Vendor: \<merchant>, \<zone>; \<as recorded>, … · any level"; a record of zones only: "Vendor: \<zone> · any level" | DRAFT |

@@ -5,6 +5,7 @@ import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREF
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
 import { statVector, type GearItem } from '../../src/gear/score.ts';
 import { GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
+import { buildSourceIndex } from '../../src/gear/sources.ts';
 import { questsByItem, withQuests } from '../../scripts/import/core.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 import { FROM_FIND_PREFIX } from '../../src/requests.ts';
@@ -344,9 +345,11 @@ describe('order 36, ITEM 3: the controls', () => {
 const gi = (o: Partial<GearItem>): GearItem => ({
   id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ...o,
 });
-const extras = (origin: unknown, d: Partial<{ mobs: unknown[]; recipes: unknown[]; crafters: unknown[] }> = {}) => ({
+// Order 37: the drop and vendor lines read the source index (src/gear/sources.ts), not the page's mob rows.
+const extras = (origin: unknown, d: Partial<{ recipes: unknown[]; crafters: unknown[] }> = {}, src: Partial<Parameters<typeof buildSourceIndex>[1]> = {}) => ({
   rows: new Map([[1, { origin_json: JSON.stringify(origin), source_mask: 0 }]]),
   d: { classes: [], mobs: [], recipes: [], crafters: [], version: null, ...d } as any,
+  src: buildSourceIndex('t', { mobs: [], npcs: [], zoneNames: [], zones: [], ...src }),
 });
 const crafter = (owner: string, member: string, character: string, level: number) => ({ recipe_id: 7, character, owner_user_id: owner, member, class: null, char_level: null, level, knows_recipe: 0 });
 const recipe = { id: 7, item_id: 1, tradeskill: 'Blacksmithing', trivial: 45, acquisition: 'vendor', trivial_corrected: 0, trivial_unconfirmed: 0 };
@@ -354,10 +357,11 @@ const recipe = { id: 7, item_id: 1, tradeskill: 'Blacksmithing', trivial: 45, ac
 describe('order 36, ITEM 3: how to get it', () => {
   it('a drop with several mobs shows the lowest-level one, its zone and level, and "+N more"', () => {
     const mobs = [
-      { key: 'A big rat', title: 'A big rat', level: '22 - 25', zones_json: '["Rat Hollow"]' },
-      { key: 'A small rat', title: 'A small rat', level: '3 - 5', zones_json: '["Sungreet"]' },
+      { key: 'A big rat', title: 'A big rat', level: '22 - 25', zones_json: '["Rat Hollow"]', loot_json: null },
+      { key: 'A small rat', title: 'A small rat', level: '3 - 5', zones_json: '["Sungreet"]', loot_json: null },
     ];
-    const h = howToGet(gi({ levelKind: 'mob', levelKinds: 'mob', levelLow: 3, levelHigh: 25 }), extras({ from: ['A big rat', 'A small rat', 'A ghost'] }, { mobs }), ANN, 25);
+    const zones = { zones: [{ key: 'rat hollow', name: 'Rat Hollow' }, { key: 'sungreet', name: 'Sungreet' }], zoneNames: [{ source: MOB_ZONES_SOURCE, name: 'Rat Hollow', zone_key: 'rat hollow' }, { source: MOB_ZONES_SOURCE, name: 'Sungreet', zone_key: 'sungreet' }] };
+    const h = howToGet(gi({ levelKind: 'mob', levelKinds: 'mob', levelLow: 3, levelHigh: 25 }), extras({ from: ['A big rat', 'A small rat', 'A ghost'] }, {}, { mobs, ...zones }), ANN, 25);
     expect(h.lines).toEqual(['Drop: A small rat in Sungreet · Lv 3–5 · +2 more']);
     expect(h.zones).toEqual([{ source: MOB_ZONES_SOURCE, name: 'Sungreet' }]);
   });
@@ -381,10 +385,15 @@ describe('order 36, ITEM 3: how to get it', () => {
     expect(h.lines).toEqual(['Crafted: Blacksmithing, trivial 45 · Lv 14+', 'You can make this (Durgrim 178)', 'Reliable in your guild: <@201> (Cara): Cyl 210']);
   });
 
-  it('vendor (as the source records where, any level), harvest, quest, and primary first', () => {
+  it('vendor (order 37: merchants named from npc and zone_name), harvest, quest, and primary first', () => {
     const it = gi({ levelKind: 'vendor', levelKinds: 'vendor,harvest,quest,mob', levelLow: 0 });
-    const h = howToGet(it, extras({ soldBy: { vendors: ['Night Harbor', 'Rais Alyssum', 'Evershade Weald', 'Ilyra Luthielle'] }, from: [] }), ANN, 25);
-    expect(h.lines).toEqual(['Vendor: Night Harbor, Rais Alyssum, Evershade Weald +1 more · any level', 'Harvested, any level', "Quest: the quest's name isn't recorded · level unknown", 'Drop: creature not recorded · level unknown']);
+    const src = {
+      npcs: [{ name: 'Rais Alyssum', zone_key: 'night harbor', level: null, loot_json: null }, { name: 'Ilyra Luthielle', zone_key: 'evershade weald', level: null, loot_json: null }],
+      zones: [{ key: 'night harbor', name: 'Night Harbor' }, { key: 'evershade weald', name: 'Evershade Weald' }],
+      zoneNames: [{ source: 'wiki:zones', name: 'Night Harbor', zone_key: 'night harbor' }, { source: 'wiki:zones', name: 'Evershade Weald', zone_key: 'evershade weald' }],
+    };
+    const h = howToGet(it, extras({ soldBy: { vendors: ['Night Harbor', 'Rais Alyssum', 'Evershade Weald', 'Ilyra Luthielle'] }, from: [] }, {}, src), ANN, 25);
+    expect(h.lines).toEqual(['Vendor: Rais Alyssum, Night Harbor; Ilyra Luthielle, Evershade Weald · any level', 'Harvested, any level', "Quest: the quest's name isn't recorded · level unknown", 'Drop: creature not recorded · level unknown']);
     expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 12 }), extras({}), ANN, 25).lines).toEqual(["Quest: the quest's name isn't recorded · Lv 12+"]);
   });
 

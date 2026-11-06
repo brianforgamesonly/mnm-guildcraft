@@ -176,6 +176,58 @@ if (process.argv.includes('--testchar')) {
   const r2 = compareGroup(groupByKey('chest'), ac0.ctx, ac0.wearer, ac0.idx.items);
   console.log(`  step 6 (AC weight 0), Chest after step 3: no cap ${JSON.stringify(counts(r2, null))}`);
 }
+// --testchar37 (order 37, Brian's check): Testchar (Inquisitor 15, Human, default weights), Primary: Copper Greatsword,
+// Chest: Fine Blue Cloth Robe. At max_level: 15: the Chest counts; Corroded Bronze Plate Breastplate's gain over the robe,
+// its page and its drop line; then, over every slot, the first listed item with a named merchant and the first with a
+// named quest (slot, page, line). Pages count from 1, PER_PAGE a page, in the list's own order.
+if (process.argv.includes('--testchar37')) {
+  const { GROUPS, SLOT_GROUPS } = await import('../../src/gear/score.ts');
+  const { extrasFor, howToGet, PER_PAGE } = await import('../../src/gear/upgrades.ts');
+  await raw.prepare("INSERT INTO character (guild_id, owner_user_id, name, name_key, class, level, race, is_main, created_at, updated_at) VALUES (?, ?, 'Testchar', 'testchar', 'INQ', 15, 'HUM', 0, ?, ?)").bind(BENCH_GUILD, USER, at, at).run();
+  const tc = await raw.prepare("SELECT * FROM character WHERE guild_id = ? AND name = 'Testchar'").bind(BENCH_GUILD).first();
+  for (const [slot, key] of [['primary', 'copper greatsword'], ['chest', 'fine blue cloth robe']])
+    await raw.prepare('INSERT INTO character_gear (character_id, guild_id, slot, item_key, set_at, set_by) VALUES (?, ?, ?, ?, ?, ?)').bind(tc.id, BENCH_GUILD, slot, key, at, USER).run();
+  const CAP = 15;
+  const L = await load(ctx(), tc);
+  const list = (g) => {
+    const by = grouped(compareGroup(g, L.ctx, L.wearer, L.idx.items).upgrades, CAP);
+    return { all: GROUPS.flatMap((k) => by[k].map((u) => ({ k, u }))), by };
+  };
+  const { vendorParts } = await import('../../src/gear/sources.ts');
+  const merchants = async (u) => {
+    const x = await extrasFor(ctx(), [u.item], L.idx.version);
+    const v = JSON.parse(x.rows.get(u.item.id)?.origin_json ?? '{}').soldBy?.vendors ?? [];
+    return v.length ? vendorParts(x.src, v).merchants.length : 0;
+  };
+  const line = async (u) => howToGet(u.item, await extrasFor(ctx(), [u.item], L.idx.version), USER, 25).lines;
+  const chest = list(groupByKey('chest'));
+  console.log(`\nTestchar (order 37), Chest at max_level ${CAP}: listed ${chest.by.listed.length}, level unknown ${chest.by.unknown.length} (shown under the cap: ${GROUPS.includes('unknown')}), hidden above Lv ${CAP}: ${chest.by.above.length}; ${chest.all.length} shown, ${Math.ceil(chest.all.length / PER_PAGE)} pages`);
+  const at37 = chest.all.findIndex((s) => s.u.item.name === 'Corroded Bronze Plate Breastplate');
+  if (at37 < 0) console.log('  Corroded Bronze Plate Breastplate: not listed');
+  else {
+    const u = chest.all[at37].u;
+    console.log(`  Corroded Bronze Plate Breastplate: +${(u.gain / 100).toFixed(2)} over the robe, page ${Math.floor(at37 / PER_PAGE) + 1} (place ${at37 + 1}); ${(await line(u)).join(' / ')}`);
+  }
+  let vendor = null;
+  let quest = null;
+  for (const g of SLOT_GROUPS) {
+    const { all } = list(g);
+    for (const [i, s] of all.entries()) {
+      if (s.k !== 'listed' || (vendor && quest)) continue;
+      const kinds = (s.u.item.levelKinds ?? '').split(',');
+      if (!vendor && kinds.includes('vendor') && (await merchants(s.u)) > 0) {
+        const l = (await line(s.u)).find((x) => x.startsWith('Vendor:'));
+        vendor = `${g.label}, page ${Math.floor(i / PER_PAGE) + 1}: ${s.u.item.name} +${(s.u.gain / 100).toFixed(2)} · ${l}`;
+      }
+      if (!quest && kinds.includes('quest')) {
+        const l = (await line(s.u)).find((x) => x.startsWith('Quest:') && !x.includes("isn't recorded"));
+        if (l) quest = `${g.label}, page ${Math.floor(i / PER_PAGE) + 1}: ${s.u.item.name} +${(s.u.gain / 100).toFixed(2)} · ${l}`;
+      }
+    }
+  }
+  console.log(`  vendor item with a named merchant: ${vendor ?? 'none listed'}`);
+  console.log(`  quest item: ${quest ?? 'none listed'}`);
+}
 // --weights (order 36, PR B): D1's rows written and read by each kind of weight change, with its audit row (no review
 // channel is set here, so nothing is posted).
 if (process.argv.includes('--weights')) {
