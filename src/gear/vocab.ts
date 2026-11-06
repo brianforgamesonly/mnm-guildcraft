@@ -41,12 +41,15 @@ export const ALL_RACES = -1;
 export const MOUNT_SLOTS = ['BARDING', 'SADDLEBAG', 'RIGGING'] as const;
 
 /**
- * Order 36: race display names, by game_race code, from the Monsters and Memories Wiki's Races page
- * (https://monstersandmemories.miraheze.org/wiki/Races, CC BY-SA 4.0). Only a name confirmed on that page goes here; no
- * runtime fetch. Empty in order 36: the page is not in the committed snapshot (data/wiki-snapshot/), order 28's rule
- * keeps the session off the live wiki, and no archived copy could be read, so every code shows as itself (raceLabel).
+ * Order 36: race display names, by game_race code, from the Monsters and Memories Wiki's races list
+ * (https://monstersandmemories.miraheze.org/wiki/Races, CC BY-SA 4.0), as Cowork read it on 2026-11-05 and the owner
+ * confirmed it (order 36, PR B). No runtime fetch; the import writes each into game_race.name (scripts/import/core.ts
+ * raceName). The mount races (HRS, DNK) stay codes: they are never offered for characters. A code not here shows as itself.
  */
-export const RACE_NAMES: Readonly<Record<string, string>> = {};
+export const RACE_NAMES: Readonly<Record<string, string>> = {
+  HUM: 'Human', DWF: 'Dwarf', DDF: 'Deep Dwarf', GNM: 'Gnome', DGN: 'Deep Gnome', HIE: 'High Elf',
+  ELF: 'Wood Elf', DEF: 'Deep Elf', HFL: 'Halfling', OGR: 'Ogre', TRL: 'Troll', GOB: 'Goblin',
+};
 /** A race's label in menus and panels: its confirmed name, else the code. */
 export const raceLabel = (code: string) => RACE_NAMES[code.toUpperCase()] ?? code;
 

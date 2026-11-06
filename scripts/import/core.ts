@@ -9,7 +9,7 @@
 //   rows_written = 0 for a re-run on unchanged data.
 
 import { ALARM_IMPORT, isFailing, type ImportStatus } from '../../src/import-status.ts';
-import { ALL_CLASSES, ALL_RACES, MOUNT_SLOTS, QUEST_CATEGORIES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
+import { ALL_CLASSES, ALL_RACES, MOUNT_SLOTS, QUEST_CATEGORIES, RACE_NAMES, REMOVED_BIT, REMOVED_CATEGORY, RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES, type Source } from '../../src/gear/vocab.ts';
 import { questBucket } from '../wiki/parse.ts';
 import type { WikiSnapshot } from '../wiki/types.ts';
 import { computeLevels, type ItemLevel, type Kind, type LevelSummary } from './levels.ts';
@@ -536,8 +536,10 @@ const ITEM_FIELDS = ['name', 'icon_url', 'slot', 'stats_json', 'wiki_url', 'clas
 export const itemDiffers = (o: StoredItem | undefined, it: ItemRow) => !o || o.source !== 'wiki' || o.gone_at !== null || ITEM_FIELDS.some((f) => o[f] !== it[f]);
 
 /** Order 35: a stored game_race row against the plan's (the dry run and the statement's guard compare the same fields). */
-export const raceDiffers = (o: { item_count: number; bit: number | null; mount: number }, r: { item_count: number; mount: number }, bit: number | undefined) =>
-  o.item_count !== r.item_count || o.bit !== (bit ?? null) || o.mount !== r.mount;
+export const raceDiffers = (o: { item_count: number; bit: number | null; mount: number; name?: string | null }, r: { code: string; item_count: number; mount: number }, bit: number | undefined) =>
+  o.item_count !== r.item_count || o.bit !== (bit ?? null) || o.mount !== r.mount || (o.name ?? null) !== raceName(r.code);
+/** Order 36: a race's display name, from src/gear/vocab.ts RACE_NAMES (the code map), or NULL: never a mount race's. */
+export const raceName = (code: string): string | null => RACE_NAMES[code] ?? null;
 
 type StoredMob = MobRow & { active: number };
 const MOB_FIELDS = ['key', 'title', 'level', 'race', 'class', 'image_url', 'zones_json', 'loot_json'] as const;
@@ -602,7 +604,7 @@ export interface ExistingState {
   activeWikiRecipes: number;
   classes: Map<string, { item_count: number; bit: number | null }>; // game_class code (item_count 0 = no longer kept)
   /** Order 35 (0029): game_race by code (item_count 0 = no longer kept). */
-  races: Map<string, { item_count: number; bit: number | null; mount: number }>;
+  races: Map<string, { item_count: number; bit: number | null; mount: number; name?: string | null }>;
   mobs: Map<string, StoredMob>; // by lower(key)
   // Order 17 (0013): zones by key, zone names by zoneNameId, npcs by npcId, source versions by name.
   zones: Map<string, StoredZone>;
@@ -1241,16 +1243,16 @@ export function buildGroups(plan: Plan, importedAt: string, ex?: ExistingState):
       stmt('game_class', codes.length, `UPDATE game_class SET item_count = 0 WHERE item_count <> 0 AND code IN (${codes.map(lit).join(', ')})`),
     ),
   ]);
-  // Order 35: races before items too (race_mask names game_race bits). name stays NULL: the data holds codes only.
+  // Order 35: races before items too (race_mask names game_race bits). Order 36: name from the code map (raceName).
   const races = ex ? plan.races.kept.filter((r) => { const o = ex.races.get(r.code); return !o || raceDiffers(o, r, plan.raceBits.get(r.code)); }) : plan.races.kept;
   groups.push([
     ...chunk(races, ROWS_PER_STATEMENT).map((rows) =>
       stmt(
         'game_race',
         rows.length,
-        `INSERT INTO game_race (code, item_count, bit, mount) VALUES ${rows.map((r) => `(${lit(r.code)}, ${r.item_count}, ${lit(plan.raceBits.get(r.code) ?? null)}, ${r.mount})`).join(', ')} ` +
-          `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count, bit = excluded.bit, mount = excluded.mount ` +
-          `WHERE game_race.item_count IS NOT excluded.item_count OR game_race.bit IS NOT excluded.bit OR game_race.mount IS NOT excluded.mount`,
+        `INSERT INTO game_race (code, item_count, bit, mount, name) VALUES ${rows.map((r) => `(${lit(r.code)}, ${r.item_count}, ${lit(plan.raceBits.get(r.code) ?? null)}, ${r.mount}, ${lit(raceName(r.code))})`).join(', ')} ` +
+          `ON CONFLICT(code) DO UPDATE SET item_count = excluded.item_count, bit = excluded.bit, mount = excluded.mount, name = excluded.name ` +
+          `WHERE game_race.item_count IS NOT excluded.item_count OR game_race.bit IS NOT excluded.bit OR game_race.mount IS NOT excluded.mount OR game_race.name IS NOT excluded.name`,
       ),
     ),
     ...chunk(plan.raceDeactivate, ROWS_PER_STATEMENT).map((codes) =>
@@ -1650,7 +1652,7 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
     'SELECT name, name_key, icon_url, slot, stats_json, wiki_url, source, class_mask, slot_mask, source_mask, origin_json, ' +
       'race_mask, level_low, level_high, level_kind, level_kinds, gone_at FROM item',
   );
-  const races = await db.all<{ code: string; item_count: number; bit: number | null; mount: number }>('SELECT code, item_count, bit, mount FROM game_race');
+  const races = await db.all<{ code: string; item_count: number; bit: number | null; mount: number; name: string | null }>('SELECT code, item_count, bit, mount, name FROM game_race');
   const ms = await db.all<StoredMob>('SELECT key, title, level, race, class, image_url, zones_json, loot_json, active FROM mob');
   // The live schema's indexes per table (the write bound): every index, partial or not, counts.
   const idx = await db.all<{ t: string; n: number }>("SELECT tbl_name AS t, count(*) AS n FROM sqlite_master WHERE type = 'index' GROUP BY tbl_name");
@@ -1712,7 +1714,8 @@ export async function loadExisting(db: Db): Promise<ExistingState> {
         },
       ]),
     ),
-    races: new Map(races.map((r) => [r.code, { item_count: Number(r.item_count), bit: r.bit === null ? null : Number(r.bit), mount: Number(r.mount) }])),
+    // Order 36 review fix: name too, so the dry run's prediction and the write's guard compare the same fields.
+    races: new Map(races.map((r) => [r.code, { item_count: Number(r.item_count), bit: r.bit === null ? null : Number(r.bit), mount: Number(r.mount), name: r.name }])),
     recipes,
     activeWikiRecipes: [...recipes.values()].filter((r) => r.active).length,
     classes: new Map(cls.map((c) => [c.code, { item_count: Number(c.item_count), bit: c.bit === null ? null : Number(c.bit) }])),

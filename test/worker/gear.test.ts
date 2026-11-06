@@ -12,6 +12,7 @@ import { embedChars, EMBED_LIMITS } from '../../src/discord.ts';
 import { ANY, decodeState, encodeState, SORTS, STAT_FILTERS, sortByKey, TOTAL_STATS_SQL, ZONE_STATE_MAX, type GearQuery } from '../../src/gear/options.ts';
 import migration11 from '../../migrations/0011_item_reports.sql?raw';
 import { filters, searchStatement } from '../../src/gear/search.ts';
+import { CLASSES } from '../../src/gear/score.ts';
 import { RESISTS, SLOTS, SOURCES, STATS, WEAPON_TYPES } from '../../src/gear/vocab.ts';
 import { one, reset } from '../db.ts';
 import { as, botApi, cmd, GUILD, press, select, send, submit } from '../discord.ts';
@@ -73,8 +74,8 @@ describe('the command definition (Discord limits)', () => {
     // Order 35: /gear's search is its subcommand "search" (beside "wear"); the options are as order 13 set them.
     type Sub = { name: string; options: { name: string; required?: boolean; choices?: { value: string }[] }[] };
     const gear = COMMANDS.find((c) => c.name === 'gear') as unknown as { options: Sub[] };
-    // Order 36: and "upgrades".
-    expect(gear.options.map((o) => o.name)).toEqual(['search', 'wear', 'upgrades']);
+    // Order 36: and "upgrades"; PR B: "weights" and "settings".
+    expect(gear.options.map((o) => o.name)).toEqual(['search', 'wear', 'upgrades', 'weights', 'settings']);
     const find = gear.options[0];
     expect(find.options.map((o) => o.name)).toEqual(['class', 'slot', 'weapon_type', 'min_ac', 'min_ratio', 'stat1', 'stat2', 'stat3', 'source', 'sort', 'zone']);
     expect(find.options[0]).toMatchObject({ required: true });
@@ -92,6 +93,8 @@ describe('the command definition (Discord limits)', () => {
     const classes = (n: number) => Array.from({ length: n }, (_, i) => `C${String(i).padStart(2, '0')}`);
     expect(commandLimitProblems(commandsWith(classes(24)))).toEqual([]);
     expect(commandLimitProblems(commandsWith(classes(25)))).toEqual(['/gear search class: 26 choices, over 25']);
+    // Order 36 review fix: with the real class codes, whose /gear weights choices carry the full names (Shadow Knight …).
+    expect(commandLimitProblems(commandsWith(Object.keys(CLASSES)))).toEqual([]);
     // Today's lists: slots 24 of 25, sorts 22, stats 20.
     expect(SLOTS.length).toBe(24);
     expect([SORTS.length, STAT_FILTERS.length]).toEqual([22, 20]);

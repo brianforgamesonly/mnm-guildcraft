@@ -3,6 +3,7 @@
 // officer passes member:@user, so another member's character answers exactly like a missing one.
 import { audit, auditNewCharacter, now } from '../access.ts';
 import { markCharacterDirty } from '../board/refresh.ts';
+import { raceLabel } from '../gear/vocab.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, md, optBool, optInt, optString, plural, type MessageReply, type Option } from '../discord.ts';
 import { updateButtons } from './skills.ts';
@@ -135,7 +136,7 @@ function checkLevel(level: number | undefined): string | null {
 const isUniqueViolation =(e: unknown) => e instanceof Error && /UNIQUE constraint failed/i.test(e.message);
 
 function describe(ch: { name: string; class: string | null; level: number | null; race?: string | null }): string {
-  const bits = [ch.class, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${ch.race}` : null].filter(Boolean);
+  const bits = [ch.class, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${raceLabel(ch.race)}` : null].filter(Boolean);
   return `**${md(ch.name)}**${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
 }
 

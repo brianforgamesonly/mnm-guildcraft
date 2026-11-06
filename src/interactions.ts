@@ -9,6 +9,7 @@ import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.t
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
 import { gearWear, WEAR_OPENS_MODAL, wearComponent, wearImmediate } from './gear/wear.ts';
 import { gearUpgrades, POST_WHAT as UPGRADES_POST, postUpgrades, upgradesComponent } from './gear/upgrades.ts';
+import { gearSettings, gearWeights } from './gear/weights.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, REJECT_PREFIX, statImage } from './commands/images.ts';
@@ -84,6 +85,9 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
   'gear wear': { access: 'member', run: gearWear },
   // Order 36: /gear upgrades (src/gear/upgrades.ts), private; its controls re-check the character's owner or an officer.
   'gear upgrades': { access: 'member', run: gearUpgrades },
+  // Order 36, PR B: officers, checked here when it runs (src/gear/weights.ts).
+  'gear weights': { access: 'officer', run: gearWeights },
+  'gear settings': { access: 'officer', run: gearSettings },
   'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
   'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
   'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },

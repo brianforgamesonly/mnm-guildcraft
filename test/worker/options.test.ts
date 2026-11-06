@@ -10,7 +10,7 @@ import { autocomplete } from '../../src/commands/autocomplete.ts';
 import { COMMANDS } from '../../src/commands/definitions.ts';
 import { gearFindOptions } from '../../src/gear/options.ts';
 import { WEAR_SLOTS } from '../../src/gear/slots.ts';
-import { SLOT_GROUPS } from '../../src/gear/score.ts';
+import { PRESETS, SLOT_GROUPS, WEIGHT_KEYS } from '../../src/gear/score.ts';
 import { ACQUISITIONS, REPORT_ISSUES } from '../../src/recipes.ts';
 import { ADMIN, as, auto } from '../discord.ts';
 
@@ -34,6 +34,9 @@ const CLOSED = [
   WEAR_SLOTS.map((w) => w.key),
   // Order 36: /gear upgrades slot:, the 17 slot groups (src/gear/score.ts SLOT_GROUPS).
   SLOT_GROUPS.map((g) => g.key),
+  // Order 36, PR B: /gear weights preset: and stat: (src/gear/score.ts PRESETS, WEIGHT_KEYS).
+  [...PRESETS],
+  [...WEIGHT_KEYS],
 ].map((l) => JSON.stringify([...l].sort()));
 
 describe('string options against the client-side rules', () => {

@@ -7,13 +7,15 @@
 import { BOARDS } from '../board/kinds.ts';
 import { gearFindOptions } from '../gear/options.ts';
 import { WEAR_SLOTS } from '../gear/slots.ts';
-import { SLOT_GROUPS } from '../gear/score.ts';
+import { className, PRESETS, SLOT_GROUPS, WEIGHT_KEYS, WEIGHT_LABEL } from '../gear/score.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
 const STRING = 3;
 const INTEGER = 4;
 const BOOLEAN = 5;
+/** Order 36: a number option (a weight). */
+const NUMBER = 10;
 const USER = 6;
 const CHANNEL = 7;
 const ROLE = 8;
@@ -53,8 +55,28 @@ const gearOptions = (classes: readonly string[]) => [
     options: [
       { type: STRING, name: 'character', description: 'Your character (needed when you have more than one)', autocomplete: true, max_length: 32 },
       { type: STRING, name: 'slot', description: 'One slot: its full list (leave out for every slot)', choices: SLOT_GROUPS.map((g) => ({ name: g.label, value: g.key })) },
-      { type: INTEGER, name: 'levels', description: 'Around your level means up to this many levels above it (default 10)', min_value: 0, max_value: 60 },
+      { type: INTEGER, name: 'levels', description: "Around your level means up to this many levels above it (default: your server's)", min_value: 0, max_value: 60 },
     ],
+  },
+  {
+    // Order 36, PR B (src/gear/weights.ts): officers, checked when it runs; visible to everyone in the command list. The
+    // class choices are the copy's game_class codes (as /gear search's), filled in at registration (commandsWith).
+    type: SUBCOMMAND,
+    name: 'weights',
+    description: 'Officers: how /gear upgrades weighs each stat for a class (show, preset, one stat, or reset)',
+    options: [
+      { type: STRING, name: 'class', description: 'The class', required: true, ...(classes.length ? { choices: classes.map((c) => ({ name: className(c), value: c })) } : {}) },
+      { type: STRING, name: 'preset', description: "Replace the class's weights with a preset (its stat priority kept)", choices: PRESETS.map((p) => ({ name: p, value: p })) },
+      { type: STRING, name: 'stat', description: 'With value: the stat to set', choices: WEIGHT_KEYS.map((k) => ({ name: WEIGHT_LABEL[k], value: k })) },
+      { type: NUMBER, name: 'value', description: 'With stat: its weight, 0 to 2 in steps of 0.05', min_value: 0, max_value: 2 },
+      { type: BOOLEAN, name: 'reset', description: 'True: back to the defaults' },
+    ],
+  },
+  {
+    type: SUBCOMMAND,
+    name: 'settings',
+    description: 'Officers: the server default for how many levels above a character count as "around your level"',
+    options: [{ type: INTEGER, name: 'window', description: 'Levels above a character that count as around its level (0 to 60; default 10)', min_value: 0, max_value: 60 }],
   },
 ];
 

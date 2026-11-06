@@ -309,7 +309,9 @@ const raceSelect = (races: string[], current: string | null) => ({
     ],
   },
 });
-const characterRaces = async (c: Ctx) => (await c.db.prepare(CHARACTER_RACES_SQL).all<{ code: string }>()).results.map((r) => r.code);
+// Order 36 review fix: in the order members read them, by name (a code with no name sorts by itself).
+const characterRaces = async (c: Ctx) =>
+  (await c.db.prepare(CHARACTER_RACES_SQL).all<{ code: string }>()).results.map((r) => r.code).sort((a, b) => raceLabel(a).localeCompare(raceLabel(b), 'en'));
 const characterFields = (races: string[], ch?: Character) => [
   textInput('name', ME_COPY.name, { required: true, max: NAME_MAX, value: ch?.name }),
   textInput('class', ME_COPY.className, { description: ME_COPY.classHint, max: 32, value: ch?.class }),

@@ -65,6 +65,9 @@ describe('schema (migrations/0001_init.sql)', () => {
       // Order 35 (0029): the races, derived as the classes are. (0030): saved gear, one row per filled slot.
       'game_race',
       'character_gear',
+      // Order 36 (0031): an officer's weight and setting changes for /gear upgrades, per server (defaults stay in code).
+      'gear_weight',
+      'gear_setting',
     ]);
     expect(tables.map((t) => t.name)).toEqual([...new Set([...prdTables, ...departureTables])].sort());
     expect([...new Set(departureIndexes)].sort()).toEqual([

@@ -518,4 +518,11 @@ Order 36 is gear upgrades, part 2: scoring, `/gear upgrades` and the officer wei
   - CI fails a pull request whose commit says it adds a rule ("Order N rule…") without changing this file in that commit (scripts/ci/commit-claims.mjs; order 35's 80ee0ae fails it).
   - A commit is never sent in the same batch of tool calls as the edits it records: it waits for their results.
 - Scores are computed, never stored, in integer hundredths (src/gear/score.ts). Scoring reads weights only through `weightsFor(server, class)`.
+- Override 4 (the owner, 2026-11-06, resolving PR A's FINAL's contradiction 1), of order 5's "The session never creates channels or posts on the owner's server. Live board posts start from the owner's own `/guildcraft setup board:`; before that, board code is verified in workerd against a mocked Discord API, and the dry run is a read-only render from live D1 (`.github/workflows/board.yml`, action `render`), with `delete` as the rollback." and of order 7's "Order 7's one explicit override of order 5's "The session never creates channels or posts on the owner's server": the bot's departure notices, posted in the review channel the owner sets with `/guildcraft setup review:`. Everything else in that rule stands."
+  - `/gear weights` and `/gear settings` changes post in the review channel: a third permitted kind of review-channel post, alongside departure notices (order 7) and report cards (order 9). Each names who, the class or setting, and the old and new values, and pings nobody (src/gear/weights.ts `postReview`).
+  - The session itself posts nothing live; tests use a mocked Discord. Everything else in order 5's rule stands.
+- Gains show two decimals everywhere (the owner, 2026-11-06: `fmtHundredths` as is).
+- ITEM 5's local measurements stand; the deployed Worker's CPU is not required (the owner, 2026-11-06).
+- Race names (src/gear/vocab.ts `RACE_NAMES`) come from Cowork's reading of the Monsters and Memories wiki's races list (2026-11-05), confirmed by the owner. HRS and DNK, the mount races, stay codes.
+- The class table's source is the Stories of MnM character planner's published priority list, against which Cowork verified all 18 rows on 2026-11-05 (the owner, 2026-11-06).
 - Failed runs: every one is listed in the FINAL (order 12).
