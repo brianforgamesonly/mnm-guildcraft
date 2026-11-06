@@ -219,6 +219,27 @@ describe('the usage warning (mocked Discord)', () => {
     expect(posted[0].body.content).toContain('**Commands and lookups** was 15,000 of 100,000 (15%)');
     expect(GUILD).toBeTruthy();
   });
+  it('order 38: a quiet cron run renders no usage line (no number formatting, the profile\'s cause) and posts nothing', async () => {
+    await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
+    await withReview();
+    await usage([['workers_requests', day(Date.now() - 86_400_000), 15_000]], new Date().toISOString());
+    const run = async (at: number) => {
+      const ctx = createExecutionContext();
+      await worker.scheduled(createScheduledController({ scheduledTime: at, cron: '*/15 * * * *' }), { ...env, ...TOKEN.env } as any, ctx);
+      await waitOnExecutionContext(ctx);
+    };
+    await run(Date.now()); // the state changed: the one line, as before
+    expect(posted).toHaveLength(1);
+    expect(posted[0].body.content).toContain('15,000 of 100,000 (15%)');
+    const fmt = vi.spyOn(Number.prototype, 'toLocaleString');
+    try {
+      await run(Date.now() + 15 * 60_000); // nothing changed since
+      expect(fmt).not.toHaveBeenCalled();
+    } finally {
+      fmt.mockRestore();
+    }
+    expect(posted).toHaveLength(1);
+  });
   it('order 12: usageAlerts itself posts and records nothing outside dev (the line is OperatorText)', async () => {
     await send(cmd(admin, 'guildcraft', 'setup'), TOKEN);
     await withReview();

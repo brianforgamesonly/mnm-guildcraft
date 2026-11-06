@@ -13,6 +13,12 @@
 #          problem never goes quiet. No state is kept between runs, and the first run needs no baseline;
 #   state: the day's own records only. The run also fails when it cannot run (an API error, or no heartbeat table).
 # GitHub's runs are read with this job's GITHUB_TOKEN (actions: read): no new credential.
+# Order 38 (ITEM 4): also fails on any invocation of the copy's Worker on the judged day whose status is not success or
+# clientDisconnected (a CPU-limit error is exceededResources), read from both GraphQL invocation datasets
+# (workersInvocationsAdaptive and workersInvocationsScheduled, so cron runs are covered), and when that read fails
+# (scripts/health/workers.ts, judge.ts judgeWorkerStatuses). Its summary also records the day's CPU p50, p99 and max: the
+# whole Worker (GraphQL, unit as the schema describes it) and the sweep apart from everything else (Workers Logs), no alarm.
+# The existing CLOUDFLARE_API_TOKEN reads both (timings.yml already reads GraphQL and Workers Logs with it). No D1 rows.
 # Dispatch: day (default yesterday), copy, and evidence_from/evidence_to (per 15-minute slot, the bot's own timestamps);
 # sweep_rows (order 21) lists every heartbeat row with its offsets, and makes the run report-only.
 name: health

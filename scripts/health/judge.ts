@@ -280,6 +280,38 @@ export function judgeQuestSites(hasTable: boolean, last: string | null, nowMs: n
     : { rule, verdict: 'pass', text: `last succeeded ${last} (${Math.floor(days)} days ago)` };
 }
 
+// ---------------------------------------------------------------- order 38, ITEM 4: invocation statuses
+
+/**
+ * The statuses that are not an error: the invocation succeeded, or the client went away first. Every other status alerts,
+ * one nobody expected included (exceededResources is the CPU limit's: Cloudflare's metrics page maps errors 1102 and 1027
+ * to it). Statuses are compared as the API returns them, so a renamed or new status alerts rather than passing.
+ */
+export const OK_STATUSES: ReadonlySet<string> = new Set(['success', 'clientDisconnected']);
+
+/** Invocations of one Worker on the judged day, per GraphQL dataset and status. */
+export interface StatusCount {
+  dataset: string;
+  status: string;
+  count: number;
+}
+
+/**
+ * Order 38: any invocation that ended in a status outside OK_STATUSES fails the check on that day (the health alarm: the run
+ * fails and GitHub mails the owner), naming the Worker, the status, the count and the dataset. A read that failed, or one
+ * that found no invocations at all for a Worker whose cron runs every day, fails too: never a silent pass.
+ */
+export function judgeWorkerStatuses(worker: string, read: { rows: StatusCount[] } | { error: string }): Line {
+  const rule = 'invocation statuses';
+  if ('error' in read) return { rule, verdict: 'fail', text: `${worker}: statuses unread (${read.error}); a failed read is never a pass` };
+  const total = read.rows.reduce((n, r) => n + r.count, 0);
+  if (!total) return { rule, verdict: 'fail', text: `${worker}: no invocations read for the day, though its cron runs every day: the query is presumed broken` };
+  const bad = read.rows.filter((r) => r.count > 0 && !OK_STATUSES.has(r.status));
+  const all = read.rows.map((r) => `${r.dataset} ${r.status} ${r.count}`).join(', ');
+  if (bad.length) return { rule, verdict: 'fail', text: `${worker}: ${bad.map((r) => `${r.count} ${r.status} (${r.dataset})`).join('; ')} — alerts on any status but ${[...OK_STATUSES].join(' or ')} (all: ${all})` };
+  return { rule, verdict: 'pass', text: `${worker}: ${all}` };
+}
+
 export const failed = (lines: Line[]) => lines.some((l) => l.verdict === 'fail');
 
 /** The UTC day before `nowMs`, as its start (ms). */
