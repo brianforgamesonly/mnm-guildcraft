@@ -570,5 +570,5 @@ Order 38 profiles and fixes the Worker's CPU: the board sweep, the cold upgrade 
 - Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1, 2 and 4; PR B: ITEM 3.
 - CPU is measured in workerd or from Cloudflare's records. The Node proxy is not used for CPU decisions.
 - A CPU fix names the function the profile showed, with its share of CPU before and after.
-- Any CPU-limit error is an alert, within one daily run: the health check fails on any invocation status outside `success` and `clientDisconnected`, in either GraphQL invocation dataset (scripts/health/judge.ts `judgeWorkerStatuses`, `OK_STATUSES`).
+- Any CPU-limit error is an alert, within one daily run: the health check fails on any invocation status outside `success` and `clientDisconnected`, in either GraphQL invocation dataset, and (because GraphQL's adaptive counts are sampled) on any Workers Logs outcome outside `ok` and `canceled` when that read succeeds (scripts/health/judge.ts `judgeWorkerStatuses`, `OK_STATUSES`, `OK_OUTCOMES`). A failed GraphQL read, or one counting fewer than half the day's sweep_run rows, fails too.
 - Failed runs: every one is listed in the FINAL (order 12).

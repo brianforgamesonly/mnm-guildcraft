@@ -27,6 +27,17 @@ test('a status nobody expected alerts', () => {
   assert.match(l.text, /3 somethingNew \(workersInvocationsScheduled\)/);
 });
 
+test('cron coverage is judged against the day\'s own sweep_run rows: a read that cannot hold the cron runs fails', () => {
+  const rows = (n: number) => ({ rows: [{ dataset: 'workersInvocationsAdaptive', status: 'success', count: n }] });
+  // 2026-11-05 as read live (run 42298307806): 94 counted, 96 sweeps recorded
+  const ok = judgeWorkerStatuses(W, rows(94), 96);
+  assert.equal(ok.verdict, 'pass');
+  assert.match(ok.text, /94 counted against 96 sweeps recorded/);
+  const thin = judgeWorkerStatuses(W, rows(5), 96);
+  assert.equal(thin.verdict, 'fail');
+  assert.match(thin.text, /cron runs not covered/);
+});
+
 test('a failed read, or no invocations at all, is never a pass', () => {
   assert.equal(judgeWorkerStatuses(W, { error: 'GraphQL HTTP 500' }).verdict, 'fail');
   assert.equal(judgeWorkerStatuses(W, { rows: [] }).verdict, 'fail');
@@ -53,12 +64,21 @@ const TYPES: Record<string, { fields?: unknown[]; inputFields?: unknown[] }> = {
   ScheduledFilter: { inputFields: ['scriptName', 'datetime_geq', 'datetime_lt'].map((name) => ({ name, description: null, type: scalar('string') })) },
 };
 
-function fakeFetch(data: { adaptive: { status: string; n: number }[]; scheduled: string[]; graphqlStatus?: number }): typeof fetch {
+function fakeFetch(data: { adaptive: { status: string; n: number }[]; scheduled: string[]; graphqlStatus?: number; logs?: { outcome: string; type: string }[] }): typeof fetch {
   return (async (url: string | URL | Request, init?: RequestInit) => {
     const u = String(url);
-    if (u.includes('/telemetry/query')) return new Response(JSON.stringify({ success: true, result: { events: { events: [] } } }));
+    if (u.includes('/telemetry/query')) {
+      const events = (data.logs ?? []).map((e, i) => ({ $metadata: { id: `e${i}` }, $workers: { requestId: `r${i}`, cpuTimeMs: 5, eventType: e.type, outcome: e.outcome } }));
+      return new Response(JSON.stringify({ success: true, result: { events: { events } } }));
+    }
     if (data.graphqlStatus) return new Response(JSON.stringify({ errors: [{ message: 'boom' }] }), { status: data.graphqlStatus });
     const { query, variables } = JSON.parse(String(init?.body));
+    // Review fix: every data query names this Worker and the judged day.
+    if (query.includes('$s: String!')) {
+      assert.equal(variables.s, W);
+      assert.equal(variables.f, '2026-11-06T00:00:00.000Z');
+      assert.equal(variables.t, '2026-11-07T00:00:00.000Z');
+    }
     if (query.includes('__type(')) return Response.json({ data: { __type: { name: variables.n, fields: null, inputFields: null, ...TYPES[variables.n] } } });
     if (query.includes('__typename')) return Response.json({ data: { viewer: { accounts: [{ __typename: 'account' }] } } });
     if (query.includes('workersInvocationsAdaptive') && query.includes('dimensions { status }'))
@@ -81,6 +101,32 @@ test('both datasets are read, so cron (scheduled) invocations are covered; a lim
   const l = judgeWorkerStatuses(W, bad.statuses);
   assert.equal(l.verdict, 'fail');
   assert.match(l.text, /1 exceededResources \(workersInvocationsScheduled\)/);
+});
+
+test('the live day\'s shape (no scheduled rows; adaptive counts): adaptive is read, and a limit error there alerts', async () => {
+  const ok = await workerDay({ ...day, fetchImpl: fakeFetch({ adaptive: [{ status: 'success', n: 94 }], scheduled: [] }) });
+  assert.ok('rows' in ok.statuses);
+  assert.deepEqual(ok.statuses.rows, [{ dataset: 'workersInvocationsAdaptive', status: 'success', count: 94 }]);
+  assert.ok(ok.notes.some((n) => /workersInvocationsScheduled: no rows for the day/.test(n)));
+  assert.equal(judgeWorkerStatuses(W, ok.statuses, 96, ok.outcomes).verdict, 'pass');
+  const bad = await workerDay({ ...day, fetchImpl: fakeFetch({ adaptive: [{ status: 'success', n: 94 }, { status: 'exceededResources', n: 1 }], scheduled: [] }) });
+  const l = judgeWorkerStatuses(W, bad.statuses, 96, bad.outcomes);
+  assert.equal(l.verdict, 'fail');
+  assert.match(l.text, /1 exceededResources \(workersInvocationsAdaptive\)/);
+});
+
+test('an error GraphQL\'s sampling missed still alerts from Workers Logs\' per-invocation outcome', async () => {
+  const logs = [...Array(95).fill({ outcome: 'ok', type: 'scheduled' }), { outcome: 'exceededCpu', type: 'scheduled' }];
+  const r = await workerDay({ ...day, fetchImpl: fakeFetch({ adaptive: [{ status: 'success', n: 94 }], scheduled: [], logs }) });
+  const l = judgeWorkerStatuses(W, r.statuses, 96, r.outcomes);
+  assert.equal(l.verdict, 'fail');
+  assert.match(l.text, /Workers Logs outcomes 1 exceededCpu/);
+  const clean = await workerDay({ ...day, fetchImpl: fakeFetch({ adaptive: [{ status: 'success', n: 94 }], scheduled: [], logs: [...Array(95).fill({ outcome: 'ok', type: 'scheduled' }), { outcome: 'canceled', type: 'fetch' }] }) });
+  assert.equal(judgeWorkerStatuses(W, clean.statuses, 96, clean.outcomes).verdict, 'pass');
+});
+
+test('a bad status with a count read wrongly (NaN) still alerts', () => {
+  assert.equal(judgeWorkerStatuses(W, { rows: [{ dataset: 'workersInvocationsAdaptive', status: 'success', count: 90 }, { dataset: 'workersInvocationsAdaptive', status: 'exceededResources', count: NaN }] }).verdict, 'fail');
 });
 
 test('the GraphQL call failing: the check fails clearly, never a silent pass', async () => {

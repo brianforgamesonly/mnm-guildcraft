@@ -1,8 +1,10 @@
 // Order 38, ITEM 4: one Worker's invocations on the judged UTC day, for the daily health check (scripts/health/run.ts).
 //
 // Statuses: Cloudflare's GraphQL Analytics API, from both invocation datasets the account schema offers,
-// workersInvocationsAdaptive and workersInvocationsScheduled (Cloudflare lists the second beside the first, so cron runs
-// are read there too even if the adaptive dataset also counts them). Each dataset's fields, filter and descriptions are
+// workersInvocationsAdaptive and workersInvocationsScheduled. Run 42298307806 (2026-11-05): the adaptive dataset counted 94
+// of production's 96 sweeps (Workers Logs: no other invocation that day), so it holds the cron runs; the scheduled dataset
+// answered with no rows. Coverage is judged every day against the day's sweep_run rows (judge.ts judgeWorkerStatuses),
+// so it can never be assumed. Each dataset's fields, filter and descriptions are
 // read from the schema itself (introspection) before it is queried: a field the schema lacks is never assumed, and the
 // field descriptions (the unit of cpuTime among them) are printed as the schema states them.
 // CPU: the whole Worker's day from the adaptive dataset's quantiles; the sweep and everything else from Workers Logs
@@ -21,7 +23,8 @@ export function graphql(token: string, fetchImpl: typeof fetch = fetch): Gql {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables }),
-      signal: AbortSignal.timeout(60_000),
+      // Review fix: about ten calls run in a 5-minute job; a hung one fails here, by name, before the job's timeout.
+      signal: AbortSignal.timeout(20_000),
     });
     const json = (await res.json().catch(() => ({}))) as { data?: any; errors?: { message?: string }[] | null };
     const errors = (json.errors ?? []).map((e) => String(e.message ?? e).replace(/[0-9a-f]{32}/gi, '<id>')).slice(0, 3);
@@ -146,16 +149,20 @@ async function adaptiveCpu(gql: Gql, ds: Dataset, v: { a: string; s: string; f: 
 
 /**
  * The sweep and everything else, per invocation, from Workers Logs (events view, paged as scripts/bench/timings.mjs reads
- * it): each request's $workers.cpuTimeMs and $workers.eventType. Workers Logs keeps 3 days, so yesterday is there.
+ * it): each request's $workers.cpuTimeMs, $workers.eventType and $workers.outcome. Workers Logs keeps 3 days: the scheduled
+ * run judges yesterday; a dispatched --day older than that finds no events, and the note says so.
  */
-export async function logsCpu(o: { token: string; account: string; script: string; from: number; to: number; fetchImpl?: typeof fetch }): Promise<{ sweep: number[]; other: number[]; events: number }> {
+export const LOGS_PAGES = 25;
+export async function logsCpu(o: { token: string; account: string; script: string; from: number; to: number; fetchImpl?: typeof fetch }): Promise<{ sweep: number[]; other: number[]; events: number; outcomes: Map<string, number>; truncated: boolean }> {
   const f = o.fetchImpl ?? fetch;
   const url = `https://api.cloudflare.com/client/v4/accounts/${o.account}/workers/observability/telemetry/query`;
-  const byRequest = new Map<string, { cpu?: number; type?: string }>();
+  const byRequest = new Map<string, { cpu?: number; type?: string; outcome?: string }>();
   let offset: string | undefined;
   let events = 0;
-  for (let page = 0; page < 25; page++) {
+  let truncated = false;
+  for (let page = 0; page < LOGS_PAGES; page++) {
     const res = await f(url, {
+      signal: AbortSignal.timeout(20_000),
       method: 'POST',
       headers: { Authorization: `Bearer ${o.token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -179,20 +186,26 @@ export async function logsCpu(o: { token: string; account: string; script: strin
       const r = byRequest.get(id) ?? {};
       if (typeof w.cpuTimeMs === 'number') r.cpu = w.cpuTimeMs;
       if (w.eventType) r.type = w.eventType;
+      if (w.outcome) r.outcome = String(w.outcome);
       byRequest.set(id, r);
     }
     const next = batch.at(-1)?.$metadata?.id;
     if (!next || next === offset || batch.length < 2000) break;
+    if (page === LOGS_PAGES - 1) truncated = true;
     offset = next;
   }
   const sweep: number[] = [];
   const other: number[] = [];
-  for (const r of byRequest.values()) if (typeof r.cpu === 'number') (r.type === 'scheduled' ? sweep : other).push(r.cpu);
-  return { sweep, other, events };
+  const outcomes = new Map<string, number>();
+  for (const r of byRequest.values()) {
+    if (typeof r.cpu === 'number') (r.type === 'scheduled' ? sweep : other).push(r.cpu);
+    if (r.outcome) outcomes.set(r.outcome, (outcomes.get(r.outcome) ?? 0) + 1);
+  }
+  return { sweep, other, events, outcomes, truncated };
 }
 
 /** Everything the health check needs about one Worker's day. Statuses fail clearly; CPU figures are notes only. */
-export async function workerDay(o: { token: string; account: string; script: string; from: number; to: number; fetchImpl?: typeof fetch }): Promise<{ statuses: { rows: StatusCount[] } | { error: string }; notes: string[] }> {
+export async function workerDay(o: { token: string; account: string; script: string; from: number; to: number; fetchImpl?: typeof fetch }): Promise<{ statuses: { rows: StatusCount[] } | { error: string }; notes: string[]; outcomes?: Map<string, number> }> {
   const gql = graphql(o.token, o.fetchImpl);
   const v = { a: o.account, s: o.script, f: new Date(o.from).toISOString(), t: new Date(o.to).toISOString() };
   const notes: string[] = [];
@@ -204,7 +217,11 @@ export async function workerDay(o: { token: string; account: string; script: str
     for (const m of schema.missing) notes.push(`${m}: not in this account's schema, so not read`);
     for (const ds of schema.datasets.values()) notes.push(...describe(ds));
     const rows: StatusCount[] = [];
-    for (const ds of schema.datasets.values()) rows.push(...(await statusesOf(gql, ds, v)));
+    for (const ds of schema.datasets.values()) {
+      const r = await statusesOf(gql, ds, v);
+      if (!r.length) notes.push(`${ds.name}: no rows for the day (read without error), so cron coverage rests on the other dataset`);
+      rows.push(...r);
+    }
     statuses = { rows };
   } catch (e) {
     statuses = { error: e instanceof Error ? e.message : String(e) };
@@ -216,11 +233,15 @@ export async function workerDay(o: { token: string; account: string; script: str
     } catch (e) {
       notes.push(`whole Worker CPU unread: ${e instanceof Error ? e.message : String(e)}`);
     }
+  let outcomes: Map<string, number> | undefined;
   try {
     const c = await logsCpu(o);
+    outcomes = c.events ? c.outcomes : undefined;
     notes.push(cpuLine('the sweep (Workers Logs, eventType scheduled)', c.sweep, 'ms, $workers.cpuTimeMs'), cpuLine('everything else (Workers Logs)', c.other, 'ms, $workers.cpuTimeMs'));
+    if (!c.events) notes.push('Workers Logs held no events for the day (it keeps 3 days), so its outcomes were not judged');
+    if (c.truncated) notes.push(`Workers Logs read stopped at ${LOGS_PAGES} pages: these figures cover part of the day`);
   } catch (e) {
-    notes.push(`sweep and other CPU unread from Workers Logs: ${e instanceof Error ? e.message : String(e)}`);
+    notes.push(`sweep and other CPU, and Workers Logs outcomes, unread: ${e instanceof Error ? e.message : String(e)}`);
   }
-  return { statuses, notes };
+  return { statuses, notes, outcomes };
 }
