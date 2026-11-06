@@ -39,6 +39,9 @@ on:
       insights:
         description: 'Order 26: also print D1 rows per database and the heaviest statements (scripts/usage/insights-cli.ts arguments; once, on the production leg; GraphQL only)'
         default: ''
+      worker_cpu:
+        description: 'Order 37: also print each Worker''s CPU time (p50, p99, max) and invocations by status for this many days (scripts/usage/worker-cpu.ts; GraphQL only)'
+        default: ''
       copy:
         description: 'Which copy to read'
         type: choice
@@ -113,6 +116,12 @@ jobs:
         env:
           INSIGHTS: ${{ inputs.insights }}
         run: node scripts/usage/insights-cli.ts $INSIGHTS
+      # Order 37, PR B: both Workers' CPU and statuses (one leg prints both). GraphQL only; no D1 rows.
+      - name: Worker CPU time and invocations by status
+        if: inputs.worker_cpu != '' && matrix.copy == 'production'
+        env:
+          DAYS: ${{ inputs.worker_cpu }}
+        run: node scripts/usage/worker-cpu.ts --days "$DAYS" | tee -a "$GITHUB_STEP_SUMMARY"
       - if: inputs.facts && matrix.copy == 'dev'
         run: npm ci
       - name: Read-only D1 facts
