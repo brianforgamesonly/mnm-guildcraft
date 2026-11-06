@@ -270,9 +270,23 @@ describe('order 35, ITEM 4: /gear wear and the rules', () => {
     expect(chars.sort()).toEqual(['Inqchar', 'Wizchar']);
   });
 
-  it('a flat /gear (an old client) is still the search', async () => {
-    const r = await send(rawCmd(ann, 'gear', undefined, { class: 'Any' }));
-    expect(r.data.content ?? '').not.toContain("isn't available");
+  it('Order 35 rule: an old-shape /gear (options, no subcommand) is answered as /gear search, identically, until re-registration', async () => {
+    const opts = { class: 'INQ', slot: 'CHEST' };
+    const old = rawCmd(ann, 'gear', undefined, opts);
+    // Routed (deferred like any routed command), never "not available".
+    expect(planFor(old as any)).toEqual(planFor(rawCmd(ann, 'gear', 'search', opts) as any));
+    expect(planFor(old as any)).toMatchObject({ defer: true });
+    // A first command carries the one-time welcome: /me takes it, so both search replies compare without it.
+    await send(rawCmd(ann, 'me', undefined));
+    const sub = await send(rawCmd(ann, 'gear', 'search', opts));
+    const flat = await send(old);
+    expect(flat.data.content ?? '').not.toContain("isn't available");
+    expect(flat.data.embeds!.length).toBeGreaterThan(0);
+    expect(JSON.stringify(flat.data.embeds)).toContain('Copper Breastplate');
+    expect(JSON.stringify(flat.data.embeds)).not.toContain("Academy Student's Robe");
+    expect(flat.data.embeds).toEqual(sub.data.embeds);
+    // Its zone autocomplete too (src/commands/autocomplete.ts).
+    expect((await send(auto(ann, 'gear', undefined, { zone: '' }, 'zone'))).type).toBe(8);
   });
 });
 
