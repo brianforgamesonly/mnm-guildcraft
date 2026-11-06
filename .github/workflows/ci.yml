@@ -34,6 +34,13 @@ jobs:
       - run: npm run test:zone-sites
       - name: Every action runs on the allowed Node runtime
         run: node scripts/ci/action-runtimes.mjs
+      # Order 36, ITEM 1: a commit that claims a rule changes docs/ORDER-RULES.md (order 35's 80ee0ae did not). The
+      # pull request's own commits are fetched (the checkout holds only the merge commit); a few seconds.
+      - run: npm run test:commit-claims
+      - name: Every commit that claims a rule changes docs/ORDER-RULES.md
+        run: |
+          git fetch --no-tags origin "+refs/pull/${{ github.event.pull_request.number }}/head:refs/remotes/pr/head" "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          node scripts/ci/commit-claims.mjs "origin/${{ github.base_ref }}" refs/remotes/pr/head
   # Order 26: the zone benches (orders 17b and 23) read a local D1 that this job fills with the real import, never a
   # Cloudflare database. Read from the dev copy, they read about 450,000 rows per run (order 26, ITEM 1: 2026-10-25 and
   # 10-27's spikes), against D1 Free's 5,000,000 a day for the whole account. No Cloudflare secret. Order 13's "measured on

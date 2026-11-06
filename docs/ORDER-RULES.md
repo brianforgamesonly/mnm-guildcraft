@@ -494,4 +494,28 @@ Order 35 is gear upgrades, part 1: race, item levels, the coverage report and sa
 - Saved gear names items, never copies them. It stores the item's stable key (`item.name_key`), never an autoincrement id, with no foreign-key cascade. The import never deletes an item that saved gear names; it flags it (`item.gone_at`, set for every wiki item the source stops listing and cleared when it returns), and the slot shows it as no longer listed until the member changes it.
 - Saved gear acts only on the presser's own characters. A button on a public `/item` card changes the presser's characters, never the card owner's. Autocomplete for `character:` lists only the caller's own.
 - The race list is derived as the class list is: a code on at least 2 items is kept (`RACE_MIN_ITEMS`), with a bit assigned once; a mount race is told apart by its items' slots alone (src/gear/vocab.ts `MOUNT_SLOTS`). `game_race` may legitimately hold no rows (every race list ALL), so it is in `IMPORT_MAY_BE_EMPTY`, outside the backup's must-hold-rows list (`IMPORT_TABLES`), and exported whole with the other game data (`IMPORT_WRITES`).
+- A command whose shape changes is registered after its deploy, and the new code answers the old shape until then.
+  - Committed by order 36 (ITEM 1). Order 35's push 80ee0ae said it added this rule, but its tree did not hold it: the edit failed ("String to replace not found") in the same batch of tool calls as the commit and the push, which ran without seeing the failure. Order 36's rules below make that impossible to miss.
+- Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 36
+
+Order 36 is gear upgrades, part 2: scoring, `/gear upgrades` and the officer weights (docs/PRD.md, "Gear upgrades"; the owner approved its specification on 2026-11-05). Its explicit overrides each quote the earlier rule in full, from where it is stored.
+
+- Budget (explicit override of this file's "By default an order is worked in 1 pull request, with at most 3 pushes and 1 merge."): 2 pull requests, each with at most 3 pushes, and 2 merges. PR A: ITEMs 1, 2 and 3, and ITEM 5's bench for the summary and the slot list; PR B: ITEM 4, and ITEM 5's rows written per weight change.
+- Override 1, of order 2's "A member's command never reveals another member's private data. Replies about the caller are ephemeral. A name that resolves to another member's character returns the same "not found" a missing name would, unless the caller is an officer." (this file, "Added by work order 2").
+  - `/gear upgrades` answers privately. Post to channel makes one list public, as `/item`'s post does.
+  - The list names no other member except as a Reliable crafter, which `/item` already shows.
+- Override 2, of order 35's "PR A: ITEM 1's item part, ITEMs 2 and 3 (data only: no derived level is shown to members)" (this file, "Order 35", the budget line).
+  - Levels are shown in `/gear upgrades`, always with their kind (order 35's "A level's kind is always shown with it.").
+- Override 3, of order 17's "A list sort uses one named key, never a combined score (the owner, order 13): zone drops sort by AC, then name." (this file, "Order 17").
+  - Order 13's `/gear search` sorts are unchanged (src/gear/search.ts `searchStatement`). `/gear upgrades` has its own order: by gain (a score), smallest first, then the lower level_low, then the name.
+- Nothing is hidden. Every usable item that scores higher than what's worn is listed, however small the gain.
+- A score is always explainable. Each result shows the stat differences that produced it.
+- Weights are the server's. Defaults live in code; an officer's change applies to that server only and is posted with who made it.
+- A commit message describes only what the pushed tree contains.
+  - After every push, `git show <pushed-sha>:<file> | grep -F "<text>"` is run for each rule or change the commit message claims.
+  - CI fails a pull request whose commit says it adds a rule ("Order N rule…") without changing this file in that commit (scripts/ci/commit-claims.mjs; order 35's 80ee0ae fails it).
+  - A commit is never sent in the same batch of tool calls as the edits it records: it waits for their results.
+- Scores are computed, never stored, in integer hundredths (src/gear/score.ts). Scoring reads weights only through `weightsFor(server, class)`.
 - Failed runs: every one is listed in the FINAL (order 12).
