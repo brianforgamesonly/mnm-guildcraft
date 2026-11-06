@@ -36,20 +36,32 @@ const TYPE_Q = 'query ($n: String!) { __type(name: $n) { fields { name descripti
 const named = (t: Field['type']): string | null => t.name ?? t.ofType?.name ?? t.ofType?.ofType?.name ?? t.ofType?.ofType?.ofType?.name ?? null;
 const fieldsOf = async (type: string): Promise<Field[]> => ((await gql(TYPE_Q, { n: type }))?.__type?.fields ?? []) as Field[];
 
-// The dataset's group type, then its blocks.
-const account_ = await fieldsOf('account');
-const ds = account_.find((f) => f.name === 'workersInvocationsAdaptive');
-if (!ds) throw new Error('workersInvocationsAdaptive is not in the schema for this token (Account Analytics Read is needed)');
-const groupType = named(ds.type)!;
+// The dataset's block types, by asking the API itself for their __typename (no type unwrapping), then each type's fields.
+// Run 42292289498 found the introspection path through "account" empty, so this asks the data path instead.
+const now = new Date().toISOString();
+const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
 const blocks = new Map<string, Field[]>();
-for (const b of await fieldsOf(groupType)) {
-  const t = named(b.type);
-  if (t && ['sum', 'quantiles', 'max', 'dimensions', 'avg'].includes(b.name)) blocks.set(b.name, await fieldsOf(t));
+let groupType = '';
+for (const block of ['sum', 'quantiles', 'max', 'dimensions'] as const) {
+  try {
+    const d = await gql(
+      `query ($a: String!, $f: Time!, $t: Time!) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $f, datetime_lt: $t }) { __typename ${block} { __typename } } } } }`,
+      { a: account, f: dayAgo, t: now },
+    );
+    const g = d?.viewer?.accounts?.[0]?.workersInvocationsAdaptive?.[0];
+    groupType ||= g?.__typename ?? '';
+    const t = g?.[block]?.__typename;
+    if (t) blocks.set(block, await fieldsOf(t));
+    else console.log(`- ${block}: no group returned in the last day, so its type is unread`);
+  } catch (e) {
+    console.log(`- ${block}: ${(e as Error).message}`);
+  }
 }
 const has = (block: string, field: string) => !!blocks.get(block)?.some((f) => f.name === field);
+void named;
 const describe = (block: string, re: RegExp) =>
   (blocks.get(block) ?? []).filter((f) => re.test(f.name)).map((f) => `${block}.${f.name}${f.description ? ` — ${f.description.replace(/\s+/g, ' ').trim()}` : ''}`);
-console.log(`### workersInvocationsAdaptive (${groupType}): the fields used, as the schema describes them`);
+console.log(`### workersInvocationsAdaptive (${groupType || 'type not read'}): the fields used, as the schema describes them`);
 for (const l of [...describe('quantiles', /^cpuTimeP(50|99)$/), ...describe('max', /^cpuTime$/), ...describe('sum', /^(requests|errors)$/), ...describe('dimensions', /^(status|scriptName)$/)]) console.log(`- ${l}`);
 for (const [b, f] of [['quantiles', 'cpuTimeP50'], ['quantiles', 'cpuTimeP99'], ['max', 'cpuTime'], ['dimensions', 'status']] as const) if (!has(b, f)) console.log(`- ${b}.${f}: NOT in the schema; not queried`);
 
@@ -58,11 +70,24 @@ const start = args.from ? Date.parse(args.from) : end - Number(args.days) * 86_4
 const days: { from: string; to: string }[] = [];
 for (let t = start; t < end; t += 86_400_000) days.push({ from: new Date(t).toISOString(), to: new Date(Math.min(end, t + 86_400_000)).toISOString() });
 
-const cpuQ = [has('quantiles', 'cpuTimeP50') ? 'cpuTimeP50' : '', has('quantiles', 'cpuTimeP99') ? 'cpuTimeP99' : ''].filter(Boolean).join(' ');
-const maxQ = has('max', 'cpuTime') ? 'max { cpuTime }' : '';
-const Q = `query ($a: String!, $s: String!, $f: Time!, $t: Time!) { viewer { accounts(filter: { accountTag: $a }) {
-  cpu: workersInvocationsAdaptive(limit: 10, filter: { scriptName: $s, datetime_geq: $f, datetime_lt: $t }) { sum { requests errors } ${cpuQ ? `quantiles { ${cpuQ} }` : ''} ${maxQ} dimensions { scriptName } }
-  st: workersInvocationsAdaptive(limit: 100, filter: { scriptName: $s, datetime_geq: $f, datetime_lt: $t }) { sum { requests errors } dimensions { status } } } } }`;
+// The documented quantile names (developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) are
+// tried even if the schema read above failed; each block is its own query, so a missing field fails only its own figure.
+const cpuQ = (blocks.size ? ['cpuTimeP50', 'cpuTimeP99'].filter((f) => has('quantiles', f)) : ['cpuTimeP50', 'cpuTimeP99']).join(' ');
+const maxField = blocks.has('max') ? (blocks.get('max')!.find((f) => f.name === 'cpuTime') ? 'cpuTime' : null) : 'cpuTime';
+const window = '$a: String!, $s: String!, $f: Time!, $t: Time!';
+const scope = 'filter: { scriptName: $s, datetime_geq: $f, datetime_lt: $t }';
+const Q_SUM = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { sum { requests errors } dimensions { scriptName } } } } }`;
+const Q_P = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { quantiles { ${cpuQ} } dimensions { scriptName } } } } }`;
+const Q_MAX = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { max { ${maxField} } dimensions { scriptName } } } } }`;
+const Q_ST = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 100, ${scope}) { sum { requests errors } dimensions { status } } } } }`;
+const one = async (q: string, v: Record<string, unknown>) => {
+  try {
+    return { rows: ((await gql(q, v))?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? []) as any[], error: null };
+  } catch (e) {
+    return { rows: [] as any[], error: (e as Error).message };
+  }
+};
+const reported = new Set<string>();
 
 console.log(`\n### CPU time per Worker, per UTC day, ${new Date(start).toISOString()} → ${new Date(end).toISOString()}`);
 for (const c of copies()) {
@@ -72,17 +97,21 @@ for (const c of copies()) {
   let requests = 0;
   console.log(`\n${c.name} (Worker ${c.worker}):\nday (from)\trequests\terrors\tcpuTimeP50\tcpuTimeP99\tmax cpuTime`);
   for (const d of days) {
-    const a = (await gql(Q, { a: account, s: c.worker, f: d.from, t: d.to }))?.viewer?.accounts?.[0];
-    const g = (a?.cpu ?? [])[0];
-    for (const s of a?.st ?? []) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
-    if (!g) {
-      console.log(`${d.from.slice(0, 16)}\t0\t0\t-\t-\t-`);
-      continue;
-    }
-    requests += Number(g.sum.requests);
-    worstP99 = Math.max(worstP99, Number(g.quantiles?.cpuTimeP99 ?? 0));
-    worstMax = Math.max(worstMax, Number(g.max?.cpuTime ?? 0));
-    console.log([d.from.slice(0, 16), g.sum.requests, g.sum.errors, g.quantiles?.cpuTimeP50 ?? '-', g.quantiles?.cpuTimeP99 ?? '-', g.max?.cpuTime ?? '-'].join('\t'));
+    const v = { a: account, s: c.worker, f: d.from, t: d.to };
+    const [sum, p, mx, st] = await Promise.all([one(Q_SUM, v), cpuQ ? one(Q_P, v) : Promise.resolve({ rows: [], error: 'no quantile field' }), maxField ? one(Q_MAX, v) : Promise.resolve({ rows: [], error: 'no max cpuTime field' }), one(Q_ST, v)]);
+    for (const [label, r] of [['sum', sum], ['quantiles', p], ['max', mx], ['status', st]] as const)
+      if (r.error && !reported.has(label)) {
+        reported.add(label);
+        console.log(`  (${label} query: ${r.error})`);
+      }
+    for (const s of st.rows) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
+    const g = sum.rows[0];
+    const q = p.rows[0]?.quantiles;
+    const m = mx.rows[0]?.max;
+    requests += Number(g?.sum.requests ?? 0);
+    worstP99 = Math.max(worstP99, Number(q?.cpuTimeP99 ?? 0));
+    worstMax = Math.max(worstMax, Number(m?.cpuTime ?? 0));
+    console.log([d.from.slice(0, 16), g?.sum.requests ?? 0, g?.sum.errors ?? 0, q?.cpuTimeP50 ?? '-', q?.cpuTimeP99 ?? '-', m?.cpuTime ?? '-'].join('\t'));
   }
   console.log(`${c.name}: ${requests} invocations; highest daily cpuTimeP99 ${worstP99}; highest daily max cpuTime ${worstMax} (the schema's units: see the field descriptions above)`);
   console.log(`${c.name}: invocations by status: ${[...statuses].map(([s, n]) => `${s} ${n}`).join(', ') || 'none'}`);
