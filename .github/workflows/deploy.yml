@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      # Order 37, PR B: apply a pull request's migrations before its merge deploys the Worker that reads them. Dispatched
+      # with --ref <branch>, this runs that branch's migrations (and this file as the branch has it), and deploys nothing.
+      migrations_only:
+        description: 'Apply migrations only; deploy no Worker'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -54,6 +61,7 @@ jobs:
       # Order 17, override 3: ATLAS_ZONE_IMAGES (a repository variable, not a secret) switches MnM Atlas's whole-zone
       # pictures on /zone cards. Unset means off; the owner sets it to "on" once the atlas's maker agrees, then re-runs this.
       - name: Deploy the Worker
+        if: ${{ !inputs.migrations_only }}
         env:
           DISCORD_PUBLIC_KEY: ${{ secrets[format('{0}DISCORD_PUBLIC_KEY', matrix.prefix)] }}
           ATLAS_ZONE_IMAGES: ${{ vars.ATLAS_ZONE_IMAGES || 'off' }}
@@ -62,6 +70,7 @@ jobs:
           echo "ATLAS_ZONE_IMAGES=$ATLAS_ZONE_IMAGES"
           npx wrangler deploy --env "$GUILDCRAFT_COPY" --var "DISCORD_PUBLIC_KEY:$DISCORD_PUBLIC_KEY" --var "ATLAS_ZONE_IMAGES:$ATLAS_ZONE_IMAGES"
       - name: Set DISCORD_BOT_TOKEN as a Worker secret
+        if: ${{ !inputs.migrations_only }}
         env:
           DISCORD_BOT_TOKEN: ${{ secrets[format('{0}DISCORD_BOT_TOKEN', matrix.prefix)] }}
         run: |

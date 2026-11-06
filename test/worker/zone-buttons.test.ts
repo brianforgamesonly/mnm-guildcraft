@@ -149,13 +149,15 @@ describe('a zone the text cuts off gets no button', () => {
     ({ id: 1, name: 'An item', slot: 'CHEST', stats_json: null, wiki_url: null, icon_url: null, source: null, ac: null, ratio: null, class_mask: 0, source_mask: 1, sort_value: null, total_stats: 0, ...o, origin_json: JSON.stringify(o.origin) }) as never;
   const data = (mobs: { key: string; title: string; level: string | null; zones_json: string | null }[] = []) => ({ classes: [], mobs, recipes: [], crafters: [], version: null });
   const names = (zones: ZoneRef[]) => zones.map((z) => z.name);
+  // Order 37, PR B: the card's ways and How to get it lines come in (src/commands/gear.ts cardHow); none here.
+  const drop = { lines: [], zones: [], ways: ['drop' as const] };
 
   it('a mob line over 200 characters: a zone ending at character 199 is shown, one ending at 200 is not', () => {
     // "<name> (A, Bee, C)": Bee ends at name length + 8; the line is cut to 199 characters and "…".
     for (const [len, shown] of [[191, ['A', 'Bee']], [192, ['A']]] as const) {
       const name = 'm'.repeat(len);
       const d = data([{ key: name, title: name, level: null, zones_json: JSON.stringify(['A', 'Bee', 'C']) }]);
-      const [mobs] = cardSources(gearRow({ origin: { from: [name] } }), d);
+      const [mobs] = cardSources(gearRow({ origin: { from: [name] } }), d, drop);
       expect(mobs.field.value.length).toBe(200);
       expect(names(mobs.zones)).toEqual(shown);
     }
@@ -163,7 +165,7 @@ describe('a zone the text cuts off gets no button', () => {
 
   it('Drop: zones past 600 characters: only the zones before "+N more" are shown', () => {
     const zones = Array.from({ length: 100 }, (_, i) => `Zone ${String(i).padStart(3, '0')}`);
-    const [field] = cardSources(gearRow({ origin: { wikiZones: zones } }), data());
+    const [field] = cardSources(gearRow({ origin: { wikiZones: zones } }), data(), drop);
     const lines = field.field.value.split('\n');
     expect(lines.at(-1)).toMatch(/^\+\d+ more$/);
     expect(names(field.zones)).toEqual(lines.slice(0, -1));
@@ -175,10 +177,10 @@ describe('a zone the text cuts off gets no button', () => {
     const d = data([{ key: name, title: name, level: null, zones_json: JSON.stringify(['Mob Zone']) }]);
     const r = gearRow({ origin: { from: [name], wikiZones: ['Wiki Zone'] } });
     const stats = Array.from({ length: 24 }, (_, i) => ({ name: `s${i}`, value: 'x' }));
-    const k = cardFields(stats, r, d);
+    const k = cardFields(stats, r, d, drop);
     expect(k.fields.map((f) => f.name).at(-1)).toBe('Drop: mobs'); // Drop: zones is field 26
     expect(names(k.zones)).toEqual(['Mob Zone']);
-    expect(names(cardFields([], r, d).zones)).toEqual(['Mob Zone', 'Wiki Zone']);
+    expect(names(cardFields([], r, d, drop).zones)).toEqual(['Mob Zone', 'Wiki Zone']);
   });
 
   it('/gear entries left off the page take their zones with them; a lone entry cut short gives none', () => {

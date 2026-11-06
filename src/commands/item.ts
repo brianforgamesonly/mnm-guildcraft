@@ -10,7 +10,7 @@ import { correctionJoin, CORRECTED, visibleTo } from '../recipes.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
 import { fitLines, findEmbeds, footerText, itemLinks, KNOW_PREFIX, loadFind, REPORT_PREFIX, statFields } from './find.ts';
 import { withZoneButtons, type ZoneRef } from '../zone/buttons.ts';
-import { cardFields, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
+import { cardFields, cardHow, classesText, GEAR_COPY, incorrectStats, pageData } from './gear.ts';
 import { SCREENSHOTS_OFF } from './images.ts';
 import { wearingButton } from '../gear/wear.ts';
 import { ITEM_REPORT_PREFIX, missingId } from './reports.ts';
@@ -74,8 +74,9 @@ export interface ItemCard {
 }
 
 /**
- * The card for one item: 2 round trips (the item and its uses; then its sources and its recipes, together). The reply's
- * zone buttons (order 23, withZoneButtons) are a third, only when the card names a zone.
+ * The card for one item: the item and its uses; then its sources, its recipes and its How to get it reads together (order
+ * 37, PR B: cardHow adds up to three round trips of its own: the import version, the source rows when cold, then the
+ * page's NPC rows and quest link). The reply's zone buttons (order 23, withZoneButtons) are one more, when it names a zone.
  */
 export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Promise<ItemCard | null> {
   const [head, uses] = await c.db.batch([
@@ -85,10 +86,11 @@ export async function itemCard(c: Pick<Ctx, 'db' | 'guild'>, itemId: number): Pr
   const r = (head.results as (GearRow & { slot_mask: number })[])[0];
   if (!r) return null;
   const usedIn = uses.results as UsedIn[];
-  const [d, f] = await Promise.all([pageData(c, [r], Infinity, false), loadFind(c.db, c.guild.id, { id: itemId })]);
+  // Order 37, PR B: "How to get it" comes from the function /gear upgrades uses (src/commands/gear.ts cardHow).
+  const [d, f, how] = await Promise.all([pageData(c, [r], Infinity, false), loadFind(c.db, c.guild.id, { id: itemId }), cardHow(c, r)]);
   const item = { id: r.id, name: r.name, icon_url: r.icon_url, slot: r.slot, stats_json: r.stats_json, wiki_url: r.wiki_url, source: r.source };
   const about = [...(r.slot ? [`Classes: ${classesText(r.class_mask, d.classes)}`] : []), ...(incorrectStats(r) ? [`⚠ ${GEAR_COPY.incorrectStats}`] : [])];
-  const { fields, zones } = cardFields(statFields(item), r, d);
+  const { fields, zones } = cardFields(statFields(item), r, d, how);
   const top: Embed = {
     title: truncate(r.name, EMBED_LIMITS.title),
     ...(r.wiki_url ? { url: r.wiki_url } : {}),

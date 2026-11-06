@@ -58,9 +58,15 @@ export interface GearRow {
   source_mask: number;
   sort_value: number | string | null;
   total_stats: number;
+  /** Order 37, PR B: what src/gear/howto.ts sourceWays and howToGet read, as /gear upgrades does. */
+  name_key: string;
+  level_low: number | null;
+  level_high: number | null;
+  level_kind: string | null;
+  level_kinds: string | null;
 }
 
-export const GEAR_COLS = 'id, name, slot, stats_json, origin_json, wiki_url, icon_url, source, ac, ratio, class_mask, source_mask';
+export const GEAR_COLS = 'id, name, slot, stats_json, origin_json, wiki_url, icon_url, source, ac, ratio, class_mask, source_mask, name_key, level_low, level_high, level_kind, level_kinds';
 
 /**
  * One page, plus one row to tell whether a next page exists: sorted by the sort (highest first, Name A→Z), then AC, then

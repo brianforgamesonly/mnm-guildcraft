@@ -12,6 +12,8 @@ import { ZONE_STATE_MAX } from '../gear/options.ts';
 import { GEAR_COLS, PAGE_SIZE, relaxStatement, searchStatement, type GearRow } from '../gear/search.ts';
 import { ALL_CLASSES, SLOTS, SOURCES, WEAPON_TYPES, type Source } from '../gear/vocab.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
+import { HOW_COPY, howToGet, sourceExtras, sourceWays, type Way } from '../gear/howto.ts';
+import { VERSION_SQL } from '../gear/index.ts';
 import { CORRECTED_COLS, correctionJoin, visibleTo, type Acquisition } from '../recipes.ts';
 import { findEmbeds, footerText, itemLinks, loadFind, statFields, trivialText } from './find.ts';
 import { ITEM_REPORT_PREFIX } from './reports.ts';
@@ -138,7 +140,8 @@ const sourcesOf = (mask: number): Source[] => SOURCES.filter((_, i) => mask & (1
  */
 export async function pageData(c: Pick<Ctx, 'db' | 'guild'>, rows: GearRow[], mobsPerItem = LINE_MOBS, withRecipes = true): Promise<PageData> {
   const names = [...new Set(rows.flatMap((r) => (parse<Origin>(r.origin_json).from ?? []).slice(0, mobsPerItem)))];
-  const crafted = withRecipes ? rows.filter((r) => sourcesOf(r.source_mask).includes('Crafted')).map((r) => r.id) : [];
+  // Order 37, PR B (review fix): crafted by the shared decider (src/gear/howto.ts sourceWays), not source_mask alone.
+  const crafted = withRecipes ? rows.filter((r) => sourceWays(howItem(r), r.source_mask, parse<Origin>(r.origin_json)).includes('crafted')).map((r) => r.id) : [];
   const db = c.db;
   const [classes, mobs, recipes, version, ...crafters] = await db.batch([
     db.prepare('SELECT code, bit FROM game_class WHERE item_count > 0 AND bit IS NOT NULL'),
@@ -233,23 +236,43 @@ function vendorLine(o: Origin, maxVendors: number): string {
   return `${GEAR_COPY.vendorLine(o.soldBy?.base)}${shown ? ` · ${shown}` : ''}${v.length > maxVendors ? ` ${GEAR_COPY.more(v.length - maxVendors)}` : ''}`;
 }
 
-/** The source lines, one per source the item has (Drop, Crafted, Vendor, Quest), or "Unknown: source not recorded". */
+/** A row as src/gear/howto.ts reads an item (its key and level columns). */
+export const howItem = (r: GearRow) => ({ id: r.id, key: r.name_key, levelLow: r.level_low, levelHigh: r.level_high, levelKind: r.level_kind, levelKinds: r.level_kinds });
+
+/**
+ * The source lines, one per way the item has, or "Unknown: source not recorded". Order 37, PR B: the ways come from
+ * src/gear/howto.ts sourceWays, the one decider /gear upgrades and the item cards use (it was source_mask alone).
+ */
 function sourceLines(r: GearRow, d: PageData, window: number, caps: { mobs: number; zones: number; vendors: number }, shown?: ZoneRef[]): string[] {
   const o = parse<Origin>(r.origin_json);
-  return sourcesOf(r.source_mask).map((s) => {
-    switch (s) {
-      case 'Drop':
+  return sourceWays(howItem(r), r.source_mask, o).map((w) => {
+    switch (w) {
+      case 'drop':
         return dropLine(o, d, caps.mobs, caps.zones, shown);
-      case 'Crafted':
+      case 'crafted':
         return craftedLine(r.id, d, window);
-      case 'Vendor':
+      case 'vendor':
         return vendorLine(o, caps.vendors);
-      case 'Quest':
+      case 'quest':
         return 'Quest';
-      case 'Unknown':
+      case 'harvest':
+        return HOW_COPY.harvest;
+      case 'unknown':
         return `Unknown: ${GEAR_COPY.unknownSource}`;
     }
   });
+}
+
+/**
+ * Order 37, PR B: the item card's "How to get it" lines, built by the function /gear upgrades uses (src/gear/howto.ts
+ * howToGet: the quest's name and links, the merchants, the lowest-level creature). Crafted is left to the card's recipe
+ * embeds. One version row, then the source reads (src/gear/howto.ts sourceExtras).
+ */
+export async function cardHow(c: Pick<Ctx, 'db' | 'guild'>, r: GearRow): Promise<{ lines: string[]; zones: ZoneRef[]; ways: Way[] }> {
+  const version = (await c.db.prepare(VERSION_SQL).first<{ v: string }>())?.v ?? null;
+  const s = await sourceExtras(c, [{ key: r.name_key, origin_json: r.origin_json }], version);
+  const h = howToGet(howItem(r), { rows: new Map([[r.id, r]]), d: { recipes: [], crafters: [] }, ...s }, '', 0, ['crafted']);
+  return { lines: h.lines, zones: h.zones, ways: sourceWays(howItem(r), r.source_mask, parse<Origin>(r.origin_json)) };
 }
 
 function flagsOf(r: GearRow): string[] {
@@ -426,10 +449,11 @@ function mobLine(d: PageData, name: string): CardLine {
 }
 
 /**
- * Full sources on the card: every mob (up to the field limit), the zones, the vendors as recorded. Each field carries
- * (order 23) the zone names its value shows, in order.
+ * Sources on the card. First "How to get it": the lines /gear upgrades shows (cardHow; order 37, PR B), so the card and
+ * the upgrade lines never disagree. Then the detail the card adds: every mob (up to the field limit), the drop zones, and
+ * the vendor's prices. Crafted: the recipe embeds below carry it. Each field carries (order 23) the zone names it shows.
  */
-export function cardSources(r: GearRow, d: PageData): { field: EmbedField; zones: ZoneRef[] }[] {
+export function cardSources(r: GearRow, d: PageData, how: { lines: string[]; zones: ZoneRef[]; ways: Way[] }): { field: EmbedField; zones: ZoneRef[] }[] {
   const o = parse<Origin>(r.origin_json);
   const f: { field: EmbedField; zones: ZoneRef[] }[] = [];
   const push = (field: EmbedField, zones: ZoneRef[] = []) => f.push({ field, zones });
@@ -437,25 +461,26 @@ export function cardSources(r: GearRow, d: PageData): { field: EmbedField; zones
     const { value, shown } = fitCardLines(lines.map((l) => l.text));
     push({ name, value }, lines.slice(0, shown).flatMap((l) => l.zones.filter((z) => z.end <= (l.text.length > CARD_LINE ? CARD_LINE - 1 : Infinity)).map((z) => z.ref)));
   };
-  for (const s of sourcesOf(r.source_mask)) {
-    if (s === 'Drop') {
-      const lines = (o.from ?? []).map((name) => mobLine(d, name));
-      if (lines.length) fitted('Drop: mobs', lines);
-      if (o.wikiZones?.length) fitted('Drop: zones', o.wikiZones.map((name) => ({ text: md(name), zones: [{ ref: { source: WIKI_ZONES_SOURCE, name }, end: md(name).length }] })));
-    } else if (s === 'Vendor') {
-      const sb = o.soldBy ?? {};
-      const price = [typeof sb.base === 'number' ? `price ${sb.base}` : null, typeof sb.shady === 'number' ? `shady price ${sb.shady}` : null].filter(Boolean).join(' · ');
-      push({ name: 'Vendor', value: truncate([price || 'price not recorded', ...(sb.vendors ?? []).map(md)].join('\n'), EMBED_LIMITS.fieldValue) });
-    } else if (s === 'Quest') push({ name: 'Quest', value: (o.categories ?? []).filter((x) => x === 'Quest Items' || x === 'Reward').join(', ') || 'Quest' });
-    else if (s === 'Unknown') push({ name: 'Unknown', value: GEAR_COPY.unknownSource });
-    // Crafted: the recipe embeds below carry it, with the crafter groups.
+  // "Source not recorded" only when the data says so (the import's Unknown bit), as the card did; an item the data never
+  // classified (a stub, a recipe result shown by its recipes below) shows no field.
+  const unclassified = how.ways.length === 1 && how.ways[0] === 'unknown' && !(r.source_mask & (1 << SOURCES.indexOf('Unknown')));
+  if (how.lines.length && !unclassified) push({ name: HOW_COPY.cardField, value: truncate(how.lines.join('\n'), EMBED_LIMITS.fieldValue) }, how.zones);
+  if (how.ways.includes('drop')) {
+    const lines = (o.from ?? []).map((name) => mobLine(d, name));
+    if (lines.length) fitted('Drop: mobs', lines);
+    if (o.wikiZones?.length) fitted('Drop: zones', o.wikiZones.map((name) => ({ text: md(name), zones: [{ ref: { source: WIKI_ZONES_SOURCE, name }, end: md(name).length }] })));
+  }
+  if (how.ways.includes('vendor')) {
+    const sb = o.soldBy ?? {};
+    const price = [typeof sb.base === 'number' ? `price ${sb.base}` : null, typeof sb.shady === 'number' ? `shady price ${sb.shady}` : null].filter(Boolean).join(' · ');
+    push({ name: 'Vendor', value: price || 'price not recorded' });
   }
   return f;
 }
 
 /** A card's fields (its stats, then its sources, to the field limit) and the zone names the fields kept show. */
-export function cardFields(stats: EmbedField[], r: GearRow, d: PageData): { fields: EmbedField[]; zones: ZoneRef[] } {
-  const sources = cardSources(r, d);
+export function cardFields(stats: EmbedField[], r: GearRow, d: PageData, how: { lines: string[]; zones: ZoneRef[]; ways: Way[] }): { fields: EmbedField[]; zones: ZoneRef[] } {
+  const sources = cardSources(r, d, how);
   const kept = sources.slice(0, Math.max(0, EMBED_LIMITS.fields - stats.length));
   return { fields: [...stats, ...kept.map((s) => s.field)].slice(0, EMBED_LIMITS.fields), zones: kept.flatMap((s) => s.zones) };
 }
@@ -482,9 +507,9 @@ const cardActions = (itemId: number) => row([button(`${ITEM_REPORT_PREFIX}${item
 async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: unknown[]; zones: ZoneRef[] } | null> {
   const r = await c.db.prepare(`SELECT ${GEAR_COLS}, NULL AS sort_value, total_stats FROM item WHERE id = ?`).bind(itemId).first<GearRow>();
   if (!r) return null;
-  const d = await pageData(c, [r], Infinity);
+  const [d, how] = await Promise.all([pageData(c, [r], Infinity), cardHow(c, r)]);
   const item = { id: r.id, name: r.name, icon_url: r.icon_url, slot: r.slot, stats_json: r.stats_json, wiki_url: r.wiki_url, source: r.source };
-  const { fields, zones } = cardFields(statFields(item), r, d);
+  const { fields, zones } = cardFields(statFields(item), r, d, how);
   const head: Embed = {
     title: truncate(r.name, EMBED_LIMITS.title),
     ...(r.wiki_url ? { url: r.wiki_url } : {}),
@@ -494,7 +519,7 @@ async function card(c: Ctx, itemId: number): Promise<{ embeds: Embed[]; links: u
     footer: { text: footerText(d.version) },
   };
   let embeds = [head];
-  if (sourcesOf(r.source_mask).includes('Crafted')) {
+  if (how.ways.includes('crafted')) {
     const f = await loadFind(c.db, c.guild.id, { id: r.id });
     if (f.item && f.isResult) {
       const recipes = findEmbeds(f, c.guild.learning_window).embeds.slice(1);

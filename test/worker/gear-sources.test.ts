@@ -1,8 +1,13 @@
 // Order 37, ITEMs 1 and 2: the drop line's creature and the vendor line's merchants (src/gear/sources.ts), through
 // /gear upgrades' howToGet. Pure: hand-made page data, and source rows copied from the real data where the order says so.
-import { describe, expect, it } from 'vitest';
-import { howToGet, UPGRADES_COPY, type Extras } from '../../src/gear/upgrades.ts';
-import { buildSourceIndex, clearSourceIndex, dropPick, sourceIndex, vendorParts } from '../../src/gear/sources.ts';
+import { env } from 'cloudflare:test';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { extrasFor, howToGet, UPGRADES_COPY, type Extras } from '../../src/gear/upgrades.ts';
+import { buildSourceIndex, clearSourceIndex, dropPick, pageSources, sourceCache, vendorParts } from '../../src/gear/sources.ts';
+import { questLinks, sourceWays } from '../../src/gear/howto.ts';
+import { GEAR_INDEX_SQL, toItem, VERSION_SQL } from '../../src/gear/index.ts';
+import { itemCard } from '../../src/commands/item.ts';
+import { markImported, one, reset } from '../db.ts';
 import { statVector, type GearItem } from '../../src/gear/score.ts';
 import { computeLevels } from '../../scripts/import/levels.ts';
 import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../../src/zone/names.ts';
@@ -139,19 +144,124 @@ describe('order 37, ITEM 1: the drop line names the creature with the lowest lev
   });
 });
 
-describe('order 37: the source index is read once per finished import', () => {
+describe('order 37: the source rows are read once per finished import', () => {
   it('cached by version; read again on a new version; never cached while the newest import has no finish time', async () => {
     let reads = 0;
     const stmt = { all: async () => ({ results: [], meta: { rows_read: 1 } }) };
     const db = { prepare: () => stmt, batch: async (l: unknown[]) => (reads++, l.map(() => ({ results: [], meta: { rows_read: 1 } }))) } as unknown as D1Database;
     clearSourceIndex();
-    expect((await sourceIndex(db, '1:ok:t')).rowsRead).toBe(4);
-    expect((await sourceIndex(db, '1:ok:t')).rowsRead).toBe(0);
-    await sourceIndex(db, '2:ok:t');
-    await sourceIndex(db, '3:running:');
-    await sourceIndex(db, '3:running:');
+    expect((await sourceCache(db, '1:ok:t')).rowsRead).toBe(4);
+    expect((await sourceCache(db, '1:ok:t')).rowsRead).toBe(0);
+    await sourceCache(db, '2:ok:t');
+    await sourceCache(db, '3:running:');
+    await sourceCache(db, '3:running:');
     expect(reads).toBe(4);
     clearSourceIndex();
+  });
+
+  it('PR B: a page reads its creatures\' and vendors\' NPC rows by name, and the line is the one the whole tables give', async () => {
+    // The cache holds the NPC rows with loot only; the page's lookup brings the cultist's three rows (no loot).
+    const all = BREASTPLATE.rows;
+    const asked: string[][] = [];
+    const loot = all.npcs.filter((n) => n.loot_json);
+    const db = {
+      prepare: (sql: string) => ({
+        bind: (names: string) => ({
+          all: async () => {
+            asked.push(JSON.parse(names));
+            const want = new Set((JSON.parse(names) as string[]).map((x) => x.toLowerCase()));
+            return { results: all.npcs.filter((n) => want.has(n.name.toLowerCase())), meta: { rows_read: 1 } };
+          },
+        }),
+        all: async () => ({ results: sql.includes('FROM mob') ? all.mobs : sql.includes('FROM npc') ? loot : sql.includes('zone_name') ? all.zoneNames : all.zones, meta: { rows_read: 1 } }),
+      }),
+      batch: async (l: { all: () => Promise<unknown> }[]) => Promise.all(l.map((s) => s.all())),
+    } as unknown as D1Database;
+    clearSourceIndex();
+    const c = await sourceCache(db, '9:ok:t');
+    const { src } = await pageSources(db, c, [{ key: BREASTPLATE.key, from: BREASTPLATE.origin.from, vendors: ['Night Harbor', 'a cultist'] }]);
+    expect(asked[0]).toEqual(expect.arrayContaining(['a cultist', 'high marshal fionna', 'Night Harbor, a cultist']));
+    expect(lines({ key: BREASTPLATE.key, levelKind: 'mob', levelKinds: 'mob', levelLow: 14, levelHigh: 25 }, BREASTPLATE.origin, src)).toEqual(['Drop: a cultist in Night Harbor · Lv 14–17 · +24 more']);
+    clearSourceIndex();
+  });
+});
+
+describe('order 37, PR B: Brian\'s check (2026-11-06 15:03 ET)', () => {
+  it('the hidden count: "1 more" and "69 more", never "mores"', () => {
+    expect(UPGRADES_COPY.hidden(1, 15)).toBe('1 more above Lv 15 not shown.');
+    expect(UPGRADES_COPY.hidden(69, 15)).toBe('69 more above Lv 15 not shown.');
+  });
+
+  it('every way is decided by one function: level kinds, then source_mask, then the recorded data; "unknown" only with none', () => {
+    // Scarab Helm as imported: source_mask 16 (mnm-tools: Unknown), level_kinds "quest" (the snapshot's quest).
+    expect(sourceWays({ levelKinds: 'quest' }, 16, { quests: [{ name: 'Scarab Armor Quests', level: 1, wiki: null }] })).toEqual(['quest']);
+    expect(sourceWays({ levelKinds: 'unknown' }, 16, { quests: [{ name: 'Q', level: null, wiki: null }] })).toEqual(['quest']);
+    expect(sourceWays({ levelKinds: 'unknown' }, 1, { from: ['a rat'] })).toEqual(['drop']);
+    expect(sourceWays({ levelKinds: 'vendor' }, 4 | 1, {})).toEqual(['vendor', 'drop']);
+    expect(sourceWays({ levelKinds: null }, 16, {})).toEqual(['unknown']);
+  });
+
+  it('a quest link from quest_site: an empty table or a missing table means no link, never an error', async () => {
+    const missing = { prepare: () => ({ bind: () => ({ all: async () => { throw new Error('D1_ERROR: no such table: quest_site: SQLITE_ERROR'); } }) }) } as unknown as D1Database;
+    expect((await questLinks(missing, ['Scarab Armor Quests'])).size).toBe(0);
+    await env.DB.prepare('DELETE FROM quest_site').run();
+    expect((await questLinks(env.DB, ['Scarab Armor Quests'])).size).toBe(0);
+  });
+});
+
+// Scarab Helm and Fine Green Cloth Robe as production imported them (run 42274262832), read from the local import.
+const CARD_ITEMS = [
+  { name: 'Scarab Helm', slot: 'HEAD', mask: 16, low: 1, kinds: 'quest', origin: { quests: [{ level: 1, name: 'Scarab Armor Quests', wiki: 'https://monstersandmemories.miraheze.org/wiki/Scarab_Armor_Quests' }] } },
+  { name: 'Fine Green Cloth Robe', slot: 'CHEST', mask: 4, low: 0, kinds: 'vendor', origin: { soldBy: { base: 10000, shady: null, vendors: ['Night Harbor', 'Master Tailor Sansha'] } } },
+];
+
+describe('order 37, PR B: the /item card reads its sources through the upgrade lines\' function', () => {
+  beforeEach(async () => {
+    await reset();
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM npc'),
+      env.DB.prepare('DELETE FROM zone_name'),
+      env.DB.prepare('DELETE FROM zone'),
+      env.DB.prepare('DELETE FROM quest_site'),
+      env.DB.prepare("DELETE FROM item WHERE name_key IN ('scarab helm', 'fine green cloth robe')"),
+      env.DB.prepare("INSERT INTO zone (key, name) VALUES ('night harbor', 'Night Harbor')"),
+      env.DB.prepare("INSERT INTO zone_name (source, name, zone_key) VALUES ('wiki:zones', 'Night Harbor', 'night harbor')"),
+      env.DB.prepare("INSERT INTO npc (zone_key, name) VALUES ('night harbor', 'Master Tailor Sansha')"),
+      env.DB.prepare("INSERT INTO quest_site (quest, url, linked, last_result, fails) VALUES ('Scarab Armor Quests', 'https://monstersandmemories.wiki/quests/scarab-armor-quests', 1, '200', 0)"),
+      ...CARD_ITEMS.map((i) =>
+        env.DB.prepare(
+          "INSERT INTO item (name, name_key, slot, stats_json, source, imported_at, slot_mask, class_mask, race_mask, source_mask, level_low, level_high, level_kind, level_kinds, origin_json) VALUES (?, ?, ?, '{}', 'wiki', 't', 1, -1, -1, ?, ?, ?, ?, ?, ?)",
+        ).bind(i.name, i.name.toLowerCase(), i.slot, i.mask, i.low, i.low, i.kinds, i.kinds, JSON.stringify(i.origin)),
+      ),
+    ]);
+    await markImported();
+  });
+
+  const card = async (name: string) => {
+    const { id } = await one<{ id: number }>('SELECT id FROM item WHERE name = ?', name);
+    const c = { db: env.DB, guild: { id: '900000000000000001', learning_window: 25 } } as never;
+    const k = await itemCard(c, id);
+    const fields = k!.embeds[0].fields ?? [];
+    const it = toItem((await env.DB.prepare(`${GEAR_INDEX_SQL} AND id = ?`).bind(id).first()) as never);
+    const ver = (await env.DB.prepare(VERSION_SQL).first<{ v: string }>())!.v;
+    return { fields, upgrade: howToGet(it, await extrasFor(c, [it], ver), '1', 25).lines };
+  };
+
+  it('Scarab Helm: the quest, linked to both wikis, as the upgrade line names it; no "Unknown — source not recorded"', async () => {
+    const { fields, upgrade } = await card('Scarab Helm');
+    const how = fields.find((f) => f.name === UPGRADES_COPY.cardField)!;
+    expect(how.value).toBe(
+      'Quest: [Scarab Armor Quests](https://monstersandmemories.miraheze.org/wiki/Scarab_Armor_Quests) ([monstersandmemories.wiki](https://monstersandmemories.wiki/quests/scarab-armor-quests)) · Lv 1+',
+    );
+    expect(how.value.split('\n')).toEqual(upgrade);
+    expect(fields.map((f) => f.name)).not.toContain('Unknown');
+  });
+
+  it('a vendor item: the merchant line the upgrade list shows, then the price', async () => {
+    const { fields, upgrade } = await card('Fine Green Cloth Robe');
+    expect(fields.find((f) => f.name === UPGRADES_COPY.cardField)!.value).toBe('Vendor: Master Tailor Sansha, Night Harbor · any level');
+    expect(upgrade).toEqual(['Vendor: Master Tailor Sansha, Night Harbor · any level']);
+    expect(fields.find((f) => f.name === 'Vendor')!.value).toBe('price 10000');
   });
 });
 

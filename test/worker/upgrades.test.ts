@@ -403,11 +403,12 @@ describe('order 36, ITEM 3: how to get it', () => {
       { name: 'A Second Errand', level: null, wiki: null },
     ];
     const h = howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 12 }), extras({ quests }), ANN, 25);
-    // "Armor from Vex" is not among quest-sites.json's verified pages: the name links to the wiki only.
+    // "Armor from Vex" has no linked quest_site row (order 37, PR B): the name links to the wiki only.
     expect(h.lines).toEqual(['Quest: [Armor from Vex](https://monstersandmemories.miraheze.org/wiki/Armor_from_Vex) · Lv 12+ · +1 more']);
     // A verified page gets its monstersandmemories.wiki link; parentheses in an address are encoded (review fix).
     const archer = { name: 'Archer Starter Quest (Faelindral)', level: 1, wiki: 'https://monstersandmemories.miraheze.org/wiki/Archer_Starter_Quest_(Faelindral)' };
-    expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 1 }), extras({ quests: [archer] }), ANN, 25).lines).toEqual([
+    const verified = { ...extras({ quests: [archer] }), questLinks: new Map([[archer.name, 'https://monstersandmemories.wiki/quests/archer-starter-quest-faelindral']]) };
+    expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest', levelLow: 1 }), verified, ANN, 25).lines).toEqual([
       'Quest: [Archer Starter Quest (Faelindral)](https://monstersandmemories.miraheze.org/wiki/Archer_Starter_Quest_%28Faelindral%29) ([monstersandmemories.wiki](https://monstersandmemories.wiki/quests/archer-starter-quest-faelindral)) · Lv 1+',
     ]);
     expect(howToGet(gi({ levelKind: 'quest', levelKinds: 'quest' }), extras({ quests: [quests[1]] }), ANN, 25).lines).toEqual(['Quest: A Second Errand · level unknown']);

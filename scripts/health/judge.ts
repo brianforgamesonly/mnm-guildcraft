@@ -262,6 +262,24 @@ export function judgeNightly({ job, rows, failedRuns }: NightlyInput): Line {
   return { rule, verdict: 'fail', text: 'no row, and no failed run of its workflow that day: it never ran, or ran without recording' };
 }
 
+/** Order 37, PR B: the monthly quest-page check must have succeeded on a schedule within this many days. */
+export const QUEST_SITES_STALE_DAYS = 35;
+
+/**
+ * The monthly quest-page check (.github/workflows/quest-sites.yml). `last`: the newest quest_site_run row from a scheduled
+ * run or the migration's seed (a dispatch is not the schedule); `hasTable`: migrations/0032 applied. Fails on every day the
+ * last success is QUEST_SITES_STALE_DAYS or more old (a stopped run, a failing job, or GitHub disabling the schedule).
+ */
+export function judgeQuestSites(hasTable: boolean, last: string | null, nowMs: number): Line {
+  const rule = 'monthly quest-page check';
+  if (!hasTable) return { rule, verdict: 'fail', text: 'no quest_site_run table: migration 0032 is not applied to this copy' };
+  if (!last) return { rule, verdict: 'fail', text: 'no scheduled or seeded run recorded' };
+  const days = (nowMs - Date.parse(last)) / DAY_MS;
+  return days >= QUEST_SITES_STALE_DAYS
+    ? { rule, verdict: 'fail', text: `last succeeded ${last} (${Math.floor(days)} days ago): fails at ${QUEST_SITES_STALE_DAYS} days` }
+    : { rule, verdict: 'pass', text: `last succeeded ${last} (${Math.floor(days)} days ago)` };
+}
+
 export const failed = (lines: Line[]) => lines.some((l) => l.verdict === 'fail');
 
 /** The UTC day before `nowMs`, as its start (ms). */

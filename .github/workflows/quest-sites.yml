@@ -1,0 +1,59 @@
+# Order 37, PR B (ITEM 4; the owner, 2026-11-06: Way A): the quest lines' monstersandmemories.wiki links, checked monthly.
+# scripts/gear/quest-sites.ts reads production's quests (the import's quest key), checks each page once on
+# monstersandmemories.wiki (robots.txt and a control first; order 14's named User-Agent, half a second apart), and writes
+# only the changed quest_site rows, plus one quest_site_run row, to each copy named. A link goes only after two counted
+# 404s in a row (a counted check: a scheduled run 25 days or more after the quest's last one; a dispatch never counts).
+# Schedule: 09:23 UTC on the 1st (GitHub may start scheduled runs late; off the hour). Dispatch: copy (default both).
+# Expected: under 1 billed minute a run (public repository: free); about 50 requests to the site a month; D1: one read of
+# production's gear items (~6,000 rows), one quest_site read per copy, a handful of rows written.
+#
+# The alarm (ORDER-RULES order 8):
+#   who:   GitHub's failed-run mail to "the user who last modified the cron syntax" (the repository owner);
+#   state: a run fails when it stops (robots.txt, the control, a 403/429, a D1 error), writing nothing. A check that has not
+#          succeeded on a schedule in 35 days fails the daily health check (scripts/health/judge.ts judgeQuestSites), which
+#          also catches GitHub disabling this schedule after 60 days without repository activity.
+# Credentials: the import's CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID (D1 read and write); no new secret.
+name: quest-sites
+on:
+  schedule:
+    - cron: '23 9 1 * *'
+  workflow_dispatch:
+    inputs:
+      copy:
+        description: 'Which copies to write (the quests are always production''s)'
+        type: choice
+        options: [both, dev, production]
+        default: both
+      dry_run:
+        description: 'Check the pages, write nothing'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: quest-sites
+  cancel-in-progress: false
+jobs:
+  check:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Check the quest pages (${{ github.event_name }})
+        shell: bash
+        env:
+          WANT: ${{ inputs.copy || 'both' }}
+          EVENT: ${{ github.event_name }}
+          DRY: ${{ inputs.dry_run == true && '--dry-run' || '' }}
+        run: |
+          # The copies are wrangler.jsonc's environments (scripts/copies.ts matrix), never a list typed here.
+          copies=$(node --input-type=module -e "import { matrix } from './scripts/copies.ts'; console.log(matrix(process.env.WANT).map((c) => c.copy).join(','))")
+          node scripts/gear/quest-sites.ts --copies "$copies" --event "$EVENT" $DRY
