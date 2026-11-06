@@ -7,6 +7,7 @@ import { createChannelsButton } from './commands/channels.ts';
 import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
+import { gearWear, WEAR_OPENS_MODAL, wearComponent, wearImmediate } from './gear/wear.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
 import { APPROVE_PREFIX, imageButton, REJECT_PREFIX, statImage } from './commands/images.ts';
@@ -76,7 +77,10 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
   // Order 13. Any member who passes the gate can search; no character needs to be registered. 'gear.find' is the
   // search's only write (its read audit row, after delivery). Not `search`: its results are always private (order 13),
   // whatever SEARCH_REPLIES_PRIVATE says, and Previous/Next edit them in place; the item card has Post to channel.
-  gear: { access: 'member', audit: 'gear.find', run: gearFind },
+  // Order 35: /gear search (order 13's search; audit action unchanged) and /gear wear (src/gear/wear.ts). A flat /gear is
+  // the search (routeKey).
+  'gear search': { access: 'member', audit: 'gear.find', run: gearFind },
+  'gear wear': { access: 'member', run: gearWear },
   'roster skill': { access: 'member', search: true, audit: 'roster.view', run: rosterSkill },
   'roster member': { access: 'member', search: true, audit: 'roster.view', run: rosterMember },
   'roster top': { access: 'member', search: true, audit: 'roster.view', run: rosterTop },
@@ -100,6 +104,8 @@ export const ROUTES: Record<string, { access: Access; search?: true; audit?: str
 /** "name sub", or "name" for a command without subcommands (order 17: /zone). */
 const routeKey = (i: Interaction) => {
   const sub = subcommand(i).name;
+  // Order 35: /gear gained subcommands; a client still holding the flat definition sends /gear with find's options.
+  if (sub === undefined && i.data?.name === 'gear') return 'gear search';
   return sub === undefined ? `${i.data?.name}` : `${i.data?.name} ${sub}`;
 };
 /** Order 27: /dkp's routes (src/dkp/commands.ts), kept apart from ROUTES as /dkp is kept apart from COMMANDS. */
@@ -149,7 +155,7 @@ function withWelcome(reply: MessageReply): MessageReply {
  * The components that answer with a modal, at once (skillSelect below): a modal cannot follow a deferral. Order 18:
  * Report a missing recipe on /item's "No item called" reply; /me's Add character and Edit character (and its select).
  */
-export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL, ...AUCTION_OPENS_MODAL];
+export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL, ...AUCTION_OPENS_MODAL, ...WEAR_OPENS_MODAL];
 
 export type Plan ={ defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
 
@@ -319,6 +325,9 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
   if (passes || c.officer) {
     const panel = meComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (panel) return panel;
+    // Order 35: saved gear (src/gear/wear.ts): each control re-checks the character's owner, or an officer.
+    const gear = wearComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
+    if (gear) return gear;
     // The panel's Update skills leads to the skill form, which re-checks owner or officer itself (componentCharacter).
     if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
   }
@@ -396,6 +405,8 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
   if (passes || c.officer) {
     const panel = meImmediate(c, id, i.data?.values ?? []);
     if (panel) return panel;
+    const gear = wearImmediate(c, id, i.data?.values ?? []);
+    if (gear) return gear;
     // The skill select (from the panel's Update skills), re-checked for owner or officer in updateSelected.
     if (id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
   }

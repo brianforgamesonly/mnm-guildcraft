@@ -6,6 +6,7 @@
 
 import { BOARDS } from '../board/kinds.ts';
 import { gearFindOptions } from '../gear/options.ts';
+import { WEAR_SLOTS } from '../gear/slots.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
@@ -29,6 +30,21 @@ const skillOption = { type: STRING, name: 'skill', description: 'Tradeskill', re
 /** /officer picks a recipe through item: (autocomplete offers each of an item's recipes, with its tradeskill and trivial). */
 const recipeItemOption = { type: STRING, name: 'item', description: 'The item: pick its recipe from the list (each shows its tradeskill and trivial)', required: true, autocomplete: true, max_length: 100 };
 const officerMember = (description: string) => ({ type: USER, name: 'member', description, required: true });
+
+/** Order 35: /gear's subcommands: search (order 13's, with the class choices) and wear (src/gear/wear.ts). */
+const gearOptions = (classes: readonly string[]) => [
+  { type: SUBCOMMAND, name: 'search', description: 'Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone', options: gearFindOptions(classes) },
+  {
+    type: SUBCOMMAND,
+    name: 'wear',
+    description: 'Save what one of your characters wears, in one of its 20 gear slots',
+    options: [
+      { type: STRING, name: 'item', description: 'The item: pick from the list (gear your character can use)', required: true, autocomplete: true, max_length: 100 },
+      { type: STRING, name: 'character', description: 'Your character (needed when you have more than one)', autocomplete: true, max_length: 32 },
+      { type: STRING, name: 'slot', description: 'The slot (asked when the item fits more than one)', choices: WEAR_SLOTS.map((w) => ({ name: w.label, value: w.key })) },
+    ],
+  },
+];
 
 export const COMMANDS = [
   {
@@ -61,11 +77,14 @@ export const COMMANDS = [
   },
   {
     // Order 13. The class choices are the copy's game_class codes, filled in at registration (commandsWith).
+    // Order 35: subcommands, because /gear wear joins the search (Discord: a command with subcommands can't take options
+    // of its own). The search is /gear search: not /gear find, an old name order 18 retired ("not available"). A flat
+    // /gear from a client that hasn't seen the new definition is still answered as the search (src/interactions.ts routeKey).
     name: 'gear',
-    description: 'Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone',
+    description: 'Find gear for your class, or save what a character wears',
     type: 1,
     contexts: GUILD_ONLY,
-    options: gearFindOptions([]),
+    options: gearOptions([]),
   },
   {
     // Kept as subcommands (order 18): each view has its own required option (skill, member), which Discord then asks for
@@ -201,7 +220,7 @@ export const COMMANDS = [
 type Gear = { name: string; options?: readonly { type: number; name: string; options?: unknown }[] };
 
 /** The definitions to register: /gear's class option offers "Any" and `classes` (the copy's game_class codes). */
-export const commandsWith = (classes: readonly string[]) => COMMANDS.map((c) => (c.name === 'gear' ? { ...c, options: gearFindOptions(classes) } : c)) as readonly Gear[];
+export const commandsWith = (classes: readonly string[]) => COMMANDS.map((c) => (c.name === 'gear' ? { ...c, options: gearOptions(classes) } : c)) as readonly Gear[];
 
 /**
  * Discord's documented maximums for a slash command (https://docs.discord.com/developers/interactions/application-commands):

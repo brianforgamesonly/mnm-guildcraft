@@ -1278,6 +1278,19 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 
 | Where | Text | Status |
 |---|---|---|
-| src/commands/help.ts:37 | (`/help`, profile page) `/gear wear` save what one of your characters wears *(coming soon)* | DRAFT |
-| src/commands/help.ts:38 | (`/help`, find page) `/gear upgrades` what beats the gear a character wears, smallest upgrade first *(coming soon)* | DRAFT |
-| src/commands/help.ts:39 | (`/help`, find page) `/gear settings` how /gear upgrades weighs the stats *(coming soon)* | DRAFT |
+| src/commands/help.ts:37 | (`/help`, profile page) `/gear wear` save what one of your characters wears *(coming soon)* — removed in PR B (built) | DRAFT |
+| src/commands/help.ts:37 | (`/help`, find page) `/gear upgrades` what beats the gear a character wears, smallest upgrade first *(coming soon)* | DRAFT |
+| src/commands/help.ts:38 | (`/help`, find page) `/gear settings` how /gear upgrades weighs the stats *(coming soon)* | DRAFT |
+
+## Work order 35, PR B: race on characters, and saved gear (DRAFT)
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/definitions.ts:84 | (`/gear`) Find gear for your class, or save what a character wears | DRAFT |
+| src/commands/definitions.ts:36 | (`/gear search`, the search's new name) Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone (the words `/gear` had) | DRAFT |
+| src/commands/definitions.ts:40-44 | (`/gear wear`) Save what one of your characters wears, in one of its 20 gear slots · `item`: The item: pick from the list (gear your character can use) · `character`: Your character (needed when you have more than one) · `slot`: The slot (asked when the item fits more than one); slot choices Head … Range | DRAFT |
+| src/commands/me.ts:102-106 | (Add/Edit character form) Race · Optional. Codes from the wiki data; no race means any race · No race (any) · (panel button) Gear: \<name> · Gear: pick a character | DRAFT |
+| src/commands/skills.ts:278 | (character card) race \<code> | DRAFT |
+| src/commands/character.ts:41 | **\<race>** isn't a race in the list taken from the wiki data. | DRAFT |
+| src/commands/character.ts:311 | (Remove character, appended) Its saved gear is removed. | DRAFT |
+| src/gear/wear.ts:57-95 | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT |

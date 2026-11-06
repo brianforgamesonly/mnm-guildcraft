@@ -20,19 +20,33 @@ export interface Character {
   name_key: string;
   class: string | null;
   level: number | null;
+  /** Order 35 (0030): a game_race code, or NULL (any race). */
+  race: string | null;
   is_main: number;
   deleted_at: string | null;
   created_at: string;
   updated_at: string;
 }
 
-const COLS = 'id, guild_id, owner_user_id, name, name_key, class, level, is_main, deleted_at, created_at, updated_at';
+const COLS = 'id, guild_id, owner_user_id, name, name_key, class, level, race, is_main, deleted_at, created_at, updated_at';
 
 export const nameKey = (name: string): string => name.toLowerCase();
 
-const snapshot = (ch: Pick<Character, 'name' | 'class' | 'level' | 'is_main' | 'deleted_at'>) => ({
-  name: ch.name, class: ch.class, level: ch.level, is_main: ch.is_main, deleted_at: ch.deleted_at,
+const snapshot = (ch: Pick<Character, 'name' | 'class' | 'level' | 'race' | 'is_main' | 'deleted_at'>) => ({
+  name: ch.name, class: ch.class, level: ch.level, race: ch.race, is_main: ch.is_main, deleted_at: ch.deleted_at,
 });
+
+/** Order 35: the races a character may take: game_race's kept codes, never a mount race (game_race.mount). One statement. */
+export const CHARACTER_RACES_SQL = 'SELECT code FROM game_race WHERE item_count > 0 AND mount = 0 ORDER BY code';
+export const RACE_NOT_LISTED = (typed: string) => `**${md(typed)}** isn't a race in the list taken from the wiki data.`;
+
+/** A race from the derived list (blank = none). A mount race, or a code not in the list, is refused. */
+async function cleanRace(db: D1Database, raw: string): Promise<{ value: string | null } | { error: string }> {
+  const typed = raw.trim();
+  if (!typed) return { value: null };
+  const row = await db.prepare('SELECT code FROM game_race WHERE code = ? AND item_count > 0 AND mount = 0').bind(typed.toUpperCase()).first<{ code: string }>();
+  return row ? { value: row.code } : { error: RACE_NOT_LISTED(typed) };
+}
 
 export const OFFICERS_ONLY = "Only officers can change another member's characters.";
 export const TAKEN = (name: string) => `**${md(name)}** is already taken in this guild. Character names are unique (capital letters don't count).`;
@@ -120,8 +134,8 @@ function checkLevel(level: number | undefined): string | null {
 
 const isUniqueViolation =(e: unknown) => e instanceof Error && /UNIQUE constraint failed/i.test(e.message);
 
-function describe(ch: { name: string; class: string | null; level: number | null }): string {
-  const bits = [ch.class, ch.level !== null ? `level ${ch.level}` : null].filter(Boolean);
+function describe(ch: { name: string; class: string | null; level: number | null; race?: string | null }): string {
+  const bits = [ch.class, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${ch.race}` : null].filter(Boolean);
   return `**${md(ch.name)}**${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
 }
 
@@ -142,6 +156,9 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
   const levelError = checkLevel(level);
   if (levelError) return ephemeral(levelError);
   const cls = await cleanClass(c.db, optString(opts, 'class'));
+  const rawRace = optString(opts, 'race');
+  const race = rawRace === undefined ? undefined : await cleanRace(c.db, rawRace);
+  if (race && 'error' in race) return ephemeral(race.error);
   const wantMain = optBool(opts, 'main') === true;
   const key = nameKey(n.name);
 
@@ -157,12 +174,12 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
 
   if (existing) {
     // The caller's own removed character: add restores it, with its skills.
-    const after = { ...existing, class: cls.value ?? existing.class, level: level ?? existing.level, is_main: isMain ? 1 : 0, deleted_at: null };
+    const after = { ...existing, class: cls.value ?? existing.class, level: level ?? existing.level, race: race ? race.value : existing.race, is_main: isMain ? 1 : 0, deleted_at: null };
     const stmts = [
       ...(isMain ? [clearMain(c.db, c.guild.id, c.userId, at, existing.id)] : []),
       c.db
-        .prepare('UPDATE character SET deleted_at = NULL, class = ?, level = ?, is_main = ?, updated_at = ? WHERE id = ?')
-        .bind(after.class, after.level, after.is_main, at, existing.id),
+        .prepare('UPDATE character SET deleted_at = NULL, class = ?, level = ?, race = ?, is_main = ?, updated_at = ? WHERE id = ?')
+        .bind(after.class, after.level, after.race, after.is_main, at, existing.id),
       audit(c.db, c.guild.id, c.userId, 'character.restore', `character:${existing.id}`, snapshot(existing), snapshot(after)),
       markCharacterDirty(c, existing.id),
     ];
@@ -174,16 +191,16 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
     });
   }
 
-  const row = { name: n.name, class: cls.value ?? null, level: level ?? null, is_main: isMain ? 1 : 0, deleted_at: null };
+  const row = { name: n.name, class: cls.value ?? null, level: level ?? null, race: race ? race.value : null, is_main: isMain ? 1 : 0, deleted_at: null };
   let newId: number;
   try {
     const results = await c.db.batch([
       ...(isMain ? [clearMain(c.db, c.guild.id, c.userId, at)] : []),
       c.db
         .prepare(
-          'INSERT INTO character (guild_id, owner_user_id, name, name_key, class, level, is_main, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+          'INSERT INTO character (guild_id, owner_user_id, name, name_key, class, level, race, is_main, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         )
-        .bind(c.guild.id, c.userId, row.name, key, row.class, row.level, row.is_main, at, at),
+        .bind(c.guild.id, c.userId, row.name, key, row.class, row.level, row.race, row.is_main, at, at),
       auditNewCharacter(c.db, c.guild.id, c.userId, 'character.add', key, row),
     ]);
     newId = results[isMain ? 1 : 0].meta.last_row_id;
@@ -209,7 +226,9 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   const rawClass = optString(opts, 'class');
   const level = optInt(opts, 'level');
   const main = optBool(opts, 'main');
-  if (rawNew === undefined && rawClass === undefined && level === undefined && main === undefined)
+  // Order 35: race: a code from the derived list, or "" to clear it.
+  const rawRace = optString(opts, 'race');
+  if (rawNew === undefined && rawClass === undefined && level === undefined && main === undefined && rawRace === undefined)
     return ephemeral('Nothing changed.');
 
   const after = { ...ch };
@@ -238,6 +257,11 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
     if (levelError) return ephemeral(levelError);
     after.level = level;
   }
+  if (rawRace !== undefined) {
+    const race = await cleanRace(c.db, rawRace);
+    if ('error' in race) return ephemeral(race.error);
+    after.race = race.value;
+  }
   if (main !== undefined) {
     if (ch.deleted_at) return ephemeral(`**${md(ch.name)}** is removed; it can't be made a main until it is restored.`);
     if (!main && ch.is_main) return ephemeral(`**${md(ch.name)}** is your main. To change that, make another character your main.`);
@@ -249,8 +273,8 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
     await c.db.batch([
       ...(after.is_main && !ch.is_main ? [clearMain(c.db, c.guild.id, ch.owner_user_id, at, ch.id)] : []),
       c.db
-        .prepare('UPDATE character SET name = ?, name_key = ?, class = ?, level = ?, is_main = ?, updated_at = ? WHERE id = ?')
-        .bind(after.name, after.name_key, after.class, after.level, after.is_main, at, ch.id),
+        .prepare('UPDATE character SET name = ?, name_key = ?, class = ?, level = ?, race = ?, is_main = ?, updated_at = ? WHERE id = ?')
+        .bind(after.name, after.name_key, after.class, after.level, after.race, after.is_main, at, ch.id),
       audit(c.db, c.guild.id, c.userId, 'character.edit', `character:${ch.id}`, snapshot(ch), snapshot(after)),
       // The board shows the character's name, so only a rename changes its posts.
       ...(after.name !== ch.name ? [markCharacterDirty(c, ch.id)] : []),
@@ -277,12 +301,14 @@ export async function characterRemove(c: Ctx, opts: Option[]): Promise<MessageRe
   // If the main goes, the oldest remaining character becomes main.
   const next = ch.is_main ? (await liveCharacters(c.db, c.guild.id, owner.ownerId)).filter((x) => x.id !== ch.id).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id - b.id)[0] : undefined;
   await c.db.batch([
+    // Order 35: its saved gear goes with it (its skills are kept, so adding it again restores them, not the gear).
+    c.db.prepare('DELETE FROM character_gear WHERE character_id = ?').bind(ch.id),
     c.db.prepare('UPDATE character SET deleted_at = ?, is_main = 0, updated_at = ? WHERE id = ?').bind(at, at, ch.id),
     ...(next ? [c.db.prepare('UPDATE character SET is_main = 1, updated_at = ? WHERE id = ?').bind(at, next.id)] : []),
     audit(c.db, c.guild.id, c.userId, 'character.remove', `character:${ch.id}`, snapshot(ch), snapshot({ ...ch, is_main: 0, deleted_at: at })),
     markCharacterDirty(c, ch.id),
   ]);
-  const lines = [`Removed **${md(ch.name)}**. Its skills are kept: **Add character** on \`/me\` with the name **${md(ch.name)}** restores it.`];
+  const lines = [`Removed **${md(ch.name)}**. Its skills are kept: **Add character** on \`/me\` with the name **${md(ch.name)}** restores it. Its saved gear is removed.`];
   if (next) lines.push(`**${md(next.name)}** is now your main.`);
   return ephemeral(lines.join('\n'));
 }

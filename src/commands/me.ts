@@ -16,7 +16,8 @@ import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, mention, optStr
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
 import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
-import { characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
+import { CHARACTER_RACES_SQL, characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
+import { PANEL_PREFIX as GEAR_PANEL_PREFIX, PANEL_PICK_PREFIX as GEAR_PANEL_PICK_PREFIX } from '../gear/wear.ts';
 import { OFFICER_ONLY } from './members.ts';
 import { craftForget } from './recipes.ts';
 import { modalValues } from './reports.ts';
@@ -97,6 +98,12 @@ export const ME_COPY = {
   forgetPlaceholder: 'A recipe marked known',
   noOpen: 'No open craft requests.',
   cancelHead: 'Pick a request to cancel. Everyone in its thread is told.',
+  // Order 35.
+  race: 'Race',
+  raceHint: 'Optional. Codes from the wiki data; no race means any race',
+  noRace: 'No race (any)',
+  gear: (name: string) => truncate(`Gear: ${name}`, 80),
+  gearPick: 'Gear: pick a character',
 } as const;
 
 // ---------------------------------------------------------------- whose panel
@@ -159,6 +166,25 @@ export function panelRows(ownerId: string, own: boolean, hasCharacters: boolean,
   return [first, second].filter((r) => r.length).map((r) => row(r));
 }
 
+/**
+ * Order 35: Gear for each character shown (src/gear/wear.ts): a button each, up to 5 (one row); more, one select. The
+ * custom_id names the character; the panel re-checks on every press who may see it (the owner, or an officer).
+ */
+export function gearRow(ownerId: string, chars: Character[]): unknown[] {
+  if (!chars.length) return [];
+  if (chars.length <= 5) return [row(chars.map((ch) => button(`${GEAR_PANEL_PREFIX}${ch.id}`, ME_COPY.gear(ch.name))))];
+  return [
+    row([
+      {
+        type: MessageComponentTypes.STRING_SELECT,
+        custom_id: `${GEAR_PANEL_PICK_PREFIX}${ownerId}`,
+        placeholder: ME_COPY.gearPick,
+        options: chars.slice(0, SELECT_MAX).map((ch) => ({ label: truncate(ch.name, 100), value: String(ch.id) })),
+      },
+    ]),
+  ];
+}
+
 /** Order 33: the Reminders toggle's state: null where the Events module is off, so the panel doesn't offer it. One statement. */
 async function remindersOn(c: Ctx): Promise<boolean | null> {
   const r = await c.db
@@ -210,7 +236,7 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
     anyStale ? ME_COPY.stale(c.guild.stale_days) : null,
     dkp,
   ].filter(Boolean);
-  return ephemeral(truncate(notes.join('\n'), 2000), { embeds, components: panelRows(ownerId, own, true, reqs.length > 0, reminders) });
+  return ephemeral(truncate(notes.join('\n'), 2000), { embeds, components: [...panelRows(ownerId, own, true, reqs.length > 0, reminders), ...gearRow(ownerId, chars)] });
 }
 
 async function whoIs(c: Ctx, userId: string): Promise<string> {
@@ -258,18 +284,44 @@ const mainSelect = (isMain: boolean, edit: boolean) => ({
     ],
   },
 });
-const characterFields = (ch?: Character) => [
+/**
+ * Order 35: the race choice, a select in the form (Discord: a String Select sits in a modal inside a Label; a modal holds
+ * at most 5 components, and this is the fifth). The races are game_race's, never a mount race; "No race" clears it. Left
+ * out while the race list is empty.
+ */
+const NO_RACE = 'none';
+const raceSelect = (races: string[], current: string | null) => ({
+  type: MessageComponentTypes.LABEL,
+  label: ME_COPY.race,
+  description: ME_COPY.raceHint,
+  component: {
+    type: MessageComponentTypes.STRING_SELECT,
+    custom_id: 'race',
+    required: false,
+    min_values: 0,
+    max_values: 1,
+    options: [
+      { label: ME_COPY.noRace, value: NO_RACE, ...(current === null ? { default: true } : {}) },
+      ...races.slice(0, SELECT_MAX - 1).map((r) => ({ label: r, value: r, ...(r === current ? { default: true } : {}) })),
+    ],
+  },
+});
+const characterRaces = async (c: Ctx) => (await c.db.prepare(CHARACTER_RACES_SQL).all<{ code: string }>()).results.map((r) => r.code);
+const characterFields = (races: string[], ch?: Character) => [
   textInput('name', ME_COPY.name, { required: true, max: NAME_MAX, value: ch?.name }),
   textInput('class', ME_COPY.className, { description: ME_COPY.classHint, max: 32, value: ch?.class }),
   textInput('level', ME_COPY.level, { description: ch ? ME_COPY.levelEditHint : ME_COPY.levelHint, max: 3, value: ch?.level === null || ch?.level === undefined ? null : String(ch.level) }),
   mainSelect(!!ch?.is_main, !!ch),
+  ...(races.length ? [raceSelect(races, ch?.race ?? null)] : []),
 ];
+/** The form's race: undefined when the form had no race select; '' for No race (or nothing picked). */
+const raceOf = (v: Map<string, string>) => (v.has('race') ? (v.get('race') === NO_RACE ? '' : (v.get('race') ?? '')) : undefined);
 
 /** mea:<target>: the Add character form (own panel only: /character add had no member: option). */
-export function addButton(c: Ctx, customId: string): InteractionReply {
+export async function addButton(c: Ctx, customId: string): Promise<InteractionReply> {
   const t = target(c, customId, ADD_PREFIX, true);
   if ('reply' in t) return t.reply;
-  return { type: InteractionResponseType.MODAL, data: { custom_id: `${ADD_MODAL_PREFIX}${t.ownerId}`, title: ME_COPY.addTitle, components: characterFields() } };
+  return { type: InteractionResponseType.MODAL, data: { custom_id: `${ADD_MODAL_PREFIX}${t.ownerId}`, title: ME_COPY.addTitle, components: characterFields(await characterRaces(c)) } };
 }
 
 /** A typed level: blank is none, digits are the number, anything else fails /character's level check. */
@@ -286,11 +338,13 @@ export async function addSubmitted(c: Ctx, customId: string, components: ModalCo
   const v = modalValues(components);
   const level = levelOf(v.get('level'));
   const cls = (v.get('class') ?? '').trim();
+  const race = raceOf(v);
   // Order 32: an event card's Add a character reaches this form from a member who may never have run a command.
   const { isNew } = await touchMember(c.db, c.guild.id, c.member);
   const reply = await characterAdd(c, [
     opt('name', v.get('name') ?? ''),
     ...(cls ? [opt('class', cls)] : []),
+    ...(race ? [opt('race', race)] : []),
     ...(level !== undefined ? [opt('level', level)] : []),
     ...(v.get('main') === YES ? [opt('main', true)] : []),
   ]);
@@ -299,9 +353,9 @@ export async function addSubmitted(c: Ctx, customId: string, components: ModalCo
 
 // ---------------------------------------------------------------- Edit character (a select when several, then a modal)
 
-const editModal = (ch: Character): InteractionReply => ({
+const editModal = async (c: Ctx, ch: Character): Promise<InteractionReply> => ({
   type: InteractionResponseType.MODAL,
-  data: { custom_id: `${EDIT_MODAL_PREFIX}${ch.id}`, title: ME_COPY.editTitle(ch.name), components: characterFields(ch) },
+  data: { custom_id: `${EDIT_MODAL_PREFIX}${ch.id}`, title: ME_COPY.editTitle(ch.name), components: characterFields(await characterRaces(c), ch) },
 });
 
 /** mee:<target>: one character, its form at once; several, a private select first (answered at once too). */
@@ -312,7 +366,7 @@ export async function editButton(c: Ctx, customId: string): Promise<InteractionR
   // member: did); the member's own panel lists live ones only.
   const chars = t.ownerId === c.userId ? await liveCharacters(c.db, c.guild.id, t.ownerId) : await charactersWithRemoved(c.db, c.guild.id, t.ownerId);
   if (!chars.length) return ephemeral(ME_COPY.gone);
-  if (chars.length === 1) return editModal(chars[0]);
+  if (chars.length === 1) return editModal(c, chars[0]);
   return ephemeral(ME_COPY.pickEdit, { components: [characterSelect(`${EDIT_PICK_PREFIX}${t.ownerId}`, chars)] });
 }
 
@@ -321,7 +375,7 @@ export async function editPicked(c: Ctx, customId: string, values: string[]): Pr
   const t = target(c, customId, EDIT_PICK_PREFIX);
   if ('reply' in t) return t.reply;
   const ch = await pickedCharacter(c, t.ownerId, values[0], t.ownerId !== c.userId);
-  return ch ? editModal(ch) : ephemeral(ME_COPY.gone);
+  return ch ? editModal(c, ch) : ephemeral(ME_COPY.gone);
 }
 
 /** meem:<character id>: /character edit with what changed (member: is the owner, so an officer's edit is checked as before). */
@@ -336,9 +390,12 @@ export async function editSubmitted(c: Ctx, customId: string, components: ModalC
   const cls = (v.get('class') ?? '').trim();
   const level = levelOf(v.get('level'));
   const main = v.get('main');
+  const race = raceOf(v);
   const changes: Option[] = [
     ...(name !== ch.name ? [opt('new_name', name)] : []),
     ...(cls !== (ch.class ?? '') ? [opt('class', cls)] : []),
+    // Order 35: the race picked, or No race to clear it.
+    ...(race !== undefined && race !== (ch.race ?? '') ? [opt('race', race)] : []),
     ...(level !== undefined && level !== ch.level ? [opt('level', level)] : []),
     // A main stops being the main only when another becomes it, so "No" on the main changes nothing (the other fields still save).
     ...(main === YES && !ch.is_main ? [opt('main', true)] : []),

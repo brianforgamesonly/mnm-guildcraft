@@ -147,7 +147,8 @@ describe('/character remove', () => {
     await add(ann, { name: 'Newest', main: true });
     await send(cmd(ann, 'craft', 'set', { skill: 'Brewing', level: 7 }));
     const r = await remove(ann, { name: 'Newest' });
-    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: **Add character** on `/me` with the name **Newest** restores it.\n**Oldest** is now your main.');
+    // Order 35: its saved gear goes with it.
+    expect(r.data.content).toBe('Removed **Newest**. Its skills are kept: **Add character** on `/me` with the name **Newest** restores it. Its saved gear is removed.\n**Oldest** is now your main.');
     expect((await chars()).map((c) => [c.name, c.is_main, c.deleted])).toEqual([['Oldest', 1, 0], ['Middle', 0, 0], ['Newest', 0, 1]]);
     expect(await count('character_skill')).toBe(1);
   });
@@ -174,7 +175,8 @@ describe('audit', () => {
       [ANN, 'character.remove', `character:${id}`],
     ]);
     const [a, e, r] = rows.map((x) => JSON.parse(x.detail_json));
-    expect(a).toEqual({ before: null, after: { name: 'Auditee', class: 'WIZ', level: 3, is_main: 1, deleted_at: null } });
+    // Order 35: the race is in the snapshot too.
+    expect(a).toEqual({ before: null, after: { name: 'Auditee', class: 'WIZ', level: 3, race: null, is_main: 1, deleted_at: null } });
     expect(e.before.level).toBe(3);
     expect(e.after.level).toBe(4);
     expect(r.before.deleted_at).toBeNull();
