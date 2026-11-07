@@ -3,8 +3,9 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
-import { statVector, type GearItem } from '../../src/gear/score.ts';
-import { GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
+import { SLOT_GROUPS, statVector, type GearItem } from '../../src/gear/score.ts';
+import { bucket, clearGearIndex, GEAR_INDEX_SQL, itemsFor, toItem } from '../../src/gear/index.ts';
+import { isolateSnapshot } from '../../src/telemetry.ts';
 import { buildSourceIndex } from '../../src/gear/sources.ts';
 import { questsByItem, withQuests } from '../../scripts/import/core.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
@@ -231,6 +232,33 @@ describe('order 36, ITEM 5: the gear index', () => {
     const { results } = await env.DB.prepare(GEAR_INDEX_SQL.replace('slot_mask <> 0', "slot_mask <> 0 ORDER BY name")).all<Record<string, unknown>>();
     const stored = await env.DB.prepare("SELECT name, stats_json FROM item ORDER BY name").all<{ name: string; stats_json: string }>();
     expect(results.map((r) => toItem(r as any).v)).toEqual(stored.results.map((r) => statVector(r.stats_json)));
+  });
+
+  it('order 38: each slot group walks exactly the items that fit its slot, in index order', async () => {
+    await seed([
+      { name: 'Ring', slots: ['FINGER'] },
+      { name: 'Band', slots: ['FINGER', 'WRIST'] },
+      { name: 'Sword', slots: ['PRIMARY', 'SECONDARY'] },
+      { name: 'Helm', slots: ['HEAD'] },
+    ]);
+    const { results } = await env.DB.prepare(GEAR_INDEX_SQL).all<Record<string, unknown>>();
+    const list = results.map((r) => toItem(r as any));
+    const buckets = bucket(list);
+    for (const g of SLOT_GROUPS) {
+      const bit = bitOf(SLOTS, g.token);
+      expect(itemsFor({ slotItems: buckets, items: list }, g.token)).toEqual(list.filter((it) => (it.slotMask & bit) !== 0));
+    }
+    expect(buckets.get('FINGER')!.map((i) => i.name).sort()).toEqual(['Band', 'Ring']);
+  });
+
+  it('order 38: the timing line carries the caches\' state (empty, then held for the version read)', async () => {
+    clearGearIndex();
+    expect(isolateSnapshot().cache.gear_index).toBe('empty');
+    await testchar();
+    const ch = await one<{ id: number }>("SELECT id FROM character WHERE name = 'Testchar'");
+    const s = await send(press(ann, `${FIND_UPGRADES_PREFIX}${ch!.id}`));
+    expect(s.data.embeds![0].title).toBe('Upgrades for Testchar');
+    expect(isolateSnapshot().cache.gear_index).toMatch(/^held:\d+:/);
   });
 });
 

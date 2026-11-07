@@ -8,8 +8,14 @@
 // database), or while the newest row has no finish time (review fix: an import still running, or one killed before it
 // could record its end, keeps writing items under an unchanged key, so each request reads the list afresh until a run
 // finishes). The tests' reset() writes a finished row each time, so each test gets a fresh key.
-import { STAT_VECTOR_SQL, vectorOf, type GearItem } from './score.ts';
-import { isTwoHanded } from './vocab.ts';
+//
+// Order 38 (ITEM 3): each slot group's items are bucketed once per index (`slotItems`, `itemsFor`), so a slot's comparison
+// walks only the items that fit it rather than all 3,156 (17 groups × every item before): warm Find upgrades p50 −10% in
+// the local workerd profile (50 runs, same machine). Reading the index packed as JSON was tried and measured: D1's binding
+// share fell, but parsing took it back (cold p50 −2%, within noise), so it was not kept.
+import { SLOT_GROUPS, STAT_VECTOR_SQL, vectorOf, type GearItem } from './score.ts';
+import type { SlotToken } from './slots.ts';
+import { bitOf, isTwoHanded, SLOTS } from './vocab.ts';
 
 export const VERSION_SQL = "SELECT id || ':' || status || ':' || coalesce(finished_at, '') AS v FROM data_import ORDER BY id DESC LIMIT 1";
 /** Every gear item, its stats already a vector (STAT_VECTOR_SQL: D1 reads the JSON, so the Worker parses none). */
@@ -24,8 +30,23 @@ export interface GearIndex {
   byKey: Map<string, GearItem>;
   classBits: Map<string, number>;
   raceBits: Map<string, number>;
+  /** Order 38: each slot group's items (slot_mask fits the group's slot), in `items` order. */
+  slotItems: Map<SlotToken, GearItem[]>;
   /** D1 rows_read for building it (0 when it came from memory). */
   rowsRead: number;
+}
+
+/** The items a slot group's comparison walks: those that fit its slot, in index order (compareGroup filters the same way). */
+export const itemsFor = (idx: Pick<GearIndex, 'slotItems' | 'items'>, token: SlotToken): readonly GearItem[] => idx.slotItems.get(token) ?? idx.items;
+
+/** Each slot group's items, in list order (the same slot test as compareGroup's). */
+export function bucket(list: readonly GearItem[]): Map<SlotToken, GearItem[]> {
+  const out = new Map<SlotToken, GearItem[]>();
+  for (const g of SLOT_GROUPS) {
+    const bit = bitOf(SLOTS, g.token);
+    out.set(g.token, list.filter((it) => (it.slotMask & bit) !== 0));
+  }
+  return out;
 }
 
 interface Row {
@@ -82,8 +103,12 @@ export async function gearIndex(db: D1Database, version: string | null): Promise
     byKey: new Map(list.map((it) => [it.key, it])),
     classBits: new Map((classes.results as { code: string; bit: number }[]).map((r) => [r.code, Number(r.bit)])),
     raceBits: new Map((races.results as { code: string; bit: number }[]).map((r) => [r.code, Number(r.bit)])),
+    slotItems: bucket(list),
     rowsRead: [items, classes, races].reduce((n, r) => n + (r.meta?.rows_read ?? 0), 0),
   };
   if (cacheable) cached = idx;
   return idx;
 }
+
+/** Order 38: the gear index's state for the request log ("held:<version>" or "empty"). */
+export const gearIndexState = (): string => (cached ? `held:${cached.version}` : 'empty');

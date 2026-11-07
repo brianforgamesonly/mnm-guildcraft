@@ -64,6 +64,8 @@ let cached: SourceCache | null = null;
 export const clearSourceIndex = () => {
   cached = null;
 };
+/** Order 38: the source rows' state for the request log ("held" for the version they were read for, or "empty"). */
+export const sourceCacheState = (): string => (cached ? `held:${cached.version}` : 'empty');
 
 interface MobRow { key: string; title: string; level: string | null; zones_json: string | null; loot_json: string | null }
 interface NpcRow { name: string; zone_key: string; level: string | null; loot_json?: string | null }
