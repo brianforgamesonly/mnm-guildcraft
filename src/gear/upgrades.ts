@@ -461,8 +461,11 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
   const s = resolveSlot(key ?? '');
   if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
   const L = await load(c, t.ch);
-  for (const side of s.oldSides ?? [s.slot.key]) {
-    const u = compare(L, side).upgrades.find((x) => x.item.id === Number(values[0]));
+  // Review fix: the weaker side first (a tie: the first side), as the old list compared, so an item that beats both
+  // sides opens for the side the old message said it replaces.
+  const sides = (s.oldSides ?? [s.slot.key]).map((side) => ({ side, r: compare(L, side) })).sort((a, b) => a.r.baseline - b.r.baseline);
+  for (const { side, r } of sides) {
+    const u = r.upgrades.find((x) => x.item.id === Number(values[0]));
     if (u) return resultReply(c, L, side, capOf(w), u);
   }
   return ephemeral(UPGRADES_COPY.gone);

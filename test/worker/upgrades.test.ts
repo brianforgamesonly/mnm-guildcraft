@@ -1,7 +1,7 @@
 // Work order 36, ITEM 3: /gear upgrades, Find upgrades, and their controls (src/gear/upgrades.ts).
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
+import { howToGet, levelText, load, summaryView, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
 import { statVector, UPGRADE_SLOTS, type GearItem } from '../../src/gear/score.ts';
 import { POST_PREFIX } from '../../src/commands/share.ts';
@@ -434,8 +434,24 @@ describe('order 40: each paired side is its own slot', () => {
     const r = await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Mid Bracer'))]));
     expect(r.data.content).toContain("for Testchar's Wrist 2");
     expect(comps(r).find((c) => c.custom_id?.startsWith(WEAR_NOW_PREFIX)).custom_id).toContain(':wrist2:');
+    // Review fix: an item that beats both sides opens for the weaker one (Wrist 2, as the old list said), not panel order.
+    await env.DB.prepare("INSERT INTO item (name, name_key, slot, stats_json, source, imported_at, slot_mask, class_mask, race_mask, level_low, level_high, level_kind, level_kinds) VALUES ('Gold Bracer', 'gold bracer', 'X', ?, 'wiki', 't', ?, -1, -1, 1, 1, 'mob', 'mob')").bind(JSON.stringify({ stats: { STA: 9 } }), slot('WRIST')).run();
+    await markImported();
+    const both = await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Gold Bracer'))]));
+    expect(both.data.content).toContain("for Testchar's Wrist 2");
     // Old Bracer beats neither side (it is worn on Wrist 2 and below Silver): gone.
     expect((await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Old Bracer'))]))).data.content).toBe(UPGRADES_COPY.gone);
+  });
+
+  it('the summary adds no database read: over 20 slots it is still one statement (the shown lines\' stats)', async () => {
+    await paired();
+    const ch = await one<any>("SELECT * FROM character WHERE name = 'Testchar'");
+    const L = await load({ db: env.DB, guild: { id: '900000000000000001' } } as any, ch);
+    let statements = 0;
+    const counting = { prepare: (sql: string) => (statements++, env.DB.prepare(sql)) } as unknown as D1Database;
+    const v = await summaryView({ db: counting }, L, null);
+    expect(v.embed.description).toContain('**Wrist 2:**');
+    expect(statements).toBe(1);
   });
 
   it('separate summary lines and Pick a slot options per side; an empty Ear 2 and a filled Ear 1 each compare with their own side', async () => {

@@ -51,6 +51,7 @@ export function planWindows(now: number, o: { days?: string; from?: string; to?:
   if (o.from !== undefined || o.to !== undefined) {
     const f = o.from !== undefined ? Date.parse(o.from) : NaN;
     const t = o.to !== undefined ? Date.parse(o.to) : now;
+    if (Number.isFinite(f) && f >= now) throw new Error('--from must be before now');
     if (!Number.isFinite(f) || !Number.isFinite(t) || f >= t) throw new Error('--from (and --to, if given) must be ISO times, --from before --to');
     start = utcDay(f);
     end = Math.min(now, utcDay(t) === t ? t : utcDay(t) + DAY);
@@ -64,7 +65,9 @@ export function planWindows(now: number, o: { days?: string; from?: string; to?:
   if (!limits) notes.push(`${DATASET}'s range limit unread (settings): whole UTC days assumed`);
   else notes.push(`${DATASET}'s range limit (the account's settings): maxDuration ${limits.maxDuration ?? 'not stated'} s, notOlderThan ${limits.notOlderThan ?? 'not stated'} s`);
   const width = limits?.maxDuration ? Math.min(DAY, limits.maxDuration * 1000) : DAY;
-  const oldest = limits?.notOlderThan ? now - limits.notOlderThan * 1000 : -Infinity;
+  // Review fix: the queries are sent after `now`, so the oldest start allowed is kept a margin inside notOlderThan
+  // (5 minutes, rounded up to the minute); a window starting exactly at the limit would be refused on arrival.
+  const oldest = limits?.notOlderThan ? Math.ceil((now - limits.notOlderThan * 1000 + OLDEST_MARGIN) / 60_000) * 60_000 : -Infinity;
   const windows: Window[] = [];
   if (width === DAY && start >= oldest) {
     for (let d = start; d < end; d += DAY) {
@@ -75,9 +78,16 @@ export function planWindows(now: number, o: { days?: string; from?: string; to?:
   }
   notes.push(`whole UTC days don't fit that limit (${width < DAY ? 'a day is wider than maxDuration' : 'the first day starts before notOlderThan'}): rolling windows instead`);
   const floor = Math.max(start, oldest);
-  for (let t = end; t > floor; t -= width) windows.unshift({ from: iso(Math.max(floor, t - width)), to: iso(t), label: `${Math.round(Math.min(width, t - floor) / 3_600_000)} h to ${minute(t)} UTC` });
+  for (let t = end; t > floor; t -= width) windows.unshift({ from: iso(Math.max(floor, t - width)), to: iso(t), label: `${span(Math.min(width, t - floor))} to ${minute(t)} UTC` });
   return { windows, wholeDays: false, notes };
 }
+/** Review fix: how far inside notOlderThan the oldest window starts. */
+export const OLDEST_MARGIN = 5 * 60_000;
+/** A window's real length: "24 h", "5 h 42 min" (review fix: never rounded). */
+const span = (ms: number) => {
+  const m = Math.round(ms / 60_000);
+  return m % 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m / 60} h`;
+};
 
 const LIMITS_Q = `query ($a: String!) { viewer { accounts(filter: { accountTag: $a }) { settings { ${DATASET} { maxDuration notOlderThan } } } } }`;
 /** The account's own range limit for the dataset (null, with the reason, when it can't be read). */
@@ -95,10 +105,12 @@ export async function readLimits(gql: Gql, account: string): Promise<{ limits: L
 // ---------------------------------------------------------------- the schema
 
 /** The dataset's shape as read, or why it wasn't. */
-export type Schema = { ds: Dataset } | { error: string };
+/** `missing`: the schema was read and the account has no such dataset (review fix: that is absent, not unknown). */
+export type Schema = { ds: Dataset } | { error: string } | { missing: string };
 export type FieldState = 'present' | 'absent' | 'unknown';
 /** Whether a block's field is in the schema; 'unknown' when the schema wasn't read (never "absent" without reading it). */
-export const fieldState = (s: Schema, block: string, field: string): FieldState => ('error' in s ? 'unknown' : s.ds.blocks.get(block)?.has(field) ? 'present' : 'absent');
+export const fieldState = (s: Schema, block: string, field: string): FieldState =>
+  'error' in s ? 'unknown' : 'missing' in s ? 'absent' : s.ds.blocks.get(block)?.has(field) ? 'present' : 'absent';
 /** The fields the report uses. */
 export const USED = [['quantiles', 'cpuTimeP50'], ['quantiles', 'cpuTimeP99'], ['max', 'cpuTime'], ['sum', 'requests'], ['sum', 'errors'], ['dimensions', 'status']] as const;
 
@@ -106,7 +118,7 @@ export async function loadSchema(gql: Gql, account: string): Promise<Schema> {
   try {
     const { datasets } = await readSchema(gql, account);
     const ds = datasets.get(DATASET);
-    return ds ? { ds } : { error: `the account schema has no ${DATASET}` };
+    return ds ? { ds } : { missing: `the account schema has no ${DATASET}` };
   } catch (e) {
     return { error: (e as Error).message };
   }
@@ -116,6 +128,7 @@ export async function loadSchema(gql: Gql, account: string): Promise<Schema> {
 export function schemaLines(s: Schema): string[] {
   const out: string[] = [];
   if ('error' in s) out.push(`- schema not read: ${s.error}`);
+  else if ('missing' in s) out.push(`- schema read: ${s.missing}`);
   else out.push(...describeFields(s.ds).filter((l) => /cpuTimeP50|cpuTimeP99|max\.cpuTime|status/.test(l)).map((l) => `- ${l}`));
   for (const [b, f] of USED) {
     const st = fieldState(s, b, f);
@@ -148,7 +161,8 @@ export async function report(gql: Gql, account: string, workers: { name: string;
   out.push(...plan.notes.map((n) => `- ${n}`));
   const f = queriedFields(schema);
   const one = async (query: string | null, v: Record<string, unknown>) => {
-    if (!query) return { rows: [] as any[], error: 'no such field in the schema' };
+    // A field the schema lacks is not queried and not a failure: the schema lines above say so, and its cells read "-".
+    if (!query) return { rows: [] as any[], error: null };
     try {
       return { rows: ((await gql(query, v))?.viewer?.accounts?.[0]?.[DATASET] ?? []) as any[], error: null };
     } catch (e) {
@@ -159,35 +173,39 @@ export async function report(gql: Gql, account: string, workers: { name: string;
   const Q_P = f.quantiles.length ? q(`quantiles { ${f.quantiles.join(' ')} } dimensions { scriptName }`) : null;
   const Q_MAX = f.max ? q(`max { ${f.max} } dimensions { scriptName }`) : null;
   const Q_ST = q('sum { requests errors } dimensions { status }', 100);
-  const reported = new Set<string>();
-  const first = plan.windows[0]?.from ?? '-';
-  const last = plan.windows.at(-1)?.to ?? '-';
-  out.push('', `### CPU time per Worker, ${plan.wholeDays ? 'per UTC day' : 'per rolling window (whole UTC days did not fit the range limit)'}, ${first} → ${last}`);
+  if (!plan.windows.length) {
+    out.push('', '### No windows: the range is empty, so nothing was read');
+    return out;
+  }
+  out.push('', `### CPU time per Worker, ${plan.wholeDays ? 'per UTC day' : 'per rolling window (whole UTC days did not fit the range limit)'}, ${plan.windows[0].from} → ${plan.windows.at(-1)!.to}`);
   for (const c of workers) {
     const statuses = new Map<string, number>();
     let worstP99 = 0;
     let worstMax = 0;
     let requests = 0;
+    // Review fix: a failed query is never a 0. Its cells read "error", the window is left out of the totals, and every
+    // failure is named with its Worker and window.
+    const unread = new Set<string>();
     out.push('', `${c.name} (Worker ${c.worker}):`, `${plan.wholeDays ? 'UTC day' : 'window'}\trequests\terrors\tcpuTimeP50\tcpuTimeP99\tmax cpuTime`);
     for (const w of plan.windows) {
       const v = { a: account, s: c.worker, f: w.from, t: w.to };
       const [sum, p, mx, st] = await Promise.all([one(Q_SUM, v), one(Q_P, v), one(Q_MAX, v), one(Q_ST, v)]);
-      for (const [label, r] of [['sum', sum], ['quantiles', p], ['max', mx], ['status', st]] as const)
-        if (r.error && !reported.has(label)) {
-          reported.add(label);
-          out.push(`  (${label} query: ${r.error})`);
-        }
-      for (const s of st.rows) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
+      const failed = ([['sum', sum], ['quantiles', p], ['max', mx], ['status', st]] as const).filter(([, r]) => r.error);
+      for (const [label, r] of failed) out.push(`  (${c.name}, ${w.label}: ${label} query: ${r.error})`);
+      if (failed.length) unread.add(w.label);
+      const cell = (r: { error: string | null }, x: unknown) => (r.error ? 'error' : (x ?? '-'));
+      if (!st.error) for (const s of st.rows) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
       const g = sum.rows[0];
       const qs = p.rows[0]?.quantiles;
       const m = mx.rows[0]?.max;
-      requests += Number(g?.sum.requests ?? 0);
-      worstP99 = Math.max(worstP99, Number(qs?.cpuTimeP99 ?? 0));
-      worstMax = Math.max(worstMax, Number(m?.cpuTime ?? 0));
-      out.push([w.label, g?.sum.requests ?? 0, g?.sum.errors ?? 0, qs?.cpuTimeP50 ?? '-', qs?.cpuTimeP99 ?? '-', m?.cpuTime ?? '-'].join('\t'));
+      if (!sum.error) requests += Number(g?.sum.requests ?? 0);
+      if (!p.error) worstP99 = Math.max(worstP99, Number(qs?.cpuTimeP99 ?? 0));
+      if (!mx.error) worstMax = Math.max(worstMax, Number(m?.cpuTime ?? 0));
+      out.push([w.label, cell(sum, g?.sum.requests ?? 0), cell(sum, g?.sum.errors ?? 0), cell(p, qs?.cpuTimeP50), cell(p, qs?.cpuTimeP99), cell(mx, m?.cpuTime)].join('\t'));
     }
-    out.push(`${c.name}: ${requests} invocations; highest cpuTimeP99 ${worstP99}; highest max cpuTime ${worstMax} (units: the schema's descriptions above${'error' in schema ? ', unread this run' : ''})`);
-    out.push(`${c.name}: invocations by status: ${[...statuses].map(([s, n]) => `${s} ${n}`).join(', ') || 'none'}`);
+    const partial = unread.size ? ` (${unread.size} of ${plan.windows.length} windows unread, left out: ${[...unread].join(', ')})` : '';
+    out.push(`${c.name}: ${requests} invocations; highest cpuTimeP99 ${worstP99}; highest max cpuTime ${worstMax}${partial} (units: the schema's descriptions above${'error' in schema ? ', unread this run' : ''})`);
+    out.push(`${c.name}: invocations by status: ${[...statuses].map(([s, n]) => `${s} ${n}`).join(', ') || 'none'}${partial}`);
   }
   return out;
 }

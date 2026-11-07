@@ -48,7 +48,7 @@ const gearOptions = (classes: readonly string[]) => [
     ],
   },
   {
-    // Order 36 (src/gear/upgrades.ts): the 17 slots, each pair (Ear, Wrist, Finger) as one.
+    // Order 36 (src/gear/upgrades.ts); order 40: the 20 slots, each side of a pair (Ear, Wrist, Finger) its own (UPGRADE_SLOTS).
     type: SUBCOMMAND,
     name: 'upgrades',
     description: "What beats your character's saved gear, smallest upgrade first, and how to get each item",
