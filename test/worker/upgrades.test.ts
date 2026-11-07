@@ -1,9 +1,10 @@
 // Work order 36, ITEM 3: /gear upgrades, Find upgrades, and their controls (src/gear/upgrades.ts).
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
+import { howToGet, levelText, load, summaryView, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
-import { SLOT_GROUPS, statVector, type GearItem } from '../../src/gear/score.ts';
+import { statVector, UPGRADE_SLOTS, type GearItem } from '../../src/gear/score.ts';
+import { POST_PREFIX } from '../../src/commands/share.ts';
 import { bucket, clearGearIndex, GEAR_INDEX_SQL, itemsFor, toItem } from '../../src/gear/index.ts';
 import { isolateSnapshot } from '../../src/telemetry.ts';
 import { buildSourceIndex } from '../../src/gear/sources.ts';
@@ -156,9 +157,9 @@ describe('order 36, ITEM 3: the summary', () => {
     expect(lines).toHaveLength(8);
     // Smallest gain first: Thing 10 (1 AC) leads.
     expect(lines[0]).toContain('Thing 10');
-    // 11 listed (Far Boots too: no cap) + 1 unknown = 12 lines; 8 shown, 4 more; 17 − 12 = 5 slots with nothing better.
+    // 11 listed (Far Boots too: no cap) + 1 unknown = 12 lines; 8 shown, 4 more; order 40: 20 − 12 = 8 slots with nothing better.
     expect(r.data.embeds![0].footer!.text).toContain('4 more slots with upgrades');
-    expect(r.data.embeds![0].footer!.text).toContain('5 slots with nothing better');
+    expect(r.data.embeds![0].footer!.text).toContain('8 slots with nothing better');
     const pick = comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX));
     expect(pick.options).toHaveLength(12);
     limits(r);
@@ -173,8 +174,8 @@ describe('order 36, ITEM 3: the summary', () => {
     const r = await upgrades(ann, { max_level: 30 });
     expect(r.data.embeds![0].description).not.toContain('Feet');
     expect(r.data.embeds![0].footer!.text).toContain(UPGRADES_COPY.hidden(2, 30));
-    // Review fix: Feet has upgrades (hidden), so it is not among the slots with nothing better: 17 − Head − Feet = 15.
-    expect(r.data.embeds![0].footer!.text).toContain('15 slots with nothing better');
+    // Review fix: Feet has upgrades (hidden), so it is not among the slots with nothing better: order 40, 20 − Head − Feet = 18.
+    expect(r.data.embeds![0].footer!.text).toContain('18 slots with nothing better');
     expect(comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX)).options.map((o: any) => o.value)).toEqual(['head']);
     // And the Feet list with the cap says only what the cap hid, never "Nothing beats".
     const feet = text(await upgrades(ann, { slot: 'feet', max_level: 30 }));
@@ -244,11 +245,13 @@ describe('order 36, ITEM 5: the gear index', () => {
     const { results } = await env.DB.prepare(GEAR_INDEX_SQL).all<Record<string, unknown>>();
     const list = results.map((r) => toItem(r as any));
     const buckets = bucket(list);
-    for (const g of SLOT_GROUPS) {
+    for (const g of UPGRADE_SLOTS) {
       const bit = bitOf(SLOTS, g.token);
       expect(itemsFor({ slotItems: buckets, items: list }, g.token)).toEqual(list.filter((it) => (it.slotMask & bit) !== 0));
     }
     expect(buckets.get('FINGER')!.map((i) => i.name).sort()).toEqual(['Band', 'Ring']);
+    // Order 40: 20 slots, still 17 buckets (a pair's sides share their token's).
+    expect(buckets.size).toBe(17);
   });
 
   it('order 38: the timing line carries the caches\' state (empty, then held for the version read)', async () => {
@@ -365,6 +368,105 @@ describe('order 36, ITEM 3: the controls', () => {
     }
     expect((await send(press(bo, `${WEAR_NOW_PREFIX}${id}:chest:10:${await itemId('Low Tie')}`))).data.content).toBe(WEAR_COPY.notYours);
     expect(await one('SELECT count(*) AS n FROM character_gear')).toEqual({ n: 0 });
+  });
+});
+
+describe('order 40: each paired side is its own slot', () => {
+  /** An Inquisitor (STA 1, AC 0.35) wearing Silver (7.05) on Wrist 1, Old (1.70) on Wrist 2, Pearl (1.40) on Ear 1; Ear 2 empty. */
+  async function paired() {
+    await add('Testchar');
+    await setChar('Testchar', 'INQ', 20);
+    await seed([
+      { name: 'Old Bracer', slots: ['WRIST'], stats: { ac: 2, stats: { STA: 1 } } }, // 1.70
+      { name: 'Silver Bracer', slots: ['WRIST'], stats: { ac: 3, stats: { STA: 6 } } }, // 7.05
+      { name: 'Mid Bracer', slots: ['WRIST'], stats: { stats: { STA: 4 } } }, // 4.00: beats Wrist 2 only
+      { name: 'Pearl Earring', slots: ['EAR'], stats: { ac: 4 } }, // 1.40
+      { name: 'Jade Earring', slots: ['EAR'], stats: { ac: 6 } }, // 2.10
+    ]);
+    await wearIt('Testchar', 'wrist1', 'Silver Bracer');
+    await wearIt('Testchar', 'wrist2', 'Old Bracer');
+    await wearIt('Testchar', 'ear1', 'Pearl Earring');
+    await markImported();
+    return charId('Testchar');
+  }
+
+  it("I'm wearing it now saves to the list's own slot (Ear 2), leaves Ear 1 as it was, and the list then compares against it", async () => {
+    await paired();
+    const list = await upgrades(ann, { slot: 'ear2' });
+    expect(text(list)).toContain('Ear 2: empty (score 0.00)');
+    const pick = comps(list).find((c) => c.custom_id?.startsWith(RESULT_PREFIX));
+    const r = await send(select(ann, pick.custom_id, [String(await itemId('Jade Earring'))]));
+    expect(r.data.content).toContain("for Testchar's Ear 2");
+    const now = comps(r).find((c) => c.custom_id?.startsWith(WEAR_NOW_PREFIX));
+    expect(now.custom_id).toContain(':ear2:');
+    const after = await send(press(ann, now.custom_id));
+    const gear = await env.DB.prepare("SELECT slot, item_key FROM character_gear WHERE slot LIKE 'ear%' ORDER BY slot").all<{ slot: string; item_key: string }>();
+    expect(gear.results).toEqual([{ slot: 'ear1', item_key: 'pearl earring' }, { slot: 'ear2', item_key: 'jade earring' }]);
+    const t = text(after);
+    expect(t).toContain('Ear 2 upgrades for Testchar');
+    expect(t).toContain('Ear 2: Jade Earring (score 2.10)');
+    expect(t).not.toContain('Ear 1:');
+  });
+
+  it('every old pair key is answered as its first side, naming the other: slot:, Pick a slot, gup: and pub:gu:', async () => {
+    const id = await paired();
+    const first = (r: Reply) => {
+      const t = text(r);
+      expect(t).toContain('Wrist 1 upgrades for Testchar');
+      expect(t).toContain(UPGRADES_COPY.otherSide('Wrist 2'));
+      expect(t).toContain('Wrist 1: Silver Bracer (score 7.05)');
+    };
+    first(await upgrades(ann, { slot: 'wrist' }));
+    first(await send(select(ann, `${SLOT_PREFIX}${id}:c`, ['wrist'])));
+    first(await send(press(ann, `${PAGE_PREFIX}${id}:wrist:c:0`)));
+    const posted = await send(press(ann, `${POST_PREFIX}gu:${id}:wrist:c:0`));
+    expect(posted.data.flags ?? 0).toBe(0);
+    first(posted);
+    // Ear and Finger too; a key that was never a slot is refused as before.
+    expect(text(await upgrades(ann, { slot: 'ear' }))).toContain(UPGRADES_COPY.otherSide('Ear 2'));
+    expect(text(await upgrades(ann, { slot: 'finger' }))).toContain('Finger 1 upgrades for Testchar');
+    expect((await upgrades(ann, { slot: 'elbow' })).data.content).toBe(UPGRADES_COPY.unknownSlot);
+  });
+
+  it('an old gur: searches both sides for the picked item (its list came from the weaker side); "gone" only when neither has it', async () => {
+    const id = await paired();
+    // Mid Bracer (4.00) beats Old Bracer on Wrist 2, not Silver on Wrist 1: found on Wrist 2, and wearing it saves there.
+    const r = await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Mid Bracer'))]));
+    expect(r.data.content).toContain("for Testchar's Wrist 2");
+    expect(comps(r).find((c) => c.custom_id?.startsWith(WEAR_NOW_PREFIX)).custom_id).toContain(':wrist2:');
+    // Review fix: an item that beats both sides opens for the weaker one (Wrist 2, as the old list said), not panel order.
+    await env.DB.prepare("INSERT INTO item (name, name_key, slot, stats_json, source, imported_at, slot_mask, class_mask, race_mask, level_low, level_high, level_kind, level_kinds) VALUES ('Gold Bracer', 'gold bracer', 'X', ?, 'wiki', 't', ?, -1, -1, 1, 1, 'mob', 'mob')").bind(JSON.stringify({ stats: { STA: 9 } }), slot('WRIST')).run();
+    await markImported();
+    const both = await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Gold Bracer'))]));
+    expect(both.data.content).toContain("for Testchar's Wrist 2");
+    // Old Bracer beats neither side (it is worn on Wrist 2 and below Silver): gone.
+    expect((await send(select(ann, `${RESULT_PREFIX}${id}:wrist:c`, [String(await itemId('Old Bracer'))]))).data.content).toBe(UPGRADES_COPY.gone);
+  });
+
+  it('the summary adds no database read: over 20 slots it is still one statement (the shown lines\' stats)', async () => {
+    await paired();
+    const ch = await one<any>("SELECT * FROM character WHERE name = 'Testchar'");
+    const L = await load({ db: env.DB, guild: { id: '900000000000000001' } } as any, ch);
+    let statements = 0;
+    const counting = { prepare: (sql: string) => (statements++, env.DB.prepare(sql)) } as unknown as D1Database;
+    const v = await summaryView({ db: counting }, L, null);
+    expect(v.embed.description).toContain('**Wrist 2:**');
+    expect(statements).toBe(1);
+  });
+
+  it('separate summary lines and Pick a slot options per side; an empty Ear 2 and a filled Ear 1 each compare with their own side', async () => {
+    await paired();
+    const s = await upgrades(ann);
+    const lines = (s.data.embeds![0].description ?? '').split('\n');
+    expect(lines.some((l) => l.startsWith('**Wrist 2:** **Mid Bracer** **+2.30**'))).toBe(true);
+    expect(lines.some((l) => l.startsWith('**Ear 1:** **Jade Earring** **+0.70**'))).toBe(true);
+    // Ear 2 is empty: its smallest is Pearl (worn on Ear 1, still a candidate here), against nothing.
+    expect(lines.some((l) => l.startsWith('**Ear 2:** **Pearl Earring** **+1.40**'))).toBe(true);
+    const opts = comps(s).find((c) => c.custom_id?.startsWith(SLOT_PREFIX)).options.map((o: any) => o.value);
+    expect(opts).toEqual(expect.arrayContaining(['ear1', 'ear2', 'wrist2']));
+    expect(opts).not.toContain('wrist1'); // Silver on Wrist 1 is the best wrist item: Wrist 1 has nothing better
+    // The footer counts the 20 slots: here every slot but Ear 1, Ear 2 and Wrist 2 has nothing better.
+    expect(s.data.embeds![0].footer!.text).toContain('17 slots with nothing better');
   });
 });
 

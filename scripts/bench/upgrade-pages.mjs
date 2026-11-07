@@ -1,7 +1,7 @@
 // Order 39, ITEM 3: the longest /gear upgrades page once every result carries its full stat line. On the local D1 after a
 // real-data import (npm run import:local): for every class in the derived list, two characters, one with nothing saved and
 // one wearing, in each of the 20 slots, the usable item with the longest stat line (the longest header, and the most stats
-// a result can lose); every page of every one of the 17 slot lists, and the summary, through the real handlers.
+// a result can lose); every page of every one of the 20 slot lists (17 before order 40), and the summary, through the real handlers.
 //   node scripts/bench/upgrade-pages.mjs
 // Prints the longest embed description and the longest whole message (Discord: description 4,096, a message's embeds
 // 6,000 characters together; src/discord.ts EMBED_LIMITS), with where each was found, and every page that reached the
@@ -11,7 +11,7 @@ import { getPlatformProxy } from 'wrangler';
 import { gearUpgrades, PAGE_PREFIX } from '../../src/gear/upgrades.ts';
 import { EMBED_LIMITS } from '../../src/discord.ts';
 import { plainLine, parseStats } from '../../src/gear/statline.ts';
-import { SLOT_GROUPS } from '../../src/gear/score.ts';
+import { UPGRADE_SLOTS } from '../../src/gear/score.ts';
 import { WEAR_SLOTS } from '../../src/gear/slots.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 
@@ -79,7 +79,7 @@ for (const cls of classes) {
     }
     const summary = await gearUpgrades(ctx(), [opt('character', name)]);
     note(summary.data.embeds[0], `${cls.code} ${kind} summary`);
-    for (const g of SLOT_GROUPS) {
+    for (const g of UPGRADE_SLOTS) {
       const first = await gearUpgrades(ctx(), [opt('character', name), opt('slot', g.key)]);
       const e = first.data.embeds[0];
       note(e, `${cls.code} ${kind} ${g.key} p1`);

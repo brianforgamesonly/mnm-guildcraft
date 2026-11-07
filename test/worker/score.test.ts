@@ -1,7 +1,7 @@
 // Work order 36, ITEM 2: scoring (src/gear/score.ts). Pure: no D1.
 import { describe, expect, it } from 'vitest';
 import {
-  breakdown, byGain, CLASSES, compareGroup, upgradeDiff, defaultWeights, presetWeights, fmtHundredths, groupByKey, grouped, levelGroup, presetOf, SLOT_GROUPS, statVector, WEIGHT_KEYS, wornState,
+  breakdown, byGain, CLASSES, compareSlot, upgradeDiff, defaultWeights, presetWeights, fmtHundredths, upgradeSlot, grouped, levelGroup, OLD_PAIR_KEYS, presetOf, resolveSlot, UPGRADE_SLOTS, statVector, WEIGHT_KEYS, wornState,
   type Context, type GearItem, type Wearer, type Weights,
 } from '../../src/gear/score.ts';
 import { bitOf, REMOVED_BIT, SLOTS } from '../../src/gear/vocab.ts';
@@ -23,7 +23,7 @@ const ctxFor = (cls: string, worn: Record<string, GearItem | null> = {}, wearer 
 });
 const W = (cls: string | null) => defaultWeights(cls);
 /** A score by itself in an empty slot: the gain against nothing. */
-const alone = (cls: string, it: GearItem, slot = 'chest') => compareGroup(groupByKey(slot)!, ctxFor(cls), anyone, [it]).upgrades[0]?.gain ?? 0;
+const alone = (cls: string, it: GearItem, slot = 'chest') => compareSlot(upgradeSlot(slot)!, ctxFor(cls), anyone, [it]).upgrades[0]?.gain ?? 0;
 
 describe('order 36, ITEM 2: weights', () => {
   it('each preset, from the table (× 100)', () => {
@@ -95,16 +95,16 @@ describe('order 36, ITEM 2: scores', () => {
     const resists = mk('Resist Ring', ['FINGER'], { resists: { MR: 5, PR: 5, DR: 5, FR: 5, CORR: 5, CR: 5, ER: 5, HR: 5 } });
     const sta = mk('Stamina Ring', ['FINGER'], { stats: { STA: 5 } });
     // Fighter: 8 × 5 × 0.1 = 4.00 against 5 × 1 = 5.00. Cleric: 8 × 5 × 0.05 = 2.00 against 5 × 0.5 = 2.50.
-    expect([alone('FTR', resists, 'finger'), alone('FTR', sta, 'finger')]).toEqual([400, 500]);
-    expect([alone('CLR', resists, 'finger'), alone('CLR', sta, 'finger')]).toEqual([200, 250]);
+    expect([alone('FTR', resists, 'finger1'), alone('FTR', sta, 'finger1')]).toEqual([400, 500]);
+    expect([alone('CLR', resists, 'finger1'), alone('CLR', sta, 'finger1')]).toEqual([200, 250]);
   });
 
   it('integer hundredths: two items of equal value are not upgrades of each other; a gain of 0.03 shows as "+0.03"', () => {
     const a = mk('A', ['CHEST'], { ac: 10 });
     const b = mk('B', ['CHEST'], { ac: 10 });
-    expect(compareGroup(groupByKey('chest')!, ctxFor('WIZ', { chest: a }), anyone, [a, b]).upgrades).toEqual([]);
+    expect(compareSlot(upgradeSlot('chest')!, ctxFor('WIZ', { chest: a }), anyone, [a, b]).upgrades).toEqual([]);
     const c = mk('C', ['CHEST'], { ac: 11 });
-    const u = compareGroup(groupByKey('chest')!, ctxFor('WIZ', { chest: a }), anyone, [c]).upgrades[0];
+    const u = compareSlot(upgradeSlot('chest')!, ctxFor('WIZ', { chest: a }), anyone, [c]).upgrades[0];
     expect(u.gain).toBe(3); // 1 AC × 0.03
     expect(fmtHundredths(u.gain)).toBe('+0.03');
     expect([fmtHundredths(1120), fmtHundredths(-500), fmtHundredths(0, false)]).toEqual(['+11.20', '−5.00', '0.00']);
@@ -114,7 +114,7 @@ describe('order 36, ITEM 2: scores', () => {
     const worn = mk('Old', ['CHEST'], { ac: 8, hp: 15, stats: { STA: 1 } });
     const cand = mk('New', ['CHEST'], { ac: 22, hp: 10, stats: { STA: 2, AGI: 3 } });
     const ctx = ctxFor('FTR', { chest: worn });
-    const u = compareGroup(groupByKey('chest')!, ctx, anyone, [cand]).upgrades[0];
+    const u = compareSlot(upgradeSlot('chest')!, ctx, anyone, [cand]).upgrades[0];
     // AC +14 × 0.35 = 4.90; STA +1 × 1 = 1.00; AGI +3 × 0.25 = 0.75; HP −5 × 0.1 = −0.50
     expect(breakdown(upgradeDiff(u, ctx), W('FTR'))).toBe('+14 AC, +1 STA, +3 AGI');
     expect(u.gain).toBe(490 + 100 + 75 - 50);
@@ -123,27 +123,53 @@ describe('order 36, ITEM 2: scores', () => {
 
 describe('order 36, ITEM 2: comparing', () => {
   it('an empty slot scores 0', () => {
-    const r = compareGroup(groupByKey('head')!, ctxFor('FTR'), anyone, [mk('Cap', ['HEAD'], { ac: 2 })]);
+    const r = compareSlot(upgradeSlot('head')!, ctxFor('FTR'), anyone, [mk('Cap', ['HEAD'], { ac: 2 })]);
     expect([r.baseline, r.upgrades[0].gain]).toEqual([0, 70]);
   });
 
-  it('a pair compares with the weaker side, an empty side scores 0, and an item worn on the other side is still a candidate', () => {
+  it('order 40: each side of a pair compares only with its own slot; an item worn on the other side is still a candidate', () => {
     const gold = mk('Gold Ring', ['FINGER'], { stats: { STA: 5 } });
     const tin = mk('Tin Ring', ['FINGER'], { stats: { STA: 1 } });
     const silver = mk('Silver Ring', ['FINGER'], { stats: { STA: 3 } });
-    const both = compareGroup(groupByKey('finger')!, ctxFor('FTR', { finger1: gold, finger2: tin }), anyone, [gold, tin, silver]);
-    expect(both.replaces).toEqual(['finger2']);
-    // Gold (worn on Finger 1) beats Tin on the weaker side; Tin itself is not a candidate there.
-    expect(both.upgrades.map((u) => [u.item.name, u.side, u.gain])).toEqual([['Gold Ring', 'finger2', 400], ['Silver Ring', 'finger2', 200]]);
-    const oneEmpty = compareGroup(groupByKey('finger')!, ctxFor('FTR', { finger1: gold }), anyone, [silver]);
-    expect([oneEmpty.replaces, oneEmpty.baseline, oneEmpty.upgrades[0].side]).toEqual([['finger2'], 0, 'finger2']);
+    const ctx = ctxFor('FTR', { finger1: gold, finger2: tin });
+    const f1 = compareSlot(upgradeSlot('finger1')!, ctx, anyone, [gold, tin, silver]);
+    const f2 = compareSlot(upgradeSlot('finger2')!, ctx, anyone, [gold, tin, silver]);
+    // Finger 1 holds Gold (5.00): nothing beats it, the stronger side is never left out.
+    expect([f1.replaces, f1.baseline, f1.upgrades]).toEqual([['finger1'], 500, []]);
+    // Finger 2 holds Tin (1.00): Gold (worn on Finger 1) and Silver beat it there; Tin itself is not a candidate.
+    expect([f2.replaces, f2.baseline]).toEqual([['finger2'], 100]);
+    expect(f2.upgrades.map((u) => [u.item.name, u.baseline, u.gain])).toEqual([['Gold Ring', 100, 400], ['Silver Ring', 100, 200]]);
+  });
+
+  it('order 40: an empty Ear 2 beside a filled Ear 1, each list comparing with its own side', () => {
+    const pearl = mk('Pearl Earring', ['EAR'], { ac: 4 });
+    const jade = mk('Jade Earring', ['EAR'], { ac: 6 });
+    const ctx = ctxFor('FTR', { ear1: pearl });
+    const e1 = compareSlot(upgradeSlot('ear1')!, ctx, anyone, [pearl, jade]);
+    const e2 = compareSlot(upgradeSlot('ear2')!, ctx, anyone, [pearl, jade]);
+    // AC 0.35: Pearl 1.40, Jade 2.10.
+    expect([e1.baseline, e1.upgrades.map((u) => [u.item.name, u.gain])]).toEqual([140, [['Jade Earring', 70]]]);
+    expect([e2.baseline, e2.worn, e2.upgrades.map((u) => [u.item.name, u.gain])]).toEqual([0, [], [['Pearl Earring', 140], ['Jade Earring', 210]]]);
+    // Against the empty side, each is compared with nothing: the stat line's baseline is empty.
+    expect(e2.upgrades.every((u) => u.against.length === 1 && u.against[0] === null && u.except.length === 1 && u.except[0] === 'ear2')).toBe(true);
+  });
+
+  it('order 40: haste elsewhere counts the other side of the pair', () => {
+    const fast = mk('Haste Bracer', ['WRIST'], { haste: 20 });
+    const faster = mk('Faster Bracer', ['WRIST'], { haste: 25 });
+    // A Rogue (haste 1 per %) wearing a 20% bracer on Wrist 1: on an empty Wrist 2, a 25% bracer adds only 5.
+    const r = compareSlot(upgradeSlot('wrist2')!, ctxFor('ROG', { wrist1: fast }), anyone, [fast, faster]);
+    expect(r.upgrades.map((u) => [u.item.name, u.gain])).toEqual([['Faster Bracer', 500]]);
+    // And on Wrist 1 itself, its own haste counts in full (nothing else worn).
+    const r1 = compareSlot(upgradeSlot('wrist1')!, ctxFor('ROG', { wrist1: fast }), anyone, [faster]);
+    expect([r1.baseline, r1.upgrades[0].gain]).toEqual([2000, 500]);
   });
 
   it('a two-hander for Primary compares with Primary plus Secondary', () => {
     const sword = mk('Sword', ['PRIMARY', 'SECONDARY'], { stats: { STA: 3 } });
     const shield = mk('Shield', ['SECONDARY'], { ac: 10 });
     const great = mk('Greatsword', ['PRIMARY'], { stats: { STA: 8 } }, { twoHanded: true });
-    const r = compareGroup(groupByKey('primary')!, ctxFor('FTR', { primary: sword, secondary: shield }), anyone, [great]);
+    const r = compareSlot(upgradeSlot('primary')!, ctxFor('FTR', { primary: sword, secondary: shield }), anyone, [great]);
     // 8 STA = 8.00 against 3 STA + 10 AC = 3.00 + 3.50 = 6.50.
     expect(r.upgrades.map((u) => [u.item.name, u.baseline, u.gain, u.note])).toEqual([['Greatsword', 650, 150, null]]);
   });
@@ -151,7 +177,7 @@ describe('order 36, ITEM 2: comparing', () => {
   it('a one-hander for Primary under a worn two-hander compares with the two-hander alone (Secondary is then free)', () => {
     const great = mk('Greatsword', ['PRIMARY'], { stats: { STA: 4 } }, { twoHanded: true });
     const dagger = mk('Dagger', ['PRIMARY'], { stats: { STA: 5 } });
-    const r = compareGroup(groupByKey('primary')!, ctxFor('FTR', { primary: great }), anyone, [dagger]);
+    const r = compareSlot(upgradeSlot('primary')!, ctxFor('FTR', { primary: great }), anyone, [dagger]);
     expect(r.upgrades.map((u) => [u.baseline, u.gain, u.note])).toEqual([[400, 100, 'secondaryFree']]);
   });
 
@@ -159,7 +185,7 @@ describe('order 36, ITEM 2: comparing', () => {
     const great = mk('Greatsword', ['PRIMARY'], { stats: { STA: 4 } }, { twoHanded: true });
     const small = mk('Small Shield', ['SECONDARY'], { ac: 5 });
     const big = mk('Tower Shield', ['SECONDARY'], { ac: 20 });
-    const r = compareGroup(groupByKey('secondary')!, ctxFor('FTR', { primary: great }), anyone, [small, big]);
+    const r = compareSlot(upgradeSlot('secondary')!, ctxFor('FTR', { primary: great }), anyone, [small, big]);
     // 5 AC = 1.75 is below the two-hander's 4.00 (not listed); 20 AC = 7.00 is 3.00 above it.
     expect(r.upgrades.map((u) => [u.item.name, u.gain, u.note])).toEqual([['Tower Shield', 300, 'needsOneHand']]);
   });
@@ -167,8 +193,8 @@ describe('order 36, ITEM 2: comparing', () => {
   it('an item that fits Primary and Secondary is a candidate in both, compared separately', () => {
     const sword = mk('Sword', ['PRIMARY', 'SECONDARY'], { stats: { STA: 3 } });
     const ctx = ctxFor('FTR');
-    expect(compareGroup(groupByKey('primary')!, ctx, anyone, [sword]).upgrades).toHaveLength(1);
-    expect(compareGroup(groupByKey('secondary')!, ctx, anyone, [sword]).upgrades).toHaveLength(1);
+    expect(compareSlot(upgradeSlot('primary')!, ctx, anyone, [sword]).upgrades).toHaveLength(1);
+    expect(compareSlot(upgradeSlot('secondary')!, ctx, anyone, [sword]).upgrades).toHaveLength(1);
   });
 
   it('class and race filters; a character with no race uses any; removed and no-longer-listed items are never candidates', () => {
@@ -177,7 +203,7 @@ describe('order 36, ITEM 2: comparing', () => {
     const elfOnly = mk('Elf Circlet', ['HEAD'], { ac: 5 }, { raceMask: 1 << 3 });
     const removed = mk('Old Helm', ['HEAD'], { ac: 9 }, { sourceMask: REMOVED_BIT });
     const gone = mk('Gone Helm', ['HEAD'], { ac: 9 }, { gone: true });
-    const names = (w: Wearer) => compareGroup(groupByKey('head')!, ctxFor('FTR'), w, [ftrOnly, wizOnly, elfOnly, removed, gone]).upgrades.map((u) => u.item.name).sort();
+    const names = (w: Wearer) => compareSlot(upgradeSlot('head')!, ctxFor('FTR'), w, [ftrOnly, wizOnly, elfOnly, removed, gone]).upgrades.map((u) => u.item.name).sort();
     expect(names({ classBit: 0, raceBit: 2 })).toEqual(['Fighter Helm']);
     expect(names({ classBit: 0, raceBit: 3 })).toEqual(['Elf Circlet', 'Fighter Helm']);
     expect(names({ classBit: 0, raceBit: null })).toEqual(['Elf Circlet', 'Fighter Helm']); // no race: any
@@ -186,7 +212,7 @@ describe('order 36, ITEM 2: comparing', () => {
   it("damage ÷ delay counts in Primary and Range always, in Secondary only for the Melee and Tank presets", () => {
     const blade = mk('Blade', ['PRIMARY', 'SECONDARY', 'RANGE', 'WAIST'], { dmg: 10, delay: 20 }); // ratio 0.5 → 50
     const caster = { ...W('WIZ'), RATIO: 10 }; // a Caster with a ratio weight, to see the slot rule alone
-    const gainIn = (slot: string, cls: string, w?: Weights) => compareGroup(groupByKey(slot)!, ctxFor(cls, {}, anyone, w), anyone, [blade]).upgrades[0]?.gain ?? 0;
+    const gainIn = (slot: string, cls: string, w?: Weights) => compareSlot(upgradeSlot(slot)!, ctxFor(cls, {}, anyone, w), anyone, [blade]).upgrades[0]?.gain ?? 0;
     expect([gainIn('primary', 'WIZ', caster), gainIn('range', 'WIZ', caster), gainIn('secondary', 'WIZ', caster), gainIn('waist', 'WIZ', caster)]).toEqual([500, 500, 0, 0]);
     expect([gainIn('secondary', 'FTR'), gainIn('secondary', 'ROG')]).toEqual([500, 1500]);
     // A shield has no ratio and scores its stats only.
@@ -198,25 +224,25 @@ describe('order 36, ITEM 2: comparing', () => {
     const cloakLow = mk('Cloak 10', ['BACK'], { haste: 10 });
     const cloakHigh = mk('Cloak 25', ['BACK'], { haste: 25 });
     const ctx = ctxFor('ROG', { waist: belt });
-    const r = compareGroup(groupByKey('back')!, ctx, anyone, [cloakLow, cloakHigh]);
+    const r = compareSlot(upgradeSlot('back')!, ctx, anyone, [cloakLow, cloakHigh]);
     // Rogue haste weight 1 per %: 10 adds nothing over the belt's 20; 25 adds 5.
     expect(r.upgrades.map((u) => [u.item.name, u.gain])).toEqual([['Cloak 25', 500]]);
     // The belt itself, with a 25% cloak worn: its own haste counts 0, so a 21% belt is no upgrade but a 30% one adds 5.
     const ctx2 = ctxFor('ROG', { waist: belt, back: cloakHigh });
-    const r2 = compareGroup(groupByKey('waist')!, ctx2, anyone, [mk('Belt 21', ['WAIST'], { haste: 21 }), mk('Belt 30', ['WAIST'], { haste: 30 })]);
+    const r2 = compareSlot(upgradeSlot('waist')!, ctx2, anyone, [mk('Belt 21', ['WAIST'], { haste: 21 }), mk('Belt 30', ['WAIST'], { haste: 30 })]);
     expect(r2.upgrades.map((u) => [u.item.name, u.gain])).toEqual([['Belt 30', 500]]);
   });
 
   it('a worn item no longer listed, or no longer usable, scores 0', () => {
     const cand = mk('Cap', ['HEAD'], { ac: 2 });
     const gone = mk('Gone Cap', ['HEAD'], { ac: 50 }, { gone: true });
-    expect(compareGroup(groupByKey('head')!, ctxFor('FTR', { head: gone }), anyone, [cand]).baseline).toBe(0);
+    expect(compareSlot(upgradeSlot('head')!, ctxFor('FTR', { head: gone }), anyone, [cand]).baseline).toBe(0);
     const wizHat = mk('Wizard Cap', ['HEAD'], { ac: 50 }, { classMask: 1 << 1 });
     const ftr: Wearer = { classBit: 0, raceBit: null };
-    const r = compareGroup(groupByKey('head')!, ctxFor('FTR', { head: wizHat }, ftr), ftr, [cand]);
+    const r = compareSlot(upgradeSlot('head')!, ctxFor('FTR', { head: wizHat }, ftr), ftr, [cand]);
     expect([r.baseline, r.worn[0].reason]).toEqual([0, 'cantUse']);
     // A key that names no item row at all.
-    expect(compareGroup(groupByKey('head')!, ctxFor('FTR', { head: null }), anyone, [cand]).baseline).toBe(0);
+    expect(compareSlot(upgradeSlot('head')!, ctxFor('FTR', { head: null }), anyone, [cand]).baseline).toBe(0);
   });
 });
 
@@ -231,7 +257,7 @@ describe('order 36, ITEM 2: review fixes', () => {
     const dagger = mk('Dagger', ['SECONDARY'], { dmg: 10, delay: 20 });
     const staff = mk('Staff', ['PRIMARY'], { stats: { INT: 1 } }, { twoHanded: true });
     const caster = { ...W('WIZ'), RATIO: 10 };
-    const r = compareGroup(groupByKey('primary')!, ctxFor('WIZ', { secondary: dagger }, anyone, caster), anyone, [staff]);
+    const r = compareSlot(upgradeSlot('primary')!, ctxFor('WIZ', { secondary: dagger }, anyone, caster), anyone, [staff]);
     // The dagger's ratio (50 × 0.10) counts nothing in Secondary for a Caster: the baseline is 0.
     expect(r.upgrades.map((u) => [u.baseline, u.gain])).toEqual([[0, 100]]);
   });
@@ -239,22 +265,25 @@ describe('order 36, ITEM 2: review fixes', () => {
   it('a gone two-hander still takes both hands (saved gear refuses Secondary under it) and scores 0', () => {
     const great = mk('Old Greatsword', ['PRIMARY'], { stats: { STA: 9 } }, { twoHanded: true, gone: true });
     const shield = mk('Shield', ['SECONDARY'], { ac: 1 });
-    const r = compareGroup(groupByKey('secondary')!, ctxFor('FTR', { primary: great }), anyone, [shield]);
+    const r = compareSlot(upgradeSlot('secondary')!, ctxFor('FTR', { primary: great }), anyone, [shield]);
     expect(r.upgrades.map((u) => [u.baseline, u.note])).toEqual([[0, 'needsOneHand']]);
   });
 
-  it('two-handers are never Secondary candidates; a pair tie compares with the first side', () => {
+  it('two-handers are never Secondary candidates', () => {
     const big = mk('Big Axe', ['PRIMARY', 'SECONDARY'], { stats: { STA: 9 } }, { twoHanded: true });
-    expect(compareGroup(groupByKey('secondary')!, ctxFor('FTR'), anyone, [big]).upgrades).toEqual([]);
-    const ring = mk('Ring', ['FINGER'], { stats: { STA: 1 } });
-    expect(compareGroup(groupByKey('finger')!, ctxFor('FTR'), anyone, [ring]).replaces).toEqual(['finger1']);
+    expect(compareSlot(upgradeSlot('secondary')!, ctxFor('FTR'), anyone, [big]).upgrades).toEqual([]);
   });
 });
 
-describe('order 36, ITEM 2: groups and order', () => {
-  it('17 slot groups; the pairs are one each', () => {
-    expect(SLOT_GROUPS).toHaveLength(17);
-    expect(SLOT_GROUPS.filter((g) => g.sides.length === 2).map((g) => g.key)).toEqual(['ear', 'wrist', 'finger']);
+describe('order 40: slots and order', () => {
+  it('20 slots, from WEAR_SLOTS; the old pair keys are derived and read as their first side', () => {
+    expect(UPGRADE_SLOTS.map((s) => s.key)).toEqual([
+      'head', 'face', 'ear1', 'ear2', 'neck', 'shoulders', 'back', 'chest', 'shirt', 'wrist1', 'wrist2', 'hands', 'waist', 'finger1', 'finger2', 'legs', 'feet', 'primary', 'secondary', 'range',
+    ]);
+    expect([...OLD_PAIR_KEYS]).toEqual([['ear', ['ear1', 'ear2']], ['wrist', ['wrist1', 'wrist2']], ['finger', ['finger1', 'finger2']]]);
+    expect(resolveSlot('wrist')).toMatchObject({ slot: { key: 'wrist1', label: 'Wrist 1' }, oldSides: ['wrist1', 'wrist2'] });
+    expect(resolveSlot('wrist2')).toMatchObject({ slot: { key: 'wrist2' }, oldSides: null });
+    expect([resolveSlot('nope'), resolveSlot('')]).toEqual([null, null]);
   });
 
   it('order 36 follow-up: no cap lists every level; a cap hides what is above it (any-level kinds are 0); no level is unknown', () => {

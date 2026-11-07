@@ -19,7 +19,7 @@
     "bench:dkp-reads": "node scripts/bench/dkp-reads.ts",
     "test:operator-text": "node --test scripts/ci/operator-text.test.ts",
     "test:zone-sites": "node --test scripts/ci/zone-sites.test.ts",
-    "test:health": "node --test scripts/health/judge.test.ts scripts/health/workers.test.ts",
+    "test:health": "node --test scripts/health/judge.test.ts scripts/health/workers.test.ts scripts/usage/worker-cpu.test.ts",
     "test:ci-reads": "node --test scripts/ci/ci-reads.test.ts",
     "test:emoji": "node scripts/emoji/build.ts --check",
     "test:wiki": "node --test scripts/wiki/wiki.test.ts scripts/wiki/cleanup.test.ts",

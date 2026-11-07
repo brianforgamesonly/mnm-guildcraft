@@ -7,7 +7,7 @@
 import { BOARDS } from '../board/kinds.ts';
 import { gearFindOptions } from '../gear/options.ts';
 import { WEAR_SLOTS } from '../gear/slots.ts';
-import { className, MAX_LEVEL_CAP, PRESETS, SLOT_GROUPS, WEIGHT_KEYS, WEIGHT_LABEL } from '../gear/score.ts';
+import { className, MAX_LEVEL_CAP, PRESETS, UPGRADE_SLOTS, WEIGHT_KEYS, WEIGHT_LABEL } from '../gear/score.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
 
 export const SUBCOMMAND = 1;
@@ -48,13 +48,13 @@ const gearOptions = (classes: readonly string[]) => [
     ],
   },
   {
-    // Order 36 (src/gear/upgrades.ts): the 17 slots, each pair (Ear, Wrist, Finger) as one.
+    // Order 36 (src/gear/upgrades.ts); order 40: the 20 slots, each side of a pair (Ear, Wrist, Finger) its own (UPGRADE_SLOTS).
     type: SUBCOMMAND,
     name: 'upgrades',
     description: "What beats your character's saved gear, smallest upgrade first, and how to get each item",
     options: [
       { type: STRING, name: 'character', description: 'Your character (needed when you have more than one)', autocomplete: true, max_length: 32 },
-      { type: STRING, name: 'slot', description: 'One slot: its full list (leave out for every slot)', choices: SLOT_GROUPS.map((g) => ({ name: g.label, value: g.key })) },
+      { type: STRING, name: 'slot', description: 'One slot: its full list (leave out for every slot)', choices: UPGRADE_SLOTS.map((s) => ({ name: s.label, value: s.key })) },
       // Order 36 follow-up: no cap unless given; items above it are not listed (counted only).
       { type: INTEGER, name: 'max_level', description: 'Only items up to this level (leave out for no cap)', min_value: 1, max_value: MAX_LEVEL_CAP },
     ],

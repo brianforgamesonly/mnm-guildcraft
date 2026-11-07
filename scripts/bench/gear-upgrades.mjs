@@ -10,7 +10,7 @@ import { getPlatformProxy } from 'wrangler';
 import { gearUpgrades, load, summaryView, upgradesComponent, PAGE_PREFIX, RESULT_PREFIX } from '../../src/gear/upgrades.ts';
 import { clearGearIndex, GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
 import { gearWeights } from '../../src/gear/weights.ts';
-import { compareGroup, groupByKey, grouped, levelGroup } from '../../src/gear/score.ts';
+import { compareSlot, upgradeSlot, grouped, levelGroup } from '../../src/gear/score.ts';
 import { WEAR_SLOTS } from '../../src/gear/slots.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 
@@ -153,12 +153,12 @@ for (const [label, name, charId] of [['Fighter 24, 15 slots filled', 'Benchfight
   console.log(`\n${label}:`);
   console.log(`  summary, cold index: rows_read ${cold.rows} (${cold.statements} statements)`);
   for (const [what, m] of [['summary', s], ['chest list', l], ['page turn', p], ['Pick a result', k]]) console.log(`  ${what}: rows_read ${m.rows} (${m.statements} statements)`);
-  // CPU: the pure work each interaction does on the warm index (the summary: 17 slot comparisons; a list, a page turn and
+  // CPU: the pure work each interaction does on the warm index (the summary: 20 slot comparisons, order 40; a list, a page turn and
   // Pick a result: one slot's), and, once per isolate or import, building the index from its rows.
   const L = await load(ctx(), (await raw.prepare('SELECT * FROM character WHERE id = ?').bind(charId).first()));
   const statRows = (await raw.prepare("SELECT id, stats_json FROM item WHERE source = 'wiki' AND slot_mask <> 0").all()).results;
   console.log(`  CPU (Node, pure work) summary: ${fmt(await cpuAsync(() => summaryView({ db: stubDb(statRows) }, L, null)))}`);
-  console.log(`  CPU (Node, pure work) one slot (list, page turn, Pick a result): ${fmt(cpu(() => grouped(compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items).upgrades, null)))}`);
+  console.log(`  CPU (Node, pure work) one slot (list, page turn, Pick a result): ${fmt(cpu(() => grouped(compareSlot(upgradeSlot('chest'), L.ctx, L.wearer, L.idx.items).upgrades, null)))}`);
   if (charId === fighter) {
     const { results } = await raw.prepare(GEAR_INDEX_SQL).all();
     console.log(`  CPU (Node, pure work) building the index from ${results.length} rows (cold only): ${fmt(cpu(() => results.map(toItem), 5))}`);
@@ -180,7 +180,7 @@ if (process.argv.includes('--testchar')) {
   const bp = await raw.prepare("SELECT level_kind, level_low, level_high FROM item WHERE name = 'Enchanted Copper Plate Breastplate'").first();
   const chest = async () => {
     const L = await load(ctx(), tc);
-    return compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items);
+    return compareSlot(upgradeSlot('chest'), L.ctx, L.wearer, L.idx.items);
   };
   // Order 36 follow-up: no cap by default; max_level: 15 hides what is above Lv 15 (counted as "above").
   const counts = (r, cap) => Object.fromEntries(Object.entries(grouped(r.upgrades, cap)).map(([g, l]) => [g, l.length]));
@@ -195,7 +195,7 @@ if (process.argv.includes('--testchar')) {
   console.log(`  Chest after step 3: no cap ${JSON.stringify(counts(r1, null))}, max_level 15 ${JSON.stringify(counts(r1, 15))}`);
   const ac0 = { ...(await load(ctx(), tc)) };
   ac0.ctx = { ...ac0.ctx, weights: { ...ac0.ctx.weights, AC: 0 } };
-  const r2 = compareGroup(groupByKey('chest'), ac0.ctx, ac0.wearer, ac0.idx.items);
+  const r2 = compareSlot(upgradeSlot('chest'), ac0.ctx, ac0.wearer, ac0.idx.items);
   console.log(`  step 6 (AC weight 0), Chest after step 3: no cap ${JSON.stringify(counts(r2, null))}`);
 }
 // --testchar37 (order 37, Brian's check): Testchar (Inquisitor 15, Human, default weights), Primary: Copper Greatsword,
@@ -203,7 +203,7 @@ if (process.argv.includes('--testchar')) {
 // its page and its drop line; then, over every slot, the first listed item with a named merchant and the first with a
 // named quest (slot, page, line). Pages count from 1, PER_PAGE a page, in the list's own order.
 if (process.argv.includes('--testchar37')) {
-  const { GROUPS, SLOT_GROUPS } = await import('../../src/gear/score.ts');
+  const { GROUPS, UPGRADE_SLOTS } = await import('../../src/gear/score.ts');
   const { extrasFor, howToGet, PER_PAGE } = await import('../../src/gear/upgrades.ts');
   await raw.prepare("INSERT INTO character (guild_id, owner_user_id, name, name_key, class, level, race, is_main, created_at, updated_at) VALUES (?, ?, 'Testchar', 'testchar', 'INQ', 15, 'HUM', 0, ?, ?)").bind(BENCH_GUILD, USER, at, at).run();
   const tc = await raw.prepare("SELECT * FROM character WHERE guild_id = ? AND name = 'Testchar'").bind(BENCH_GUILD).first();
@@ -212,7 +212,7 @@ if (process.argv.includes('--testchar37')) {
   const CAP = 15;
   const L = await load(ctx(), tc);
   const list = (g) => {
-    const by = grouped(compareGroup(g, L.ctx, L.wearer, L.idx.items).upgrades, CAP);
+    const by = grouped(compareSlot(g, L.ctx, L.wearer, L.idx.items).upgrades, CAP);
     return { all: GROUPS.flatMap((k) => by[k].map((u) => ({ k, u }))), by };
   };
   const { vendorParts } = await import('../../src/gear/sources.ts');
@@ -222,7 +222,7 @@ if (process.argv.includes('--testchar37')) {
     return v.length ? vendorParts(x.src, v).merchants.length : 0;
   };
   const line = async (u) => howToGet(u.item, await extrasFor(ctx(), [u.item], L.idx.version), USER, 25).lines;
-  const chest = list(groupByKey('chest'));
+  const chest = list(upgradeSlot('chest'));
   console.log(`\nTestchar (order 37), Chest at max_level ${CAP}: listed ${chest.by.listed.length}, level unknown ${chest.by.unknown.length} (shown under the cap: ${GROUPS.includes('unknown')}), hidden above Lv ${CAP}: ${chest.by.above.length}; ${chest.all.length} shown, ${Math.ceil(chest.all.length / PER_PAGE)} pages`);
   const at37 = chest.all.findIndex((s) => s.u.item.name === 'Corroded Bronze Plate Breastplate');
   if (at37 < 0) console.log('  Corroded Bronze Plate Breastplate: not listed');
@@ -232,7 +232,7 @@ if (process.argv.includes('--testchar37')) {
   }
   let vendor = null;
   let quest = null;
-  for (const g of SLOT_GROUPS) {
+  for (const g of UPGRADE_SLOTS) {
     const { all } = list(g);
     for (const [i, s] of all.entries()) {
       if (s.k !== 'listed' || (vendor && quest)) continue;
