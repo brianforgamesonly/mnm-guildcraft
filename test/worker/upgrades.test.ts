@@ -3,8 +3,9 @@ import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
-import { statVector, type GearItem } from '../../src/gear/score.ts';
-import { GEAR_INDEX_PACKED_SQL, GEAR_INDEX_SQL, PACKED_CHUNK, toItem, unpack } from '../../src/gear/index.ts';
+import { SLOT_GROUPS, statVector, type GearItem } from '../../src/gear/score.ts';
+import { bucket, clearGearIndex, GEAR_INDEX_SQL, itemsFor, toItem } from '../../src/gear/index.ts';
+import { isolateSnapshot } from '../../src/telemetry.ts';
 import { buildSourceIndex } from '../../src/gear/sources.ts';
 import { questsByItem, withQuests } from '../../scripts/import/core.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
@@ -233,25 +234,31 @@ describe('order 36, ITEM 5: the gear index', () => {
     expect(results.map((r) => toItem(r as any).v)).toEqual(stored.results.map((r) => statVector(r.stats_json)));
   });
 
-  it('order 38: the packed read gives the same items, values and order as the row read (GEAR_INDEX_SQL in its index order)', async () => {
-    const odd = { stats: { STR: 2.6 }, resists: { MR: 3 } };
+  it('order 38: each slot group walks exactly the items that fit its slot, in index order', async () => {
     await seed([
-      { name: 'Full', slots: ['CHEST'], stats: { ac: 7, hp: -3, mana: 9, haste: 12, hpRegen: 1, manaRegen: 2, dmg: 7, delay: 30, stats: { STR: 1, STA: 2, DEX: 3, AGI: 4, INT: 5, WIS: 6, CHA: -7 }, resists: { MR: 1, PR: 2, DR: 3, FR: 4, CORR: 5, CR: 6, ER: 7, HR: 8 } } },
-      { name: 'Half "quoted" \\ name', slots: ['PRIMARY'], stats: { dmg: 5, delay: 10 } },
-      { name: 'Bare', slots: ['HEAD'] },
-      { name: 'Odd', slots: ['FINGER', 'WRIST'], stats: odd },
-      { name: 'Zero Delay', slots: ['PRIMARY'], stats: { dmg: 5, delay: 0 } },
+      { name: 'Ring', slots: ['FINGER'] },
+      { name: 'Band', slots: ['FINGER', 'WRIST'] },
+      { name: 'Sword', slots: ['PRIMARY', 'SECONDARY'] },
+      { name: 'Helm', slots: ['HEAD'] },
     ]);
-    const rows = await env.DB.prepare(`${GEAR_INDEX_SQL} ORDER BY slot_mask, class_mask, source_mask, id`).all<Record<string, unknown>>();
-    const packed = await env.DB.prepare(GEAR_INDEX_PACKED_SQL).all<{ chunk: string }>();
-    expect(unpack(packed.results.map((r) => r.chunk))).toEqual(rows.results.map((r) => toItem(r as any)));
+    const { results } = await env.DB.prepare(GEAR_INDEX_SQL).all<Record<string, unknown>>();
+    const list = results.map((r) => toItem(r as any));
+    const buckets = bucket(list);
+    for (const g of SLOT_GROUPS) {
+      const bit = bitOf(SLOTS, g.token);
+      expect(itemsFor({ slotItems: buckets, items: list }, g.token)).toEqual(list.filter((it) => (it.slotMask & bit) !== 0));
+    }
+    expect(buckets.get('FINGER')!.map((i) => i.name).sort()).toEqual(['Band', 'Ring']);
   });
 
-  it('order 38: chunks arriving in any order unpack in the row read\'s order (slot, class, source, id)', () => {
-    const one = (id: number, slot: number) => [id, `I${id}`, `i${id}`, slot, 0, 0, 0, null, null, null, null, null, null, null, ...Array(22).fill(0)];
-    const list = unpack([JSON.stringify([one(1500, 1), one(1200, 2)]), JSON.stringify([one(7, 2), one(3, 1)])]);
-    expect(list.map((i) => i.id)).toEqual([3, 1500, 7, 1200]);
-    expect(PACKED_CHUNK).toBeGreaterThan(0);
+  it('order 38: the timing line carries the caches\' state (empty, then held for the version read)', async () => {
+    clearGearIndex();
+    expect(isolateSnapshot().cache.gear_index).toBe('empty');
+    await testchar();
+    const ch = await one<{ id: number }>("SELECT id FROM character WHERE name = 'Testchar'");
+    const s = await send(press(ann, `${FIND_UPGRADES_PREFIX}${ch!.id}`));
+    expect(s.data.embeds![0].title).toBe('Upgrades for Testchar');
+    expect(isolateSnapshot().cache.gear_index).toMatch(/^held:\d+:/);
   });
 });
 
