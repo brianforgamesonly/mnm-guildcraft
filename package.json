@@ -36,7 +36,6 @@
     "bench:cold-slot-list": "node scripts/bench/cold-slot-list.mjs",
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "bench:upgrade-pages": "node scripts/bench/upgrade-pages.mjs",
-    "show:wrist": "node scripts/bench/show-wrist.mjs",
     "commands:register": "node scripts/discord/register.ts"
   },
   "dependencies": {

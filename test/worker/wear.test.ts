@@ -190,6 +190,14 @@ describe('order 35, ITEM 4: the Gear panel and changing a slot', () => {
     expect(other.type).toBe(4);
     expect(other.data.content).toBe(WEAR_COPY.notYours);
     for (const r of [refused, none, noFit]) expect(atPrompt(r, id)).toBe(true);
+    // Review: Empty slot and Back from someone else's copied panel are refused privately, and change nothing.
+    await box(ann, 'Testchar', 'head', 'wizard hat');
+    for (const cid of [`wre:${id}:head`, `wrv:${id}`]) {
+      const r = await send(press(bo, cid));
+      expect(r.type).toBe(4);
+      expect(r.data.content).toBe(WEAR_COPY.notYours);
+    }
+    expect(await worn('Testchar')).toEqual({ head: 'wizard hat' });
   });
 
   it('the box: one exact match saves; several are a menu by name, told apart by slot and classes; over 24 says how many more; none offers the box again', async () => {

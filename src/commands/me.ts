@@ -340,7 +340,7 @@ const classSelect = (classes: string[], ch: Character | undefined) => ({
 // Order 36 review fix: in the order members read them, by name (a code with no name sorts by itself).
 const characterRaces = async (c: Ctx) =>
   (await c.db.prepare(CHARACTER_RACES_SQL).all<{ code: string }>()).results.map((r) => r.code).sort((a, b) => raceLabel(a).localeCompare(raceLabel(b), 'en'));
-/** Order 39: the class menu's list, by name (one statement; read with the races in one batch). */
+/** Order 39: the class menu's list, by name (one statement, read alongside the races' one). */
 async function formLists(c: Ctx): Promise<{ races: string[]; classes: string[] }> {
   const [races, classes] = await Promise.all([characterRaces(c), gameClasses(c.db)]);
   return { races, classes: classes.sort((a, b) => className(a).localeCompare(className(b), 'en')) };
@@ -441,7 +441,8 @@ export async function editSubmitted(c: Ctx, customId: string, components: ModalC
   const changes: Option[] = [
     ...(name !== ch.name ? [opt('new_name', name)] : []),
     // Order 39: nothing picked keeps the stored class (even one outside the list); No class clears it.
-    ...(cls !== undefined && cls !== (ch.class ?? '') ? [opt('class', cls)] : []),
+    // Review fix: case-insensitive, as the pre-pick is, so an untouched menu never rewrites "spb" as "SPB".
+    ...(cls !== undefined && cls.toUpperCase() !== (ch.class ?? '').toUpperCase() ? [opt('class', cls)] : []),
     // Order 35: the race picked, or No race to clear it.
     ...(race !== undefined && race !== (ch.race ?? '') ? [opt('race', race)] : []),
     ...(level !== undefined && level !== ch.level ? [opt('level', level)] : []),

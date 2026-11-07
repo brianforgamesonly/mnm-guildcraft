@@ -103,6 +103,10 @@ describe('/me', () => {
     // Saved with the menu left alone (it sends nothing): the class is kept, the level changes.
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: '', level: '18', main: '' }));
     expect(await one('SELECT class, level FROM character WHERE id = ?', id)).toEqual({ class: 'Halfling', level: 18 });
+    // Review fix: a known code stored in lower case is pre-picked, and the untouched menu (it sends the code) changes nothing.
+    await env.DB.prepare("UPDATE character SET class = 'wiz' WHERE id = ?").bind(id).run();
+    expect((await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'WIZ', level: '18', main: '' }))).data.content).toBe(ME_COPY.nothingChanged);
+    expect(await one('SELECT class FROM character WHERE id = ?', id)).toEqual({ class: 'wiz' });
     // Picking a class fixes it; No class clears it.
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'CLR', level: '', main: '' }));
     expect(await one('SELECT class FROM character WHERE id = ?', id)).toEqual({ class: 'CLR' });

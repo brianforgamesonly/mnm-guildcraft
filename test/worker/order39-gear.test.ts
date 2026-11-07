@@ -36,9 +36,23 @@ describe('order 39, ITEM 3: the stat line (src/gear/statline.ts)', () => {
     const twoHander = S({ dmg: 20, delay: 40, stats: { STR: 3 } });
     expect(markedLine(twoHander, { items: [primary, secondary], hasteElsewhere: 0 }, false)).toBe('**AC — ▼−4** · **Damage 20 ▲+10** / **40 delay ▲+10** (vs Primary) · STR +3');
   });
-  it('haste: compared as the others; when it is no more than the haste worn elsewhere, the line says it does not stack', () => {
-    expect(markedLine(S({ haste: 10 }), { items: [], hasteElsewhere: 15 }, false)).toBe(`**Haste 10 ▲+10** (${STAT_COPY.hasteNoStack(15)})`);
-    expect(markedLine(S({ haste: 20 }), { items: [], hasteElsewhere: 15 }, false)).toBe('**Haste 20 ▲+20**');
+  it('haste is marked as scoring counts it (above the haste worn elsewhere), with the note whenever that limits it', () => {
+    const note = `(${STAT_COPY.hasteNoStack(15)})`;
+    expect(markedLine(S({ haste: 10 }), { items: [], hasteElsewhere: 15 }, false)).toBe(`Haste 10 ${note}`);
+    expect(markedLine(S({ haste: 10 }), { items: [], hasteElsewhere: 15 }, true)).toBe('');
+    expect(markedLine(S({ haste: 20 }), { items: [], hasteElsewhere: 15 }, false)).toBe(`**Haste 20 ▲+5** ${note}`);
+    expect(markedLine(S({ haste: 20 }), { items: [], hasteElsewhere: 0 }, false)).toBe('**Haste 20 ▲+20**');
+    // Review fix: a lost haste that didn't count anyway is no loss; one that did is.
+    expect(markedLine(S({ ac: 1 }), { items: [S({ ac: 1, haste: 10 })], hasteElsewhere: 15 }, true)).toBe('');
+    expect(markedLine(S({ ac: 1 }), { items: [S({ ac: 1, haste: 20 })], hasteElsewhere: 0 }, true)).toBe('**Haste — ▼−20**');
+    expect(markedLine(S({ haste: 40 }), { items: [S({ haste: 10 })], hasteElsewhere: 30 }, true)).toBe('**Haste 40 ▲+10** (doesn\'t stack: Haste 30 worn elsewhere)');
+  });
+  it('review fix: against a pair, damage is Primary\'s even when Primary has none or is empty; a shared lost effect shows once; fractions stay tidy', () => {
+    const dagger = S({ dmg: 5, delay: 20, effect: { name: 'Glow' } });
+    const maul = S({ dmg: 30, delay: 40 });
+    expect(markedLine(maul, { items: [S({ ac: 2, effect: { name: 'Glow' } }), dagger], hasteElsewhere: 0 }, true)).toBe(`**AC — ▼−2** · **Damage 30 ▲+30** / **40 delay ▲+40** (${STAT_COPY.vsPrimary}) · **${STAT_COPY.effectLost('Glow')}**`);
+    expect(markedLine(maul, { items: [null, dagger], hasteElsewhere: 0 }, true)).toBe(`**Damage 30 ▲+30** / **40 delay ▲+40** (${STAT_COPY.vsPrimary}) · **${STAT_COPY.effectLost('Glow')}**`);
+    expect(markedLine(S({ ac: 0.3 }), { items: [S({ ac: 0.1 }), S({ ac: 0.2 })], hasteElsewhere: 0 }, true)).toBe('');
   });
   it('the effect: plain when the same, marked when new or lost', () => {
     const fire = { name: 'Fire Bolt', trigger: 'Combat' };

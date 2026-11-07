@@ -270,7 +270,9 @@ const againstIds = (u: Upgrade) => u.against.filter((x): x is GearItem => !!x).m
 const NO_STATS = parseStats(null);
 /** Order 39: an upgrade's stat line, marked against what it replaces; `changesOnly` for the summary and Pick a result. */
 function upgradeLine(u: Upgrade, L: Loaded, stats: Map<number, ItemStats>, changesOnly: boolean): string {
-  const base: Baseline = { items: u.against.filter((x): x is GearItem => !!x).map((x) => stats.get(x.id) ?? NO_STATS), hasteElsewhere: hasteWornElsewhere(L.ctx, u.except) };
+  // Review fix: a pair keeps its empty or uncounted side as null, so Primary stays Primary for damage and delay.
+  const items = u.against.map((x) => (x ? (stats.get(x.id) ?? NO_STATS) : null));
+  const base: Baseline = { items: items.length > 1 ? items : items.filter((x): x is ItemStats => !!x), hasteElsewhere: hasteWornElsewhere(L.ctx, u.except) };
   return markedLine(stats.get(u.item.id) ?? NO_STATS, base, changesOnly);
 }
 

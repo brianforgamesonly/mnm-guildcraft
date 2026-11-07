@@ -110,7 +110,7 @@ export const STAT_COPY = {
 } as const;
 
 /** "▲+2" / "▼−2" (a true minus, as the gains print). */
-export const mark = (d: number) => (d > 0 ? `▲+${d}` : `▼−${-d}`);
+export const mark = (d: number) => (d > 0 ? `▲+${tidy(d)}` : `▼−${tidy(-d)}`);
 
 /** The unmarked full line (the header's worn items). Empty when the item has no stats. */
 export function plainLine(item: ItemStats): string {
@@ -130,26 +130,36 @@ function joinWeapon<T extends { key: string; text: string }>(entries: T[]): T[] 
 }
 
 export interface Baseline {
-  /** The items replaced, as upgradeDiff compares with (Primary first for a pair); [] for an empty slot. */
-  items: ItemStats[];
+  /**
+   * The items replaced, as upgradeDiff compares with: [] for an empty slot; [Primary, Secondary] against a pair, each null
+   * when that side is empty or counts 0 (review fix: kept in place, so Primary's weapon is never mistaken for Secondary's).
+   */
+  items: (ItemStats | null)[];
   /** The highest haste worn in every other slot (src/gear/score.ts hasteWornElsewhere). */
   hasteElsewhere: number;
 }
 
+/** Review fix: whole hundredths, so a fraction never prints as 0.30000000000000004 or marks a rounding error as a change. */
+const tidy = (n: number) => Math.round(n * 100) / 100;
+
 /**
  * The candidate's line, marked against the baseline. `changesOnly`: only the marked stats (the summary, and Pick a result's
- * own lines). Numbers add up across a pair (scoring adds them too); haste is the highest (it doesn't stack); damage and delay
- * are the first replaced weapon's (Primary's, against a pair).
+ * own lines). Numbers add up across a pair (scoring adds them too); damage and delay are the replaced weapon's (Primary's
+ * alone, against a pair). Haste is marked as scoring counts it (review fix): each side's haste above the haste worn
+ * elsewhere, so a haste that doesn't stack never reads as a gain or a loss; the note says so whenever haste worn elsewhere
+ * limits either side.
  */
 export function markedLine(cand: ItemStats, base: Baseline, changesOnly: boolean): string {
   const mine = new Map(statParts(cand).map((p) => [p.key, p]));
   const theirs = new Map<string, StatPart>();
-  const weapon = base.items.find((b) => b.dmg !== null) ?? base.items[0];
-  for (const b of base.items) {
+  const pair = base.items.length > 1;
+  const present = base.items.filter((b): b is ItemStats => !!b);
+  const weapon = pair ? base.items[0] : present[0];
+  for (const b of present) {
     for (const p of statParts(b)) {
       if (p.key === 'DMG' || p.key === 'DELAY') continue;
       const had = theirs.get(p.key);
-      const n = had ? (p.key === 'HASTE' ? Math.max(had.n, p.n) : had.n + p.n) : p.n;
+      const n = had ? (p.key === 'HASTE' ? Math.max(had.n, p.n) : tidy(had.n + p.n)) : p.n;
       theirs.set(p.key, { ...p, value: valueOf(p.key, n), n });
     }
   }
@@ -159,20 +169,23 @@ export function markedLine(cand: ItemStats, base: Baseline, changesOnly: boolean
   for (const k of keys) {
     const a = mine.get(k);
     const b = theirs.get(k);
-    const d = (a?.n ?? 0) - (b?.n ?? 0);
+    const h = base.hasteElsewhere;
+    const eff = (n: number | undefined) => (k === 'HASTE' ? Math.max(0, (n ?? 0) - h) : (n ?? 0));
+    const d = tidy(eff(a?.n) - eff(b?.n));
     if (d === 0 && changesOnly) continue;
     // A lost stat reads "**WIS — ▼−4**": it never vanishes. A lost delay keeps its word ("**Delay — ▼−30**").
-    let text = !a ? `**${b!.label} ${STAT_COPY.lost} ${mark(d)}**` : d === 0 ? partText(a) : `**${partText(a)} ${mark(d)}**`;
-    if (k === 'HASTE' && a && a.n > 0 && a.n <= base.hasteElsewhere) text = `${text} (${STAT_COPY.hasteNoStack(base.hasteElsewhere)})`;
+    const shown = a ? partText(a) : `${b!.label} ${STAT_COPY.lost}`;
+    let text = d === 0 ? shown : `**${shown} ${mark(d)}**`;
+    if (k === 'HASTE' && h > 0 && ((a?.n ?? 0) > 0 || (b?.n ?? 0) > 0) && Math.min(a?.n ?? h, b?.n ?? h) <= h) text = `${text} (${STAT_COPY.hasteNoStack(h)})`;
     entries.push({ key: k, text, changed: d !== 0 });
   }
   const joined = joinWeapon(entries);
   // Against a pair, damage and delay were compared with Primary's weapon alone: say so after them.
-  const w = base.items.length > 1 ? joined.find((e) => isWeapon(e.key) && entries.some((x) => isWeapon(x.key) && x.changed)) : undefined;
+  const w = pair ? joined.find((e) => isWeapon(e.key) && entries.some((x) => isWeapon(x.key) && x.changed)) : undefined;
   if (w) w.text = `${w.text} (${STAT_COPY.vsPrimary})`;
   const line = joined.map((e) => e.text);
-  // The effect: plain when the same, marked when new or lost (both, when one replaces another).
-  const theirEffects = base.items.map((b) => b.effect).filter((e): e is NonNullable<ItemStats['effect']> => !!e);
+  // The effect: plain when the same, marked when new or lost (both, when one replaces another); each lost effect once.
+  const theirEffects = [...new Map(present.flatMap((b) => (b.effect ? [[b.effect.name, b.effect] as const] : []))).values()];
   const mineE = cand.effect;
   const same = mineE && theirEffects.some((e) => e.name === mineE.name);
   if (mineE && same && !changesOnly) line.push(STAT_COPY.effect(effectText(mineE)));
