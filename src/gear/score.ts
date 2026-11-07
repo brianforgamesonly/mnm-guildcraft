@@ -197,23 +197,29 @@ export function statVector(statsJson: string | null): number[] {
  * Order 36, ITEM 5: the same vector, worked out by D1 (one column per WEIGHT_KEYS entry, s0…s21), so building the gear
  * index parses no JSON in the Worker. test/worker/upgrades.test.ts checks it equals statVector on every item it seeds.
  */
-export const STAT_VECTOR_SQL = WEIGHT_KEYS.map((k, i) => {
+/** Each WEIGHT_KEYS entry's value, as a SQL expression over stats_json (order 38: shared by the row and packed reads). */
+export const STAT_EXPRS: readonly string[] = WEIGHT_KEYS.map((k) => {
   const path =
     (STATS as readonly string[]).includes(k) ? `$.stats.${k}` : (RESISTS as readonly string[]).includes(k) ? `$.resists.${k}`
     : ({ AC: '$.ac', HP: '$.hp', MANA: '$.mana', HASTE: '$.haste', HPREGEN: '$.hpRegen', MANAREGEN: '$.manaRegen' } as Record<string, string>)[k];
-  const expr = k === 'RATIO'
+  return k === 'RATIO'
     ? "CASE WHEN json_extract(stats_json, '$.dmg') > 0 AND json_extract(stats_json, '$.delay') > 0 THEN round(json_extract(stats_json, '$.dmg') * 100.0 / json_extract(stats_json, '$.delay')) ELSE 0 END"
     : `coalesce(json_extract(stats_json, '${path}'), 0)`;
-  return `${expr} AS s${i}`;
-}).join(', ');
-/** A row's s0…s21 as a vector (non-numbers as 0, as statVector reads them). */
+});
+export const STAT_VECTOR_SQL = STAT_EXPRS.map((e, i) => `${e} AS s${i}`).join(', ');
+/** One stat as the vector holds it: a non-number as 0, a fraction rounded (as statVector reads them). */
+const statOf = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : 0);
+/** A row's s0…s21 as a vector. */
 const S_COLS = WEIGHT_KEYS.map((_, i) => `s${i}`);
 export const vectorOf = (r: Record<string, unknown>) => {
   const v = new Array<number>(KEYS_N);
-  for (let i = 0; i < KEYS_N; i++) {
-    const x = r[S_COLS[i]];
-    v[i] = typeof x === 'number' && Number.isFinite(x) ? Math.round(x) : 0;
-  }
+  for (let i = 0; i < KEYS_N; i++) v[i] = statOf(r[S_COLS[i]]);
+  return v;
+};
+/** Order 38: the same vector from a packed row's values, starting at `from` (src/gear/index.ts GEAR_INDEX_PACKED_SQL). */
+export const vectorAt = (a: readonly unknown[], from: number) => {
+  const v = new Array<number>(KEYS_N);
+  for (let i = 0; i < KEYS_N; i++) v[i] = statOf(a[from + i]);
   return v;
 };
 

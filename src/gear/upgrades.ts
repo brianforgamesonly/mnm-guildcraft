@@ -21,7 +21,7 @@ import { itemCard, POST_WHAT as ITEM_POST } from '../commands/item.ts';
 import { POST_PREFIX, postedReply, searchReply } from '../commands/share.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
 import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
-import { gearIndex, VERSION_SQL, type GearIndex } from './index.ts';
+import { gearIndex, itemsFor, VERSION_SQL, type GearIndex } from './index.ts';
 import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
   breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, fmtHundredths, groupByKey, grouped, GROUPS, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
@@ -155,7 +155,8 @@ export async function load(c: Ctx, ch: Character): Promise<Loaded> {
   return { ch, idx, wearer, weights, cls: className(ch.class), ctx: { weights, preset: presetOf(ch.class), worn } };
 }
 
-const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx, L.wearer, L.idx.items);
+// Order 38: each group walks only its slot's items (src/gear/index.ts itemsFor); compareGroup's own slot test is unchanged.
+const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx, L.wearer, itemsFor(L.idx, groupByKey(key)!.token));
 
 // ---------------------------------------------------------------- the summary
 
@@ -165,7 +166,7 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
   // Review fix: items, not slot entries (a weapon above the cap that fits Primary and Secondary is one hidden item).
   const hiddenIds = new Set<number>();
   const per = SLOT_GROUPS.map((g) => {
-    const r = compareGroup(g, L.ctx, L.wearer, L.idx.items);
+    const r = compareGroup(g, L.ctx, L.wearer, itemsFor(L.idx, g.token));
     let listed: Upgrade | null = null;
     let unknown = false;
     let shownCount = 0;

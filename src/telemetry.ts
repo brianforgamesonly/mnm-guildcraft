@@ -1,6 +1,9 @@
 // Per-request timing (order 3, ITEM 3.1): one structured log line per interaction, with the number of
 // D1 round trips and the milliseconds spent waiting on each.
 //
+import { gearIndexState } from './gear/index.ts';
+import { sourceCacheState } from './gear/sources.ts';
+
 // Limitation: in Workers, Date.now() advances only across I/O, so these figures measure D1 and network
 // waits. CPU spent after the last I/O is not in them; the platform's own per-invocation wallTime and
 // cpuTime (Workers Logs / tail events) cover the whole request.
@@ -29,10 +32,17 @@ type Meta = { served_by_region?: string; served_by_primary?: boolean; duration?:
 let isolateRequests = 0;
 let lastD1At: number | null = null;
 
-/** Called once at the start of each request or scheduled run: the isolate's state before it. */
-export function isolateSnapshot(): { isolate_first_request: boolean; ms_since_last_d1_in_isolate: number | null } {
+/**
+ * Called once at the start of each request or scheduled run: the isolate's state before it. Order 38 (ITEM 3): with the
+ * module-level caches' state (src/gear/index.ts, src/gear/sources.ts), so a cold request can be told apart in Workers Logs.
+ */
+export function isolateSnapshot(): { isolate_first_request: boolean; ms_since_last_d1_in_isolate: number | null; cache: { gear_index: string; sources: string } } {
   isolateRequests++;
-  return { isolate_first_request: isolateRequests === 1, ms_since_last_d1_in_isolate: lastD1At === null ? null : Date.now() - lastD1At };
+  return {
+    isolate_first_request: isolateRequests === 1,
+    ms_since_last_d1_in_isolate: lastD1At === null ? null : Date.now() - lastD1At,
+    cache: { gear_index: gearIndexState(), sources: sourceCacheState() },
+  };
 }
 const metaOf = (r: unknown): Meta | undefined => {
   const one = Array.isArray(r) ? r[0] : r;

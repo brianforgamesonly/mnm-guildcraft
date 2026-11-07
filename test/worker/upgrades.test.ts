@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { howToGet, levelText, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
 import { statVector, type GearItem } from '../../src/gear/score.ts';
-import { GEAR_INDEX_SQL, toItem } from '../../src/gear/index.ts';
+import { GEAR_INDEX_PACKED_SQL, GEAR_INDEX_SQL, PACKED_CHUNK, toItem, unpack } from '../../src/gear/index.ts';
 import { buildSourceIndex } from '../../src/gear/sources.ts';
 import { questsByItem, withQuests } from '../../scripts/import/core.ts';
 import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
@@ -231,6 +231,27 @@ describe('order 36, ITEM 5: the gear index', () => {
     const { results } = await env.DB.prepare(GEAR_INDEX_SQL.replace('slot_mask <> 0', "slot_mask <> 0 ORDER BY name")).all<Record<string, unknown>>();
     const stored = await env.DB.prepare("SELECT name, stats_json FROM item ORDER BY name").all<{ name: string; stats_json: string }>();
     expect(results.map((r) => toItem(r as any).v)).toEqual(stored.results.map((r) => statVector(r.stats_json)));
+  });
+
+  it('order 38: the packed read gives the same items, values and order as the row read (GEAR_INDEX_SQL in its index order)', async () => {
+    const odd = { stats: { STR: 2.6 }, resists: { MR: 3 } };
+    await seed([
+      { name: 'Full', slots: ['CHEST'], stats: { ac: 7, hp: -3, mana: 9, haste: 12, hpRegen: 1, manaRegen: 2, dmg: 7, delay: 30, stats: { STR: 1, STA: 2, DEX: 3, AGI: 4, INT: 5, WIS: 6, CHA: -7 }, resists: { MR: 1, PR: 2, DR: 3, FR: 4, CORR: 5, CR: 6, ER: 7, HR: 8 } } },
+      { name: 'Half "quoted" \\ name', slots: ['PRIMARY'], stats: { dmg: 5, delay: 10 } },
+      { name: 'Bare', slots: ['HEAD'] },
+      { name: 'Odd', slots: ['FINGER', 'WRIST'], stats: odd },
+      { name: 'Zero Delay', slots: ['PRIMARY'], stats: { dmg: 5, delay: 0 } },
+    ]);
+    const rows = await env.DB.prepare(`${GEAR_INDEX_SQL} ORDER BY slot_mask, class_mask, source_mask, id`).all<Record<string, unknown>>();
+    const packed = await env.DB.prepare(GEAR_INDEX_PACKED_SQL).all<{ chunk: string }>();
+    expect(unpack(packed.results.map((r) => r.chunk))).toEqual(rows.results.map((r) => toItem(r as any)));
+  });
+
+  it('order 38: chunks arriving in any order unpack in the row read\'s order (slot, class, source, id)', () => {
+    const one = (id: number, slot: number) => [id, `I${id}`, `i${id}`, slot, 0, 0, 0, null, null, null, null, null, null, null, ...Array(22).fill(0)];
+    const list = unpack([JSON.stringify([one(1500, 1), one(1200, 2)]), JSON.stringify([one(7, 2), one(3, 1)])]);
+    expect(list.map((i) => i.id)).toEqual([3, 1500, 7, 1200]);
+    expect(PACKED_CHUNK).toBeGreaterThan(0);
   });
 });
 
