@@ -2,10 +2,9 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now } from '../access.ts';
 import { markSkillsDirty } from '../board/refresh.ts';
-import { raceLabel } from '../gear/vocab.ts';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optInt, optString, row, STYLE_PRIMARY, truncate, type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
-import { findById, resolveCharacter, resolveOwner, type Character } from './character.ts';
+import { characterHead, findById, gameClasses, isGameClass, resolveCharacter, resolveOwner, type Character } from './character.ts';
 import { knownLine, knownRecipesOf } from './recipes.ts';
 
 export interface Tradeskill {
@@ -271,12 +270,12 @@ export async function characterEmbeds(c: Ctx, shown: Character[]): Promise<{ emb
     )
     .bind(...shown.map((ch) => ch.id))
     .all<{ character_id: number; name: string; level: number; updated_at: string }>();
-  const known = await knownRecipesOf(c.db, c.guild.id, shown.map((ch) => ch.id));
+  const [known, classes] = await Promise.all([knownRecipesOf(c.db, c.guild.id, shown.map((ch) => ch.id)), gameClasses(c.db)]);
   const staleBefore = Date.now() - c.guild.stale_days * DAY_MS;
   let anyStale = false;
   const embeds: Embed[] = shown.map((ch) => {
-    // Order 35: the race (a game_race code), when set.
-    const head = [ch.class ? md(ch.class) : null, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${md(raceLabel(ch.race))}` : null].filter(Boolean).join(' · ');
+    // Order 39: the one character head, without the name (it is the embed's title).
+    const head = characterHead(ch, isGameClass(ch.class, classes), false);
     const lines = results
       .filter((r) => r.character_id === ch.id)
       .map((r) => {

@@ -84,7 +84,7 @@ describe('order 36, ITEM 3: the slot list', () => {
     expect(t).not.toContain('above Lv');
     expect([at('Far Plate'), at('Low Tie'), at('High Tie'), at('Big Plate'), at('Mystery Vest')].every((x, i, a) => x > 0 && (i === 0 || x > a[i - 1]))).toBe(true);
     expect(t).toContain('**Low Tie** **+2.10** · Lv 8 (drop)');
-    expect(t).toContain('+6 AC');
+    expect(t).toContain('**AC 6 ▲+6**'); // order 39: the full stat line, marked, in place of the 3-stat breakdown
     expect(t).toContain("Uses your guild's Inquisitor weights.");
     expect(t).toContain('Chest: empty (score 0.00)');
   });

@@ -24,11 +24,12 @@ import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
 import { gearIndex, itemsFor, VERSION_SQL, type GearIndex } from './index.ts';
 import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
-  breakdown, byGain, className, compareGroup, levelGroup, upgradeDiff, fmtHundredths, groupByKey, grouped, GROUPS, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
+  byGain, className, compareGroup, levelGroup, fmtHundredths, groupByKey, grouped, GROUPS, hasteWornElsewhere, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
-import { raceLabel } from './vocab.ts';
+import { characterHead } from '../commands/character.ts';
+import { markedLine, parseStats, plainLine, type Baseline, type ItemStats } from './statline.ts';
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
@@ -65,8 +66,11 @@ const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.na
 export const UPGRADES_COPY = {
   title: (name: string) => `Upgrades for ${name}`,
   slotTitle: (slot: string, name: string) => `${slot} upgrades for ${name}`,
-  who: (ch: Character) => `**${md(ch.name)}** · ${md(className(ch.class))}${ch.level !== null ? ` ${ch.level}` : ''} · ${ch.race ? md(raceLabel(ch.race)) : 'any race'}`,
+  /** Order 39: the one character head (src/commands/character.ts characterHead). */
+  who: (L: Pick<Loaded, 'ch' | 'known'>) => characterHead(L.ch, L.known),
   weights: (cls: string) => `Uses your guild's ${cls} weights.`,
+  /** Order 39: no game class saved (none, or one outside the list): scoring uses the default weights (weightsFor's fallback). */
+  defaultWeights: 'Uses default weights: no game class saved. Pick one on /me.',
   capNote: (cap: number) => `Items up to Lv ${cap}.`,
   // Order 37, PR B (Brian's check): "more" takes no plural ("69 more above Lv 15 not shown", "1 more …").
   hidden: (n: number, cap: number) => `${n} more above Lv ${cap} not shown.`,
@@ -139,7 +143,11 @@ interface Loaded {
   wearer: Wearer;
   weights: Weights;
   cls: string;
+  /** Order 39: the stored class is a game class (it has a bit in the index). */
+  known: boolean;
 }
+/** The footer's weights line: the guild's weights for a game class, else the defaults, said so. */
+const weightsLine = (L: Pick<Loaded, 'known' | 'cls'>) => (L.known ? UPGRADES_COPY.weights(L.cls) : UPGRADES_COPY.defaultWeights);
 
 /** The character's saved gear and the gear index: 1 round trip (2 statements), plus the index when its key changed. */
 export async function load(c: Ctx, ch: Character): Promise<Loaded> {
@@ -152,7 +160,7 @@ export async function load(c: Ctx, ch: Character): Promise<Loaded> {
   const worn = new Map<string, Worn>();
   for (const g of gear.results as { slot: string; item_key: string }[]) worn.set(g.slot, wornState(g.item_key, idx.byKey.get(g.item_key) ?? null, wearer));
   const weights = await weightsFor(c.db, c.guild.id, ch.class);
-  return { ch, idx, wearer, weights, cls: className(ch.class), ctx: { weights, preset: presetOf(ch.class), worn } };
+  return { ch, idx, wearer, weights, cls: className(ch.class), known: wearer.classBit !== null, ctx: { weights, preset: presetOf(ch.class), worn } };
 }
 
 // Order 38: each group walks only its slot's items (src/gear/index.ts itemsFor); compareGroup's own slot test is unchanged.
@@ -160,7 +168,7 @@ const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx
 
 // ---------------------------------------------------------------- the summary
 
-export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: unknown[] } {
+export async function summaryView(c: Pick<Ctx, 'db'>, L: Loaded, cap: Cap): Promise<{ embed: Embed; components: unknown[] }> {
   // ITEM 5: one pass per slot for what the summary shows (no sort of every candidate): the smallest listed candidate (the
   // list's own order, byGain), whether any is level-unknown, and (with a cap) how many are above it, hidden.
   // Review fix: items, not slot entries (a weapon above the cap that fits Primary and Secondary is one hidden item).
@@ -188,14 +196,25 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
   // by the hidden line instead.
   const none = per.filter((p) => !p.r.upgrades.length).length;
   const hidden = hiddenIds.size;
-  const lines = [...listed.map((x) => UPGRADES_COPY.listedLine(x.p.g.label, x.u)), ...unknown.map((p) => UPGRADES_COPY.unknownLine(p.g.label))];
+  // Order 39: each listed line's changed stats, marked, on the next line. One statement reads the stats of the lines shown
+  // and of what each replaces.
+  const shownListed = listed.slice(0, SUMMARY_LINES);
+  const stats = await statsById(c.db, shownListed.flatMap((x) => [x.u.item.id, ...againstIds(x.u)]));
+  const lines = [
+    ...listed.map((x, i) => {
+      const head = UPGRADES_COPY.listedLine(x.p.g.label, x.u);
+      const changes = i < SUMMARY_LINES ? upgradeLine(x.u, L, stats, true) : '';
+      return changes ? `${head}\n${changes}` : head;
+    }),
+    ...unknown.map((p) => UPGRADES_COPY.unknownLine(p.g.label)),
+  ];
   const shown = lines.slice(0, SUMMARY_LINES);
-  const notes = [UPGRADES_COPY.who(L.ch), ...(cap !== null ? [UPGRADES_COPY.capNote(cap)] : [])];
+  const notes = [UPGRADES_COPY.who(L), ...(cap !== null ? [UPGRADES_COPY.capNote(cap)] : [])];
   const footer = [UPGRADES_COPY.footer(lines.length - shown.length, none), ...(cap !== null && hidden ? [UPGRADES_COPY.hidden(hidden, cap)] : [])].filter(Boolean).join(' · ');
   const embed: Embed = {
     title: truncate(UPGRADES_COPY.title(L.ch.name), EMBED_LIMITS.title),
     description: truncate([...notes, '', ...(shown.length ? shown : [UPGRADES_COPY.nothingAnywhere(L.ch.name, L.cls)])].join('\n'), EMBED_LIMITS.description),
-    footer: { text: [footer, UPGRADES_COPY.weights(L.cls)].filter(Boolean).join(' · ') },
+    footer: { text: [footer, weightsLine(L)].filter(Boolean).join(' · ') },
   };
   const withUps = per.filter((p) => p.shownCount);
   const components = withUps.length
@@ -219,32 +238,63 @@ export function summaryView(L: Loaded, cap: Cap): { embed: Embed; components: un
  * The page's items' sources: their rows, then their recipes and crafters (pageData's batch), and what the lines read
  * besides (src/gear/howto.ts sourceExtras). pageData reads no mob rows here.
  */
-export async function extrasFor(c: Pick<Ctx, 'db' | 'guild'>, items: GearItem[], version: string | null): Promise<Extras> {
-  if (!items.length) return { rows: new Map(), d: { classes: [], mobs: [], recipes: [], crafters: [], version: null }, src: null };
+export async function extrasFor(c: Pick<Ctx, 'db' | 'guild'>, items: GearItem[], version: string | null, alsoStats: number[] = []): Promise<Extras & { stats: Map<number, ItemStats> }> {
+  const empty = { rows: new Map(), d: { classes: [], mobs: [], recipes: [], crafters: [], version: null }, src: null };
+  if (!items.length) return { ...empty, stats: await statsById(c.db, alsoStats) };
+  // Order 39: the same statement also reads stats_json, for the shown items and the worn ones (`alsoStats`) together.
   const { results } = await c.db
-    .prepare('SELECT id, origin_json, source_mask, name_key, level_low, level_high, level_kind, level_kinds FROM item WHERE id IN (SELECT value FROM json_each(?1))')
-    .bind(JSON.stringify(items.map((i) => i.id)))
-    .all<{ id: number; origin_json: string | null; source_mask: number }>();
-  const byId = new Map(results.map((r) => [r.id, r]));
+    .prepare('SELECT id, origin_json, source_mask, name_key, level_low, level_high, level_kind, level_kinds, stats_json FROM item WHERE id IN (SELECT value FROM json_each(?1))')
+    .bind(JSON.stringify([...new Set([...items.map((i) => i.id), ...alsoStats])]))
+    .all<{ id: number; origin_json: string | null; source_mask: number; stats_json: string | null }>();
+  const stats = new Map(results.map((r) => [r.id, parseStats(r.stats_json)]));
+  const shownIds = new Set(items.map((i) => i.id));
+  const shown = results.filter((r) => shownIds.has(r.id));
+  const byId = new Map(shown.map((r) => [r.id, r]));
   const [d, s] = await Promise.all([
-    pageData(c, results as unknown as GearRow[], 0),
+    pageData(c, shown as unknown as GearRow[], 0),
     sourceExtras(c, items.map((it) => ({ key: it.key, origin_json: byId.get(it.id)?.origin_json ?? null })), version),
   ]);
-  return { rows: byId, d, ...s };
+  return { rows: byId, d, ...s, stats };
 }
-const extras = (c: Ctx, L: Loaded, items: GearItem[]) => extrasFor(c, items, L.idx.version);
+const extras = (c: Ctx, L: Loaded, items: GearItem[], alsoStats: number[] = []) => extrasFor(c, items, L.idx.version, alsoStats);
 
-/** One result's lines: its name and gain, the side or note, the breakdown, then how to get it. */
-function resultLines(u: Upgrade, L: Loaded, how: string[]): string[] {
+/** Order 39: items' stats_json by id, in one statement (none when no ids). */
+async function statsById(db: D1Database, ids: number[]): Promise<Map<number, ItemStats>> {
+  if (!ids.length) return new Map();
+  const { results } = await db.prepare('SELECT id, stats_json FROM item WHERE id IN (SELECT value FROM json_each(?1))').bind(JSON.stringify([...new Set(ids)])).all<{ id: number; stats_json: string | null }>();
+  return new Map(results.map((r) => [r.id, parseStats(r.stats_json)]));
+}
+
+/** Order 39: the ids an upgrade is compared with (upgradeDiff's baseline: the counted items it replaces). */
+const againstIds = (u: Upgrade) => u.against.filter((x): x is GearItem => !!x).map((x) => x.id);
+const NO_STATS = parseStats(null);
+/** Order 39: an upgrade's stat line, marked against what it replaces; `changesOnly` for the summary and Pick a result. */
+function upgradeLine(u: Upgrade, L: Loaded, stats: Map<number, ItemStats>, changesOnly: boolean): string {
+  // Review fix: a pair keeps its empty or uncounted side as null, so Primary stays Primary for damage and delay.
+  const items = u.against.map((x) => (x ? (stats.get(x.id) ?? NO_STATS) : null));
+  const base: Baseline = { items: items.length > 1 ? items : items.filter((x): x is ItemStats => !!x), hasteElsewhere: hasteWornElsewhere(L.ctx, u.except) };
+  return markedLine(stats.get(u.item.id) ?? NO_STATS, base, changesOnly);
+}
+
+/**
+ * One result's lines: its name and gain, the side or note, its stat line (order 39: in place of the 3-stat breakdown; the
+ * full line marked in a list, the changes only on Pick a result), then how to get it.
+ */
+function resultLines(u: Upgrade, L: Loaded, how: string[], stats: Map<number, ItemStats>, changesOnly = false): string[] {
   const note = u.side ? UPGRADES_COPY.replaces(sideLabel(u.side)) : u.note === 'secondaryFree' ? UPGRADES_COPY.secondaryFree : u.note === 'needsOneHand' ? UPGRADES_COPY.needsOneHand : null;
-  return [`${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}${note ? ` · ${note}` : ''}`, breakdown(upgradeDiff(u, L.ctx), L.weights), ...how.map((l) => `-# ${l}`)].filter(Boolean);
+  return [`${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}${note ? ` · ${note}` : ''}`, upgradeLine(u, L, stats, changesOnly), ...how.map((l) => `-# ${l}`)].filter(Boolean);
 }
 
-/** The header lines: what's worn in each slot compared with, and each one's score (0 with the reason it counts 0). */
-function headerLines(L: Loaded, r: GroupResult): string[] {
+/** The worn sides the header shows (Primary and Secondary for the hands; the group's sides otherwise). */
+const headerSides = (r: GroupResult) => (r.group.token === 'PRIMARY' || (r.group.token === 'SECONDARY' && r.replaces[0] === 'primary') ? ['primary', ...(r.group.token === 'PRIMARY' ? ['secondary'] : [])] : r.group.sides);
+
+/**
+ * The header lines: what's worn in each slot compared with, and each one's score (0 with the reason it counts 0). Order 39:
+ * each worn item's full stat line under it, unmarked (the baseline).
+ */
+function headerLines(L: Loaded, r: GroupResult, stats: Map<number, ItemStats>): string[] {
   const out: string[] = [];
-  const sides = r.group.token === 'PRIMARY' || (r.group.token === 'SECONDARY' && r.replaces[0] === 'primary') ? ['primary', ...(r.group.token === 'PRIMARY' ? ['secondary'] : [])] : r.group.sides;
-  for (const side of sides) {
+  for (const side of headerSides(r)) {
     const g = L.ctx.worn.get(side);
     const token = side === 'primary' ? 'PRIMARY' : side === 'secondary' ? 'SECONDARY' : r.group.token;
     const label = sideLabel(side);
@@ -254,6 +304,8 @@ function headerLines(L: Loaded, r: GroupResult): string[] {
       const why = g.reason === 'gone' ? UPGRADES_COPY.notCounted.gone : g.reason === 'cantUse' ? UPGRADES_COPY.notCounted.cantUse(L.ch.name) : null;
       const line = UPGRADES_COPY.worn(label, name, fmtHundredths(wornScore(side, token, L.ctx), false));
       out.push(why ? `${line} · ${why}` : line);
+      const full = g.item ? plainLine(stats.get(g.item.id) ?? NO_STATS) : '';
+      if (full) out.push(full);
     }
   }
   if (r.group.sides.length > 1) out.push(UPGRADES_COPY.comparedWith(sideLabel(r.replaces[0])));
@@ -275,8 +327,10 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const n = Math.min(Math.max(0, page), pages - 1);
   const shown = all.slice(n * PER_PAGE, n * PER_PAGE + PER_PAGE);
-  const x = await extras(c, L, shown.map((s) => s.u.item));
-  const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L.ch), ...headerLines(L, r)];
+  // Order 39: one statement reads the shown items' rows and stats with the worn items' stats (the header and the baselines).
+  const wornIds = headerSides(r).map((s) => L.ctx.worn.get(s)?.item?.id).filter((id): id is number => id !== undefined);
+  const x = await extras(c, L, shown.map((s) => s.u.item), [...wornIds, ...shown.flatMap((s) => againstIds(s.u))]);
+  const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L), ...headerLines(L, r, x.stats)];
   if (cap !== null) body.push(UPGRADES_COPY.capNote(cap));
   // Review fix: "Nothing beats" only when nothing does; when the cap hid every upgrade, the quiet count below says so.
   if (!all.length && !hidden) {
@@ -288,14 +342,14 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   for (const s of shown) {
     if (s.g !== last) body.push('', `__${UPGRADES_COPY.head[s.g as (typeof GROUPS)[number]]}__`);
     last = s.g;
-    body.push(...resultLines(s.u, L, howToGet(s.u.item, x, c.userId, c.guild.learning_window).lines));
+    body.push(...resultLines(s.u, L, howToGet(s.u.item, x, c.userId, c.guild.learning_window).lines, x.stats));
   }
   // The owner (2026-11-06): with a cap, a quiet count of what it hid, at the end of the list.
   if (cap !== null && hidden && n === pages - 1) body.push('', `-# ${UPGRADES_COPY.hidden(hidden, cap)}`);
   const embed: Embed = {
     title: truncate(UPGRADES_COPY.slotTitle(r.group.label, L.ch.name), EMBED_LIMITS.title),
     description: truncate(body.join('\n'), EMBED_LIMITS.description),
-    footer: { text: [all.length > PER_PAGE ? UPGRADES_COPY.page(n + 1, pages) : null, UPGRADES_COPY.weights(L.cls)].filter(Boolean).join(' · ') },
+    footer: { text: [all.length > PER_PAGE ? UPGRADES_COPY.page(n + 1, pages) : null, weightsLine(L)].filter(Boolean).join(' · ') },
   };
   if (posted || !shown.length) return { embed, components: [] };
   const state = `${L.ch.id}:${key}:${capState(cap)}`;
@@ -345,7 +399,7 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
   }
   const cap: Cap = max ?? (oldLevels !== undefined && ch.level !== null ? Math.min(MAX_LEVEL_CAP, ch.level + oldLevels) : null);
   const L = await load(c, ch);
-  const v = key ? await slotPage(c, L, key, cap, 0) : summaryView(L, cap);
+  const v = key ? await slotPage(c, L, key, cap, 0) : await summaryView(c, L, cap);
   return ephemeral('', { embeds: [v.embed], components: v.components });
 }
 
@@ -353,7 +407,7 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
 async function findUpgrades(c: Ctx, id: string): Promise<MessageReply> {
   const t = await characterFor(c, id.slice(FIND_UPGRADES_PREFIX.length));
   if ('reply' in t) return t.reply;
-  const v = summaryView(await load(c, t.ch), null);
+  const v = await summaryView(c, await load(c, t.ch), null);
   return ephemeral('', { embeds: [v.embed], components: v.components });
 }
 
@@ -399,7 +453,7 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
  * each zone the text and the card show (src/zone/buttons.ts, in the rows left; the rest named as "+N more zones").
  */
 async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade): Promise<MessageReply> {
-  const [x, k] = await Promise.all([extras(c, L, [u.item]), itemCard(c, u.item.id)]);
+  const [x, k] = await Promise.all([extras(c, L, [u.item], againstIds(u)), itemCard(c, u.item.id)]);
   if (!k) return ephemeral(UPGRADES_COPY.gone);
   const how = howToGet(u.item, x, c.userId, c.guild.learning_window);
   const slot = u.side ?? (key === 'secondary' ? 'secondary' : groupByKey(key)!.sides[0]);
@@ -413,12 +467,13 @@ async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade)
   const more = z.zones - z.shown;
   const label = sideLabel(slot);
   const content = [
-    `${UPGRADES_COPY.who(L.ch)} · ${UPGRADES_COPY.forSlot(L.ch.name, label)}`,
-    ...resultLines(u, L, how.lines),
+    `${UPGRADES_COPY.who(L)} · ${UPGRADES_COPY.forSlot(L.ch.name, label)}`,
+    // Order 39: the changed stats only; the card below has the full stats.
+    ...resultLines(u, L, how.lines, x.stats, true),
     ...(more > 0 ? [`-# ${UPGRADES_COPY.moreZones(more)}`] : []),
     // Review fix: the card's own note ("Showing N of M recipes"), as /item shows it.
     ...(k.note ? [k.note] : []),
-    `-# ${UPGRADES_COPY.weights(L.cls)}`,
+    `-# ${weightsLine(L)}`,
   ].join('\n');
   return ephemeral(truncate(content, 2000), { embeds: k.embeds, components: [...own, ...z.rows] });
 }

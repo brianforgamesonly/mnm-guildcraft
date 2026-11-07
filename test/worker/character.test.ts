@@ -1,7 +1,10 @@
 // ITEM 1.3: /character add | edit | remove, name resolution and privacy, audit rows. Order 18: these are /me's Add
 // character, Edit character and Remove character now (test/discord.ts sends the old calls through them).
+import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { CLASS_NOT_LISTED, HEAD_COPY } from '../../src/commands/character.ts';
 import { ME_COPY } from '../../src/commands/me.ts';
+import { raceLabel } from '../../src/gear/vocab.ts';
 import { all, count, one, reset } from '../db.ts';
 import { ADMIN, as, auto, cmd, select, send, submit } from '../discord.ts';
 
@@ -24,7 +27,8 @@ const chars = () => all<{ name: string; owner_user_id: string; is_main: number; 
 describe('/character add', () => {
   it('the first character becomes main; a class picked from the list is stored as its code', async () => {
     const r = await add(ann, { name: '  Testchar ', class: 'shd', level: 10 });
-    expect(r.data.content).toBe('Added **Testchar** (SHD, level 10). It is your main (your first character).');
+    // Order 39: the one character head (the class by name, the race once).
+    expect(r.data.content).toBe('Added **Testchar** · Shadow Knight · level 10 · any race. It is your main (your first character).');
     expect(await chars()).toEqual([{ name: 'Testchar', owner_user_id: ANN, is_main: 1, deleted: 0, class: 'SHD', level: 10 }]);
   });
 
@@ -43,11 +47,19 @@ describe('/character add', () => {
     expect(await count('character')).toBe(0);
   });
 
-  it('a class not on the list is accepted as typed, and the reply says so; a deactivated code counts as not on the list', async () => {
+  it('order 39: a class not on the list is refused (nothing is saved as typed); a deactivated code counts as not on the list', async () => {
     const r = await add(ann, { name: 'Oddball', class: 'Spellsword' });
-    expect(r.data.content).toContain("Class **Spellsword** isn't in the class list");
-    await add(ann, { name: 'Oldie', class: 'old' });
-    expect((await chars()).map((c) => c.class)).toEqual(['Spellsword', 'old']);
+    expect(r.data.content).toBe(CLASS_NOT_LISTED('Spellsword'));
+    expect((await add(ann, { name: 'Oldie', class: 'old' })).data.content).toBe(CLASS_NOT_LISTED('old'));
+    expect(await chars()).toEqual([]);
+  });
+
+  it('order 39: a class already stored outside the list is kept, shown as stored with the marker, and never rewritten', async () => {
+    await add(ann, { name: 'Banakil', level: 18 });
+    await env.DB.prepare("UPDATE character SET class = 'Halfling', race = 'HFL' WHERE name = 'Banakil'").run();
+    const r = await edit(ann, { name: 'Banakil', level: 19 });
+    expect(r.data.content).toBe(`Updated **Banakil** · Halfling ${HEAD_COPY.notGameClass} · level 19 · ${raceLabel('HFL')}.`);
+    expect((await chars())[0].class).toBe('Halfling');
   });
 
   it('a second character is not main unless asked; main:true moves the main in the same write', async () => {
@@ -66,7 +78,7 @@ describe('removed names', () => {
     await send(cmd(ann, 'craft', 'set', { skill: 'Tailoring', level: 3 }));
     await remove(ann, { name: 'Testchar' });
     const r = await add(ann, { name: 'TESTCHAR' });
-    expect(r.data.content).toBe('Restored **Testchar** (SHD, level 10), which you removed earlier, with its 2 saved skills. It is your main.');
+    expect(r.data.content).toBe('Restored **Testchar** · Shadow Knight · level 10 · any race, which you removed earlier, with its 2 saved skills. It is your main.');
     expect(await chars()).toEqual([{ name: 'Testchar', owner_user_id: ANN, is_main: 1, deleted: 0, class: 'SHD', level: 10 }]);
     expect(await count('character_skill')).toBe(2);
   });
@@ -80,7 +92,7 @@ describe('removed names', () => {
     const o = await add(officer, { name: 'Testchar' });
     expect(o.data.content).toContain(`It belongs to <@${ANN}>`);
     // The officer frees the name by renaming the removed character, which stays removed.
-    expect((await edit(officer, { name: 'Testchar', new_name: 'Testchar-old', member: ANN })).data.content).toMatch(/^Updated \*\*Testchar-old\*\* \(was \*\*Testchar\*\*\)\./);
+    expect((await edit(officer, { name: 'Testchar', new_name: 'Testchar-old', member: ANN })).data.content).toMatch(/^Updated \*\*Testchar-old\*\* · no class · no level · any race \(was \*\*Testchar\*\*\)\./);
     expect((await add(bo, { name: 'Testchar' })).data.content).toMatch(/^Added \*\*Testchar\*\*/);
     expect((await chars()).map((c) => [c.name, c.owner_user_id, c.deleted])).toEqual([['Testchar-old', ANN, 1], ['Testchar', BO, 0]]);
   });
@@ -91,14 +103,14 @@ describe('/character edit', () => {
     await add(ann, { name: 'Alpha' });
     await add(bo, { name: 'Bravo' });
     expect((await edit(ann, { name: 'alpha', new_name: 'BRAVO' })).data.content).toMatch(/is already taken in this guild/);
-    expect((await edit(ann, { name: 'alpha', new_name: 'ALPHA' })).data.content).toBe('Updated **ALPHA** (was **Alpha**).');
+    expect((await edit(ann, { name: 'alpha', new_name: 'ALPHA' })).data.content).toBe('Updated **ALPHA** · no class · no level · any race (was **Alpha**).');
     expect((await edit(ann, { name: 'Alpha', new_name: ' ' })).data.content).toBe("A character name can't be empty.");
   });
 
   it('setting main clears the previous main in the same transaction; unsetting the main is refused', async () => {
     await add(ann, { name: 'One' });
     await add(ann, { name: 'Two' });
-    expect((await edit(ann, { name: 'Two', main: true })).data.content).toBe('Updated **Two**. It is now your main.');
+    expect((await edit(ann, { name: 'Two', main: true })).data.content).toBe('Updated **Two** · no class · no level · any race. It is now your main.');
     expect((await chars()).map((c) => c.is_main)).toEqual([0, 1]);
     // Order 18: on /me's form, "No" on the main changes nothing (a main stops being the main only when another becomes it).
     expect((await edit(ann, { name: 'Two', main: false })).data.content).toBe('Nothing changed.');
@@ -129,7 +141,7 @@ describe('/character edit', () => {
   it('member:@user is refused for a non-officer and works for an officer', async () => {
     await add(bo, { name: 'Bochar' });
     expect((await edit(ann, { name: 'Bochar', level: 5, member: BO })).data.content).toBe('Only officers can do that.');
-    expect((await edit(officer, { name: 'Bochar', level: 5, member: BO })).data.content).toBe('Updated **Bochar** (level 5).');
+    expect((await edit(officer, { name: 'Bochar', level: 5, member: BO })).data.content).toBe('Updated **Bochar** · no class · level 5 · any race.');
     expect((await remove(ann, { name: 'Bochar', member: BO })).data.content).toBe('Only officers can do that.');
   });
 
@@ -186,11 +198,10 @@ describe('audit', () => {
 });
 
 describe('autocomplete', () => {
-  // Order 18: class is a typed text box on /me's form (a modal has no autocomplete), so any class name is accepted as
-  // before; the code is matched to the class list when saved (cleanClass).
-  it('class: a code from the list is stored as the code; anything else as typed, with a note', async () => {
-    expect((await add(ann, { name: 'Coded', class: 'clr' })).data.content).toMatch(/^Added \*\*Coded\*\* \(CLR\)/);
-    expect((await add(ann, { name: 'Typed', class: 'Spellsword' })).data.content).toContain("isn't in the class list");
+  // Order 39: class is a menu of the list on /me's form; the code is checked against the list when saved (cleanClass).
+  it('class: a code from the list is stored as the code; anything else is refused', async () => {
+    expect((await add(ann, { name: 'Coded', class: 'clr' })).data.content).toMatch(/^Added \*\*Coded\*\* · Cleric · /);
+    expect((await add(ann, { name: 'Typed', class: 'Spellsword' })).data.content).toBe(CLASS_NOT_LISTED('Spellsword'));
   });
 
   it("character: only the caller's own live characters; a member: option the command does not have is ignored", async () => {

@@ -64,6 +64,12 @@ const worn = async (char: string) =>
     (await env.DB.prepare('SELECT slot, item_key FROM character_gear WHERE character_id = ? ORDER BY slot').bind(await charId(char)).all<{ slot: string; item_key: string }>()).results.map((r) => [r.slot, r.item_key]),
   );
 const options = (r: Reply) => (r.data.components ?? []).flatMap((row: any) => row.components).find((c: any) => c.options)?.options as { label: string; value: string; description?: string }[];
+/** Order 39: a reply's components, flat; its first line; whether Change a slot shows its prompt (no default option). */
+const flat = (r: Reply) => (r.data.components ?? []).flatMap((row: any) => row.components) as any[];
+const first = (r: Reply) => (r.data.content ?? '').split('\n')[0];
+const atPrompt = (r: Reply, id: number) => !flat(r).find((c) => c.custom_id === `wrs:${id}`).options.some((o: any) => o.default);
+/** Order 39: the box's pick list (wrk:), on the slot view under Change a slot. */
+const matches = (r: Reply) => (r.data.components ?? []).flatMap((row: any) => row.components).find((c: any) => c.custom_id?.startsWith('wrk:'))?.options as { label: string; value: string; description?: string }[];
 
 describe('order 35, ITEM 1: race on characters', () => {
   it('Add and Edit character offer the race (mount races left out), set it and clear it', async () => {
@@ -77,7 +83,8 @@ describe('order 35, ITEM 1: race on characters', () => {
     expect(await one('SELECT race FROM character WHERE name = ?', 'Testchar')).toEqual({ race: 'HUM' });
     const id = await charId('Testchar');
     // The card shows it.
-    expect((await send(rawCmd(ann, 'me', undefined))).data.embeds![0].description).toContain('race Human'); // order 36: the name, from the code map
+    // Order 36: the name, from the code map; order 39: the one head, the race once, without "race".
+    expect((await send(rawCmd(ann, 'me', undefined))).data.embeds![0].description).toContain('Inquisitor · level 15 · Human');
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'INQ', level: '', main: '', race: 'ELF' }));
     expect(await one('SELECT race FROM character WHERE id = ?', id)).toEqual({ race: 'ELF' });
     await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'INQ', level: '', main: '', race: 'none' }));
@@ -117,18 +124,80 @@ describe('order 35, ITEM 4: the Gear panel and changing a slot', () => {
     expect((await panel(ann, 'Testchar')).data.content).toContain(WEAR_COPY.filled(20));
   });
 
-  it('the slot select answers with the box at once (a modal, never deferred); a blank box empties the slot', async () => {
+  it('order 39: the slot select updates the panel in place (deferred, no modal) to the slot view, the select at its prompt; Type the item opens the box', async () => {
     await add('Testchar');
     const id = await charId('Testchar');
-    expect(planFor(select(ann, `wrs:${id}`, ['chest']) as any)).toEqual({ defer: false });
-    const modal = await send(select(ann, `wrs:${id}`, ['chest']));
+    expect(planFor(select(ann, `wrs:${id}`, ['shirt']) as any)).toEqual({ defer: true, ack: 6, private: true });
+    const view = await send(select(ann, `wrs:${id}`, ['shirt']));
+    expect(view.type).toBe(7); // an update of the panel, never a new message
+    expect(view.data.content).toBe(`**Testchar** · no class · no level · any race\n${WEAR_COPY.slotLine('Shirt', WEAR_COPY.slotEmpty)}`);
+    const comps = flat(view);
+    // Change a slot is redrawn with no default option, so the client shows its prompt again.
+    const slotSel = comps.find((c: any) => c.custom_id === `wrs:${id}`);
+    expect(slotSel.placeholder).toBe(WEAR_COPY.changeSlot);
+    expect(slotSel.options.some((o: any) => o.default)).toBe(false);
+    // Empty slot only when the slot is filled.
+    expect(comps.filter((c: any) => c.type === 2).map((b: any) => [b.label, b.custom_id])).toEqual([[WEAR_COPY.typeItem, `wrt:${id}:shirt`], [WEAR_COPY.back, `wrv:${id}`]]);
+    expect(planFor(press(ann, `wrt:${id}:shirt`) as any)).toEqual({ defer: false });
+    const modal = await send(press(ann, `wrt:${id}:shirt`));
     expect(modal.type).toBe(9);
-    expect((modal.data as any).custom_id).toBe(`wrm:${id}:chest`);
+    expect((modal.data as any).custom_id).toBe(`wrm:${id}:shirt`);
+    // Back: the panel, in place.
+    const back = await send(press(ann, `wrv:${id}`));
+    expect(back.type).toBe(7);
+    expect(back.data.content).toContain(WEAR_COPY.filled(0));
+  });
+
+  it('order 39: the box submit updates the panel in place with the saved line as its note; a blank box (or Empty slot) empties it', async () => {
+    await add('Testchar');
+    const id = await charId('Testchar');
+    expect(planFor(submit(ann, `wrm:${id}:chest`, { item: 'x' }) as any)).toEqual({ defer: true, ack: 6, private: true });
+    const saved = await box(ann, 'Testchar', 'chest', 'copper breastplate');
+    expect(saved.type).toBe(7);
+    expect(saved.data.content).toBe(
+      [WEAR_COPY.saved('Chest', 'Copper Breastplate', null), '**Testchar** · no class · no level · any race', WEAR_COPY.filled(1), '', ...WEAR_SLOTS.map((w) => `${w.label}: ${w.key === 'chest' ? 'Copper Breastplate' : WEAR_COPY.empty}`)].join('\n'),
+    );
+    expect(atPrompt(saved, id)).toBe(true);
+    // The slot view of a filled slot offers Empty slot; it empties in place.
+    const view = await send(select(ann, `wrs:${id}`, ['chest']));
+    expect(view.data.content).toContain(WEAR_COPY.slotLine('Chest', 'Copper Breastplate'));
+    const emptied = await send(press(ann, `wre:${id}:chest`));
+    expect(emptied.type).toBe(7);
+    expect(first(emptied)).toBe(WEAR_COPY.emptied('Chest', 'Copper Breastplate'));
     await box(ann, 'Testchar', 'chest', 'copper breastplate');
     const r = await box(ann, 'Testchar', 'chest', '   ');
-    expect(r.data.content).toBe(WEAR_COPY.emptied('Chest', 'Copper Breastplate'));
+    expect(r.type).toBe(7);
+    expect(first(r)).toBe(WEAR_COPY.emptied('Chest', 'Copper Breastplate'));
     expect(await worn('Testchar')).toEqual({});
-    expect((await box(ann, 'Testchar', 'chest', '')).data.content).toBe(WEAR_COPY.alreadyEmpty('Chest'));
+    expect(first(await box(ann, 'Testchar', 'chest', ''))).toBe(WEAR_COPY.alreadyEmpty('Chest'));
+  });
+
+  it('order 39: refusals, no match and the pick list answer on the slot view, in place; the presser refused gets a private message', async () => {
+    await add('Testchar');
+    await set('Testchar', 'WIZ');
+    const id = await charId('Testchar');
+    const refused = await box(ann, 'Testchar', 'chest', 'copper breastplate');
+    expect(refused.type).toBe(7);
+    expect((refused.data.content ?? '').split('\n')).toEqual([WEAR_COPY.classRefused('WIZ', 'Copper Breastplate'), '**Testchar** · Wizard · no level · any race', WEAR_COPY.slotLine('Chest', WEAR_COPY.slotEmpty)]);
+    const none = await box(ann, 'Testchar', 'chest', 'zzz');
+    expect(none.type).toBe(7);
+    expect(first(none)).toBe(WEAR_COPY.noMatch('Chest', 'zzz'));
+    const noFit = await send(select(ann, `wrk:${id}:secondary`, [String(await itemId('Copper Breastplate'))]));
+    expect(noFit.type).toBe(7);
+    expect(first(noFit)).toBe(WEAR_COPY.noFit('Copper Breastplate', 'Secondary'));
+    // Another member's copied box: refused privately, as a new message (the panel isn't theirs to change).
+    const other = await send(submit(bo, `wrm:${id}:chest`, { item: 'buckler' }));
+    expect(other.type).toBe(4);
+    expect(other.data.content).toBe(WEAR_COPY.notYours);
+    for (const r of [refused, none, noFit]) expect(atPrompt(r, id)).toBe(true);
+    // Review: Empty slot and Back from someone else's copied panel are refused privately, and change nothing.
+    await box(ann, 'Testchar', 'head', 'wizard hat');
+    for (const cid of [`wre:${id}:head`, `wrv:${id}`]) {
+      const r = await send(press(bo, cid));
+      expect(r.type).toBe(4);
+      expect(r.data.content).toBe(WEAR_COPY.notYours);
+    }
+    expect(await worn('Testchar')).toEqual({ head: 'wizard hat' });
   });
 
   it('the box: one exact match saves; several are a menu by name, told apart by slot and classes; over 24 says how many more; none offers the box again', async () => {
@@ -136,16 +205,20 @@ describe('order 35, ITEM 4: the Gear panel and changing a slot', () => {
     const exact = await box(ann, 'Testchar', 'chest', 'ENCHANTED copper plate breastplate');
     expect(exact.data.content).toContain('**Chest:** Enchanted Copper Plate Breastplate (was empty)');
     const several = await box(ann, 'Testchar', 'chest', 'copper');
-    expect(options(several).map((o) => o.label)).toEqual(['Copper Breastplate', 'Enchanted Copper Plate Breastplate']);
-    expect(options(several)[0].description).toBe('X · CLR INQ');
+    expect(several.type).toBe(7);
+    expect(matches(several).map((o) => o.label)).toEqual(['Copper Breastplate', 'Enchanted Copper Plate Breastplate']);
+    expect(matches(several)[0].description).toBe('X · CLR INQ');
     const picked = await send(select(ann, `wrk:${await charId('Testchar')}:chest`, [String(await itemId('Copper Breastplate'))]));
+    expect(picked.type).toBe(7);
     expect(picked.data.content).toContain('**Chest:** Copper Breastplate (replaced Enchanted Copper Plate Breastplate)');
+    expect(picked.data.content).toContain(WEAR_COPY.filled(1));
     const many = await box(ann, 'Testchar', 'head', 'leather cap');
-    expect(options(many).length).toBe(MATCH_MAX + 1);
-    expect(options(many)[MATCH_MAX]).toMatchObject({ label: WEAR_COPY.more(30 - MATCH_MAX), value: 'more' });
+    expect(matches(many).length).toBe(MATCH_MAX + 1);
+    expect(matches(many)[MATCH_MAX]).toMatchObject({ label: WEAR_COPY.more(30 - MATCH_MAX), value: 'more' });
     const none = await box(ann, 'Testchar', 'chest', 'zzz');
-    expect(none.data.content).toBe(WEAR_COPY.noMatch('Chest', 'zzz'));
-    expect((none.data.components as any)[0].components[0].label).toBe(WEAR_COPY.typeAgain);
+    expect(first(none)).toBe(WEAR_COPY.noMatch('Chest', 'zzz'));
+    // Order 39: no match answers on the slot's view (the panel, in place), with Type the item.
+    expect(flat(none).find((c) => c.custom_id?.startsWith('wrt:')).label).toBe(WEAR_COPY.typeItem);
     expect((await send(press(ann, `wrt:${await charId('Testchar')}:chest`))).type).toBe(9);
     // Two items can't share a name: item.name_key is unique (the import keeps the first of a case-only pair).
     await expect(env.DB.prepare("INSERT INTO item (name, name_key, source, imported_at) VALUES ('copper BREASTPLATE', 'copper breastplate', 'wiki', 't')").run()).rejects.toThrow(/UNIQUE/);

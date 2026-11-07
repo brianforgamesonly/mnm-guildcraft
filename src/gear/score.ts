@@ -288,7 +288,10 @@ export interface Context {
   worn: Map<string, Worn>;
 }
 
-/** The highest haste worn (counted items only) in every slot outside `except`. */
+/** The highest haste worn (counted items only) in every slot outside `except`. Order 39: the stat line reads it as is. */
+export function hasteWornElsewhere(ctx: Context, except: string[]): number {
+  return hasteElsewhere(ctx, except);
+}
 function hasteElsewhere(ctx: Context, except: string[]): number {
   let h = 0;
   for (const [slot, g] of ctx.worn) {

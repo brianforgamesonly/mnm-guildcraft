@@ -115,6 +115,27 @@ function cpu(work, reps = 50) {
   return { median: (t[9] + t[10]) / 2, worst: t[19] };
 }
 const fmt = (c) => `median ${c.median.toFixed(3)} ms, worst ${c.worst.toFixed(3)} ms`;
+/** cpu() for async work whose D1 is a stub answering at once (order 39: the summary reads its stat lines' rows). */
+async function cpuAsync(work, reps = 50) {
+  for (let i = 0; i < 20; i++) await work();
+  const t = [];
+  for (let i = 0; i < 20; i++) {
+    const t0 = performance.now();
+    for (let j = 0; j < reps; j++) await work();
+    t.push((performance.now() - t0) / reps);
+  }
+  t.sort((a, b) => a - b);
+  return { median: (t[9] + t[10]) / 2, worst: t[19] };
+}
+/** A D1 stand-in that answers every statement with the rows read once from the real one (the pure work, no wait). */
+const stubDb = (rows) => ({
+  prepare: () => ({
+    bind: (ids) => {
+      const want = new Set(JSON.parse(ids));
+      return { all: async () => ({ results: rows.filter((r) => want.has(r.id)) }) };
+    },
+  }),
+});
 
 for (const [label, name, charId] of [['Fighter 24, 15 slots filled', 'Benchfighter', fighter], ['Fighter 24, nothing saved', 'Benchbare', bare]]) {
   const summary = () => gearUpgrades(ctx(), [opt('character', name)]);
@@ -135,7 +156,8 @@ for (const [label, name, charId] of [['Fighter 24, 15 slots filled', 'Benchfight
   // CPU: the pure work each interaction does on the warm index (the summary: 17 slot comparisons; a list, a page turn and
   // Pick a result: one slot's), and, once per isolate or import, building the index from its rows.
   const L = await load(ctx(), (await raw.prepare('SELECT * FROM character WHERE id = ?').bind(charId).first()));
-  console.log(`  CPU (Node, pure work) summary: ${fmt(cpu(() => summaryView(L, null)))}`);
+  const statRows = (await raw.prepare("SELECT id, stats_json FROM item WHERE source = 'wiki' AND slot_mask <> 0").all()).results;
+  console.log(`  CPU (Node, pure work) summary: ${fmt(await cpuAsync(() => summaryView({ db: stubDb(statRows) }, L, null)))}`);
   console.log(`  CPU (Node, pure work) one slot (list, page turn, Pick a result): ${fmt(cpu(() => grouped(compareGroup(groupByKey('chest'), L.ctx, L.wearer, L.idx.items).upgrades, null)))}`);
   if (charId === fighter) {
     const { results } = await raw.prepare(GEAR_INDEX_SQL).all();
