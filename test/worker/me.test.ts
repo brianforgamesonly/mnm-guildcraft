@@ -2,6 +2,7 @@
 // officer role; Add character, Notices and Forget a recipe are the member's own.
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { CLASS_NOT_LISTED } from '../../src/commands/character.ts';
 import { ME_COPY } from '../../src/commands/me.ts';
 import { OFFICER_ONLY } from '../../src/commands/members.ts';
 import { WELCOME } from '../../src/commands/welcome.ts';
@@ -59,17 +60,54 @@ describe('/me', () => {
     expect((await me(ann, { character: 'Alt' })).data.embeds!.map((e) => e.title)).toEqual(['Alt']);
   });
 
-  it('Add character: a modal at once (never deferred); its form adds the character, class typed in', async () => {
+  it('Add character: a modal at once (never deferred); its form adds the character, class picked from the menu', async () => {
+    await env.DB.prepare("INSERT INTO game_race (code, item_count, bit, mount) VALUES ('HUM', 5, 0, 0)").run();
     const id = byLabel(await me(), ME_COPY.add).custom_id;
     expect(planFor(press(ann, id) as any)).toEqual({ defer: false });
     const modal = await send(press(ann, id));
     expect(modal.type).toBe(9);
     expect(modal.data.title).toBe(ME_COPY.addTitle);
-    const done = await send(submit(ann, modal.data.custom_id!, { name: 'Testchar', class: 'Spellsword', level: '12' }));
-    expect(done.data.content).toMatch(/^Added \*\*Testchar\*\* \(Spellsword, level 12\)\. It is your main/);
-    expect(await one('SELECT class, level, is_main FROM character')).toEqual({ class: 'Spellsword', level: 12, is_main: 1 });
+    // Order 39: the class is a select in a Label, the form still 5 components; nothing picked on Add.
+    const comps = (modal.data as any).components;
+    expect(comps.length).toBe(5);
+    const cls = comps.find((c: any) => c.component?.custom_id === 'class');
+    expect(cls.type).toBe(18);
+    expect(cls.component.type).toBe(3);
+    // The derived list (game_class codes on items: OLD has none), by name, valued by code, after No class.
+    expect(cls.component.options.map((o: any) => [o.label, o.value])).toEqual([[ME_COPY.noClass, 'none'], ['Cleric', 'CLR'], ['Shadow Knight', 'SHD'], ['Wizard', 'WIZ']]);
+    expect(cls.component.options.some((o: any) => o.default)).toBe(false);
+    const done = await send(submit(ann, modal.data.custom_id!, { name: 'Testchar', class: 'SHD', level: '12' }));
+    expect(done.data.content).toMatch(/^Added \*\*Testchar\*\* · Shadow Knight · level 12 · any race\. It is your main/);
+    expect(await one('SELECT class, level, is_main FROM character')).toEqual({ class: 'SHD', level: 12, is_main: 1 });
     const bad = await send(submit(ann, modal.data.custom_id!, { name: 'Other', level: 'abc' }));
     expect(bad.data.content).toBe('Level must be a whole number from 1 to 100.');
+    // A value that isn't a code from the list (a stale or forged form) is refused, and nothing is saved.
+    expect((await send(submit(ann, modal.data.custom_id!, { name: 'Other', class: 'Ranger' }))).data.content).toBe(CLASS_NOT_LISTED('Ranger'));
+    expect(await count('character')).toBe(1);
+  });
+
+  it('order 39: Edit pre-picks a known class; an unknown stored class is not offered, nothing is picked, and an untouched menu keeps it', async () => {
+    await add('Testchar');
+    const id = (await one<{ id: number }>('SELECT id FROM character')).id;
+    await env.DB.prepare("UPDATE character SET class = 'WIZ' WHERE id = ?").bind(id).run();
+    const classOpts = async () => ((await send(press(ann, byLabel(await me(), ME_COPY.edit).custom_id))).data as any).components.find((c: any) => c.component?.custom_id === 'class').component.options;
+    expect((await classOpts()).filter((o: any) => o.default).map((o: any) => o.value)).toEqual(['WIZ']);
+    // No class saved: No class is picked.
+    await env.DB.prepare('UPDATE character SET class = NULL WHERE id = ?').bind(id).run();
+    expect((await classOpts()).filter((o: any) => o.default).map((o: any) => o.value)).toEqual(['none']);
+    // Banakil's case: a class saved as typed before order 39.
+    await env.DB.prepare("UPDATE character SET class = 'Halfling' WHERE id = ?").bind(id).run();
+    const opts = await classOpts();
+    expect(opts.some((o: any) => o.default)).toBe(false);
+    expect(opts.map((o: any) => o.value)).not.toContain('Halfling');
+    // Saved with the menu left alone (it sends nothing): the class is kept, the level changes.
+    await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: '', level: '18', main: '' }));
+    expect(await one('SELECT class, level FROM character WHERE id = ?', id)).toEqual({ class: 'Halfling', level: 18 });
+    // Picking a class fixes it; No class clears it.
+    await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'CLR', level: '', main: '' }));
+    expect(await one('SELECT class FROM character WHERE id = ?', id)).toEqual({ class: 'CLR' });
+    await send(submit(ann, `meem:${id}`, { name: 'Testchar', class: 'none', level: '', main: '' }));
+    expect(await one('SELECT class FROM character WHERE id = ?', id)).toEqual({ class: null });
   });
 
   it('Edit character: one character opens its form at once; several ask which first; the form changes what changed', async () => {
@@ -86,7 +124,7 @@ describe('/me', () => {
     const modal = await send(select(ann, sel.custom_id, [sel.options[1].value]));
     expect(modal.type).toBe(9);
     const done = await send(submit(ann, modal.data.custom_id!, { name: 'Altana', class: '', level: '20', main: 'yes' }));
-    expect(done.data.content).toBe('Updated **Altana** (level 20) (was **Alt**). It is now your main.');
+    expect(done.data.content).toBe('Updated **Altana** · no class · level 20 · any race (was **Alt**). It is now your main.');
     expect((await send(submit(ann, modal.data.custom_id!, { name: 'Altana', class: '', level: '20', main: 'yes' }))).data.content).toBe(ME_COPY.nothingChanged);
   });
 
@@ -168,9 +206,11 @@ describe('/officer edit-member: the member\'s panel for an officer, re-checked o
     const panel = await send(cmd(officer, 'officer', 'edit-member', { member: ANN }));
     const modal = await send(press(officer, byLabel(panel, ME_COPY.edit).custom_id));
     expect(modal.type).toBe(9);
-    const done = await send(submit(officer, modal.data.custom_id!, { name: 'Testchar', class: 'Ranger', level: '', main: 'no' }));
-    expect(done.data.content).toMatch(/^Updated \*\*Testchar\*\* \(Ranger\)/);
-    expect(await one('SELECT class, is_main FROM character')).toEqual({ class: 'Ranger', is_main: 1 });
+    // Order 39: the officer's form has the same class menu.
+    expect((modal.data as any).components.find((c: any) => c.component?.custom_id === 'class').component.type).toBe(3);
+    const done = await send(submit(officer, modal.data.custom_id!, { name: 'Testchar', class: 'SHD', level: '', main: 'no' }));
+    expect(done.data.content).toMatch(/^Updated \*\*Testchar\*\* · Shadow Knight · /);
+    expect(await one('SELECT class, is_main FROM character')).toEqual({ class: 'SHD', is_main: 1 });
   });
 
   it('a member who is not an officer gets nowhere with copied buttons or forms of another member\'s panel', async () => {

@@ -163,10 +163,11 @@ describe('/craft me', () => {
     expect(r.data.flags).toBe(64);
     expect(r.data.embeds!.map((e) => e.title)).toEqual(['Testchar (main)', 'Alt']);
     const lines = r.data.embeds![0].description!.split('\n');
-    expect(lines[0]).toBe('CLR · level 10');
+    // Order 39: the one character head without the name (the embed's title), the class by name; every part shown.
+    expect(lines[0]).toBe('Cleric · level 10 · any race');
     expect(lines[1]).toMatch(/^\*\*Blacksmithing\*\* 25 · <t:\d{10}:d>$/);
     expect(lines[2]).toBe(`**Tailoring** 7 · <t:${Date.parse('2026-01-01T00:00:00.000Z') / 1000}:d> · *stale*`);
-    expect(r.data.embeds![1].description).toBe('No skills yet: `/skills` or **Update skills**.');
+    expect(r.data.embeds![1].description).toBe('no class · no level · any race\nNo skills yet: `/skills` or **Update skills**.');
     // Order 16: the member's craft request opt-ins (none yet).
     expect(r.data.content).toBe(`**Craft request notices:** off (**Notices** on \`/me\` turns them on for a tradeskill)\n${ME_COPY.noRequests}\n-# *stale* = not updated in 60 days.`);
   });

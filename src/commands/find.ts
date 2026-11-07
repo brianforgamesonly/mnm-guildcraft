@@ -7,6 +7,7 @@ import { FINISHED_IMPORT } from '../import-status.ts';
 import { CORRECTED_COLS, correctionJoin, isGated, type Acquisition } from '../recipes.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
 import { postedReply } from './share.ts';
+import { effectText, parseStats, partText, statParts } from '../gear/statline.ts';
 
 export interface ItemRecord {
   id: number;
@@ -57,29 +58,32 @@ export function itemLinks(item: ItemRecord): unknown[] {
 
 // ---------------------------------------------------------------- the item card (FR-6 layer 1)
 
-const signed = (n: number) => (n > 0 ? `+${n}` : String(n));
-const pairs = (o: unknown) =>
-  o && typeof o === 'object' && !Array.isArray(o) ? Object.entries(o as Record<string, unknown>).filter(([, v]) => typeof v === 'number') : [];
-
-/** Key stats as compact inline fields; only the ones the item has. */
+/**
+ * Key stats as compact inline fields; only the ones the item has. Order 39: the stat values come from the one stat line
+ * (src/gear/statline.ts statParts), which /gear upgrades also shows, so a stat reads the same on the card and in a list.
+ */
 export function statFields(item: ItemRecord): EmbedField[] {
   const s = (item.stats_json ? JSON.parse(item.stats_json) : {}) as Record<string, unknown>;
+  const st = parseStats(item.stats_json);
+  const parts = new Map(statParts(st).map((p) => [p.key, p]));
   const f: EmbedField[] = [];
   const add = (name: string, value: unknown) => {
     if (value !== undefined && value !== null && value !== '') f.push({ name, value: truncate(String(value), EMBED_LIMITS.fieldValue), inline: true });
   };
   add('Slot', item.slot);
-  add('AC', s.ac);
-  if (typeof s.dmg === 'number') add('Damage', `${s.dmg}${typeof s.delay === 'number' ? ` / ${s.delay} delay` : ''}${s.skill ? ` · ${s.skill}` : ''}${s.handed ? ` · ${s.handed}` : ''}`);
-  add('HP', typeof s.hp === 'number' ? signed(s.hp) : undefined);
-  add('Mana', typeof s.mana === 'number' ? signed(s.mana) : undefined);
-  const stats = pairs(s.stats).map(([k, v]) => `${k} ${signed(v as number)}`);
+  add('AC', parts.get('AC')?.value);
+  const dmg = parts.get('DMG');
+  const delay = parts.get('DELAY');
+  if (dmg) add('Damage', `${dmg.value}${delay ? ` / ${delay.value}` : ''}${st.skill ? ` · ${st.skill}` : ''}${st.handed ? ` · ${st.handed}` : ''}`);
+  add('HP', parts.get('HP')?.value);
+  add('Mana', parts.get('MANA')?.value);
+  const of = (prefix: string) => [...parts.values()].filter((p) => p.key.startsWith(prefix)).map(partText);
+  const stats = of('stat:');
   if (stats.length) add('Stats', stats.join(' · '));
-  const res = pairs(s.resists).map(([k, v]) => `${k} ${signed(v as number)}`);
+  const res = of('res:');
   if (res.length) add('Resists', res.join(' · '));
-  for (const k of ['hpRegen', 'manaRegen', 'haste'] as const) if (typeof s[k] === 'number') add(k === 'haste' ? 'Haste' : k === 'hpRegen' ? 'HP regen' : 'Mana regen', s[k]);
-  const effect = s.effect as { name?: string; trigger?: string } | undefined;
-  if (effect?.name) add('Effect', `${effect.name}${effect.trigger ? ` (${effect.trigger})` : ''}`);
+  for (const k of ['HPREGEN', 'MANAREGEN', 'HASTE'] as const) if (parts.get(k)) add(parts.get(k)!.label, parts.get(k)!.value);
+  if (st.effect) add('Effect', effectText(st.effect));
   if (typeof s.weight === 'number' || s.size) add('Weight · Size', [typeof s.weight === 'number' ? `${s.weight} wt` : null, s.size].filter(Boolean).join(' · '));
   if (s.class || s.race) add('Class / Race', `${s.class ?? '?'} / ${s.race ?? '?'}`);
   if (Array.isArray(s.flags) && s.flags.length) add('Flags', s.flags.join(' '));

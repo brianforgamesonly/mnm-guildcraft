@@ -28,15 +28,15 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 
 | Where | Text | Status |
 |---|---|---|
-| src/commands/character.ts:194 | Added **\<character>** (\<class>, level \<level>). | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/character.ts:194 | Added **\<character>** (\<class>, level \<level>). | RETIRED by order 39 (the one character head; see "Work order 39") |
 | src/commands/character.ts:156 | (added after "Added …", first character) It is your main (your first character). | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:156 | (added after "Added …", when the form's "Make this your main?" is Yes) It is now your main. | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/character.ts:172 | Restored **\<character>** (\<class>, level \<level>), which you removed earlier, with its \<number> saved skill(s). It is your main. | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/character.ts:172 | Restored **\<character>** (\<class>, level \<level>), which you removed earlier, with its \<number> saved skill(s). It is your main. | RETIRED by order 39 (the one character head; see "Work order 39") |
 | src/commands/character.ts:101 | A character name can't be empty. (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:102 | A character name can be at most 32 characters. (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:103 | A character name can't contain line breaks or control characters. (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:118 | Level must be a whole number from 1 to 100. (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/character.ts:113 | Class **\<class>** isn't in the class list taken from the wiki data, so it's saved as typed. (The game is in Early Access; the list may be incomplete.) (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/character.ts:113 | Class **\<class>** isn't in the class list taken from the wiki data, so it's saved as typed. (The game is in Early Access; the list may be incomplete.) (also Edit character) | RETIRED by order 39 (override 1: the class is picked from a menu; nothing is saved as typed) |
 | src/commands/character.ts:49 | **\<name>** belongs to a removed character, so it can't be reused yet. An officer can rename the removed character to free the name. (also Edit character) | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:50 | (added for officers) It belongs to @\<member>: `/officer edit-member` on them, then **Edit character** on the removed one, with a new name. | DRAFT (changes approved copy) |
 
@@ -48,7 +48,7 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 | src/commands/character.ts:225 | There is a removed character of yours named **\<name>**. **Add character** on `/me` with that name restores it; or pick another name. | DRAFT (changes approved copy) |
 | src/commands/character.ts:242 | **\<character>** is removed; it can't be made a main until it is restored. | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/character.ts:243 | **\<character>** is your main. To change that, make another character your main. (a guard: the Edit character form never sends it, as No on the main changes nothing) | DRAFT (changes approved copy) |
-| src/commands/character.ts:264 | Updated **\<character>** (\<class>, level \<level>) (was **\<old name>**). It is now your main. ("(was …)" only on a rename; "It is now your main." only when it became main) | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/character.ts:264 | Updated **\<character>** (\<class>, level \<level>) (was **\<old name>**). It is now your main. ("(was …)" only on a rename; "It is now your main." only when it became main) | RETIRED by order 39 (the one character head; the rest of the line stands) |
 
 #### Remove character (on /me; formerly /character remove)
 
@@ -62,7 +62,7 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 | Where | Text | Status |
 |---|---|---|
 | src/commands/skills.ts:287 | Card title: \<character> (main) ("(main)" only on the main) | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/skills.ts:277 | Card first line: \<class> · level \<level> | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/skills.ts:277 | Card first line: \<class> · level \<level> | RETIRED by order 39 (the one character head, without the name) |
 | src/commands/skills.ts:284 | **\<tradeskill>** \<level> · \<date> · *stale* ("*stale*" only when old) | APPROVED (owner, by exception, 2026-10-20) |
 | src/commands/skills.ts:288 | No skills yet: `/skills` or **Update skills**. | DRAFT (changes approved copy) |
 | src/commands/recipes.ts:147 | Known recipes: \<item> (\<tradeskill>), \<item> (\<tradeskill>) +\<number> more | APPROVED (owner, by exception, 2026-10-20) |
@@ -855,7 +855,7 @@ Every line below is DRAFT until approved: the new commands' and options' descrip
 | src/commands/me.ts:77 | Form title: Edit \<character> | DRAFT |
 | src/commands/me.ts:78 | Form field: Name | DRAFT |
 | src/commands/me.ts:79 | Form field: Class | DRAFT |
-| src/commands/me.ts:80 | Form field note: Optional. A class code from the game (e.g. CLR), or type your own | DRAFT |
+| src/commands/me.ts:80 | Form field note: Optional. A class code from the game (e.g. CLR), or type your own | RETIRED by order 39 (the class menu) |
 | src/commands/me.ts:81 | Form field: Level | DRAFT |
 | src/commands/me.ts:82 | Form field note (Add): Optional: 1 to 100 | DRAFT |
 | src/commands/me.ts:83 | Form field note (Edit): 1 to 100. Blank keeps the current level | DRAFT |
@@ -1290,13 +1290,13 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/commands/definitions.ts:36 | (`/gear search`, the search's new name) Gear for your class, by slot, weapon type, AC, ratio, stats, source and zone (the words `/gear` had) | DRAFT |
 | src/commands/definitions.ts:40-44 | (`/gear wear`) Save what one of your characters wears, in one of its 20 gear slots · `item`: The item: pick from the list (gear your character can use) · `character`: Your character (needed when you have more than one) · `slot`: The slot (asked when the item fits more than one); slot choices Head … Range | DRAFT |
 | src/commands/me.ts:102-106 | (Add/Edit character form) Race · Optional. Codes from the wiki data; no race means any race · No race (any) · (panel button) Gear: \<name> · Gear: pick a character | DRAFT |
-| src/commands/skills.ts:278 | (character card) race \<code> | DRAFT |
+| src/commands/skills.ts:278 | (character card) race \<code> | RETIRED by order 39 (the race once, by name, without "race") |
 | src/commands/character.ts:41 | **\<race>** isn't a race in the list taken from the wiki data. | DRAFT |
 | src/commands/gear.ts:56 | That item is no longer in the data. Run `/gear search` again. (was `/gear`) | DRAFT |
 | src/commands/zone.ts:41 | No classes are loaded yet. Try `/gear search` once the nightly import has run. (was `/gear`) | DRAFT |
 | src/gear/wear.ts:59 | That item is no longer in the data. (I'm wearing this on an item gone upstream) | DRAFT |
 | src/commands/character.ts:311 | (Remove character, appended) Its saved gear is removed. | DRAFT |
-| src/gear/wear.ts:57-95 (order 35; see order 36 below) | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT |
+| src/gear/wear.ts:57-95 (order 35; see order 36 below) | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT; the panel head and "Type again" RETIRED by order 39 (see "Work order 39") |
 
 ## Work order 36, PR A: /gear upgrades and Find upgrades (DRAFT)
 
@@ -1304,7 +1304,7 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 |---|---|---|
 | src/commands/definitions.ts:49-57 | (`/gear upgrades`) What beats your character's saved gear, smallest upgrade first, and how to get each item · `character`: Your character (needed when you have more than one) · `slot`: One slot: its full list (leave out for every slot); slot choices Head … Range, the pairs as Ear, Wrist, Finger · `levels`: Around your level means up to this many levels above it (default 10) | DRAFT |
 | src/gear/wear.ts:99 | (Gear panel button) Find upgrades | DRAFT |
-| src/gear/upgrades.ts:60-115 | Every /gear upgrades string (UPGRADES_COPY): "Upgrades for \<name>", "\<Slot> upgrades for \<name>", the head "\<name> · \<Class> \<level> · \<race>/any race", "Uses your guild's \<Class> weights.", "Save a level for \<name> on `/me` to group this list by level.", "Around your level means up to Lv \<n> (your level + \<w>).", the summary lines ("**\<Slot>:** \<item> **+\<gain>** · \<level>", "nothing around your level · next: …", "only level-unknown upgrades"), the footer ("\<n> more slots with upgrades: pick a slot below · \<n> slots with nothing better"), "Nothing beats what \<name> wears, for a \<Class>, in any slot.", "Nothing beats \<item> for a \<Class> in \<slot>.", "an empty \<slot>", Pick a slot, "smallest: \<item> +\<gain>", the group heads (Around your level, Above your level, Level unknown), "\<Slot>: \<item> (score \<n>)", "\<Slot>: empty (score 0.00)", "counts 0: no longer listed", "counts 0: \<name> can't use it", "Compared with the weaker side, **\<side>**.", the two-hander note, "replaces \<side>", "replaces the two-hander: Secondary is then free", "needs a one-handed Primary", Pick a result, ◀ Smaller, Bigger ▶, "Page \<n> of \<m>", Open item, I'm wearing it now, Request a craft, "+\<n> more zones", the levels: and slot: refusals, That item is no longer in the data., and the source lines (Drop: …, Crafted: …, You can make this (…), Reliable in your guild: …, No Reliable crafter in the guild yet, Vendor: … · any level, Harvested, any level, Quest: the quest's name isn't recorded · …, Source not recorded) | DRAFT |
+| src/gear/upgrades.ts:60-115 | Every /gear upgrades string (UPGRADES_COPY): "Upgrades for \<name>", "\<Slot> upgrades for \<name>", the head "\<name> · \<Class> \<level> · \<race>/any race", "Uses your guild's \<Class> weights.", "Save a level for \<name> on `/me` to group this list by level.", "Around your level means up to Lv \<n> (your level + \<w>).", the summary lines ("**\<Slot>:** \<item> **+\<gain>** · \<level>", "nothing around your level · next: …", "only level-unknown upgrades"), the footer ("\<n> more slots with upgrades: pick a slot below · \<n> slots with nothing better"), "Nothing beats what \<name> wears, for a \<Class>, in any slot.", "Nothing beats \<item> for a \<Class> in \<slot>.", "an empty \<slot>", Pick a slot, "smallest: \<item> +\<gain>", the group heads (Around your level, Above your level, Level unknown), "\<Slot>: \<item> (score \<n>)", "\<Slot>: empty (score 0.00)", "counts 0: no longer listed", "counts 0: \<name> can't use it", "Compared with the weaker side, **\<side>**.", the two-hander note, "replaces \<side>", "replaces the two-hander: Secondary is then free", "needs a one-handed Primary", Pick a result, ◀ Smaller, Bigger ▶, "Page \<n> of \<m>", Open item, I'm wearing it now, Request a craft, "+\<n> more zones", the levels: and slot: refusals, That item is no longer in the data., and the source lines (Drop: …, Crafted: …, You can make this (…), Reliable in your guild: …, No Reliable crafter in the guild yet, Vendor: … · any level, Harvested, any level, Quest: the quest's name isn't recorded · …, Source not recorded) | DRAFT; the head "\<name> · \<Class> \<level> · \<race>" and the 3-stat breakdown ("+14 AC, +1 STA, −5 HP") RETIRED by order 39 (see "Work order 39") |
 | src/gear/upgrades.ts:120-141 | (levels, always with their kind) Lv \<a>–\<b> (drop) · zone Lv \<a>–\<b> · Lv \<n> (crafted) · Lv \<n>+ (crafted, component floor) · quest Lv \<n> · any level (vendor) · any level (harvested) · level unknown | DRAFT |
 | src/gear/upgrades.ts:406 | You have no character named **\<name>**. | DRAFT |
 
@@ -1346,3 +1346,17 @@ PR B: the how-to-get lines moved to src/gear/howto.ts (HOW_COPY), unchanged.
 | src/gear/howto.ts (HOW_COPY.cardField) | /item card field: "How to get it" (the same lines as /gear upgrades; replaces the card's "Quest" and "Unknown — source not recorded" fields; the Vendor field now shows the price only) | DRAFT |
 | src/gear/upgrades.ts (UPGRADES_COPY.hidden) | "\<n> more above Lv \<n> not shown." (fixes "69 mores …") | DRAFT |
 | src/commands/gear.ts (sourceLines) | /gear find result line for a harvested item: "Harvested, any level" | DRAFT |
+
+## Work order 39: one character head, the class menu, full item stats (DRAFT)
+
+Retired by order 39 (marked in their rows above): the approved "Class \<class> isn't in the class list … saved as typed" (override 1), the Added/Restored/Updated replies' "(\<class>, level \<n>)", the card's "\<class> · level \<n>" and "race \<code>", the form note "A class code from the game (e.g. CLR), or type your own", the Gear panel's head "\<name> · \<class> · level \<n> · race \<race>" and "Type again", the /gear upgrades head "\<name> · \<Class> \<level> · \<race>" and its 3-stat breakdown.
+
+| Where | Text | Status |
+|---|---|---|
+| src/commands/character.ts:145-148, 157-163 | The one character head: "**\<name>** · \<Class name> · level \<n> · \<Race name>", with "no class", "no level", "any race"; a stored class outside the list: "\<as stored> (not a game class: edit on /me)". The card's head has no name (it is the title). | DRAFT |
+| src/commands/character.ts:174 | Added / Restored / Updated replies with the head: "Added **Banakil** · Ranger · level 18 · Halfling." (the rest of each reply as before) | DRAFT |
+| src/commands/character.ts:129 | **\<value>** isn't a class in the list taken from the wiki data. Pick one from the menu. | DRAFT |
+| src/commands/me.ts:89-90 | (Add/Edit character form, the Class menu) Optional. The classes in the wiki data · No class (options: the class names, e.g. Ranger) | DRAFT |
+| src/gear/wear.ts:82-86 | (Gear panel, the slot view) Type the item · Empty slot · Back · "**\<Slot>:** \<item>" / "**\<Slot>:** empty" | DRAFT |
+| src/gear/upgrades.ts:73 | Uses default weights: no game class saved. Pick one on /me. | DRAFT |
+| src/gear/statline.ts:72, 103-113 | The stat line: "AC 12 · Damage 20 / 30 delay · HP +15 · Mana +5 · STR +2 · FR +3 · Haste 10 · HP regen 1 · Mana regen 2 · Effect: \<effect> (\<trigger>)"; marked "**STA +5 ▲+2**", "**AGI +1 ▼−2**", "**WIS — ▼−4**"; "(vs Primary)"; "(doesn't stack: Haste \<n> worn elsewhere)"; "**Effect: \<effect> (new effect)**"; "**effect lost: \<effect>**" | DRAFT |

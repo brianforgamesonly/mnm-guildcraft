@@ -152,7 +152,7 @@ describe('first-use welcome (FR-9)', () => {
     expect(first.data.flags).toBe(64);
     expect(first.data.embeds!.filter((e) => e.title === WELCOME.title)).toHaveLength(1);
     const added = await send(cmd(as(ANN), 'character', 'add', { name: 'Testchar' }));
-    expect(added.data.content).toMatch(/^Added \*\*Testchar\*\*\. It is your main/);
+    expect(added.data.content).toMatch(/^Added \*\*Testchar\*\* · no class · no level · any race\. It is your main/);
     expect(hasWelcome(added)).toBe(false);
     const second = await send(top(as(ANN), 'me'));
     expect(hasWelcome(second)).toBe(false);

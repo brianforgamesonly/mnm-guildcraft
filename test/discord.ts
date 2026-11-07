@@ -274,7 +274,8 @@ async function fromLegacy({ m, key, options: o }: Legacy, opts: { env?: Record<s
       const ch = await characterOf(owner, o.name, owner !== me);
       return submit(m, `meem:${ch?.id ?? 0}`, {
         name: String(o.new_name ?? ch?.name ?? o.name ?? ''),
-        class: String(o.class ?? ch?.class ?? ''),
+        // Order 39: class is a menu; left alone it sends nothing (the stored class is kept).
+        ...(o.class !== undefined ? { class: String(o.class) } : {}),
         level: o.level !== undefined ? String(o.level) : '',
         main: o.main === true ? 'yes' : o.main === false ? 'no' : '',
       });

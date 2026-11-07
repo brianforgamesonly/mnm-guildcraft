@@ -7,7 +7,7 @@ import { createChannelsButton } from './commands/channels.ts';
 import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } from './commands/members.ts';
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
-import { gearWear, WEAR_OPENS_MODAL, wearComponent, wearImmediate } from './gear/wear.ts';
+import { gearWear, WEAR_OPENS_MODAL, WEAR_SUBMITS_IN_PLACE, wearComponent, wearImmediate } from './gear/wear.ts';
 import { gearUpgrades, POST_WHAT as UPGRADES_POST, postUpgrades, upgradesComponent } from './gear/upgrades.ts';
 import { gearWeights } from './gear/weights.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
@@ -181,6 +181,9 @@ export function planFor(i: Interaction): Plan {
       return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
     case InteractionType.MODAL_SUBMIT:
       if (!inGuild) return { defer: false };
+      // Order 39: the Gear panel's item box edits the panel it came from (type 6; Discord: DEFERRED_UPDATE_MESSAGE is
+      // "Only valid for MODAL_SUBMIT and component-based interactions"). Every other submit answers as a new message.
+      if (WEAR_SUBMITS_IN_PLACE.some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
       return { defer: true, ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, private: true };
     default:
       return { defer: false }; // PING, autocomplete

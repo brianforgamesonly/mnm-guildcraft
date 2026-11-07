@@ -16,7 +16,8 @@ import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, mention, optStr
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
 import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
-import { CHARACTER_RACES_SQL, characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
+import { className } from '../gear/score.ts';
+import { CHARACTER_RACES_SQL, gameClasses, characterAdd, characterEdit, characterRemove, charactersWithRemoved, findById, LEVEL_MAX, liveCharacters, NAME_MAX, resolveCharacter, type Character } from './character.ts';
 import { PANEL_PREFIX as GEAR_PANEL_PREFIX, PANEL_PICK_PREFIX as GEAR_PANEL_PICK_PREFIX } from '../gear/wear.ts';
 import { raceLabel } from '../gear/vocab.ts';
 import { OFFICER_ONLY } from './members.ts';
@@ -84,7 +85,9 @@ export const ME_COPY = {
   editTitle: (name: string) => truncate(`Edit ${name}`, LABEL_MAX),
   name: 'Name',
   className: 'Class',
-  classHint: 'Optional. A class code from the game (e.g. CLR), or type your own',
+  // Order 39: a menu of the game's classes (retires "A class code from the game (e.g. CLR), or type your own").
+  classHint: 'Optional. The classes in the wiki data',
+  noClass: 'No class',
   level: 'Level',
   levelHint: `Optional: 1 to ${LEVEL_MAX}`,
   levelEditHint: `1 to ${LEVEL_MAX}. Blank keeps the current level`,
@@ -309,24 +312,63 @@ const raceSelect = (races: string[], current: string | null) => ({
     ],
   },
 });
+/**
+ * Order 39: the class choice, a select in the form in place of the text box (Discord: "String Selects are available in
+ * messages and modals. They must be placed inside an Action Row in messages and a Label in modals"; a modal holds "Between
+ * 1 and 5 (inclusive) components", and this keeps it at 5). The classes are game_class's (src/commands/character.ts
+ * GAME_CLASSES_SQL), labelled by name, valued by code, by name; "No class" clears it. Edit pre-picks a known class (and No
+ * class when none is saved). A stored class outside the list is not offered and nothing is picked: left alone, the menu
+ * sends nothing and the stored value is kept (order 39's override 1: never rewritten). Left out while the list is empty.
+ */
+const NO_CLASS = 'none';
+const classSelect = (classes: string[], ch: Character | undefined) => ({
+  type: MessageComponentTypes.LABEL,
+  label: ME_COPY.className,
+  description: ME_COPY.classHint,
+  component: {
+    type: MessageComponentTypes.STRING_SELECT,
+    custom_id: 'class',
+    required: false,
+    min_values: 0,
+    max_values: 1,
+    options: [
+      { label: ME_COPY.noClass, value: NO_CLASS, ...(ch && ch.class === null ? { default: true } : {}) },
+      ...classes.slice(0, SELECT_MAX - 1).map((code) => ({ label: className(code), value: code, ...(ch?.class?.toUpperCase() === code ? { default: true } : {}) })),
+    ],
+  },
+});
 // Order 36 review fix: in the order members read them, by name (a code with no name sorts by itself).
 const characterRaces = async (c: Ctx) =>
   (await c.db.prepare(CHARACTER_RACES_SQL).all<{ code: string }>()).results.map((r) => r.code).sort((a, b) => raceLabel(a).localeCompare(raceLabel(b), 'en'));
-const characterFields = (races: string[], ch?: Character) => [
+/** Order 39: the class menu's list, by name (one statement; read with the races in one batch). */
+async function formLists(c: Ctx): Promise<{ races: string[]; classes: string[] }> {
+  const [races, classes] = await Promise.all([characterRaces(c), gameClasses(c.db)]);
+  return { races, classes: classes.sort((a, b) => className(a).localeCompare(className(b), 'en')) };
+}
+const characterFields = ({ races, classes }: { races: string[]; classes: string[] }, ch?: Character) => [
   textInput('name', ME_COPY.name, { required: true, max: NAME_MAX, value: ch?.name }),
-  textInput('class', ME_COPY.className, { description: ME_COPY.classHint, max: 32, value: ch?.class }),
+  ...(classes.length ? [classSelect(classes, ch)] : []),
   textInput('level', ME_COPY.level, { description: ch ? ME_COPY.levelEditHint : ME_COPY.levelHint, max: 3, value: ch?.level === null || ch?.level === undefined ? null : String(ch.level) }),
   mainSelect(!!ch?.is_main, !!ch),
   ...(races.length ? [raceSelect(races, ch?.race ?? null)] : []),
 ];
 /** The form's race: undefined when the form had no race select; '' for No race (or nothing picked). */
 const raceOf = (v: Map<string, string>) => (v.has('race') ? (v.get('race') === NO_RACE ? '' : (v.get('race') ?? '')) : undefined);
+/**
+ * Order 39: the form's class: undefined (keep) when nothing was picked or the form had no menu; '' for No class; else the
+ * picked value, which /character's check refuses unless it is a code from the list. A form sent before order 39 (a text box)
+ * arrives the same way: blank keeps, text is checked.
+ */
+const classOf = (v: Map<string, string>) => {
+  const raw = (v.get('class') ?? '').trim();
+  return raw === '' ? undefined : raw === NO_CLASS ? '' : raw;
+};
 
 /** mea:<target>: the Add character form (own panel only: /character add had no member: option). */
 export async function addButton(c: Ctx, customId: string): Promise<InteractionReply> {
   const t = target(c, customId, ADD_PREFIX, true);
   if ('reply' in t) return t.reply;
-  return { type: InteractionResponseType.MODAL, data: { custom_id: `${ADD_MODAL_PREFIX}${t.ownerId}`, title: ME_COPY.addTitle, components: characterFields(await characterRaces(c)) } };
+  return { type: InteractionResponseType.MODAL, data: { custom_id: `${ADD_MODAL_PREFIX}${t.ownerId}`, title: ME_COPY.addTitle, components: characterFields(await formLists(c)) } };
 }
 
 /** A typed level: blank is none, digits are the number, anything else fails /character's level check. */
@@ -342,7 +384,7 @@ export async function addSubmitted(c: Ctx, customId: string, components: ModalCo
   if ('reply' in t) return t.reply;
   const v = modalValues(components);
   const level = levelOf(v.get('level'));
-  const cls = (v.get('class') ?? '').trim();
+  const cls = classOf(v);
   const race = raceOf(v);
   // Order 32: an event card's Add a character reaches this form from a member who may never have run a command.
   const { isNew } = await touchMember(c.db, c.guild.id, c.member);
@@ -360,7 +402,7 @@ export async function addSubmitted(c: Ctx, customId: string, components: ModalCo
 
 const editModal = async (c: Ctx, ch: Character): Promise<InteractionReply> => ({
   type: InteractionResponseType.MODAL,
-  data: { custom_id: `${EDIT_MODAL_PREFIX}${ch.id}`, title: ME_COPY.editTitle(ch.name), components: characterFields(await characterRaces(c), ch) },
+  data: { custom_id: `${EDIT_MODAL_PREFIX}${ch.id}`, title: ME_COPY.editTitle(ch.name), components: characterFields(await formLists(c), ch) },
 });
 
 /** mee:<target>: one character, its form at once; several, a private select first (answered at once too). */
@@ -392,13 +434,14 @@ export async function editSubmitted(c: Ctx, customId: string, components: ModalC
   if (ch.deleted_at && ch.owner_user_id === c.userId) return ephemeral(ME_COPY.gone);
   const v = modalValues(components);
   const name = (v.get('name') ?? '').trim();
-  const cls = (v.get('class') ?? '').trim();
+  const cls = classOf(v);
   const level = levelOf(v.get('level'));
   const main = v.get('main');
   const race = raceOf(v);
   const changes: Option[] = [
     ...(name !== ch.name ? [opt('new_name', name)] : []),
-    ...(cls !== (ch.class ?? '') ? [opt('class', cls)] : []),
+    // Order 39: nothing picked keeps the stored class (even one outside the list); No class clears it.
+    ...(cls !== undefined && cls !== (ch.class ?? '') ? [opt('class', cls)] : []),
     // Order 35: the race picked, or No race to clear it.
     ...(race !== undefined && race !== (ch.race ?? '') ? [opt('race', race)] : []),
     ...(level !== undefined && level !== ch.level ? [opt('level', level)] : []),

@@ -4,6 +4,7 @@
 import { audit, auditNewCharacter, now } from '../access.ts';
 import { markCharacterDirty } from '../board/refresh.ts';
 import { raceLabel } from '../gear/vocab.ts';
+import { className } from '../gear/score.ts';
 import type { Ctx } from '../context.ts';
 import { ephemeral, md, optBool, optInt, optString, plural, type MessageReply, type Option } from '../discord.ts';
 import { updateButtons } from './skills.ts';
@@ -119,14 +120,48 @@ function cleanName(raw: string | undefined): { name: string } | { error: string 
   return { name };
 }
 
-/** A class from the derived list (stored as its code), or as typed with a note: in Early Access the list is not authoritative. */
-async function cleanClass(db: D1Database, raw: string | undefined): Promise<{ value?: string; note?: string }> {
+/**
+ * Order 39: the game's classes, the one derived list: game_class codes on at least one item (the import's list, order 13).
+ * The class menu offers these; a stored class outside it is "not a game class".
+ */
+export const GAME_CLASSES_SQL = 'SELECT code FROM game_class WHERE item_count > 0 ORDER BY code';
+export const gameClasses = async (db: D1Database): Promise<string[]> => (await db.prepare(GAME_CLASSES_SQL).all<{ code: string }>()).results.map((r) => r.code);
+export const CLASS_NOT_LISTED = (typed: string) => `**${md(typed)}** isn't a class in the list taken from the wiki data. Pick one from the menu.`;
+
+/**
+ * Order 39 (override 1 of the approved "saved as typed" copy): a class is a code from the derived list, or none. Anything
+ * else is refused, so a stale form can't save one. A class already stored outside the list is never rewritten here.
+ */
+async function cleanClass(db: D1Database, raw: string | undefined): Promise<{ value: string | null } | { error: string }> {
   const typed = raw?.trim();
-  if (!typed) return {};
+  if (!typed) return { value: null };
   const row = await db.prepare('SELECT code FROM game_class WHERE code = ? AND item_count > 0').bind(typed.toUpperCase()).first<{ code: string }>();
-  if (row) return { value: row.code };
-  return { value: typed, note: `Class **${md(typed)}** isn't in the class list taken from the wiki data, so it's saved as typed. (The game is in Early Access; the list may be incomplete.)` };
+  return row ? { value: row.code } : { error: CLASS_NOT_LISTED(typed) };
 }
+
+// ---------------------------------------------------------------- the character head (order 39: one wording everywhere)
+
+export const HEAD_COPY = {
+  noClass: 'no class',
+  noLevel: 'no level',
+  anyRace: 'any race',
+  notGameClass: '(not a game class: edit on /me)',
+} as const;
+
+/**
+ * Order 39: the one character head, "**<name>** · <Class name> · level <n> · <Race name>", used by the Gear panel, the
+ * character card (without the name: it is the card's title), the add/edit replies and /gear upgrades. The class by its name
+ * (src/gear/score.ts className); a stored class outside the game's list as stored, with the marker. `classKnown` is whether
+ * the stored class is a game class (each caller already holds the list or the class's bit).
+ */
+export function characterHead(ch: Pick<Character, 'name' | 'class' | 'level' | 'race'>, classKnown: boolean, withName = true): string {
+  const cls = !ch.class ? HEAD_COPY.noClass : classKnown ? md(className(ch.class)) : `${md(ch.class)} ${HEAD_COPY.notGameClass}`;
+  const level = ch.level !== null ? `level ${ch.level}` : HEAD_COPY.noLevel;
+  const race = ch.race ? md(raceLabel(ch.race)) : HEAD_COPY.anyRace;
+  return [...(withName ? [`**${md(ch.name)}**`] : []), cls, level, race].join(' · ');
+}
+/** Whether a stored class is in the game's list (case-insensitive, as the class bit lookups read it). */
+export const isGameClass = (cls: string | null, classes: readonly string[]) => cls !== null && classes.includes(cls.toUpperCase());
 
 function checkLevel(level: number | undefined): string | null {
   if (level === undefined) return null;
@@ -135,10 +170,9 @@ function checkLevel(level: number | undefined): string | null {
 
 const isUniqueViolation =(e: unknown) => e instanceof Error && /UNIQUE constraint failed/i.test(e.message);
 
-function describe(ch: { name: string; class: string | null; level: number | null; race?: string | null }): string {
-  const bits = [ch.class, ch.level !== null ? `level ${ch.level}` : null, ch.race ? `race ${raceLabel(ch.race)}` : null].filter(Boolean);
-  return `**${md(ch.name)}**${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
-}
+/** Order 39: the add/edit replies name the character with the one head (src/commands/character.ts characterHead). */
+const describe = (ch: { name: string; class: string | null; level: number | null; race: string | null }, classes: readonly string[]) =>
+  characterHead(ch, isGameClass(ch.class, classes));
 
 const byKey = (db: D1Database, guildId: string, key: string) =>
   db.prepare(`SELECT ${COLS} FROM character WHERE guild_id = ? AND name_key = ?`).bind(guildId, key).first<Character>();
@@ -157,6 +191,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
   const levelError = checkLevel(level);
   if (levelError) return ephemeral(levelError);
   const cls = await cleanClass(c.db, optString(opts, 'class'));
+  if ('error' in cls) return ephemeral(cls.error);
   const rawRace = optString(opts, 'race');
   const race = rawRace === undefined ? undefined : await cleanRace(c.db, rawRace);
   if (race && 'error' in race) return ephemeral(race.error);
@@ -170,7 +205,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
   const live = await liveCharacters(c.db, c.guild.id, c.userId);
   const isMain = live.length === 0 || wantMain;
   const at = now();
-  const notes = cls.note ? `\n${cls.note}` : '';
+  const classes = await gameClasses(c.db);
   const mainLine = isMain ? (live.length === 0 ? ' It is your main (your first character).' : ' It is now your main.') : '';
 
   if (existing) {
@@ -187,7 +222,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
     await c.db.batch(stmts);
     const skills = await c.db.prepare('SELECT count(*) AS n FROM character_skill WHERE character_id = ?').bind(existing.id).first<{ n: number }>();
     const n2 = skills?.n ?? 0;
-    return ephemeral(`Restored ${describe(after)}, which you removed earlier, with its ${plural(n2, 'saved skill')}.${isMain ? ' It is your main.' : ''}${notes}`, {
+    return ephemeral(`Restored ${describe(after, classes)}, which you removed earlier, with its ${plural(n2, 'saved skill')}.${isMain ? ' It is your main.' : ''}`, {
       components: updateButtons([existing]),
     });
   }
@@ -209,7 +244,7 @@ export async function characterAdd(c: Ctx, opts: Option[]): Promise<MessageReply
     if (isUniqueViolation(e)) return ephemeral(TAKEN(n.name));
     throw e;
   }
-  return ephemeral(`Added ${describe(row)}.${mainLine}${notes}`, { components: updateButtons([{ id: newId, name: row.name }]) });
+  return ephemeral(`Added ${describe(row, classes)}.${mainLine}`, { components: updateButtons([{ id: newId, name: row.name }]) });
 }
 
 // ---------------------------------------------------------------- /character edit
@@ -233,7 +268,6 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
     return ephemeral('Nothing changed.');
 
   const after = { ...ch };
-  const notes: string[] = [];
   if (rawNew !== undefined) {
     const n = cleanName(rawNew);
     if ('error' in n) return ephemeral(n.error);
@@ -250,8 +284,8 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   }
   if (rawClass !== undefined) {
     const cls = await cleanClass(c.db, rawClass);
-    after.class = cls.value ?? null;
-    if (cls.note) notes.push(cls.note);
+    if ('error' in cls) return ephemeral(cls.error);
+    after.class = cls.value;
   }
   if (level !== undefined) {
     const levelError = checkLevel(level);
@@ -286,7 +320,7 @@ export async function characterEdit(c: Ctx, opts: Option[]): Promise<MessageRepl
   }
   const renamed = after.name !== ch.name ? ` (was **${md(ch.name)}**)` : '';
   const mainLine = after.is_main && !ch.is_main ? ' It is now your main.' : '';
-  return ephemeral([`Updated ${describe(after)}${renamed}.${mainLine}`, ...notes].join('\n'));
+  return ephemeral(`Updated ${describe(after, await gameClasses(c.db))}${renamed}.${mainLine}`);
 }
 
 // ---------------------------------------------------------------- /character remove

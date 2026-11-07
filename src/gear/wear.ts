@@ -15,10 +15,10 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import type { Ctx } from '../context.ts';
 import { button, ephemeral, md, optString, row, STYLE_PRIMARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
-import { findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
+import { characterHead, findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { modalValues } from '../commands/reports.ts';
 import { slotByKey, WEAR_MASK, WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
-import { ALL_CLASSES, bitOf, isTwoHanded, raceLabel, SLOTS } from './vocab.ts';
+import { ALL_CLASSES, bitOf, isTwoHanded, SLOTS } from './vocab.ts';
 
 export { slotByKey, WEAR_MASK, WEAR_SLOTS };
 const fits = (slotMask: number, w: WearSlot) => (slotMask & bitOf(SLOTS, w.token)) !== 0;
@@ -31,12 +31,19 @@ const groupKey = (token: SlotToken) => `g:${token}`;
 export const PANEL_PREFIX = 'wrp:';
 /** wrg:<owner>: /me's character select, when there are more than 5. */
 export const PANEL_PICK_PREFIX = 'wrg:';
-/** wrs:<character id>: Change a slot (select; answers with the item box, a modal). */
+/**
+ * wrs:<character id>: Change a slot (select). Order 39: it updates the panel in place to that slot (UPDATE_MESSAGE, which
+ * redraws the select at its prompt), instead of opening the box: a box can't be answered when it is dismissed.
+ */
 export const SLOT_PREFIX = 'wrs:';
-/** wrm:<character id>:<slot>: the item box's submit. */
+/** wrm:<character id>:<slot>: the item box's submit. Order 39: it updates the panel in place (src/interactions.ts planFor). */
 export const BOX_PREFIX = 'wrm:';
-/** wrt:<character id>:<slot>: Type again (a modal). */
+/** wrt:<character id>:<slot>: Type the item (order 39; was Type again): the box, a modal. */
 export const AGAIN_PREFIX = 'wrt:';
+/** Order 39: wre:<character id>:<slot>: Empty slot on the slot view (in place). */
+export const EMPTY_PREFIX = 'wre:';
+/** Order 39: wrv:<character id>: Back, from the slot view to the panel (in place). */
+export const BACK_PREFIX = 'wrv:';
 /** wrk:<character id>:<slot>: the matches menu (values: item ids, or "more"). */
 export const MATCH_PREFIX = 'wrk:';
 /** wri:<item id>: I'm wearing this on an /item card. */
@@ -47,8 +54,10 @@ export const WEARING_CHAR_PREFIX = 'wrc:';
 export const SLOT_PICK_PREFIX = 'wrz:';
 /** Order 36: guf:<character id>: Find upgrades on the panel (src/gear/upgrades.ts answers it). */
 export const FIND_UPGRADES_PREFIX = 'guf:';
-/** The controls that answer with a modal, at once (src/interactions.ts OPENS_MODAL). */
-export const WEAR_OPENS_MODAL = [SLOT_PREFIX, AGAIN_PREFIX];
+/** The controls that answer with a modal, at once (src/interactions.ts OPENS_MODAL). Order 39: the slot select no longer. */
+export const WEAR_OPENS_MODAL = [AGAIN_PREFIX];
+/** Order 39: the modal submits answered by editing the panel they were opened from (src/interactions.ts planFor). */
+export const WEAR_SUBMITS_IN_PLACE = [BOX_PREFIX];
 
 const MORE = 'more';
 /** Matches shown in the menu; the 25th option says how many more there are. */
@@ -61,8 +70,6 @@ export const WEAR_COPY = {
   itemGone: 'That item is no longer in the data.',
   notYours: "That's another member's character. Only they, or an officer, can change its gear.",
   ownOnly: 'I\'m wearing this saves gear for your own characters only.',
-  head: (ch: Character) =>
-    `**${md(ch.name)}** · ${ch.class ? md(ch.class) : 'no class'} · ${ch.level !== null ? `level ${ch.level}` : 'no level'} · ${ch.race ? `race ${md(raceLabel(ch.race))}` : 'any race'}`,
   filled: (n: number) => `${n} of ${WEAR_SLOTS.length} slots filled`,
   empty: '—',
   noLongerListed: '*(no longer listed)*',
@@ -71,7 +78,12 @@ export const WEAR_COPY = {
   boxTitle: (label: string) => truncate(`${label}: type the item`, 45),
   boxLabel: 'Item name',
   boxHint: 'Leave blank to empty the slot',
-  typeAgain: 'Type again',
+  // Order 39: the slot view (a slot pick updates the panel in place).
+  typeItem: 'Type the item',
+  emptySlot: 'Empty slot',
+  back: 'Back',
+  slotLine: (label: string, what: string) => `**${label}:** ${what}`,
+  slotEmpty: 'empty',
   gearButton: 'Gear',
   noMatch: (label: string, typed: string) => `No ${label} item matches **${md(typed)}**.`,
   pick: (label: string, n: number) => `${n} ${label} items match. Pick one:`,
@@ -121,6 +133,8 @@ interface Worn {
 interface Bits {
   cb: number | null;
   rb: number | null;
+  /** Order 39: 1 when the stored class is a game class (src/commands/character.ts GAME_CLASSES_SQL's rule), for the head. */
+  ck?: number | null;
 }
 
 /** The character's saved rows (each with its item, or null when the key names no item row), and its class and race bits. */
@@ -129,7 +143,7 @@ async function readGear(c: Ctx, ch: Character): Promise<{ worn: Map<string, Worn
     // The saved slot is gear_slot: item.slot (in ITEM_COLS) is the item's own slot text.
     c.db.prepare(`SELECT g.slot AS gear_slot, g.item_key, ${ITEM_COLS} FROM character_gear g LEFT JOIN item i ON i.name_key = g.item_key WHERE g.character_id = ?`).bind(ch.id),
     c.db
-      .prepare('SELECT (SELECT bit FROM game_class WHERE code = ?1 AND item_count > 0) AS cb, (SELECT bit FROM game_race WHERE code = ?2 AND item_count > 0) AS rb')
+      .prepare('SELECT (SELECT bit FROM game_class WHERE code = ?1 AND item_count > 0) AS cb, (SELECT bit FROM game_race WHERE code = ?2 AND item_count > 0) AS rb, (SELECT 1 FROM game_class WHERE code = ?1 AND item_count > 0) AS ck')
       .bind(ch.class ? ch.class.toUpperCase() : null, ch.race),
   ]);
   const worn = new Map<string, Worn>();
@@ -163,19 +177,21 @@ const displayName = (c: Ctx) => c.member.nick ?? c.member.user.global_name ?? c.
 
 // ---------------------------------------------------------------- the panel
 
-/** The private Gear panel: the character, the 20 slots, how many are filled, and Change a slot. 1 round trip (2 statements). */
-export async function gearPanel(c: Ctx, ch: Character, note?: string): Promise<MessageReply> {
-  const { worn, bits } = await readGear(c, ch);
-  const lines = WEAR_SLOTS.map((w) => {
-    const g = worn.get(w.key);
-    if (!g) return `${w.label}: ${WEAR_COPY.empty}`;
-    if (!g.item || g.item.gone_at !== null) return `${w.label}: ${md(g.item?.name ?? g.item_key)} ${WEAR_COPY.noLongerListed}`;
-    // A class or race change keeps saved gear; the slot is marked when the character can no longer use it.
-    const r = refusal(ch, g.item, bits);
-    return `${w.label}: ${md(g.item.name)}${r ? ` ${WEAR_COPY.cantUse(r.who)}` : ''}`;
-  });
-  const content = [note, WEAR_COPY.head(ch), WEAR_COPY.filled(worn.size), '', ...lines].filter((l) => l !== undefined).join('\n');
-  const select = row([
+/** What a slot holds, as the panel shows it: the item, marked when no longer listed or the character can't use it. */
+function slotText(ch: Character, g: Worn | undefined, bits: Bits): string {
+  if (!g) return WEAR_COPY.empty;
+  if (!g.item || g.item.gone_at !== null) return `${md(g.item?.name ?? g.item_key)} ${WEAR_COPY.noLongerListed}`;
+  // A class or race change keeps saved gear; the slot is marked when the character can no longer use it.
+  const r = refusal(ch, g.item, bits);
+  return `${md(g.item.name)}${r ? ` ${WEAR_COPY.cantUse(r.who)}` : ''}`;
+}
+
+/**
+ * Change a slot: never a default option, so every redraw shows the prompt (order 39: the client otherwise keeps showing the
+ * last pick, as Brian's screenshot of "Shirt: —" showed).
+ */
+const slotSelect = (ch: Character, worn: Map<string, Worn>) =>
+  row([
     {
       type: MessageComponentTypes.STRING_SELECT,
       custom_id: `${SLOT_PREFIX}${ch.id}`,
@@ -186,9 +202,34 @@ export async function gearPanel(c: Ctx, ch: Character, note?: string): Promise<M
       }),
     },
   ]);
+
+/** The private Gear panel: the character, the 20 slots, how many are filled, and Change a slot. 1 round trip (2 statements). */
+export async function gearPanel(c: Ctx, ch: Character, note?: string): Promise<MessageReply> {
+  const { worn, bits } = await readGear(c, ch);
+  const lines = WEAR_SLOTS.map((w) => `${w.label}: ${slotText(ch, worn.get(w.key), bits)}`);
+  const content = [note, characterHead(ch, !!bits.ck), WEAR_COPY.filled(worn.size), '', ...lines].filter((l) => l !== undefined).join('\n');
   // Order 36: Find upgrades opens /gear upgrades' summary for this character (the same owner-or-officer check).
-  return ephemeral(truncate(content, 2000), { components: [select, row([button(`${FIND_UPGRADES_PREFIX}${ch.id}`, WEAR_COPY.findUpgrades, STYLE_PRIMARY)])] });
+  return ephemeral(truncate(content, 2000), { components: [slotSelect(ch, worn), row([button(`${FIND_UPGRADES_PREFIX}${ch.id}`, WEAR_COPY.findUpgrades, STYLE_PRIMARY)])] });
 }
+
+/**
+ * Order 39: the slot view, the panel updated in place for one slot: what it holds, Type the item (the box), Empty slot (only
+ * when filled) and Back; Change a slot stays on top at its prompt. `matches` is the box's pick list, when it has one.
+ */
+async function slotView(c: Ctx, ch: Character, slot: WearSlot, note?: string, matches?: unknown): Promise<MessageReply> {
+  const { worn, bits } = await readGear(c, ch);
+  const g = worn.get(slot.key);
+  const content = [note, characterHead(ch, !!bits.ck), WEAR_COPY.slotLine(slot.label, g ? slotText(ch, g, bits) : WEAR_COPY.slotEmpty)].filter((l) => l !== undefined).join('\n');
+  const buttons = [
+    button(`${AGAIN_PREFIX}${ch.id}:${slot.key}`, WEAR_COPY.typeItem, STYLE_PRIMARY),
+    ...(g ? [button(`${EMPTY_PREFIX}${ch.id}:${slot.key}`, WEAR_COPY.emptySlot)] : []),
+    button(`${BACK_PREFIX}${ch.id}`, WEAR_COPY.back),
+  ];
+  return updateMessage({ content: truncate(content, 2000), embeds: [], components: [slotSelect(ch, worn), ...(matches ? [matches] : []), row(buttons)] });
+}
+
+/** The panel itself, in place (after a save, an emptying, or Back). */
+const panelInPlace = async (c: Ctx, ch: Character, note?: string) => asEdit(await gearPanel(c, ch, note));
 
 /** wrp:<character id>: the panel, as a new private message. */
 export async function panelButton(c: Ctx, id: string): Promise<MessageReply> {
@@ -221,17 +262,33 @@ const box = (charId: string, slot: WearSlot): InteractionReply => ({
 });
 
 /**
- * wrs:<character id>: the picked slot's item box (a modal, at once: Discord allows no deferral before one). Review fix:
- * the character is checked first (one indexed read), so a removed one's panel answers "no longer exists" here.
+ * wrs:<character id>: the picked slot's view, the panel edited in place (deferred like any component: no modal here). The
+ * character is checked first, so a removed one's panel answers "no longer exists" (a new private message).
  */
-export async function slotPicked(c: Ctx, id: string, values: string[]): Promise<InteractionReply> {
+export async function slotPicked(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
   const slot = slotByKey(values[0] ?? '');
   const t = await characterFor(c, id.slice(SLOT_PREFIX.length));
   if ('reply' in t) return t.reply;
-  return slot ? box(String(t.ch.id), slot) : ephemeral(WEAR_COPY.gone);
+  return slot ? slotView(c, t.ch, slot) : ephemeral(WEAR_COPY.gone);
 }
 
-/** wrt:<character id>:<slot>: the box again, after the same check. */
+/** Order 39: wre:<character id>:<slot>: Empty slot, then the panel in place with the reply line as its note. */
+export async function emptyPressed(c: Ctx, id: string): Promise<MessageReply> {
+  const [charId, key] = id.slice(EMPTY_PREFIX.length).split(':');
+  const slot = slotByKey(key ?? '');
+  const t = await characterFor(c, charId);
+  if ('reply' in t) return t.reply;
+  if (!slot) return ephemeral(WEAR_COPY.gone);
+  return panelInPlace(c, t.ch, note(c, t.ch, await emptyLines(c, t.ch, slot)));
+}
+
+/** Order 39: wrv:<character id>: Back to the panel, in place. */
+export async function backPressed(c: Ctx, id: string): Promise<MessageReply> {
+  const t = await characterFor(c, id.slice(BACK_PREFIX.length));
+  return 'reply' in t ? t.reply : panelInPlace(c, t.ch);
+}
+
+/** wrt:<character id>:<slot>: Type the item (was Type again): the box, after the same check. */
 export async function againButton(c: Ctx, id: string): Promise<InteractionReply> {
   const [charId, key] = id.slice(AGAIN_PREFIX.length).split(':');
   const slot = slotByKey(key ?? '');
@@ -240,13 +297,20 @@ export async function againButton(c: Ctx, id: string): Promise<InteractionReply>
   return slot ? box(String(t.ch.id), slot) : ephemeral(WEAR_COPY.gone);
 }
 
-const againRow = (charId: number, slot: WearSlot) => row([button(`${AGAIN_PREFIX}${charId}:${slot.key}`, WEAR_COPY.typeAgain, STYLE_PRIMARY)]);
 const like = (s: string) => `%${s.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+
+/**
+ * Order 39: what a save or an emptying from the panel answers. Saved, emptied or unchanged: the panel, in place, with the
+ * reply line as its note. Refused: the slot's view with the reason, so Type the item is at hand.
+ */
+const afterChange = (c: Ctx, ch: Character, slot: WearSlot, r: { lines: string[]; refused: boolean }) =>
+  r.refused ? slotView(c, ch, slot, note(c, ch, r.lines)) : panelInPlace(c, ch, note(c, ch, r.lines));
 
 /**
  * wrm:<character id>:<slot>: blank empties the slot; one exact name (case-insensitive) that fits the slot saves it;
  * otherwise the items that fit the slot and contain the text, by name (never by stats), up to 24 and a "more" line; none
- * says so and offers the box again. One statement for the matches (count(*) OVER () gives how many in the same scan).
+ * says so on the slot's view. One statement for the matches (count(*) OVER () gives how many in the same scan). Order 39:
+ * every answer edits the message the box came from (the panel), never a new message, except a refusal of the presser.
  */
 export async function boxSubmitted(c: Ctx, id: string, components: ModalComponent[] | undefined): Promise<MessageReply> {
   const [charId, key] = id.slice(BOX_PREFIX.length).split(':');
@@ -255,7 +319,7 @@ export async function boxSubmitted(c: Ctx, id: string, components: ModalComponen
   if ('reply' in t) return t.reply;
   if (!slot) return ephemeral(WEAR_COPY.gone);
   const typed = (modalValues(components).get('item') ?? '').trim();
-  if (!typed) return emptySlot(c, t.ch, slot);
+  if (!typed) return afterChange(c, t.ch, slot, { lines: await emptyLines(c, t.ch, slot), refused: false });
   const lower = typed.toLowerCase();
   const { results } = await c.db
     .prepare(
@@ -265,8 +329,8 @@ export async function boxSubmitted(c: Ctx, id: string, components: ModalComponen
     )
     .bind(bitOf(SLOTS, slot.token), like(lower), lower)
     .all<WearItem & { total: number }>();
-  if (!results.length) return ephemeral(WEAR_COPY.noMatch(slot.label, typed), { components: [againRow(t.ch.id, slot)] });
-  if (results[0].name_key === lower) return wear(c, t.ch, results[0], slot);
+  if (!results.length) return slotView(c, t.ch, slot, WEAR_COPY.noMatch(slot.label, typed));
+  if (results[0].name_key === lower) return afterChange(c, t.ch, slot, await wearLines(c, t.ch, results[0], slot));
   const total = Number(results[0].total);
   const classes = await classCodes(c);
   const options = results.map((r) => ({
@@ -275,9 +339,8 @@ export async function boxSubmitted(c: Ctx, id: string, components: ModalComponen
     value: String(r.id),
   }));
   if (total > MATCH_MAX) options.push({ label: WEAR_COPY.more(total - MATCH_MAX), description: WEAR_COPY.typeMore, value: MORE });
-  return ephemeral(WEAR_COPY.pick(slot.label, total), {
-    components: [row([{ type: MessageComponentTypes.STRING_SELECT, custom_id: `${MATCH_PREFIX}${t.ch.id}:${slot.key}`, placeholder: truncate(typed, 100), options }]), againRow(t.ch.id, slot)],
-  });
+  const matches = row([{ type: MessageComponentTypes.STRING_SELECT, custom_id: `${MATCH_PREFIX}${t.ch.id}:${slot.key}`, placeholder: truncate(typed, 100), options }]);
+  return slotView(c, t.ch, slot, WEAR_COPY.pick(slot.label, total), matches);
 }
 
 async function classCodes(c: Ctx): Promise<{ code: string; bit: number }[]> {
@@ -286,17 +349,20 @@ async function classCodes(c: Ctx): Promise<{ code: string; bit: number }[]> {
 const classList = (mask: number, classes: { code: string; bit: number }[]) =>
   mask === ALL_CLASSES ? 'ALL' : mask === 0 ? 'no class listed' : classes.filter((k) => ((mask >>> k.bit) & 1) === 1).map((k) => k.code).join(' ') || 'no class listed';
 
-/** wrk:<character id>:<slot>: the picked match (or "more": the box again). Edits the private menu in place. */
+/**
+ * wrk:<character id>:<slot>: the picked match (or "more": type more). Edits the message in place: order 39, the panel with
+ * the saved line, or the slot's view (refused, "more", or an item gone since the list was drawn).
+ */
 export async function matchPicked(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
   const [charId, key] = id.slice(MATCH_PREFIX.length).split(':');
   const slot = slotByKey(key ?? '');
   const t = await characterFor(c, charId);
   if ('reply' in t) return asEdit(t.reply);
   if (!slot) return asEdit(ephemeral(WEAR_COPY.gone));
-  if (values[0] === MORE) return updateMessage({ content: WEAR_COPY.typeMore, components: [againRow(t.ch.id, slot)] });
+  if (values[0] === MORE) return slotView(c, t.ch, slot, WEAR_COPY.typeMore);
   const item = await loadItem(c, Number(values[0]));
-  if (!item) return asEdit(ephemeral(WEAR_COPY.gone));
-  return asEdit(await wear(c, t.ch, item, slot));
+  if (!item) return slotView(c, t.ch, slot, WEAR_COPY.itemGone);
+  return afterChange(c, t.ch, slot, await wearLines(c, t.ch, item, slot));
 }
 
 const asEdit = (r: MessageReply) => updateMessage({ content: r.data.content, embeds: r.data.embeds ?? [], components: r.data.components ?? [] });
@@ -304,8 +370,9 @@ const asEdit = (r: MessageReply) => updateMessage({ content: r.data.content, emb
 // ---------------------------------------------------------------- saving
 
 const gearButton = (ch: Character) => row([button(`${PANEL_PREFIX}${ch.id}`, WEAR_COPY.gearButton)]);
-const reply = (c: Ctx, ch: Character, lines: string[]) =>
-  ephemeral([...lines, ...(ch.owner_user_id !== c.userId ? [WEAR_COPY.changedBy(displayName(c))] : [])].join('\n'), { components: [gearButton(ch)] });
+/** The reply lines, with "Changed by <officer>" when someone else changed the character's gear. */
+const note = (c: Ctx, ch: Character, lines: string[]) => [...lines, ...(ch.owner_user_id !== c.userId ? [WEAR_COPY.changedBy(displayName(c))] : [])].join('\n');
+const reply = (c: Ctx, ch: Character, lines: string[]) => ephemeral(note(c, ch, lines), { components: [gearButton(ch)] });
 const upsert = (c: Ctx, ch: Character, slot: string, itemKey: string) =>
   c.db
     .prepare(
@@ -317,12 +384,13 @@ const upsert = (c: Ctx, ch: Character, slot: string, itemKey: string) =>
 const remove = (c: Ctx, ch: Character, slot: string) => c.db.prepare('DELETE FROM character_gear WHERE character_id = ? AND slot = ?').bind(ch.id, slot);
 const nameOf = (g: Worn) => g.item?.name ?? g.item_key;
 
-async function emptySlot(c: Ctx, ch: Character, slot: WearSlot): Promise<MessageReply> {
+/** Empties the slot; the reply line. */
+async function emptyLines(c: Ctx, ch: Character, slot: WearSlot): Promise<string[]> {
   const { worn } = await readGear(c, ch);
   const g = worn.get(slot.key);
-  if (!g) return reply(c, ch, [WEAR_COPY.alreadyEmpty(slot.label)]);
+  if (!g) return [WEAR_COPY.alreadyEmpty(slot.label)];
   await remove(c, ch, slot.key).run();
-  return reply(c, ch, [WEAR_COPY.emptied(slot.label, nameOf(g))]);
+  return [WEAR_COPY.emptied(slot.label, nameOf(g))];
 }
 
 /**
@@ -337,12 +405,18 @@ export async function wearById(c: Ctx, ch: Character, itemId: number, slotKey: s
 
 /** Saves the item in that one slot, with every rule; the reply names the slot, the item and what it replaced. */
 export async function wear(c: Ctx, ch: Character, item: WearItem, slot: WearSlot): Promise<MessageReply> {
-  if (!fits(Number(item.slot_mask), slot)) return reply(c, ch, [WEAR_COPY.noFit(item.name, slot.label)]);
+  return reply(c, ch, (await wearLines(c, ch, item, slot)).lines);
+}
+
+/** wear()'s work: the reply lines, and whether a rule refused it (order 39: the panel answers a refusal on the slot's view). */
+async function wearLines(c: Ctx, ch: Character, item: WearItem, slot: WearSlot): Promise<{ lines: string[]; refused: boolean }> {
+  const no = (line: string) => ({ lines: [line], refused: true });
+  if (!fits(Number(item.slot_mask), slot)) return no(WEAR_COPY.noFit(item.name, slot.label));
   const { worn, bits } = await readGear(c, ch);
-  const no = refusal(ch, item, bits);
-  if (no) return reply(c, ch, [no.message]);
+  const refused = refusal(ch, item, bits);
+  if (refused) return no(refused.message);
   const primary = worn.get('primary');
-  if (slot.key === 'secondary' && primary?.item && isTwoHanded(primary.item.handed)) return reply(c, ch, [WEAR_COPY.underTwoHand(primary.item.name)]);
+  if (slot.key === 'secondary' && primary?.item && isTwoHanded(primary.item.handed)) return no(WEAR_COPY.underTwoHand(primary.item.name));
   const had = worn.get(slot.key);
   const stmts: D1PreparedStatement[] = [];
   const lines: string[] = [];
@@ -359,7 +433,7 @@ export async function wear(c: Ctx, ch: Character, item: WearItem, slot: WearSlot
     } else lines.push(WEAR_COPY.twoHandEmpty);
   }
   if (stmts.length) await c.db.batch(stmts);
-  return reply(c, ch, lines);
+  return { lines, refused: false };
 }
 
 /**
@@ -459,8 +533,7 @@ export async function wearingCharacterPicked(c: Ctx, id: string, values: string[
 // ---------------------------------------------------------------- routing (src/interactions.ts)
 
 /** The saved-gear controls answered at once (modals). */
-export function wearImmediate(c: Ctx, id: string, values: string[]): Promise<InteractionReply> | null {
-  if (id.startsWith(SLOT_PREFIX)) return slotPicked(c, id, values);
+export function wearImmediate(c: Ctx, id: string, _values: string[]): Promise<InteractionReply> | null {
   if (id.startsWith(AGAIN_PREFIX)) return againButton(c, id);
   return null;
 }
@@ -470,6 +543,10 @@ export function wearComponent(c: Ctx, id: string, values: string[], components: 
   if (modal) return id.startsWith(BOX_PREFIX) ? boxSubmitted(c, id, components) : null;
   if (id.startsWith(PANEL_PREFIX)) return panelButton(c, id);
   if (id.startsWith(PANEL_PICK_PREFIX)) return panelPicked(c, values);
+  // Order 39: the slot view (in place).
+  if (id.startsWith(SLOT_PREFIX)) return slotPicked(c, id, values);
+  if (id.startsWith(EMPTY_PREFIX)) return emptyPressed(c, id);
+  if (id.startsWith(BACK_PREFIX)) return backPressed(c, id);
   if (id.startsWith(MATCH_PREFIX)) return matchPicked(c, id, values);
   if (id.startsWith(SLOT_PICK_PREFIX)) return slotPickedForItem(c, id, values);
   if (id.startsWith(WEARING_CHAR_PREFIX)) return wearingCharacterPicked(c, id, values);

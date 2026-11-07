@@ -572,3 +572,23 @@ Order 38 profiles and fixes the Worker's CPU: the board sweep, the cold upgrade 
 - A CPU fix names the function the profile showed, with its share of CPU before and after.
 - Any CPU-limit error is an alert, within one daily run: the health check fails on any invocation status outside `success` and `clientDisconnected`, in either GraphQL invocation dataset, and (because GraphQL's adaptive counts are sampled) on any Workers Logs outcome outside `ok` and `canceled` when that read succeeds (scripts/health/judge.ts `judgeWorkerStatuses`, `OK_STATUSES`, `OK_OUTCOMES`). A failed GraphQL read, or one counting fewer than half the day's sweep_run rows, fails too.
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 39
+
+Order 39 is the Gear header, the class menu and full item stats (the owner's requests of 2026-11-07, 10:45 and 10:50 ET; the class menu and the slot flow are Cowork's fixes, approved by the owner's pasting of the order). Its explicit overrides each quote the earlier text in full, from where it is stored.
+
+- Budget: this file's default (1 pull request, at most 3 pushes, 1 merge).
+- Override 1, of the copy approved by the owner by exception on 2026-10-20, stored at docs/COPY.md:39 (src/commands/character.ts): "Class **\<class>** isn't in the class list taken from the wiki data, so it's saved as typed. (The game is in Early Access; the list may be incomplete.)"
+  - A character's class is picked from a menu of the derived class list (game_class codes on items, src/commands/character.ts `GAME_CLASSES_SQL`). Nothing is saved as typed: a value that isn't a code from the list is refused (`CLASS_NOT_LISTED`), so a stale form can't save one.
+  - The list grows by itself through the import (order 13's `vocab_drift` warning and re-registration), so a new class reaches the menu without anyone typing it.
+  - Characters already saved with a class the data doesn't know keep it, unchanged; nothing is rewritten, not even an exact full name such as "Ranger" (order 4's rule stands). Members fix their own characters through the menu.
+- Override 2, of docs/PRD.md's (at a16ec03, line 999) "each result has its name and gain, up to three stat differences (largest weighted effect first, signed), and how to get it by its level kinds, primary first" and of its line 1033's "with the upgrade's own lines above it (its gain for that character's slot, the breakdown and how to get it)".
+  - A result in a slot's list shows the item's full stat line, every changed stat marked (src/gear/statline.ts `markedLine`).
+  - The summary line and Pick a result's own lines show every changed stat, marked, and no unchanged ones.
+  - Order 36's "A score is always explainable. Each result shows the stat differences that produced it." stands: the full marked line meets it.
+- Classes are picked from the derived list; a stored unknown class is kept, never rewritten.
+- A select whose pick needs typing updates its message in place before opening a box (Discord sends nothing when a box is dismissed, so an answer to the box alone can never reset the select). The Gear panel's Change a slot does (src/gear/wear.ts `slotView`), and its box's submit edits the panel (src/interactions.ts `planFor`, `WEAR_SUBMITS_IN_PLACE`).
+- One shared character head (src/commands/character.ts `characterHead`): the Gear panel, the character card (without the name, its title), the add/edit replies and `/gear upgrades`.
+- One shared stat line, the same on the card and the list (src/gear/statline.ts `statParts`, read by src/commands/find.ts `statFields` and by `/gear upgrades`).
+- A changed stat is never hidden: a stat the replaced item has and the candidate lacks reads "— ▼−n".
+- Failed runs: every one is listed in the FINAL (order 12).
