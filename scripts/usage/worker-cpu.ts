@@ -2,117 +2,207 @@
 // GraphQL Analytics API's workersInvocationsAdaptive. Reads only; costs no D1 rows.
 //   node scripts/usage/worker-cpu.ts [--days 7] [--from ISO --to ISO]
 // Environment: CLOUDFLARE_API_TOKEN (Account Analytics Read), CLOUDFLARE_ACCOUNT_ID.
-// The dataset's fields are read from the schema first (introspection), with their descriptions, so the units and the
-// fields used are the API's own, never assumed: a field the schema lacks is reported as missing, never queried.
-// One query per Worker per UTC day (an adaptive dataset limits a query's time range). A quantile cannot be combined across
-// days, so the window's p50 and p99 are reported per day, with the highest daily p99; the max is the highest daily max.
+//
+// Order 40, ITEM 2: the windows and the schema tell the truth.
+// - Windows are whole UTC days, 00:00 to 24:00, so "per UTC day" is true and lines up with the health check's day. --days N
+//   is the N whole UTC days before today plus today's partial day ("partial, to <time> UTC"); --from/--to are rounded out to
+//   day boundaries, and the output says so. The account's own range limit is read first (settings.workersInvocationsAdaptive
+//   { maxDuration notOlderThan }: developers.cloudflare.com/analytics/graphql-api/features/discovery/settings/, "notOlderThan
+//   returns a number of seconds on how far back in time a query can read"; maxDuration "shows how wide the requested time range
+//   could be", in seconds per the limits page). Where whole days don't fit it, the windows stay rolling and are labelled so.
+// - The schema is read by the health check's one reader (scripts/health/workers.ts readSchema), which needs no data row.
+//   When it can't be read, each field prints "unknown (schema not read)", never "NOT in the schema"; the documented names
+//   are still queried, each block in its own query, so a missing field fails only its own figure.
+// A quantile cannot be combined across windows, so p50 and p99 are reported per window, with the highest p99; the max is the
+// highest window max. Everything below main() is a pure or injected-client function (scripts/usage/worker-cpu.test.ts).
 import { parseArgs } from 'node:util';
+import { pathToFileURL } from 'node:url';
 import { copies } from '../copies.ts';
+import { describe as describeFields, graphql, readSchema, type Dataset } from '../health/workers.ts';
 
-const { values: args } = parseArgs({ options: { days: { type: 'string', default: '7' }, from: { type: 'string' }, to: { type: 'string' } } });
-const token = process.env.CLOUDFLARE_API_TOKEN;
-const account = process.env.CLOUDFLARE_ACCOUNT_ID ?? '';
-if (!token || !account) throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
+type Gql = (query: string, variables?: Record<string, unknown>) => Promise<any>;
+export const DATASET = 'workersInvocationsAdaptive';
+const DAY = 86_400_000;
 
-async function gql(query: string, variables: Record<string, unknown> = {}): Promise<any> {
-  const res = await fetch('https://api.cloudflare.com/client/v4/graphql', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables }),
-    signal: AbortSignal.timeout(60_000),
+// ---------------------------------------------------------------- windows
+
+export interface Window {
+  from: string;
+  to: string;
+  label: string;
+}
+/** The account's range limit for the dataset, in seconds (null: not stated or not read). */
+export interface Limits {
+  maxDuration: number | null;
+  notOlderThan: number | null;
+}
+export const utcDay = (t: number) => Math.floor(t / DAY) * DAY;
+const iso = (t: number) => new Date(t).toISOString();
+const minute = (t: number) => iso(t).slice(0, 16).replace('T', ' ');
+
+/**
+ * The windows to read. Whole UTC days when the account's limit allows a day-wide range reaching back to the first day;
+ * otherwise rolling windows of at most a day (or maxDuration), ending now, labelled "<n> h to <time> UTC".
+ */
+export function planWindows(now: number, o: { days?: string; from?: string; to?: string }, limits: Limits | null): { windows: Window[]; wholeDays: boolean; notes: string[] } {
+  const notes: string[] = [];
+  let start: number;
+  let end: number;
+  if (o.from !== undefined || o.to !== undefined) {
+    const f = o.from !== undefined ? Date.parse(o.from) : NaN;
+    const t = o.to !== undefined ? Date.parse(o.to) : now;
+    if (!Number.isFinite(f) || !Number.isFinite(t) || f >= t) throw new Error('--from (and --to, if given) must be ISO times, --from before --to');
+    start = utcDay(f);
+    end = Math.min(now, utcDay(t) === t ? t : utcDay(t) + DAY);
+    notes.push(`--from/--to rounded out to whole UTC days: ${iso(start)} → ${iso(end)}${end === now ? ' (now: the last day is partial)' : ''}`);
+  } else {
+    const n = Number(o.days ?? '7');
+    if (!Number.isInteger(n) || n < 0) throw new Error('--days must be a whole number, 0 or more');
+    start = utcDay(now) - n * DAY;
+    end = now;
+  }
+  if (!limits) notes.push(`${DATASET}'s range limit unread (settings): whole UTC days assumed`);
+  else notes.push(`${DATASET}'s range limit (the account's settings): maxDuration ${limits.maxDuration ?? 'not stated'} s, notOlderThan ${limits.notOlderThan ?? 'not stated'} s`);
+  const width = limits?.maxDuration ? Math.min(DAY, limits.maxDuration * 1000) : DAY;
+  const oldest = limits?.notOlderThan ? now - limits.notOlderThan * 1000 : -Infinity;
+  const windows: Window[] = [];
+  if (width === DAY && start >= oldest) {
+    for (let d = start; d < end; d += DAY) {
+      const to = Math.min(end, d + DAY);
+      windows.push({ from: iso(d), to: iso(to), label: `${iso(d).slice(0, 10)}${to - d === DAY ? '' : ` (partial, to ${iso(to).slice(11, 16)} UTC)`}` });
+    }
+    return { windows, wholeDays: true, notes };
+  }
+  notes.push(`whole UTC days don't fit that limit (${width < DAY ? 'a day is wider than maxDuration' : 'the first day starts before notOlderThan'}): rolling windows instead`);
+  const floor = Math.max(start, oldest);
+  for (let t = end; t > floor; t -= width) windows.unshift({ from: iso(Math.max(floor, t - width)), to: iso(t), label: `${Math.round(Math.min(width, t - floor) / 3_600_000)} h to ${minute(t)} UTC` });
+  return { windows, wholeDays: false, notes };
+}
+
+const LIMITS_Q = `query ($a: String!) { viewer { accounts(filter: { accountTag: $a }) { settings { ${DATASET} { maxDuration notOlderThan } } } } }`;
+/** The account's own range limit for the dataset (null, with the reason, when it can't be read). */
+export async function readLimits(gql: Gql, account: string): Promise<{ limits: Limits | null; error: string | null }> {
+  try {
+    const s = (await gql(LIMITS_Q, { a: account }))?.viewer?.accounts?.[0]?.settings?.[DATASET];
+    if (!s) return { limits: null, error: 'the settings node returned nothing for the dataset' };
+    const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+    return { limits: { maxDuration: n(s.maxDuration), notOlderThan: n(s.notOlderThan) }, error: null };
+  } catch (e) {
+    return { limits: null, error: (e as Error).message };
+  }
+}
+
+// ---------------------------------------------------------------- the schema
+
+/** The dataset's shape as read, or why it wasn't. */
+export type Schema = { ds: Dataset } | { error: string };
+export type FieldState = 'present' | 'absent' | 'unknown';
+/** Whether a block's field is in the schema; 'unknown' when the schema wasn't read (never "absent" without reading it). */
+export const fieldState = (s: Schema, block: string, field: string): FieldState => ('error' in s ? 'unknown' : s.ds.blocks.get(block)?.has(field) ? 'present' : 'absent');
+/** The fields the report uses. */
+export const USED = [['quantiles', 'cpuTimeP50'], ['quantiles', 'cpuTimeP99'], ['max', 'cpuTime'], ['sum', 'requests'], ['sum', 'errors'], ['dimensions', 'status']] as const;
+
+export async function loadSchema(gql: Gql, account: string): Promise<Schema> {
+  try {
+    const { datasets } = await readSchema(gql, account);
+    const ds = datasets.get(DATASET);
+    return ds ? { ds } : { error: `the account schema has no ${DATASET}` };
+  } catch (e) {
+    return { error: (e as Error).message };
+  }
+}
+
+/** The schema's own words for the fields used (their units among them), or what couldn't be read. */
+export function schemaLines(s: Schema): string[] {
+  const out: string[] = [];
+  if ('error' in s) out.push(`- schema not read: ${s.error}`);
+  else out.push(...describeFields(s.ds).filter((l) => /cpuTimeP50|cpuTimeP99|max\.cpuTime|status/.test(l)).map((l) => `- ${l}`));
+  for (const [b, f] of USED) {
+    const st = fieldState(s, b, f);
+    if (st === 'unknown') out.push(`- ${b}.${f}: unknown (schema not read)`);
+    else if (st === 'absent') out.push(`- ${b}.${f}: NOT in the schema; not queried`);
+  }
+  return out;
+}
+
+/** The quantile and max fields to query: present or unknown (the documented names are tried when unread). */
+export function queriedFields(s: Schema): { quantiles: string[]; max: string | null } {
+  const q = (['cpuTimeP50', 'cpuTimeP99'] as const).filter((f) => fieldState(s, 'quantiles', f) !== 'absent');
+  return { quantiles: q, max: fieldState(s, 'max', 'cpuTime') !== 'absent' ? 'cpuTime' : null };
+}
+
+// ---------------------------------------------------------------- the report
+
+const VARS = '$a: String!, $s: String!, $f: Time!, $t: Time!';
+const SCOPE = 'filter: { scriptName: $s, datetime_geq: $f, datetime_lt: $t }';
+const q = (sel: string, limit = 10) => `query (${VARS}) { viewer { accounts(filter: { accountTag: $a }) { ${DATASET}(limit: ${limit}, ${SCOPE}) { ${sel} } } } }`;
+
+/** The whole report, as lines. `workers`: each copy's name and Worker. */
+export async function report(gql: Gql, account: string, workers: { name: string; worker: string }[], now: number, args: { days?: string; from?: string; to?: string }): Promise<string[]> {
+  const out: string[] = [];
+  const schema = await loadSchema(gql, account);
+  const lim = await readLimits(gql, account);
+  const plan = planWindows(now, args, lim.limits);
+  out.push(`### ${DATASET}: the fields used, as the schema describes them`, ...schemaLines(schema));
+  if (lim.error) out.push(`- range limit unread: ${lim.error}`);
+  out.push(...plan.notes.map((n) => `- ${n}`));
+  const f = queriedFields(schema);
+  const one = async (query: string | null, v: Record<string, unknown>) => {
+    if (!query) return { rows: [] as any[], error: 'no such field in the schema' };
+    try {
+      return { rows: ((await gql(query, v))?.viewer?.accounts?.[0]?.[DATASET] ?? []) as any[], error: null };
+    } catch (e) {
+      return { rows: [] as any[], error: (e as Error).message };
+    }
+  };
+  const Q_SUM = q('sum { requests errors } dimensions { scriptName }');
+  const Q_P = f.quantiles.length ? q(`quantiles { ${f.quantiles.join(' ')} } dimensions { scriptName }`) : null;
+  const Q_MAX = f.max ? q(`max { ${f.max} } dimensions { scriptName }`) : null;
+  const Q_ST = q('sum { requests errors } dimensions { status }', 100);
+  const reported = new Set<string>();
+  const first = plan.windows[0]?.from ?? '-';
+  const last = plan.windows.at(-1)?.to ?? '-';
+  out.push('', `### CPU time per Worker, ${plan.wholeDays ? 'per UTC day' : 'per rolling window (whole UTC days did not fit the range limit)'}, ${first} → ${last}`);
+  for (const c of workers) {
+    const statuses = new Map<string, number>();
+    let worstP99 = 0;
+    let worstMax = 0;
+    let requests = 0;
+    out.push('', `${c.name} (Worker ${c.worker}):`, `${plan.wholeDays ? 'UTC day' : 'window'}\trequests\terrors\tcpuTimeP50\tcpuTimeP99\tmax cpuTime`);
+    for (const w of plan.windows) {
+      const v = { a: account, s: c.worker, f: w.from, t: w.to };
+      const [sum, p, mx, st] = await Promise.all([one(Q_SUM, v), one(Q_P, v), one(Q_MAX, v), one(Q_ST, v)]);
+      for (const [label, r] of [['sum', sum], ['quantiles', p], ['max', mx], ['status', st]] as const)
+        if (r.error && !reported.has(label)) {
+          reported.add(label);
+          out.push(`  (${label} query: ${r.error})`);
+        }
+      for (const s of st.rows) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
+      const g = sum.rows[0];
+      const qs = p.rows[0]?.quantiles;
+      const m = mx.rows[0]?.max;
+      requests += Number(g?.sum.requests ?? 0);
+      worstP99 = Math.max(worstP99, Number(qs?.cpuTimeP99 ?? 0));
+      worstMax = Math.max(worstMax, Number(m?.cpuTime ?? 0));
+      out.push([w.label, g?.sum.requests ?? 0, g?.sum.errors ?? 0, qs?.cpuTimeP50 ?? '-', qs?.cpuTimeP99 ?? '-', m?.cpuTime ?? '-'].join('\t'));
+    }
+    out.push(`${c.name}: ${requests} invocations; highest cpuTimeP99 ${worstP99}; highest max cpuTime ${worstMax} (units: the schema's descriptions above${'error' in schema ? ', unread this run' : ''})`);
+    out.push(`${c.name}: invocations by status: ${[...statuses].map(([s, n]) => `${s} ${n}`).join(', ') || 'none'}`);
+  }
+  return out;
+}
+
+async function main(): Promise<void> {
+  const { values: args } = parseArgs({ options: { days: { type: 'string', default: '7' }, from: { type: 'string' }, to: { type: 'string' } } });
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID ?? '';
+  if (!token || !account) throw new Error('CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID must be set');
+  const lines = await report(graphql(token), account, copies(), Date.now(), args.from || args.to ? { from: args.from, to: args.to } : { days: args.days });
+  console.log(lines.join('\n'));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch((e) => {
+    console.error((e as Error).message);
+    process.exitCode = 1;
   });
-  const json = (await res.json().catch(() => ({}))) as { data?: any; errors?: { message?: string }[] | null };
-  const errors = (json.errors ?? []).map((e) => String(e.message ?? e).replace(/[0-9a-f]{32}/gi, '<id>')).slice(0, 3);
-  if (!res.ok || errors.length) throw new Error(`graphql HTTP ${res.status}: ${errors.join('; ') || 'no detail'}`);
-  return json.data;
-}
-
-interface Field {
-  name: string;
-  description: string | null;
-  type: { name: string | null; kind: string; ofType: { name: string | null; kind: string; ofType: { name: string | null; kind: string; ofType: { name: string | null } | null } | null } | null };
-}
-const TYPE_Q = 'query ($n: String!) { __type(name: $n) { fields { name description type { name kind ofType { name kind ofType { name kind ofType { name } } } } } } }';
-const named = (t: Field['type']): string | null => t.name ?? t.ofType?.name ?? t.ofType?.ofType?.name ?? t.ofType?.ofType?.ofType?.name ?? null;
-const fieldsOf = async (type: string): Promise<Field[]> => ((await gql(TYPE_Q, { n: type }))?.__type?.fields ?? []) as Field[];
-
-// The dataset's block types, by asking the API itself for their __typename (no type unwrapping), then each type's fields.
-// Run 42292289498 found the introspection path through "account" empty, so this asks the data path instead.
-const now = new Date().toISOString();
-const dayAgo = new Date(Date.now() - 86_400_000).toISOString();
-const blocks = new Map<string, Field[]>();
-let groupType = '';
-for (const block of ['sum', 'quantiles', 'max', 'dimensions'] as const) {
-  try {
-    const d = await gql(
-      `query ($a: String!, $f: Time!, $t: Time!) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 1, filter: { datetime_geq: $f, datetime_lt: $t }) { __typename ${block} { __typename } } } } }`,
-      { a: account, f: dayAgo, t: now },
-    );
-    const g = d?.viewer?.accounts?.[0]?.workersInvocationsAdaptive?.[0];
-    groupType ||= g?.__typename ?? '';
-    const t = g?.[block]?.__typename;
-    if (t) blocks.set(block, await fieldsOf(t));
-    else console.log(`- ${block}: no group returned in the last day, so its type is unread`);
-  } catch (e) {
-    console.log(`- ${block}: ${(e as Error).message}`);
-  }
-}
-const has = (block: string, field: string) => !!blocks.get(block)?.some((f) => f.name === field);
-void named;
-const describe = (block: string, re: RegExp) =>
-  (blocks.get(block) ?? []).filter((f) => re.test(f.name)).map((f) => `${block}.${f.name}${f.description ? ` — ${f.description.replace(/\s+/g, ' ').trim()}` : ''}`);
-console.log(`### workersInvocationsAdaptive (${groupType || 'type not read'}): the fields used, as the schema describes them`);
-for (const l of [...describe('quantiles', /^cpuTimeP(50|99)$/), ...describe('max', /^cpuTime$/), ...describe('sum', /^(requests|errors)$/), ...describe('dimensions', /^(status|scriptName)$/)]) console.log(`- ${l}`);
-for (const [b, f] of [['quantiles', 'cpuTimeP50'], ['quantiles', 'cpuTimeP99'], ['max', 'cpuTime'], ['dimensions', 'status']] as const) if (!has(b, f)) console.log(`- ${b}.${f}: NOT in the schema; not queried`);
-
-const end = args.to ? Date.parse(args.to) : Date.now();
-const start = args.from ? Date.parse(args.from) : end - Number(args.days) * 86_400_000;
-const days: { from: string; to: string }[] = [];
-for (let t = start; t < end; t += 86_400_000) days.push({ from: new Date(t).toISOString(), to: new Date(Math.min(end, t + 86_400_000)).toISOString() });
-
-// The documented quantile names (developers.cloudflare.com/analytics/graphql-api/tutorials/querying-workers-metrics/) are
-// tried even if the schema read above failed; each block is its own query, so a missing field fails only its own figure.
-const cpuQ = (blocks.size ? ['cpuTimeP50', 'cpuTimeP99'].filter((f) => has('quantiles', f)) : ['cpuTimeP50', 'cpuTimeP99']).join(' ');
-const maxField = blocks.has('max') ? (blocks.get('max')!.find((f) => f.name === 'cpuTime') ? 'cpuTime' : null) : 'cpuTime';
-const window = '$a: String!, $s: String!, $f: Time!, $t: Time!';
-const scope = 'filter: { scriptName: $s, datetime_geq: $f, datetime_lt: $t }';
-const Q_SUM = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { sum { requests errors } dimensions { scriptName } } } } }`;
-const Q_P = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { quantiles { ${cpuQ} } dimensions { scriptName } } } } }`;
-const Q_MAX = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 10, ${scope}) { max { ${maxField} } dimensions { scriptName } } } } }`;
-const Q_ST = `query (${window}) { viewer { accounts(filter: { accountTag: $a }) { workersInvocationsAdaptive(limit: 100, ${scope}) { sum { requests errors } dimensions { status } } } } }`;
-const one = async (q: string, v: Record<string, unknown>) => {
-  try {
-    return { rows: ((await gql(q, v))?.viewer?.accounts?.[0]?.workersInvocationsAdaptive ?? []) as any[], error: null };
-  } catch (e) {
-    return { rows: [] as any[], error: (e as Error).message };
-  }
-};
-const reported = new Set<string>();
-
-console.log(`\n### CPU time per Worker, per UTC day, ${new Date(start).toISOString()} → ${new Date(end).toISOString()}`);
-for (const c of copies()) {
-  const statuses = new Map<string, number>();
-  let worstP99 = 0;
-  let worstMax = 0;
-  let requests = 0;
-  console.log(`\n${c.name} (Worker ${c.worker}):\nday (from)\trequests\terrors\tcpuTimeP50\tcpuTimeP99\tmax cpuTime`);
-  for (const d of days) {
-    const v = { a: account, s: c.worker, f: d.from, t: d.to };
-    const [sum, p, mx, st] = await Promise.all([one(Q_SUM, v), cpuQ ? one(Q_P, v) : Promise.resolve({ rows: [], error: 'no quantile field' }), maxField ? one(Q_MAX, v) : Promise.resolve({ rows: [], error: 'no max cpuTime field' }), one(Q_ST, v)]);
-    for (const [label, r] of [['sum', sum], ['quantiles', p], ['max', mx], ['status', st]] as const)
-      if (r.error && !reported.has(label)) {
-        reported.add(label);
-        console.log(`  (${label} query: ${r.error})`);
-      }
-    for (const s of st.rows) statuses.set(s.dimensions.status, (statuses.get(s.dimensions.status) ?? 0) + Number(s.sum.requests));
-    const g = sum.rows[0];
-    const q = p.rows[0]?.quantiles;
-    const m = mx.rows[0]?.max;
-    requests += Number(g?.sum.requests ?? 0);
-    worstP99 = Math.max(worstP99, Number(q?.cpuTimeP99 ?? 0));
-    worstMax = Math.max(worstMax, Number(m?.cpuTime ?? 0));
-    console.log([d.from.slice(0, 16), g?.sum.requests ?? 0, g?.sum.errors ?? 0, q?.cpuTimeP50 ?? '-', q?.cpuTimeP99 ?? '-', m?.cpuTime ?? '-'].join('\t'));
-  }
-  console.log(`${c.name}: ${requests} invocations; highest daily cpuTimeP99 ${worstP99}; highest daily max cpuTime ${worstMax} (the schema's units: see the field descriptions above)`);
-  console.log(`${c.name}: invocations by status: ${[...statuses].map(([s, n]) => `${s} ${n}`).join(', ') || 'none'}`);
-}

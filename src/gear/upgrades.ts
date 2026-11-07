@@ -24,8 +24,8 @@ import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
 import { gearIndex, itemsFor, VERSION_SQL, type GearIndex } from './index.ts';
 import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
-  byGain, className, compareGroup, levelGroup, fmtHundredths, groupByKey, grouped, GROUPS, hasteWornElsewhere, MAX_LEVEL_CAP, presetOf, sideLabel, SLOT_GROUPS, weightsFor, wornState, wornScore,
-  type Context, type GearItem, type GroupResult, type LevelGroup, type Upgrade, type Wearer, type Weights, type Worn,
+  byGain, className, compareSlot, levelGroup, fmtHundredths, grouped, GROUPS, hasteWornElsewhere, MAX_LEVEL_CAP, presetOf, resolveSlot, slotLabel, upgradeSlot, UPGRADE_SLOTS, weightsFor, wornState, wornScore,
+  type Context, type GearItem, type LevelGroup, type SlotResult, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
 import { characterHead } from '../commands/character.ts';
@@ -33,17 +33,20 @@ import { markedLine, parseStats, plainLine, type Baseline, type ItemStats } from
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
-/** gus:<character id>:<window>: Pick a slot (select; values: a slot group key). */
+// Order 40: <slot> is one of the 20 slot keys (src/gear/score.ts UPGRADE_SLOTS). A pair key sent before order 40 (ear,
+// wrist, finger) is still answered (order 18): as the pair's first side, with a line naming the other (resolveSlot); gur:
+// searches both sides for the picked item, because its list came from the weaker side.
+/** gus:<character id>:<window>: Pick a slot (select; values: a slot key). */
 export const SLOT_PREFIX = 'gus:';
-/** gup:<character id>:<group>:<window>:<page>: ◀ Smaller / Bigger ▶. */
+/** gup:<character id>:<slot>:<window>:<page>: ◀ Smaller / Bigger ▶. */
 export const PAGE_PREFIX = 'gup:';
-/** gur:<character id>:<group>:<window>: Pick a result (select; values: item ids). */
+/** gur:<character id>:<slot>:<window>: Pick a result (select; values: item ids). */
 export const RESULT_PREFIX = 'gur:';
 /** guw:<character id>:<slot>:<window>:<item id>: I'm wearing it now. */
 export const WEAR_NOW_PREFIX = 'guw:';
 /** guo:<item id>: Open item (its /item card). */
 export const OPEN_PREFIX = 'guo:';
-/** Post to channel: "pub:gu:<character id>:<group>:<window>:<page>" (src/commands/share.ts POST_PREFIX). */
+/** Post to channel: "pub:gu:<character id>:<slot>:<window>:<page>" (src/commands/share.ts POST_PREFIX). */
 export const POST_WHAT = 'gu:';
 export { FIND_UPGRADES_PREFIX };
 
@@ -87,9 +90,9 @@ export const UPGRADES_COPY = {
   worn: (slot: string, item: string, score: string) => `${slot}: ${item} (score ${score})`,
   wornEmpty: (slot: string) => `${slot}: empty (score 0.00)`,
   notCounted: { gone: 'counts 0: no longer listed', cantUse: (name: string) => `counts 0: ${md(name)} can't use it` },
-  comparedWith: (slot: string) => `Compared with the weaker side, **${slot}**.`,
   twoHanded: (item: string) => `Two-handed candidates are compared with Primary and Secondary together; ${item} is in Primary.`,
-  replaces: (slot: string) => `replaces ${slot}`,
+  // Order 40 (listed in docs/COPY.md): a control or slot: value from before order 40 named a pair; it opens the first side, and says this.
+  otherSide: (slot: string) => `${slot}: pick it from Pick a slot.`,
   secondaryFree: 'replaces the two-hander: Secondary is then free',
   needsOneHand: 'needs a one-handed Primary',
   pickResult: 'Pick a result',
@@ -163,8 +166,14 @@ export async function load(c: Ctx, ch: Character): Promise<Loaded> {
   return { ch, idx, wearer, weights, cls: className(ch.class), known: wearer.classBit !== null, ctx: { weights, preset: presetOf(ch.class), worn } };
 }
 
-// Order 38: each group walks only its slot's items (src/gear/index.ts itemsFor); compareGroup's own slot test is unchanged.
-const compare = (L: Loaded, key: string) => compareGroup(groupByKey(key)!, L.ctx, L.wearer, itemsFor(L.idx, groupByKey(key)!.token));
+// Order 38: each slot walks only its token's items (src/gear/index.ts itemsFor); compareSlot's own slot test is unchanged.
+// Order 40: `key` is one of the 20 slot keys (callers resolve an old pair key first, resolveSlot).
+const compare = (L: Loaded, key: string) => {
+  const s = upgradeSlot(key)!;
+  return compareSlot(s, L.ctx, L.wearer, itemsFor(L.idx, s.token));
+};
+/** Order 40: the line an old pair key's page carries, naming the side it didn't open ("Wrist 2: pick it from Pick a slot."). */
+const otherSideNote = (oldSides: readonly string[] | null) => (oldSides ? oldSides.slice(1).map((s) => UPGRADES_COPY.otherSide(slotLabel(s))).join('\n') : undefined);
 
 // ---------------------------------------------------------------- the summary
 
@@ -173,8 +182,9 @@ export async function summaryView(c: Pick<Ctx, 'db'>, L: Loaded, cap: Cap): Prom
   // list's own order, byGain), whether any is level-unknown, and (with a cap) how many are above it, hidden.
   // Review fix: items, not slot entries (a weapon above the cap that fits Primary and Secondary is one hidden item).
   const hiddenIds = new Set<number>();
-  const per = SLOT_GROUPS.map((g) => {
-    const r = compareGroup(g, L.ctx, L.wearer, itemsFor(L.idx, g.token));
+  // Order 40: one entry per slot, the 20 of UPGRADE_SLOTS (each side of a pair its own).
+  const per = UPGRADE_SLOTS.map((g) => {
+    const r = compareSlot(g, L.ctx, L.wearer, itemsFor(L.idx, g.token));
     let listed: Upgrade | null = null;
     let unknown = false;
     let shownCount = 0;
@@ -281,23 +291,26 @@ function upgradeLine(u: Upgrade, L: Loaded, stats: Map<number, ItemStats>, chang
  * full line marked in a list, the changes only on Pick a result), then how to get it.
  */
 function resultLines(u: Upgrade, L: Loaded, how: string[], stats: Map<number, ItemStats>, changesOnly = false): string[] {
-  const note = u.side ? UPGRADES_COPY.replaces(sideLabel(u.side)) : u.note === 'secondaryFree' ? UPGRADES_COPY.secondaryFree : u.note === 'needsOneHand' ? UPGRADES_COPY.needsOneHand : null;
+  const note = u.note === 'secondaryFree' ? UPGRADES_COPY.secondaryFree : u.note === 'needsOneHand' ? UPGRADES_COPY.needsOneHand : null;
   return [`${named(u.item)} **${fmtHundredths(u.gain)}** · ${levelText(u.item)}${note ? ` · ${note}` : ''}`, upgradeLine(u, L, stats, changesOnly), ...how.map((l) => `-# ${l}`)].filter(Boolean);
 }
 
-/** The worn sides the header shows (Primary and Secondary for the hands; the group's sides otherwise). */
-const headerSides = (r: GroupResult) => (r.group.token === 'PRIMARY' || (r.group.token === 'SECONDARY' && r.replaces[0] === 'primary') ? ['primary', ...(r.group.token === 'PRIMARY' ? ['secondary'] : [])] : r.group.sides);
+/**
+ * The worn slots the header shows: Primary and Secondary for Primary; Primary for Secondary under a two-hander; otherwise
+ * that slot alone (order 40: a pair's other side is never shown).
+ */
+const headerSides = (r: SlotResult) => (r.slot.token === 'PRIMARY' || (r.slot.token === 'SECONDARY' && r.replaces[0] === 'primary') ? ['primary', ...(r.slot.token === 'PRIMARY' ? ['secondary'] : [])] : [r.slot.key]);
 
 /**
  * The header lines: what's worn in each slot compared with, and each one's score (0 with the reason it counts 0). Order 39:
  * each worn item's full stat line under it, unmarked (the baseline).
  */
-function headerLines(L: Loaded, r: GroupResult, stats: Map<number, ItemStats>): string[] {
+function headerLines(L: Loaded, r: SlotResult, stats: Map<number, ItemStats>): string[] {
   const out: string[] = [];
   for (const side of headerSides(r)) {
     const g = L.ctx.worn.get(side);
-    const token = side === 'primary' ? 'PRIMARY' : side === 'secondary' ? 'SECONDARY' : r.group.token;
-    const label = sideLabel(side);
+    const token = side === 'primary' ? 'PRIMARY' : side === 'secondary' ? 'SECONDARY' : r.slot.token;
+    const label = slotLabel(side);
     if (!g) out.push(UPGRADES_COPY.wornEmpty(label));
     else {
       const name = md(g.item?.name ?? g.key);
@@ -308,14 +321,13 @@ function headerLines(L: Loaded, r: GroupResult, stats: Map<number, ItemStats>): 
       if (full) out.push(full);
     }
   }
-  if (r.group.sides.length > 1) out.push(UPGRADES_COPY.comparedWith(sideLabel(r.replaces[0])));
   const p = L.ctx.worn.get('primary');
-  if (r.group.token === 'PRIMARY' && p?.item?.twoHanded && p.reason === null) out.push(UPGRADES_COPY.twoHanded(md(p.item.name)));
+  if (r.slot.token === 'PRIMARY' && p?.item?.twoHanded && p.reason === null) out.push(UPGRADES_COPY.twoHanded(md(p.item.name)));
   return out;
 }
 
 /** The candidates in display order (listed, then level unknown, each sorted), and how many a cap hid. */
-const ordered = (r: GroupResult, cap: Cap) => {
+const ordered = (r: SlotResult, cap: Cap) => {
   const by = grouped(r.upgrades, cap);
   return { all: GROUPS.flatMap((g) => by[g].map((u) => ({ g, u }))), hidden: by.above.length };
 };
@@ -335,8 +347,8 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   // Review fix: "Nothing beats" only when nothing does; when the cap hid every upgrade, the quiet count below says so.
   if (!all.length && !hidden) {
     const worn = r.worn.filter((g) => g.reason === null && g.item);
-    const what = worn.length ? worn.map((g) => md(g.item!.name)).join(' and ') : UPGRADES_COPY.emptySlot(r.group.label);
-    body.push('', UPGRADES_COPY.nothing(what, L.cls, r.group.label));
+    const what = worn.length ? worn.map((g) => md(g.item!.name)).join(' and ') : UPGRADES_COPY.emptySlot(r.slot.label);
+    body.push('', UPGRADES_COPY.nothing(what, L.cls, r.slot.label));
   }
   let last: LevelGroup | null = null;
   for (const s of shown) {
@@ -347,7 +359,7 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   // The owner (2026-11-06): with a cap, a quiet count of what it hid, at the end of the list.
   if (cap !== null && hidden && n === pages - 1) body.push('', `-# ${UPGRADES_COPY.hidden(hidden, cap)}`);
   const embed: Embed = {
-    title: truncate(UPGRADES_COPY.slotTitle(r.group.label, L.ch.name), EMBED_LIMITS.title),
+    title: truncate(UPGRADES_COPY.slotTitle(r.slot.label, L.ch.name), EMBED_LIMITS.title),
     description: truncate(body.join('\n'), EMBED_LIMITS.description),
     footer: { text: [all.length > PER_PAGE ? UPGRADES_COPY.page(n + 1, pages) : null, weightsLine(L)].filter(Boolean).join(' · ') },
   };
@@ -386,7 +398,9 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
   const max = optInt(opts, 'max_level');
   const oldLevels = optInt(opts, 'levels');
   if (max !== undefined && (max < 1 || max > MAX_LEVEL_CAP)) return ephemeral(UPGRADES_COPY.capRange);
-  if (key !== undefined && !groupByKey(key)) return ephemeral(UPGRADES_COPY.unknownSlot);
+  // Order 40: 20 slots; an old pair value (a client holding the 17-choice definition) opens its first side (order 35's rule).
+  const slot = key !== undefined ? resolveSlot(key) : null;
+  if (key !== undefined && !slot) return ephemeral(UPGRADES_COPY.unknownSlot);
   let ch: Character | null;
   if (name !== undefined) {
     ch = await findByName(c.db, c.guild.id, c.userId, name);
@@ -399,7 +413,7 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
   }
   const cap: Cap = max ?? (oldLevels !== undefined && ch.level !== null ? Math.min(MAX_LEVEL_CAP, ch.level + oldLevels) : null);
   const L = await load(c, ch);
-  const v = key ? await slotPage(c, L, key, cap, 0) : await summaryView(c, L, cap);
+  const v = slot ? await slotPage(c, L, slot.slot.key, cap, 0, false, otherSideNote(slot.oldSides)) : await summaryView(c, L, cap);
   return ephemeral('', { embeds: [v.embed], components: v.components });
 }
 
@@ -419,32 +433,39 @@ async function slotPicked(c: Ctx, id: string, values: string[]): Promise<Message
   const [charId, w] = parts(id, SLOT_PREFIX);
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
-  const key = values[0] ?? '';
-  if (!groupByKey(key)) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), 0);
+  const s = resolveSlot(values[0] ?? '');
+  if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), 0, false, otherSideNote(s.oldSides));
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
-/** gup:<character id>:<group>:<cap>:<page>: paging, in place. */
+/** gup:<character id>:<slot>:<cap>:<page>: paging, in place. */
 async function pagePressed(c: Ctx, id: string): Promise<MessageReply> {
   const [charId, key, w, p] = parts(id, PAGE_PREFIX);
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
-  if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), int(p) ?? 0);
+  const s = resolveSlot(key ?? '');
+  if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, false, otherSideNote(s.oldSides));
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
-/** gur:<character id>:<group>:<window>: one result, as a new private message, with its controls. */
+/**
+ * gur:<character id>:<slot>:<window>: one result, as a new private message, with its controls. Order 40: an old pair key's
+ * list came from its weaker side, so both sides are searched for the item, in panel order; "gone" only when neither has it.
+ */
 async function resultPicked(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
   const [charId, key, w] = parts(id, RESULT_PREFIX);
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
-  if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const s = resolveSlot(key ?? '');
+  if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
   const L = await load(c, t.ch);
-  const u = compare(L, key).upgrades.find((x) => x.item.id === Number(values[0]));
-  if (!u) return ephemeral(UPGRADES_COPY.gone);
-  return resultReply(c, L, key, capOf(w), u);
+  for (const side of s.oldSides ?? [s.slot.key]) {
+    const u = compare(L, side).upgrades.find((x) => x.item.id === Number(values[0]));
+    if (u) return resultReply(c, L, side, capOf(w), u);
+  }
+  return ephemeral(UPGRADES_COPY.gone);
 }
 
 /**
@@ -456,7 +477,8 @@ async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade)
   const [x, k] = await Promise.all([extras(c, L, [u.item], againstIds(u)), itemCard(c, u.item.id)]);
   if (!k) return ephemeral(UPGRADES_COPY.gone);
   const how = howToGet(u.item, x, c.userId, c.guild.learning_window);
-  const slot = u.side ?? (key === 'secondary' ? 'secondary' : groupByKey(key)!.sides[0]);
+  // Order 40: I'm wearing it now saves to the slot whose list it came from (a two-hander in Primary: order 35's rules).
+  const slot = key;
   const buttons = [
     // Review fix: not under a two-hander (order 35's saved gear refuses Secondary there); the result says why instead.
     ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${capState(cap)}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
@@ -465,7 +487,7 @@ async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade)
   const own = buttons.length ? [row(buttons)] : [];
   const z = await zoneButtons(c.db, [...how.zones, ...k.zones], own.length);
   const more = z.zones - z.shown;
-  const label = sideLabel(slot);
+  const label = slotLabel(slot);
   const content = [
     `${UPGRADES_COPY.who(L)} · ${UPGRADES_COPY.forSlot(L.ch.name, label)}`,
     // Order 39: the changed stats only; the card below has the full stats.
@@ -487,7 +509,9 @@ async function wearNow(c: Ctx, id: string): Promise<MessageReply> {
   if (!saved) return ephemeral(UPGRADES_COPY.gone);
   // The character as it is now (a class or level change since the list was drawn applies).
   const ch = (await findById(c.db, c.guild.id, t.ch.id)) ?? t.ch;
-  const key = SLOT_GROUPS.find((g) => g.sides.includes(slot ?? ''))!.key;
+  // Order 40: the list of the slot it was saved to (guw: has always carried a slot key, never a pair key).
+  const key = resolveSlot(slot ?? '')?.slot.key;
+  if (!key) return ephemeral(UPGRADES_COPY.unknownSlot);
   const v = await slotPage(c, await load(c, ch), key, capOf(w), 0, false, saved.data.content);
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
@@ -500,13 +524,14 @@ async function openItem(c: Ctx, id: string): Promise<MessageReply> {
   return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${ITEM_POST}${itemId}`, k.links, [k.actions]), k.zones);
 }
 
-/** pub:gu:<character id>:<group>:<window>:<page>: this page, public, with no buttons. The character's owner only. */
+/** pub:gu:<character id>:<slot>:<window>:<page>: this page, public, with no buttons. The character's owner only. */
 export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> {
   const [charId, key, w, p] = what.split(':');
   const t = await characterFor(c, charId ?? '', true);
   if ('reply' in t) return t.reply;
-  if (!groupByKey(key ?? '')) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), key, capOf(w), int(p) ?? 0, true);
+  const s = resolveSlot(key ?? '');
+  if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, true, otherSideNote(s.oldSides));
   return postedReply({ embeds: [v.embed] }, c.userId);
 }
 

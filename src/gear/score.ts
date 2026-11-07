@@ -11,7 +11,7 @@
 //   in every other slot, for a candidate and for the item it replaces alike.
 // - Weights are read only through weightsFor(server, class) (ITEM 4 changes its source, never its callers).
 import { RESISTS, STATS, ALL_CLASSES, ALL_RACES, REMOVED_BIT, bitOf, SLOTS } from './vocab.ts';
-import { WEAR_SLOTS, type SlotToken } from './slots.ts';
+import { WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
 
 // ---------------------------------------------------------------- the weights
 
@@ -233,24 +233,35 @@ export const isCandidate = (w: Wearer, it: GearItem) => !it.gone && (it.sourceMa
 
 // ---------------------------------------------------------------- scoring
 
-/** The 17 slot groups: the 20 slots with each pair (Ear, Wrist, Finger) as one. */
-export interface SlotGroup {
-  key: string;
-  label: string;
-  token: SlotToken;
-  sides: string[];
-}
-export const SLOT_GROUPS: SlotGroup[] = (() => {
-  const out: SlotGroup[] = [];
+/**
+ * Order 40 (the owner, 2026-11-07, reversing order 39's "paired slots stay as built"): every one of the 20 wear slots is its
+ * own slot in /gear upgrades (src/gear/slots.ts WEAR_SLOTS); a pair (Ear, Wrist, Finger) is never compared as one. The
+ * summary, Pick a slot, slot:, the slot list, I'm wearing it now and Post to channel all read this list.
+ */
+export const UPGRADE_SLOTS: readonly WearSlot[] = WEAR_SLOTS;
+export const upgradeSlot = (key: string): WearSlot | undefined => UPGRADE_SLOTS.find((s) => s.key === key);
+export const slotLabel = (key: string) => upgradeSlot(key)?.label ?? key;
+
+/**
+ * Order 40, under order 18's "every custom_id prefix the code has ever sent is still handled": the pair keys sent before
+ * order 40 (ear, wrist, finger), each with its sides in panel order. Derived as order 36's 17 groups were: slots sharing a
+ * token are a pair, keyed by the first side's key without its digit. Never typed.
+ */
+export const OLD_PAIR_KEYS: ReadonlyMap<string, readonly string[]> = (() => {
+  const m = new Map<string, string[]>();
   for (const w of WEAR_SLOTS) {
-    const g = out.find((x) => x.token === w.token);
-    if (g) g.sides.push(w.key);
-    else out.push({ key: w.key.replace(/\d$/, ''), label: w.label.replace(/ \d$/, ''), token: w.token, sides: [w.key] });
+    const sides = WEAR_SLOTS.filter((x) => x.token === w.token);
+    if (sides.length > 1 && sides[0] === w) m.set(w.key.replace(/\d$/, ''), sides.map((x) => x.key));
   }
-  return out;
+  return m;
 })();
-export const groupByKey = (key: string) => SLOT_GROUPS.find((g) => g.key === key);
-export const sideLabel = (key: string) => WEAR_SLOTS.find((w) => w.key === key)?.label ?? key;
+/** A slot key; or an old pair key, read as the pair's first side (`oldSides`: both sides, for an old key; else null). */
+export function resolveSlot(key: string): { slot: WearSlot; oldSides: readonly string[] | null } | null {
+  const s = upgradeSlot(key);
+  if (s) return { slot: s, oldSides: null };
+  const sides = OLD_PAIR_KEYS.get(key);
+  return sides ? { slot: upgradeSlot(sides[0])!, oldSides: sides } : null;
+}
 
 /** Whether damage ÷ delay counts in a slot, for a class's preset. */
 export const ratioCounts = (token: SlotToken, preset: Preset) => token === 'PRIMARY' || token === 'RANGE' || (token === 'SECONDARY' && (preset === 'Tank' || preset === 'Melee'));
@@ -324,7 +335,7 @@ function scoreTogether(items: (GearItem | null)[], ctx: Context, token: SlotToke
 }
 const PAIR_TOKENS: SlotToken[] = ['PRIMARY', 'SECONDARY'];
 
-/** One candidate for a slot group. */
+/** One candidate for a slot. */
 export interface Upgrade {
   item: GearItem;
   /** Gain in hundredths (> 0). */
@@ -336,8 +347,6 @@ export interface Upgrade {
   against: (GearItem | null)[];
   token: SlotToken;
   except: string[];
-  /** The side it replaces, for a pair; null otherwise. */
-  side: string | null;
   note: 'secondaryFree' | 'needsOneHand' | null;
 }
 
@@ -351,8 +360,8 @@ export function upgradeDiff(u: Upgrade, ctx: Context): number[] {
   return cand.map((x, i) => x - base[i]);
 }
 
-export interface GroupResult {
-  group: SlotGroup;
+export interface SlotResult {
+  slot: WearSlot;
   /** What the comparison is against: the slots replaced and their score. */
   replaces: string[];
   baseline: number;
@@ -368,16 +377,16 @@ export interface GroupResult {
 const isTwoHand = (g: Worn | undefined) => !!g?.item?.twoHanded;
 
 /**
- * Every candidate that beats what's worn in one slot group (unsorted). The comparison:
- * - a pair compares with its weaker side (an empty side scores 0; a tie picks the first side); an item worn on the other
- *   side is still a candidate;
+ * Every candidate that beats what's worn in one slot (unsorted). The comparison:
+ * - a slot compares only with what is worn in it (empty: 0). Order 40: each side of a pair (Ear, Wrist, Finger) is its own
+ *   slot; an item worn on the other side is still a candidate, and haste elsewhere counts the other side like any slot;
  * - Primary: a two-handed candidate against Primary plus Secondary; a one-handed one against a worn two-hander alone
  *   ("Secondary is then free"), else against Primary;
  * - Secondary under a worn two-hander: against the two-hander's score ("needs a one-handed Primary"); two-handers are never
  *   Secondary candidates (one takes both hands from Primary).
  */
-export function compareGroup(group: SlotGroup, ctx: Context, wearer: Wearer, items: readonly GearItem[]): GroupResult {
-  const bit = bitOf(SLOTS, group.token);
+export function compareSlot(slot: WearSlot, ctx: Context, wearer: Wearer, items: readonly GearItem[]): SlotResult {
+  const bit = bitOf(SLOTS, slot.token);
   const worn = (slot: string) => ctx.worn.get(slot);
   const out: Upgrade[] = [];
   const wv = WEIGHT_KEYS.map((k) => ctx.weights[k]);
@@ -389,15 +398,15 @@ export function compareGroup(group: SlotGroup, ctx: Context, wearer: Wearer, ite
     for (let i = 0; i < KEYS_N; i++) if (i !== HASTE_I && (i !== RATIO_I || ratio)) s += wv[i] * v[i];
     return s + wv[HASTE_I] * Math.max(0, v[HASTE_I] - hasteOther);
   };
-  const consider = (it: GearItem, token: SlotToken, except: string[], against: (GearItem | null)[], base: number, hasteOther: number, side: string | null, note: Upgrade['note']) => {
+  const consider = (it: GearItem, token: SlotToken, except: string[], against: (GearItem | null)[], base: number, hasteOther: number, note: Upgrade['note']) => {
     const score = fast(it, ratioCounts(token, ctx.preset), hasteOther);
-    if (score - base > 0) out.push({ item: it, gain: score - base, score, baseline: base, against, token, except, side, note });
+    if (score - base > 0) out.push({ item: it, gain: score - base, score, baseline: base, against, token, except, note });
   };
-  const one = (slot: string) => scoreTogether([counts(worn(slot))], ctx, group.token, [slot]).score;
+  const one = (key: string) => scoreTogether([counts(worn(key))], ctx, slot.token, [key]).score;
   const fitting: GearItem[] = [];
   for (const it of items) if ((it.slotMask & bit) !== 0 && isCandidate(wearer, it)) fitting.push(it);
 
-  if (group.token === 'PRIMARY') {
+  if (slot.token === 'PRIMARY') {
     const twoWorn = isTwoHand(worn('primary'));
     const both = ['primary', 'secondary'];
     const p = counts(worn('primary'));
@@ -409,31 +418,31 @@ export function compareGroup(group: SlotGroup, ctx: Context, wearer: Wearer, ite
     const hOne = hasteElsewhere(ctx, ['primary']);
     for (const it of fitting) {
       if (it.key === worn('primary')?.key) continue;
-      if (it.twoHanded) consider(it, 'PRIMARY', both, pair, pairBase, hBoth, null, null);
-      else if (twoWorn) consider(it, 'PRIMARY', both, [p], twoBase, hBoth, null, 'secondaryFree');
-      else consider(it, 'PRIMARY', ['primary'], [p], oneBase, hOne, null, null);
+      if (it.twoHanded) consider(it, 'PRIMARY', both, pair, pairBase, hBoth, null);
+      else if (twoWorn) consider(it, 'PRIMARY', both, [p], twoBase, hBoth, 'secondaryFree');
+      else consider(it, 'PRIMARY', ['primary'], [p], oneBase, hOne, null);
     }
-    return { group, replaces: ['primary'], baseline: oneBase, worn: [worn('primary')].filter((g): g is Worn => !!g), upgrades: out };
+    return { slot, replaces: ['primary'], baseline: oneBase, worn: [worn('primary')].filter((g): g is Worn => !!g), upgrades: out };
   }
-  if (group.token === 'SECONDARY' && isTwoHand(worn('primary'))) {
+  if (slot.token === 'SECONDARY' && isTwoHand(worn('primary'))) {
     const both = ['primary', 'secondary'];
     const p = counts(worn('primary'));
     const base = scoreTogether([p], ctx, 'PRIMARY', both).score;
     const h = hasteElsewhere(ctx, both);
-    for (const it of fitting) if (!it.twoHanded) consider(it, 'SECONDARY', both, [p], base, h, null, 'needsOneHand');
-    return { group, replaces: ['primary'], baseline: base, worn: [worn('primary')!], upgrades: out };
+    for (const it of fitting) if (!it.twoHanded) consider(it, 'SECONDARY', both, [p], base, h, 'needsOneHand');
+    return { slot, replaces: ['primary'], baseline: base, worn: [worn('primary')!], upgrades: out };
   }
-  // A single slot, or a pair's weaker side (a tie picks the first side).
-  const sides = group.sides.map((s) => ({ s, base: one(s) }));
-  const weaker = sides.reduce((a, b) => (b.base < a.base ? b : a));
-  const h = hasteElsewhere(ctx, [weaker.s]);
-  const against = [counts(worn(weaker.s))];
+  // One slot (each side of a pair is one): what is worn in it, and nothing else.
+  const k = slot.key;
+  const base = one(k);
+  const h = hasteElsewhere(ctx, [k]);
+  const against = [counts(worn(k))];
   for (const it of fitting) {
-    if (group.token === 'SECONDARY' && it.twoHanded) continue;
-    if (it.key === worn(weaker.s)?.key) continue;
-    consider(it, group.token, [weaker.s], against, weaker.base, h, group.sides.length > 1 ? weaker.s : null, null);
+    if (slot.token === 'SECONDARY' && it.twoHanded) continue;
+    if (it.key === worn(k)?.key) continue;
+    consider(it, slot.token, [k], against, base, h, null);
   }
-  return { group, replaces: [weaker.s], baseline: weaker.base, worn: [worn(weaker.s)].filter((g): g is Worn => !!g), upgrades: out };
+  return { slot, replaces: [k], baseline: base, worn: [worn(k)].filter((g): g is Worn => !!g), upgrades: out };
 }
 
 /** The score of one worn slot (0 when empty or not counted), in hundredths: the header's "score". */

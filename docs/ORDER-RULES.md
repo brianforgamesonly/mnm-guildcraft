@@ -592,3 +592,21 @@ Order 39 is the Gear header, the class menu and full item stats (the owner's req
 - One shared stat line, the same on the card and the list (src/gear/statline.ts `statParts`, read by src/commands/find.ts `statFields` and by `/gear upgrades`).
 - A changed stat is never hidden: a stat the replaced item has and the candidate lacks reads "— ▼−n".
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 40
+
+Order 40 makes each paired side its own slot in `/gear upgrades` (the owner, 2026-11-07, 13:16–13:17 ET, reversing the 10:50 ET decision recorded in order 39, "paired slots stay as built") and fixes the CPU script's labels. Its explicit overrides each quote the earlier text in full, from where it is stored.
+
+- Budget: this file's default (1 pull request, at most 3 pushes, 1 merge).
+- Override 1, of docs/PRD.md:995 (at 3210464): "Paired slots (Ear, Wrist, Finger) are one slot each (17 in all); a candidate compares with the weaker side and says which side it replaces; an item worn on the other side is still a candidate."
+  - Every one of the 20 wear slots is its own slot in `/gear upgrades`, including the summary, Pick a slot, `slot:`, the slot list, I'm wearing it now and Post to channel (src/gear/score.ts `UPGRADE_SLOTS`, from src/gear/slots.ts `WEAR_SLOTS`).
+  - A candidate compares only with what is worn in that slot. An item worn on the other side of the pair is still a candidate (no one-per-character rule: ITEM 1.4 found no source definition of any flag).
+- Override 2, of docs/PRD.md:999 (at 3210464), two phrases: "slot: (17 choices)" becomes 20 choices; "I'm wearing it now (saved through order 35's rules, the weaker side for a pair; …)" now saves to the slot whose list it came from.
+- Override 3, of docs/PRD.md:1039 (at 3210464): "The slot list's header shows each worn side's full line, unmarked; each result its full line, marked against the side it replaces". The header shows that slot's worn item only (the hands unchanged: Primary's list shows Primary and Secondary, Secondary's under a two-hander shows Primary), and each result is marked against that slot.
+- Override 4, of order 28's "Only ITEM 1's job contacts the wiki. Everything else reads its snapshot." (this file, "Order 28"): not lifted. Order 40's flag check read only wiki snapshots already taken (wiki-snapshot.yml run 40962576790 and import run 42354892171's artifact) and the local import, never the live wiki. It is quoted so nobody reads the flag check as permission to fetch.
+- Unchanged: Primary, Secondary and two-handers (including "Secondary is then free" and "needs a one-handed Primary"), haste stacking, `/gear wear`'s own paired-slot rules (order 35: fill the empty side first, ask when both are filled) and the Gear panel.
+- Old controls keep working (order 18): a pair key from before order 40 (ear, wrist, finger) in `slot:`, a Pick a slot value, `gup:` or `pub:gu:` is answered as that pair's first side, with one line naming the other side ("Wrist 2: pick it from Pick a slot."); in `gur:` both sides are searched for the picked item, "gone" only when neither has it (src/gear/score.ts `resolveSlot`, `OLD_PAIR_KEYS`, derived from WEAR_SLOTS). `guw:` always carried a slot key.
+- Every wear slot is its own slot in /gear upgrades; a pair is never compared as one.
+- A flag's game meaning comes only from its source's own definition, cited.
+- worker-cpu.ts windows are whole UTC days; an unread schema prints unknown, never absent.
+- Failed runs: every one is listed in the FINAL (order 12).

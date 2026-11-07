@@ -5,7 +5,7 @@ import { characterHead, HEAD_COPY } from '../../src/commands/character.ts';
 import { statFields } from '../../src/commands/find.ts';
 import { markedLine, parseStats, plainLine, STAT_COPY } from '../../src/gear/statline.ts';
 import { PANEL_PREFIX } from '../../src/gear/wear.ts';
-import { RESULT_PREFIX, UPGRADES_COPY } from '../../src/gear/upgrades.ts';
+import { RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY } from '../../src/gear/upgrades.ts';
 import { POST_PREFIX } from '../../src/commands/share.ts';
 import { bitOf, raceLabel, SLOTS } from '../../src/gear/vocab.ts';
 import { markImported, one, reset } from '../db.ts';
@@ -152,17 +152,29 @@ describe('order 39, ITEM 3: full stats on /gear upgrades, changes marked', () =>
     await markImported();
   }
 
-  it('the Wrist list: each worn side with its score and full stats; each result its full stats marked against the side it replaces', async () => {
+  it('order 40: the Wrist 1 list shows only Wrist 1 in its header; each result is marked against Wrist 1, with no "replaces"', async () => {
     await inq();
-    const d = desc(await upgrades({ slot: 'wrist' }));
-    const lines = d.split('\n');
-    expect(lines).toContain('Wrist 1: Old Bracer (score 2.70)');
-    expect(lines[lines.indexOf('Wrist 1: Old Bracer (score 2.70)') + 1]).toBe('AC 2 · STA +1 · WIS +4');
-    expect(lines[lines.indexOf('Wrist 2: Silver Bracer (score 7.05)') + 1]).toBe('AC 3 · AGI +2 · STA +6');
-    // Weaker side Wrist 1: the candidates compare with Old Bracer. AGI weighs 0 for an Inquisitor and is still marked.
+    const r = await upgrades({ slot: 'wrist1' });
+    expect(r.data.embeds![0].title).toBe('Wrist 1 upgrades for Testchar');
+    const lines = desc(r).split('\n');
+    // The rendered header: the head line, then that slot's worn item, its score and its stat line, and nothing of Wrist 2.
+    expect(lines.slice(1, 3)).toEqual(['Wrist 1: Old Bracer (score 2.70)', 'AC 2 · STA +1 · WIS +4']);
+    expect(lines.some((l) => l.startsWith('Wrist 2'))).toBe(false);
+    expect(desc(r)).not.toMatch(/weaker side|replaces Wrist/);
+    // AGI weighs 0 for an Inquisitor and is still marked.
     const fine = lines.findIndex((l) => l.startsWith('**Fine Bracer**'));
-    expect(lines[fine]).toContain(UPGRADES_COPY.replaces('Wrist 1'));
     expect(lines[fine + 1]).toBe('**AC 4 ▲+2** · **AGI +1 ▲+1** · **STA +8 ▲+7** · **WIS — ▼−4**');
+  });
+
+  it('order 40: the Wrist 2 list compares with Wrist 2 only (Silver Bracer, 7.05), so Old Bracer is no upgrade there', async () => {
+    await inq();
+    const r = await upgrades({ slot: 'wrist2' });
+    const lines = desc(r).split('\n');
+    expect(lines.slice(1, 3)).toEqual(['Wrist 2: Silver Bracer (score 7.05)', 'AC 3 · AGI +2 · STA +6']);
+    expect(lines.some((l) => l.startsWith('Wrist 1'))).toBe(false);
+    // Fine Bracer: 4 × 0.35 + 8 = 9.40, 2.35 above Silver. Old Bracer (worn on Wrist 1) scores 2.70: not listed.
+    expect(lines.find((l) => l.startsWith('**Fine Bracer**'))).toContain('**+2.35**');
+    expect(lines.some((l) => l.startsWith('**Old Bracer**'))).toBe(false);
   });
 
   it('a two-hander against Primary and Secondary: the pair adds up, damage and delay against Primary', async () => {
@@ -184,11 +196,21 @@ describe('order 39, ITEM 3: full stats on /gear upgrades, changes marked', () =>
 
   it('the summary shows each line with its changed stats only, marked', async () => {
     await inq();
-    const lines = desc(await upgrades()).split('\n');
-    // The smallest Wrist upgrade is Silver Bracer (worn on the other side, still a candidate for the weaker one).
-    const wrist = lines.findIndex((l) => l.startsWith('**Wrist:**'));
-    expect(lines[wrist]).toContain('Silver Bracer');
-    expect(lines[wrist + 1]).toBe('**AC 3 ▲+1** · **AGI +2 ▲+2** · **STA +6 ▲+5** · **WIS — ▼−4**');
+    const r = await upgrades();
+    const lines = desc(r).split('\n');
+    // Order 40: one line per side. Wrist 1's smallest upgrade is Silver Bracer (worn on Wrist 2, still a candidate here);
+    // Wrist 2's is Fine Bracer, marked against Silver Bracer. Never a bare "Wrist:".
+    expect(lines.some((l) => l.startsWith('**Wrist:**'))).toBe(false);
+    const wrist1 = lines.findIndex((l) => l.startsWith('**Wrist 1:**'));
+    expect(lines[wrist1]).toContain('Silver Bracer');
+    expect(lines[wrist1 + 1]).toBe('**AC 3 ▲+1** · **AGI +2 ▲+2** · **STA +6 ▲+5** · **WIS — ▼−4**');
+    const wrist2 = lines.findIndex((l) => l.startsWith('**Wrist 2:**'));
+    expect(lines[wrist2]).toContain('Fine Bracer');
+    expect(lines[wrist2]).toContain('**+2.35**');
+    // Pick a slot lists each side separately, by its slot key.
+    const pick = comps(r).find((c) => c.custom_id?.startsWith(SLOT_PREFIX));
+    expect(pick.options.map((o: { value: string }) => o.value)).toEqual(expect.arrayContaining(['wrist1', 'wrist2']));
+    expect(pick.options.map((o: { label: string }) => o.label)).toEqual(expect.arrayContaining(['Wrist 1', 'Wrist 2']));
     const shirt = lines.findIndex((l) => l.startsWith('**Shirt:**'));
     expect(lines[shirt + 1]).toBe('**AC 1 ▲+1** · **STA +2 ▲+2**');
   });
@@ -201,7 +223,7 @@ describe('order 39, ITEM 3: full stats on /gear upgrades, changes marked', () =>
       { name: 'Same Bracer', slots: ['WRIST'], stats: { ac: 2, stats: { STA: 3, WIS: 4 } } },
     ]);
     await markImported();
-    const list = await upgrades({ slot: 'wrist' });
+    const list = await upgrades({ slot: 'wrist1' });
     const pick = comps(list).find((c) => c.custom_id?.startsWith(RESULT_PREFIX));
     const r = await send(select(ann, pick.custom_id, [String((await one<{ id: number }>("SELECT id FROM item WHERE name = 'Same Bracer'")).id)]));
     expect(r.data.content!.split('\n')[2]).toBe('**STA +3 ▲+2**'); // AC and WIS unchanged: not repeated
@@ -210,7 +232,7 @@ describe('order 39, ITEM 3: full stats on /gear upgrades, changes marked', () =>
 
   it('Post to channel: the posted page reads the same as the private one', async () => {
     await inq();
-    const priv = await upgrades({ slot: 'wrist' });
+    const priv = await upgrades({ slot: 'wrist2' });
     const post = comps(priv).find((c) => c.custom_id?.startsWith(POST_PREFIX));
     const posted = await send(press(ann, post.custom_id));
     expect(posted.data.embeds![0].description).toBe(desc(priv));
