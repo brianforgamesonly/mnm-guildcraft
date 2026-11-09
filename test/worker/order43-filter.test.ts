@@ -159,6 +159,12 @@ describe('order 43: the Filter button and its form', () => {
       expect(form.data.custom_id).toBe(`${FILTER_MODAL_PREFIX}${id}:${s.key}:c20r450`);
     }
     expect(WEAPON_SLOTS.map((s) => s.label)).toEqual(['Primary', 'Secondary', 'Range']);
+    // Review fix: the Caster's Secondary list (its score counts no ratio) does apply a ratio floor, by slot token.
+    const sec = text(await upgrades(ann, { slot: 'secondary', min_ratio: 0.45 }));
+    expect(sec).toContain('Filtered: ratio 0.450+');
+    expect(sec).not.toContain('Just Under');
+    expect(sec).not.toContain('No Damage');
+    expect(sec).toMatch(/more below ratio 0\.450 not shown\./);
   });
 
   it('submitting redraws the same message from page 1: the filter line, only items that pass, and the counts', async () => {
@@ -178,7 +184,9 @@ describe('order 43: the Filter button and its form', () => {
     // Scores, gains and order unchanged: the passing items in the unfiltered list's order.
     const order = (r: Reply) => byPrefix(r, RESULT_PREFIX)[0].options.map((o: any) => `${o.label} ${o.description}`);
     const kept = ['Vest 6 +2.10 · Lv 1 (drop)', 'Vest 8 +2.80 · Lv 40 (drop)', 'Vest 12 +4.20 · Lv 1 (drop)'];
-    expect(order(list).filter((x: string) => kept.includes(x))).toEqual(kept.slice(0, 2)); // page 1 unfiltered: same gains, same order
+    // Review fix: the whole unfiltered list (both pages), so every kept item's gain and position is checked.
+    const page2 = await send(press(ann, byPrefix(list, PAGE_PREFIX)[1].custom_id));
+    expect([...order(list), ...order(page2)].filter((x: string) => kept.includes(x))).toEqual(kept);
     expect(order(after)).toEqual(kept);
     expect(text({ type: 7, data: calls[0].body } as Reply)).toBe(t);
   });
@@ -192,6 +200,7 @@ describe('order 43: the Filter button and its form', () => {
     expect(t).toContain(UPGRADES_COPY.belowAc(6, 99));
     expect(byPrefix(all, RESULT_PREFIX)).toHaveLength(0);
     expect(filterButton(all).custom_id).toMatch(/:ca99$/);
+    expect(byPrefix(all, POST_PREFIX)).toHaveLength(0); // review fix: an emptied list can't be posted
     // Clearing: the same form, emptied.
     const cleared = await filterWith(all, { ac: '' });
     expect(text(cleared)).not.toContain('Filtered');

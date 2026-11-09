@@ -672,7 +672,8 @@ Order 43 adds a Filter to one slot's upgrade list, by minimum AC and (weapon slo
 - Applies (this file, "Data"): "Imported data is never invented. A value the source does not hold is stored as unknown (NULL), never guessed." An item with no recorded AC, or no ratio (NULL), does not pass a floor above 0; it is counted among the hidden, never shown as 0.
 - A filter on an upgrade list only removes candidates; it never changes a score, a gain or the order.
 - A missing stat never passes a floor; it is counted as hidden.
-- List state (cap and filters) travels in one segment, parsed by one function; every control keeps it. (src/gear/filter.ts `listState` / `listFilter`, replacing `capState` / `capOf`; gup:, gur:, guw:, guq:, gum: and pub:gu: carry the whole segment; gus: carries the cap only, because a filter is set per slot list.)
+- List state (cap and filters) travels in one segment, parsed by one function; every control keeps it. (src/gear/filter.ts `listState` / `listFilter`, replacing `capState` / `capOf`; gup:, gur:, guw:, guq: and pub:gu: carry the whole segment; gum: carries it too, and its submit keeps the cap while the typed boxes replace the floors; gus: carries the cap only, because a filter is set per slot list.)
+- The Filter form reads nothing itself; the press's one D1 read is the guild row every immediate answer loads (src/interactions.ts `skillSelect`), as for the other forms. A list a filter emptied keeps Filter but has no Post to channel.
 - The weapon slots are one constant (src/gear/slots.ts `WEAPON_TOKENS`, `WEAPON_SLOTS`), read by scoring's `ratioCounts` and by the Minimum ratio box; the box goes by slot token, never by the class preset.
 - The floors are judged on the candidate's own stats: AC from its score vector, the ratio from item.ratio exactly (added to the gear index's one query, src/gear/index.ts `GEAR_INDEX_SQL`), never the rounded RATIO the score uses.
 - Failed runs: every one is listed in the FINAL (order 12).

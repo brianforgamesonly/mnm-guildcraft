@@ -433,8 +433,9 @@ async function slotPage(c: Ctx, L: Loaded, key: string, f0: ListFilter, page: nu
       : []),
     // Order 43: Filter, beside the page buttons; on an officer's view of a member's list too (filtering only reads).
     button(`${FILTER_PREFIX}${state}`, UPGRADES_COPY.filter),
-    // Pages an officer opened for someone else's character can't be posted.
-    ...(own ? [button(`${POST_PREFIX}${POST_WHAT}${state}:${n}`, 'Post to channel')] : []),
+    // Pages an officer opened for someone else's character can't be posted. Review fix: nor a list the filter emptied (it
+    // keeps its row only so the filter can be changed or cleared).
+    ...(own && shown.length ? [button(`${POST_PREFIX}${POST_WHAT}${state}:${n}`, 'Post to channel')] : []),
   ];
   // Two disabled page buttons could share an id (page 0 of 1 never shows them): the ids differ whenever both show.
   const pick = row([
@@ -608,7 +609,7 @@ async function openItem(c: Ctx, id: string): Promise<MessageReply> {
   return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${ITEM_POST}${itemId}`, k.links, [k.actions]), k.zones);
 }
 
-/** pub:gu:<character id>:<slot>:<window>:<page>: this page, public, with no buttons. The character's owner only. */
+/** pub:gu:<character id>:<slot>:<state>:<page>: this page, public, with no buttons (the filter line kept). The character's owner only. */
 export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> {
   const [charId, key, w, p] = what.split(':');
   const t = await characterFor(c, charId ?? '', true);
@@ -624,8 +625,9 @@ export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> 
 // ---------------------------------------------------------------- Order 43: the Filter form
 
 /**
- * guq:<character id>:<slot>:<state>: the Filter form, built from the custom_id alone (no D1 read: a modal must answer within
- * Discord's 3 seconds and can't be deferred). A box per floor the slot takes, each pre-filled with the current value. Its
+ * guq:<character id>:<slot>:<state>: the Filter form, built from the custom_id alone: it reads nothing itself (a modal must
+ * answer within Discord's 3 seconds and can't be deferred). The press's one D1 read is the guild row every immediate
+ * answer loads first (src/interactions.ts skillSelect), as for the other forms. A box per floor the slot takes, each pre-filled with the current value. Its
  * submit re-checks the character's owner or an officer (characterFor), as every other control does.
  */
 export function filterModal(id: string): InteractionReply {
