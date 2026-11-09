@@ -11,9 +11,12 @@
 // Buttons"; a string select's options "max 25"; custom_id "a string of 1 to 100 characters"; "Messages allow up to 40 total
 // components" (legacy messages: up to 5 action rows, src/zone/buttons.ts). Message content: 2,000 characters; embeds:
 // src/discord.ts EMBED_LIMITS. The largest reply here is Pick a result's: 2 rows, 3 + 5 buttons.
-import { MessageComponentTypes } from 'discord-interactions';
+import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, optInt, optString, plural, row, STYLE_PRIMARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import {
+  button, EMBED_LIMITS, ephemeral, md, optInt, optString, plural, row, STYLE_PRIMARY, truncate, updateMessage,
+  type Embed, type InteractionReply, type MessageReply, type ModalComponent, type Option,
+} from '../discord.ts';
 import { findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { pageData } from '../commands/gear.ts';
 import type { GearRow } from './search.ts';
@@ -30,24 +33,38 @@ import {
 import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
 import { characterHead } from '../commands/character.ts';
 import { markedLine, parseStats, plainLine, type Baseline, type ItemStats } from './statline.ts';
+import { floorMiss, forSlot, isFiltered, listFilter, listState, NO_FILTER, parseAc, parseRatio, showRatio, takesRatio, type ListFilter } from './filter.ts';
+import { MIN_AC_MAX, MIN_RATIO_MAX, roundRatio } from './options.ts';
+import { WEAPON_SLOTS } from './slots.ts';
+import { modalValues } from '../commands/reports.ts';
 
 // ---------------------------------------------------------------- custom_ids (order 23: each has its own routing test)
 
 // Order 40: <slot> is one of the 20 slot keys (src/gear/score.ts UPGRADE_SLOTS). A pair key sent before order 40 (ear,
 // wrist, finger) is still answered (order 18): as the pair's first side, with a line naming the other (resolveSlot); gur:
 // searches both sides for the picked item, because its list came from the weaker side.
-/** gus:<character id>:<window>: Pick a slot (select; values: a slot key). */
+// Order 43: <state> is the list's one state segment (src/gear/filter.ts listState: the cap, then the floors, e.g. c30a20r450);
+// an older control's "c", "c<level>" or window number reads as before (listFilter). Pick a slot carries the cap only.
+/** gus:<character id>:<state>: Pick a slot (select; values: a slot key). The cap only: a filter is set per slot list. */
 export const SLOT_PREFIX = 'gus:';
-/** gup:<character id>:<slot>:<window>:<page>: ◀ Smaller / Bigger ▶. */
+/** gup:<character id>:<slot>:<state>:<page>: ◀ Smaller / Bigger ▶. */
 export const PAGE_PREFIX = 'gup:';
-/** gur:<character id>:<slot>:<window>: Pick a result (select; values: item ids). */
+/** gur:<character id>:<slot>:<state>: Pick a result (select; values: item ids). */
 export const RESULT_PREFIX = 'gur:';
-/** guw:<character id>:<slot>:<window>:<item id>: I'm wearing it now. */
+/** guw:<character id>:<slot>:<state>:<item id>: I'm wearing it now. */
 export const WEAR_NOW_PREFIX = 'guw:';
 /** guo:<item id>: Open item (its /item card). */
 export const OPEN_PREFIX = 'guo:';
-/** Post to channel: "pub:gu:<character id>:<slot>:<window>:<page>" (src/commands/share.ts POST_PREFIX). */
+/** Post to channel: "pub:gu:<character id>:<slot>:<state>:<page>" (src/commands/share.ts POST_PREFIX). */
 export const POST_WHAT = 'gu:';
+/** Order 43: guq:<character id>:<slot>:<state>: Filter, answered at once with its form (a modal is never deferred). */
+export const FILTER_PREFIX = 'guq:';
+/** Order 43: gum:<character id>:<slot>:<state>: the Filter form's submit, which redraws the list in place (type 6). */
+export const FILTER_MODAL_PREFIX = 'gum:';
+/** The controls that answer with a modal, at once (src/interactions.ts OPENS_MODAL). */
+export const UPGRADES_OPENS_MODAL = [FILTER_PREFIX];
+/** The modal submits answered by editing the message they were opened from (src/interactions.ts planFor). */
+export const UPGRADES_SUBMITS_IN_PLACE = [FILTER_MODAL_PREFIX];
 export { FIND_UPGRADES_PREFIX };
 
 export const PER_PAGE = 5;
@@ -55,12 +72,10 @@ export const SUMMARY_LINES = 8;
 export { VENDOR_MERCHANTS, linkUrl, howToGet, type Extras };
 
 /**
- * Order 36 follow-up (the owner, 2026-11-06): a level cap, or none (null: the default). In a custom_id it is "c" (none) or
- * "c<level>". A control sent before this carries a window number there; it reads as no cap (order 18: still handled).
+ * Order 36 follow-up (the owner, 2026-11-06): a level cap, or none (null: the default). Order 43: it travels in the list's one
+ * state segment with the floors (src/gear/filter.ts listState / listFilter, replacing capState / capOf).
  */
 export type Cap = number | null;
-export const capState = (cap: Cap) => (cap === null ? 'c' : `c${cap}`);
-export const capOf = (s: string | undefined): Cap => (s && /^c\d+$/.test(s) ? Number(s.slice(1)) : null);
 /** An item name, linked to its wiki page when it has one (https only). */
 const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${linkUrl(it.wiki)})` : `**${md(it.name)}**`);
 
@@ -107,6 +122,21 @@ export const UPGRADES_COPY = {
   forSlot: (ch: string, slot: string) => `for ${md(ch)}'s ${slot}`,
   unknownSlot: 'Pick a slot from the list.',
   gone: 'That item is no longer in the data.',
+  // Order 43 (listed in docs/COPY.md for approval): the Filter on one slot's list, and /gear upgrades min_ac: and min_ratio:.
+  filter: 'Filter',
+  filterTitle: (slot: string) => `Filter ${slot} upgrades`,
+  minAcLabel: 'Minimum AC',
+  minAcHint: `A whole number from 0 to ${MIN_AC_MAX}. Leave empty for no floor.`,
+  minRatioLabel: 'Minimum ratio (damage ÷ delay)',
+  minRatioHint: `From 0 to ${MIN_RATIO_MAX}, up to 3 decimals. Leave empty for no floor.`,
+  badAc: `Minimum AC is a whole number from 0 to ${MIN_AC_MAX}, or empty for no floor. Nothing was changed.`,
+  badRatio: `Minimum ratio is a number from 0 to ${MIN_RATIO_MAX}, with up to 3 decimals, or empty for no floor. Nothing was changed.`,
+  filtered: (f: ListFilter) => `Filtered: ${[f.minAc !== null ? `AC ${f.minAc}+` : null, f.minRatio !== null ? `ratio ${showRatio(f.minRatio)}+` : null].filter(Boolean).join(' · ')}`,
+  belowAc: (n: number, ac: number) => `${n} more below AC ${ac} not shown.`,
+  belowRatio: (n: number, ratio: number) => `${n} more below ratio ${showRatio(ratio)} not shown.`,
+  nothingFiltered: (item: string, cls: string, slot: string) => `Nothing beats ${item} for a ${cls} in ${slot} with this filter.`,
+  floorsNeedSlot: "min_ac and min_ratio apply to one slot's list: add slot:.",
+  ratioWeaponsOnly: `min_ratio applies to weapon slots (${WEAPON_SLOTS.map((s) => s.label).join(', ')}).`,
   // How to get it (order 37, PR B: src/gear/howto.ts, shared with the item cards).
   ...HOW_COPY,
 } as const;
@@ -232,7 +262,8 @@ export async function summaryView(c: Pick<Ctx, 'db'>, L: Loaded, cap: Cap): Prom
         row([
           {
             type: MessageComponentTypes.STRING_SELECT,
-            custom_id: `${SLOT_PREFIX}${L.ch.id}:${capState(cap)}`,
+            // Order 43: the cap only; a filter is set on each slot's list.
+            custom_id: `${SLOT_PREFIX}${L.ch.id}:${listState({ ...NO_FILTER, cap })}`,
             placeholder: UPGRADES_COPY.pickSlot,
             options: withUps.slice(0, 25).map((p) => ({ label: p.g.label, value: p.g.key, ...(p.listed ? { description: UPGRADES_COPY.pickSlotOption(p.listed) } : {}) })),
           },
@@ -326,16 +357,33 @@ function headerLines(L: Loaded, r: SlotResult, stats: Map<number, ItemStats>): s
   return out;
 }
 
-/** The candidates in display order (listed, then level unknown, each sorted), and how many a cap hid. */
-const ordered = (r: SlotResult, cap: Cap) => {
-  const by = grouped(r.upgrades, cap);
-  return { all: GROUPS.flatMap((g) => by[g].map((u) => ({ g, u }))), hidden: by.above.length };
+/**
+ * The candidates in display order (listed, then level unknown, each sorted), and how many each test hid. Order 43: the tests
+ * run in order, the cap, then the minimum AC, then the minimum ratio, and an item is counted once, under the first it fails.
+ * The floors only remove: the order of what stays is the groups' own.
+ */
+export const ordered = (r: SlotResult, f: ListFilter) => {
+  const by = grouped(r.upgrades, f.cap);
+  const all: { g: LevelGroup; u: Upgrade }[] = [];
+  let belowAc = 0;
+  let belowRatio = 0;
+  for (const g of GROUPS)
+    for (const u of by[g]) {
+      const miss = floorMiss(u.item, f);
+      if (miss === 'ac') belowAc++;
+      else if (miss === 'ratio') belowRatio++;
+      else all.push({ g, u });
+    }
+  return { all, hidden: by.above.length, belowAc, belowRatio };
 };
 
 /** One page of one slot's list: the embed, and (unless `posted`) its controls. Pages count from 0. */
-async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, posted = false, note?: string): Promise<{ embed: Embed; components: unknown[] }> {
+async function slotPage(c: Ctx, L: Loaded, key: string, f0: ListFilter, page: number, posted = false, note?: string): Promise<{ embed: Embed; components: unknown[] }> {
   const r = compare(L, key);
-  const { all, hidden } = ordered(r, cap);
+  // Order 43: a ratio floor applies only on a weapon slot (Primary, Secondary, Range: src/gear/filter.ts takesRatio).
+  const f = forSlot(f0, r.slot.token);
+  const cap = f.cap;
+  const { all, hidden, belowAc, belowRatio } = ordered(r, f);
   const pages = Math.max(1, Math.ceil(all.length / PER_PAGE));
   const n = Math.min(Math.max(0, page), pages - 1);
   const shown = all.slice(n * PER_PAGE, n * PER_PAGE + PER_PAGE);
@@ -344,11 +392,16 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
   const x = await extras(c, L, shown.map((s) => s.u.item), [...wornIds, ...shown.flatMap((s) => againstIds(s.u))]);
   const body: string[] = [...(note ? [note, ''] : []), UPGRADES_COPY.who(L), ...headerLines(L, r, x.stats)];
   if (cap !== null) body.push(UPGRADES_COPY.capNote(cap));
+  const filtered = isFiltered(f);
+  // Order 43: the active filter, named under the header.
+  if (filtered) body.push(UPGRADES_COPY.filtered(f));
   // Review fix: "Nothing beats" only when nothing does; when the cap hid every upgrade, the quiet count below says so.
-  if (!all.length && !hidden) {
+  // Order 43: items a floor hid count as hidden too; when the filter left nothing, the line says "with this filter".
+  const floorHidden = belowAc + belowRatio;
+  if (!all.length && (!hidden || floorHidden)) {
     const worn = r.worn.filter((g) => g.reason === null && g.item);
     const what = worn.length ? worn.map((g) => md(g.item!.name)).join(' and ') : UPGRADES_COPY.emptySlot(r.slot.label);
-    body.push('', UPGRADES_COPY.nothing(what, L.cls, r.slot.label));
+    body.push('', floorHidden ? UPGRADES_COPY.nothingFiltered(what, L.cls, r.slot.label) : UPGRADES_COPY.nothing(what, L.cls, r.slot.label));
   }
   let last: LevelGroup | null = null;
   for (const s of shown) {
@@ -356,22 +409,33 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
     last = s.g;
     body.push(...resultLines(s.u, L, howToGet(s.u.item, x, c.userId, c.guild.learning_window).lines, x.stats));
   }
-  // The owner (2026-11-06): with a cap, a quiet count of what it hid, at the end of the list.
-  if (cap !== null && hidden && n === pages - 1) body.push('', `-# ${UPGRADES_COPY.hidden(hidden, cap)}`);
+  // The owner (2026-11-06): with a cap, a quiet count of what it hid, at the end of the list. Order 43: then the floors' counts.
+  if (n === pages - 1) {
+    const counts = [
+      ...(cap !== null && hidden ? [UPGRADES_COPY.hidden(hidden, cap)] : []),
+      ...(f.minAc !== null && belowAc ? [UPGRADES_COPY.belowAc(belowAc, f.minAc)] : []),
+      ...(f.minRatio !== null && belowRatio ? [UPGRADES_COPY.belowRatio(belowRatio, f.minRatio)] : []),
+    ];
+    if (counts.length) body.push('', ...counts.map((l) => `-# ${l}`));
+  }
   const embed: Embed = {
     title: truncate(UPGRADES_COPY.slotTitle(r.slot.label, L.ch.name), EMBED_LIMITS.title),
     description: truncate(body.join('\n'), EMBED_LIMITS.description),
     footer: { text: [all.length > PER_PAGE ? UPGRADES_COPY.page(n + 1, pages) : null, weightsLine(L)].filter(Boolean).join(' · ') },
   };
-  if (posted || !shown.length) return { embed, components: [] };
-  const state = `${L.ch.id}:${key}:${capState(cap)}`;
+  // Order 43: a list a filter emptied keeps its controls (Filter at least), so the filter can always be changed or cleared.
+  if (posted || (!shown.length && !filtered)) return { embed, components: [] };
+  const state = `${L.ch.id}:${key}:${listState(f)}`;
   const own = L.ch.owner_user_id === c.userId;
   const nav = [
     ...(pages > 1
       ? [button(`${PAGE_PREFIX}${state}:${Math.max(0, n - 1)}`, UPGRADES_COPY.smaller, undefined, n === 0), button(`${PAGE_PREFIX}${state}:${n + 1}`, UPGRADES_COPY.bigger, undefined, n >= pages - 1)]
       : []),
-    // Pages an officer opened for someone else's character can't be posted.
-    ...(own ? [button(`${POST_PREFIX}${POST_WHAT}${state}:${n}`, 'Post to channel')] : []),
+    // Order 43: Filter, beside the page buttons; on an officer's view of a member's list too (filtering only reads).
+    button(`${FILTER_PREFIX}${state}`, UPGRADES_COPY.filter),
+    // Pages an officer opened for someone else's character can't be posted. Review fix: nor a list the filter emptied (it
+    // keeps its row only so the filter can be changed or cleared).
+    ...(own && shown.length ? [button(`${POST_PREFIX}${POST_WHAT}${state}:${n}`, 'Post to channel')] : []),
   ];
   // Two disabled page buttons could share an id (page 0 of 1 never shows them): the ids differ whenever both show.
   const pick = row([
@@ -382,7 +446,8 @@ async function slotPage(c: Ctx, L: Loaded, key: string, cap: Cap, page: number, 
       options: shown.map((s) => ({ label: truncate(s.u.item.name, 100), value: String(s.u.item.id), description: truncate(`${fmtHundredths(s.u.gain)} · ${levelText(s.u.item)}`, 100) })),
     },
   ]);
-  return { embed, components: [pick, ...(nav.length ? [row(nav)] : [])] };
+  // A select needs at least one option: a list the filter emptied has the nav row alone.
+  return { embed, components: [...(shown.length ? [pick] : []), row(nav)] };
 }
 
 // ---------------------------------------------------------------- the command and Find upgrades
@@ -397,7 +462,13 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
   const key = optString(opts, 'slot');
   const max = optInt(opts, 'max_level');
   const oldLevels = optInt(opts, 'levels');
+  // Order 43: min_ac: (0 to MIN_AC_MAX) and min_ratio: (0 to MIN_RATIO_MAX, kept to 3 decimals as /gear search keeps it).
+  const minAc = optInt(opts, 'min_ac');
+  const ratioOpt = opts.find((o) => o.name === 'min_ratio')?.value;
+  const minRatio = typeof ratioOpt === 'number' ? roundRatio(ratioOpt) : undefined;
   if (max !== undefined && (max < 1 || max > MAX_LEVEL_CAP)) return ephemeral(UPGRADES_COPY.capRange);
+  if (minAc !== undefined && (minAc < 0 || minAc > MIN_AC_MAX)) return ephemeral(UPGRADES_COPY.badAc);
+  if (minRatio !== undefined && (minRatio < 0 || minRatio > MIN_RATIO_MAX)) return ephemeral(UPGRADES_COPY.badRatio);
   // Order 40: 20 slots; an old pair value (a client holding the 17-choice definition) opens its first side (order 35's rule).
   const slot = key !== undefined ? resolveSlot(key) : null;
   if (key !== undefined && !slot) return ephemeral(UPGRADES_COPY.unknownSlot);
@@ -413,7 +484,17 @@ export async function gearUpgrades(c: Ctx, opts: Option[]): Promise<MessageReply
   }
   const cap: Cap = max ?? (oldLevels !== undefined && ch.level !== null ? Math.min(MAX_LEVEL_CAP, ch.level + oldLevels) : null);
   const L = await load(c, ch);
-  const v = slot ? await slotPage(c, L, slot.slot.key, cap, 0, false, otherSideNote(slot.oldSides)) : await summaryView(c, L, cap);
+  const floors = minAc !== undefined || minRatio !== undefined;
+  if (!slot) {
+    // Order 43: the floors apply to one slot's list; the summary says so once, and is otherwise unchanged.
+    const v = await summaryView(c, L, cap);
+    return ephemeral(floors ? UPGRADES_COPY.floorsNeedSlot : '', { embeds: [v.embed], components: v.components });
+  }
+  const f: ListFilter = { cap, minAc: minAc || null, minRatio: minRatio ? Math.round(minRatio * 1000) : null };
+  // Order 43: min_ratio: on a slot that isn't a weapon slot is ignored, with one line saying so.
+  const ignored = minRatio !== undefined && !takesRatio(slot.slot.token) ? UPGRADES_COPY.ratioWeaponsOnly : undefined;
+  const note = [ignored, otherSideNote(slot.oldSides)].filter(Boolean).join('\n') || undefined;
+  const v = await slotPage(c, L, slot.slot.key, f, 0, false, note);
   return ephemeral('', { embeds: [v.embed], components: v.components });
 }
 
@@ -435,18 +516,19 @@ async function slotPicked(c: Ctx, id: string, values: string[]): Promise<Message
   if ('reply' in t) return t.reply;
   const s = resolveSlot(values[0] ?? '');
   if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), 0, false, otherSideNote(s.oldSides));
+  // Order 43: Pick a slot carries the cap only; any floor in a hand-made id is dropped.
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, { ...NO_FILTER, cap: listFilter(w).cap }, 0, false, otherSideNote(s.oldSides));
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
-/** gup:<character id>:<slot>:<cap>:<page>: paging, in place. */
+/** gup:<character id>:<slot>:<state>:<page>: paging, in place, keeping the cap and the filter. */
 async function pagePressed(c: Ctx, id: string): Promise<MessageReply> {
   const [charId, key, w, p] = parts(id, PAGE_PREFIX);
   const t = await characterFor(c, charId);
   if ('reply' in t) return t.reply;
   const s = resolveSlot(key ?? '');
   if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, false, otherSideNote(s.oldSides));
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, listFilter(w), int(p) ?? 0, false, otherSideNote(s.oldSides));
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
@@ -466,7 +548,7 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
   const sides = (s.oldSides ?? [s.slot.key]).map((side) => ({ side, r: compare(L, side) })).sort((a, b) => a.r.baseline - b.r.baseline);
   for (const { side, r } of sides) {
     const u = r.upgrades.find((x) => x.item.id === Number(values[0]));
-    if (u) return resultReply(c, L, side, capOf(w), u);
+    if (u) return resultReply(c, L, side, listFilter(w), u);
   }
   return ephemeral(UPGRADES_COPY.gone);
 }
@@ -476,7 +558,7 @@ async function resultPicked(c: Ctx, id: string, values: string[]): Promise<Messa
  * character's slot, the breakdown and how to get it); under it, I'm wearing it now and Request a craft, then a button for
  * each zone the text and the card show (src/zone/buttons.ts, in the rows left; the rest named as "+N more zones").
  */
-async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade): Promise<MessageReply> {
+async function resultReply(c: Ctx, L: Loaded, key: string, f: ListFilter, u: Upgrade): Promise<MessageReply> {
   const [x, k] = await Promise.all([extras(c, L, [u.item], againstIds(u)), itemCard(c, u.item.id)]);
   if (!k) return ephemeral(UPGRADES_COPY.gone);
   const how = howToGet(u.item, x, c.userId, c.guild.learning_window);
@@ -484,7 +566,7 @@ async function resultReply(c: Ctx, L: Loaded, key: string, cap: Cap, u: Upgrade)
   const slot = key;
   const buttons = [
     // Review fix: not under a two-hander (order 35's saved gear refuses Secondary there); the result says why instead.
-    ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${capState(cap)}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
+    ...(u.note === 'needsOneHand' ? [] : [button(`${WEAR_NOW_PREFIX}${L.ch.id}:${slot}:${listState(f)}:${u.item.id}`, UPGRADES_COPY.wearingNow, STYLE_PRIMARY)]),
     ...(how.craftable ? [button(`${FROM_FIND_PREFIX}${u.item.id}`, UPGRADES_COPY.requestCraft)] : []),
   ];
   const own = buttons.length ? [row(buttons)] : [];
@@ -515,7 +597,7 @@ async function wearNow(c: Ctx, id: string): Promise<MessageReply> {
   // Order 40: the list of the slot it was saved to (guw: has always carried a slot key, never a pair key).
   const key = resolveSlot(slot ?? '')?.slot.key;
   if (!key) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, ch), key, capOf(w), 0, false, saved.data.content);
+  const v = await slotPage(c, await load(c, ch), key, listFilter(w), 0, false, saved.data.content);
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
@@ -527,7 +609,7 @@ async function openItem(c: Ctx, id: string): Promise<MessageReply> {
   return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${ITEM_POST}${itemId}`, k.links, [k.actions]), k.zones);
 }
 
-/** pub:gu:<character id>:<slot>:<window>:<page>: this page, public, with no buttons. The character's owner only. */
+/** pub:gu:<character id>:<slot>:<state>:<page>: this page, public, with no buttons (the filter line kept). The character's owner only. */
 export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> {
   const [charId, key, w, p] = what.split(':');
   const t = await characterFor(c, charId ?? '', true);
@@ -536,12 +618,72 @@ export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> 
   if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
   // Order 42: a posted page has no menus, so it carries no "pick it from Pick a slot" note (an old pair key posts the
   // first side's page alone). Private pages keep the note.
-  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, true);
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, listFilter(w), int(p) ?? 0, true);
   return postedReply({ embeds: [v.embed] }, c);
 }
 
+// ---------------------------------------------------------------- Order 43: the Filter form
+
+/**
+ * guq:<character id>:<slot>:<state>: the Filter form, built from the custom_id alone: it reads nothing itself (a modal must
+ * answer within Discord's 3 seconds and can't be deferred). The press's one D1 read is the guild row every immediate
+ * answer loads first (src/interactions.ts skillSelect), as for the other forms. A box per floor the slot takes, each pre-filled with the current value. Its
+ * submit re-checks the character's owner or an officer (characterFor), as every other control does.
+ */
+export function filterModal(id: string): InteractionReply {
+  const [charId, key, w] = parts(id, FILTER_PREFIX);
+  const s = resolveSlot(key ?? '');
+  if (!s || !int(charId)) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const f = forSlot(listFilter(w), s.slot.token);
+  const box = (id: string, label: string, description: string, value: string | null, max: number) => ({
+    type: MessageComponentTypes.LABEL,
+    label,
+    description,
+    component: { type: MessageComponentTypes.INPUT_TEXT, custom_id: id, style: 1, required: false, max_length: max, ...(value !== null ? { value } : {}) },
+  });
+  return {
+    type: InteractionResponseType.MODAL,
+    data: {
+      custom_id: `${FILTER_MODAL_PREFIX}${charId}:${s.slot.key}:${listState(f)}`,
+      title: truncate(UPGRADES_COPY.filterTitle(s.slot.label), 45),
+      components: [
+        box('ac', UPGRADES_COPY.minAcLabel, UPGRADES_COPY.minAcHint, f.minAc !== null ? String(f.minAc) : null, 4),
+        ...(takesRatio(s.slot.token) ? [box('ratio', UPGRADES_COPY.minRatioLabel, UPGRADES_COPY.minRatioHint, f.minRatio !== null ? showRatio(f.minRatio) : null, 6)] : []),
+      ],
+    },
+  };
+}
+
+/**
+ * gum:<character id>:<slot>:<state>: the form's submit. A bad value answers privately with what's allowed and changes
+ * nothing; otherwise the list redraws in place from page 1, with the cap kept and the floors as typed (empty: no floor, so
+ * emptying every box clears the filter).
+ */
+async function filterSubmitted(c: Ctx, id: string, components: ModalComponent[] | undefined): Promise<MessageReply> {
+  const [charId, key, w] = parts(id, FILTER_MODAL_PREFIX);
+  const t = await characterFor(c, charId ?? '');
+  if ('reply' in t) return t.reply;
+  const s = resolveSlot(key ?? '');
+  if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
+  const typed = modalValues(components);
+  const ac = parseAc(typed.get('ac') ?? '');
+  if (!ac.ok) return ephemeral(UPGRADES_COPY.badAc);
+  const ratio = takesRatio(s.slot.token) ? parseRatio(typed.get('ratio') ?? '') : ({ ok: true, value: null } as const);
+  if (!ratio.ok) return ephemeral(UPGRADES_COPY.badRatio);
+  const f: ListFilter = { cap: listFilter(w).cap, minAc: ac.value, minRatio: ratio.value };
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, f, 0);
+  return updateMessage({ embeds: [v.embed], components: v.components });
+}
+
+/** The /gear upgrades controls answered at once (the Filter form). */
+export function upgradesImmediate(id: string): Promise<InteractionReply> | null {
+  return id.startsWith(FILTER_PREFIX) ? Promise.resolve(filterModal(id)) : null;
+}
+
 /** The deferred /gear upgrades controls (null: not one). */
-export function upgradesComponent(c: Ctx, id: string, values: string[]): Promise<MessageReply> | null {
+export function upgradesComponent(c: Ctx, id: string, values: string[], components?: ModalComponent[], modal = false): Promise<MessageReply> | null {
+  // Order 43: the only /gear upgrades modal submit is the Filter form's.
+  if (modal) return id.startsWith(FILTER_MODAL_PREFIX) ? filterSubmitted(c, id, components) : null;
   if (id.startsWith(FIND_UPGRADES_PREFIX)) return findUpgrades(c, id);
   if (id.startsWith(SLOT_PREFIX)) return slotPicked(c, id, values);
   if (id.startsWith(PAGE_PREFIX)) return pagePressed(c, id);

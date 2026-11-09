@@ -3,6 +3,7 @@
 // cold (their caches are module state) and the JIT is cold, as in a new isolate. One run: Testchar (Inquisitor 15, Human,
 // Fine Blue Cloth Robe in Chest, Copper Greatsword in Primary) asks /gear upgrades slot:chest, through the real handler.
 //   node scripts/bench/cold-slot-list.mjs            (10 runs: median and worst)
+//   node scripts/bench/cold-slot-list.mjs --min-ac=10   (order 43: the same list with min_ac: 10)
 // Rows: D1's own rows_read, every statement added up. CPU: a PROXY measured in Node: the handler's wall time less the time
 // spent waiting on D1 (overlapping waits counted once). workerd's own accounting is not reproduced (as order 36's bench).
 // Writes only the bench guild's own rows to the local database, and removes them.
@@ -11,11 +12,12 @@ import { fileURLToPath } from 'node:url';
 
 const RUNS = 10;
 const self = fileURLToPath(import.meta.url);
+const minAcArg = process.argv.find((a) => a.startsWith('--min-ac='));
 
 if (!process.argv.includes('--once')) {
   const out = [];
   for (let i = 0; i < RUNS; i++) {
-    const r = spawnSync(process.execPath, [self, '--once', ...(process.argv.includes('--split') ? ['--split'] : [])], { encoding: 'utf8' });
+    const r = spawnSync(process.execPath, [self, '--once', ...(process.argv.includes('--split') ? ['--split'] : []), ...(minAcArg ? [minAcArg] : [])], { encoding: 'utf8' });
     const line = r.stdout.split('\n').find((l) => l.startsWith('{"rows"'));
     if (!line) throw new Error(`run ${i + 1} printed no result:\n${r.stdout}\n${r.stderr}`);
     out.push(JSON.parse(line));
@@ -113,7 +115,9 @@ if (!process.argv.includes('--once')) {
     loadMs = performance.now() - s - waitedSince(s);
   }
   const t0 = performance.now();
-  const reply = await gearUpgrades(ctx, [{ type: 3, name: 'character', value: 'Testchar' }, { type: 3, name: 'slot', value: 'chest' }]);
+  const minAc = minAcArg ? [{ type: 4, name: 'min_ac', value: Number(minAcArg.slice('--min-ac='.length)) }] : [];
+  const reply = await gearUpgrades(ctx, [{ type: 3, name: 'character', value: 'Testchar' }, { type: 3, name: 'slot', value: 'chest' }, ...minAc]);
+  if (minAc.length && !reply.data.embeds?.[0]?.description?.includes('Filtered: AC')) throw new Error('the reply is not filtered');
   const total = performance.now() - t0;
   const waited = waitedSince(t0);
   if (!reply.data.embeds?.[0]?.description?.includes('Chest')) throw new Error('the reply is not a Chest list');

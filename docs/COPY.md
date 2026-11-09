@@ -1386,3 +1386,18 @@ Every member the bot names is shown once, as their saved name in plain text (src
 | src/commands/members.ts:61, src/commands/images.ts:65 | "(Checked by \<name>.)" · "\<name> kept …" · "approved by \<name>" (the officer, by saved name; were mentions) | DRAFT |
 | src/commands/requests.ts:318, 323 | "Sent: #\<thread>. \<n> crafter(s) added there." when the crafters' ping failed (else "added and pinged there") · "-# The crafters' ping didn't go out, so they may not have noticed: say hello in the thread." | DRAFT |
 | src/commands/recipes.ts:310 | `/roster recipes` who knows it: "\<character> · \<name>, \<character> · \<name>, +\<n> more" (a " · " now separates the two names, which the mention used to do) | DRAFT |
+
+## Order 43: a Filter on one slot's upgrade list (DRAFT)
+
+New variants beside approved and earlier strings, which are unchanged: "\<n> more above Lv \<n> not shown." (UPGRADES_COPY.hidden, src/gear/upgrades.ts:94, APPROVED by order 42) and "Nothing beats \<item> for a \<Class> in \<slot>." (UPGRADES_COPY.nothing, :100, DRAFT in order 36, PR A's row). Brian's check of order 43, if it passes, approves the rows below.
+
+| Where | Text | Status |
+|---|---|---|
+| src/gear/upgrades.ts:126 | (the slot list's button) Filter | DRAFT |
+| src/gear/upgrades.ts:127-131 | (the form) title "Filter \<slot> upgrades"; box "Minimum AC", hint "A whole number from 0 to 9999. Leave empty for no floor."; on Primary, Secondary and Range also "Minimum ratio (damage ÷ delay)", hint "From 0 to 99, up to 3 decimals. Leave empty for no floor." | DRAFT |
+| src/gear/upgrades.ts:132-133 | (a bad value, privately) "Minimum AC is a whole number from 0 to 9999, or empty for no floor. Nothing was changed." · "Minimum ratio is a number from 0 to 99, with up to 3 decimals, or empty for no floor. Nothing was changed." | DRAFT |
+| src/gear/upgrades.ts:134 | (under the header) "Filtered: AC \<n>+", "Filtered: ratio \<x.xxx>+", "Filtered: AC \<n>+ · ratio \<x.xxx>+" | DRAFT |
+| src/gear/upgrades.ts:135-136 | (at the end of the list, beside the cap's line) "\<n> more below AC \<n> not shown." · "\<n> more below ratio \<x.xxx> not shown." | DRAFT |
+| src/gear/upgrades.ts:137 | "Nothing beats \<item> for a \<Class> in \<slot> with this filter." | DRAFT |
+| src/gear/upgrades.ts:138-139 | (`/gear upgrades`) "min_ac and min_ratio apply to one slot's list: add slot:." · "min_ratio applies to weapon slots (Primary, Secondary, Range)." | DRAFT |
+| src/commands/definitions.ts:61-62 | (`/gear upgrades` options) min_ac: "With slot: only items with at least this much AC" · min_ratio: "With a weapon slot: only items with at least this damage ÷ delay" (not /gear search's: theirs would read as applying to the summary too) | DRAFT |

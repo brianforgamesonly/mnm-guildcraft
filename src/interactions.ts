@@ -8,7 +8,7 @@ import { noticeButton, OFFICER_ONLY, officerRemoveMember, removeMemberButton } f
 import { itemCommand, POST_WHAT as ITEM_POST, postItem } from './commands/item.ts';
 import { ME_OPENS_MODAL, meCommand, meComponent, meImmediate, officerEditMember } from './commands/me.ts';
 import { gearWear, WEAR_OPENS_MODAL, WEAR_SUBMITS_IN_PLACE, wearComponent, wearImmediate } from './gear/wear.ts';
-import { gearUpgrades, POST_WHAT as UPGRADES_POST, postUpgrades, upgradesComponent } from './gear/upgrades.ts';
+import { gearUpgrades, POST_WHAT as UPGRADES_POST, postUpgrades, upgradesComponent, upgradesImmediate, UPGRADES_OPENS_MODAL, UPGRADES_SUBMITS_IN_PLACE } from './gear/upgrades.ts';
 import { gearWeights } from './gear/weights.ts';
 import { NOTICE_PREFIX, REMOVE_PREFIX } from './departures.ts';
 import { IMAGE_PREFIX, KNOW_PREFIX, postFind, REPORT_PREFIX } from './commands/find.ts';
@@ -162,7 +162,13 @@ function withWelcome(reply: MessageReply): MessageReply {
  * The components that answer with a modal, at once (skillSelect below): a modal cannot follow a deferral. Order 18:
  * Report a missing recipe on /item's "No item called" reply; /me's Add character and Edit character (and its select).
  */
-export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL, ...AUCTION_OPENS_MODAL, ...WEAR_OPENS_MODAL];
+// Order 43: /gear upgrades' Filter (src/gear/upgrades.ts UPGRADES_OPENS_MODAL).
+export const OPENS_MODAL = [SELECT_PREFIX, REPORT_PREFIX, ITEM_REPORT_PREFIX, ADD_PREFIX, MISSING_PREFIX, ...ME_OPENS_MODAL, ...AUCTION_OPENS_MODAL, ...WEAR_OPENS_MODAL, ...UPGRADES_OPENS_MODAL];
+/**
+ * The modal submits that edit the message their form came from (type 6). Order 39: the Gear panel's item box; order 43: the
+ * upgrade list's Filter form.
+ */
+export const SUBMITS_IN_PLACE = [...WEAR_SUBMITS_IN_PLACE, ...UPGRADES_SUBMITS_IN_PLACE];
 
 export type Plan ={ defer: false } | { defer: true; ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE | InteractionResponseType.DEFERRED_UPDATE_MESSAGE; private: boolean };
 
@@ -183,7 +189,8 @@ export function planFor(i: Interaction): Plan {
       if (!inGuild) return { defer: false };
       // Order 39: the Gear panel's item box edits the panel it came from (type 6; Discord: DEFERRED_UPDATE_MESSAGE is
       // "Only valid for MODAL_SUBMIT and component-based interactions"). Every other submit answers as a new message.
-      if (WEAR_SUBMITS_IN_PLACE.some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
+      // Order 43: the upgrade list's Filter form too (re-read 2026-11-08, docs.discord.com/developers/interactions/receiving-and-responding).
+      if (SUBMITS_IN_PLACE.some((p) => (i.data?.custom_id ?? '').startsWith(p))) return { defer: true, ack: InteractionResponseType.DEFERRED_UPDATE_MESSAGE, private: true };
       return { defer: true, ack: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE, private: true };
     default:
       return { defer: false }; // PING, autocomplete
@@ -339,7 +346,8 @@ async function component(i: Interaction, env: Env, effects: Effects): Promise<Me
     const gear = wearComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (gear) return gear;
     // Order 36: /gear upgrades' controls and Find upgrades (the same owner-or-officer check, src/gear/wear.ts characterFor).
-    const upgrades = i.type === InteractionType.MODAL_SUBMIT ? null : upgradesComponent(c, id, i.data?.values ?? []);
+    // Order 43: the Filter form's submit routes here as well (upgradesComponent answers only its own modal).
+    const upgrades = upgradesComponent(c, id, i.data?.values ?? [], i.data?.components, i.type === InteractionType.MODAL_SUBMIT);
     if (upgrades) return upgrades;
     // The panel's Update skills leads to the skill form, which re-checks owner or officer itself (componentCharacter).
     if (i.type === InteractionType.MODAL_SUBMIT && id.startsWith(MODAL_PREFIX)) return updateSubmitted(c, id, i.data?.components);
@@ -421,6 +429,9 @@ async function skillSelect(i: Interaction, env: Env): Promise<InteractionReply> 
     if (panel) return panel;
     const gear = wearImmediate(c, id, i.data?.values ?? []);
     if (gear) return gear;
+    // Order 43: /gear upgrades' Filter form, built from its custom_id alone.
+    const upgrades = upgradesImmediate(id);
+    if (upgrades) return upgrades;
     // The skill select (from the panel's Update skills), re-checked for owner or officer in updateSelected.
     if (id.startsWith(SELECT_PREFIX)) return updateSelected(c, id, i.data?.values ?? []);
   }

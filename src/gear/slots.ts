@@ -19,5 +19,13 @@ export const WEAR_SLOTS: readonly WearSlot[] = [
   s('primary', 'Primary', 'PRIMARY'), s('secondary', 'Secondary', 'SECONDARY'), s('range', 'Range', 'RANGE'),
 ];
 export const slotByKey = (key: string) => WEAR_SLOTS.find((w) => w.key === key);
+/**
+ * Order 43: the weapon slots' tokens, held once. Damage ÷ delay belongs to these slots: scoring reads it here
+ * (src/gear/score.ts ratioCounts, which also asks the class preset for Secondary), and the upgrade list's Minimum ratio box
+ * and min_ratio: go by token alone (src/gear/filter.ts), whatever the class.
+ */
+export const WEAPON_TOKENS: readonly SlotToken[] = ['PRIMARY', 'SECONDARY', 'RANGE'];
+/** Order 43: the weapon slots, derived from WEAR_SLOTS by token (Primary, Secondary, Range). */
+export const WEAPON_SLOTS: readonly WearSlot[] = WEAR_SLOTS.filter((w) => WEAPON_TOKENS.includes(w.token));
 /** Every slot bit the 20 slots use: an item is wearable when its slot_mask meets this. */
 export const WEAR_MASK = WEAR_SLOTS.reduce((m, w) => m | bitOf(SLOTS, w.token), 0);

@@ -15,7 +15,7 @@ import { MOB_ZONES_SOURCE, WIKI_ZONES_SOURCE } from '../../src/zone/names.ts';
 type Rows = Parameters<typeof buildSourceIndex>[1];
 const src = (r: Partial<Rows> = {}) => buildSourceIndex('t', { mobs: [], npcs: [], zoneNames: [], zones: [], ...r });
 const gi = (o: Partial<GearItem>): GearItem => ({
-  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ...o,
+  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ratio: null, ...o,
 });
 const extras = (origin: unknown, s = src()): Extras => ({
   rows: new Map([[1, { origin_json: JSON.stringify(origin), source_mask: 0 }]]),

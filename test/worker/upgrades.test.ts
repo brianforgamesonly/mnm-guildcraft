@@ -1,7 +1,7 @@
 // Work order 36, ITEM 3: /gear upgrades, Find upgrades, and their controls (src/gear/upgrades.ts).
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { howToGet, levelText, load, summaryView, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
+import { FILTER_PREFIX, howToGet, levelText, load, summaryView, OPEN_PREFIX, PAGE_PREFIX, RESULT_PREFIX, SLOT_PREFIX, UPGRADES_COPY, WEAR_NOW_PREFIX } from '../../src/gear/upgrades.ts';
 import { FIND_UPGRADES_PREFIX, PANEL_PREFIX, WEAR_COPY } from '../../src/gear/wear.ts';
 import { statVector, UPGRADE_SLOTS, type GearItem } from '../../src/gear/score.ts';
 import { POST_PREFIX } from '../../src/commands/share.ts';
@@ -13,7 +13,7 @@ import { bitOf, SLOTS } from '../../src/gear/vocab.ts';
 import { FROM_FIND_PREFIX } from '../../src/requests.ts';
 import { MOB_ZONES_SOURCE } from '../../src/zone/names.ts';
 import { markImported, one, reset } from '../db.ts';
-import { ADMIN, as, cmd, press, rawCmd, select, send, type Member, type Reply } from '../discord.ts';
+import { ADMIN, as, cmd, press, rawCmd, select, send, submit, type Member, type Reply } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const BO = '100000000000000002';
@@ -363,6 +363,13 @@ describe('order 36, ITEM 3: the controls', () => {
     const id = await charId('Testchar');
     for (const custom_id of [`${FIND_UPGRADES_PREFIX}${id}`, `${PAGE_PREFIX}${id}:chest:10:0`, `${SLOT_PREFIX}${id}:10`, ...ids(list)]) {
       const value = custom_id.startsWith(SLOT_PREFIX) ? 'chest' : String(await itemId('Low Tie'));
+      // Order 43: Filter's form is built from its custom_id alone (no D1 read, so no owner check); its submit is refused.
+      if (custom_id.startsWith(FILTER_PREFIX)) {
+        const form = await send(press(bo, custom_id));
+        expect(form.type).toBe(9);
+        expect((await send(submit(bo, form.data.custom_id!, { ac: '5' }))).data.content).toBe(WEAR_COPY.notYours);
+        continue;
+      }
       const r = custom_id.startsWith(RESULT_PREFIX) || custom_id.startsWith(SLOT_PREFIX) ? await send(select(bo, custom_id, [value])) : await send(press(bo, custom_id));
       expect([WEAR_COPY.notYours, WEAR_COPY.ownOnly], custom_id).toContain(r.data.content);
     }
@@ -477,7 +484,7 @@ describe('order 40: each paired side is its own slot', () => {
 // ---------------------------------------------------------------- how to get it (pure, with hand-made page data)
 
 const gi = (o: Partial<GearItem>): GearItem => ({
-  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ...o,
+  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ratio: null, ...o,
 });
 // Order 37: the drop and vendor lines read the source index (src/gear/sources.ts), not the page's mob rows.
 const extras = (origin: unknown, d: Partial<{ recipes: unknown[]; crafters: unknown[] }> = {}, src: Partial<Parameters<typeof buildSourceIndex>[1]> = {}) => ({
