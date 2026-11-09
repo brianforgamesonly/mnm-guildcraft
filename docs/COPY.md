@@ -272,9 +272,9 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 | Where | Text | Status |
 |---|---|---|
 | src/commands/definitions.ts:180 | The top 3 characters in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/roster.ts:192 | Card title: Top 3 in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/roster.ts:190 | **\<tradeskill>**: \<character> \<level> · \<character> \<level> · \<character> \<level> | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/roster.ts:193 | No one in the guild has recorded a tradeskill yet. | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/roster.ts:202 | Card title: Top 3 in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/roster.ts:199-200, 204 | **\<tradeskill>**: \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) (order 43 addendum: the owner in brackets, by saved name, or the mention alone with none; was "\<character> \<level>", APPROVED by exception 2026-10-20) | DRAFT |
+| src/commands/roster.ts:204 | No one in the guild has recorded a tradeskill yet. | APPROVED (owner, by exception, 2026-10-20) |
 
 #### /roster recipes
 
@@ -662,7 +662,7 @@ Every line below is DRAFT until approved. \<label> is a filter as the member set
 
 ## Order 16: names and craft requests
 
-(Order 42: every "@member (saved name)" below now reads as the saved name alone, e.g. `**1.** **Character** · Kestrel · level`; see "Order 42".) Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved name) · level` on the board (src/board/render.ts:47), the same `· @member (saved name)` after each crafter on `/item` (formerly `/craft find`; src/commands/find.ts:143) and `/roster skill` (src/commands/roster.ts:72), after the name on `/roster top` and `/roster recipes`, and the `/roster member` header `@member (saved name): N characters`.
+(Order 42: every "@member (saved name)" below now reads as the saved name alone, e.g. `**1.** **Character** · Kestrel · level`; see "Order 42".) Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved name) · level` on the board (src/board/render.ts:47), the same `· @member (saved name)` after each crafter on `/item` (formerly `/craft find`; src/commands/find.ts:143) and `/roster skill` (src/commands/roster.ts:72), after the name on `/roster top` and `/roster recipes`, and the `/roster member` header `@member (saved name): N characters`. (Order 43 addendum: on `/roster top` the owner now shows in brackets after the level, "\<character> \<level> (\<owner>)"; see the /roster top row above.)
 
 | Where | Text | Status |
 |---|---|---|

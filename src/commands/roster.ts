@@ -194,7 +194,9 @@ async function topEmbed(c: Ctx): Promise<Embed> {
     .bind(c.guild.id, TOP_N)
     .all<{ skill: string; name: string; owner_user_id: string; member: string; level: number }>();
   const bySkill = new Map<string, string[]>();
-  for (const r of results) bySkill.set(r.skill, [...(bySkill.get(r.skill) ?? []), `${md(r.name)} ${r.level} ${memberTag(r.owner_user_id, r.member)}`]);
+  // Order 43 addendum (owner, 2026-11-08 21:10 ET): "<character> <level> (<owner>)": the brackets name the owner, so the
+  // two names don't run together. The owner is memberTag's (the mention alone with no saved name, never a raw id).
+  for (const r of results) bySkill.set(r.skill, [...(bySkill.get(r.skill) ?? []), `${md(r.name)} ${r.level} (${memberTag(r.owner_user_id, r.member)})`]);
   const lines = [...bySkill].map(([skill, top]) => `**${skill}**: ${top.join(' · ')}`);
   return {
     title: `Top ${TOP_N} in each tradeskill`,
