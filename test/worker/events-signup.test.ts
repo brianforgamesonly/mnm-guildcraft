@@ -622,7 +622,9 @@ it('the card is derived from the rows, and every press asks for one edit', async
   await runItem('evcard', id);
   const d = fake.messages.at(-1)!.body.embeds[0].description as string;
   expect(d).toContain('**Healers 1 / 1**');
-  expect(d).toContain('Aelin · CLR 32 · <@');
+  // Order 42: the member named once, by saved name (this fixture saves the character's name), never as a mention.
+  expect(d).toContain('Aelin · CLR 32 · Aelin');
+  expect(d).not.toContain(`<@${ann.user.id}>`);
   expect(fake.messages.at(-1)!.body.allowed_mentions).toEqual({ parse: [] });
 });
 const until = async (ok: () => Promise<boolean>) => {

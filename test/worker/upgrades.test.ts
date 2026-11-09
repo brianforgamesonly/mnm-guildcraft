@@ -408,20 +408,24 @@ describe('order 40: each paired side is its own slot', () => {
     expect(t).not.toContain('Ear 1:');
   });
 
-  it('every old pair key is answered as its first side, naming the other: slot:, Pick a slot, gup: and pub:gu:', async () => {
+  it('every old pair key is answered as its first side: slot:, Pick a slot and gup: name the other side; pub:gu: posts the first side without that line (order 42)', async () => {
     const id = await paired();
-    const first = (r: Reply) => {
+    const firstSide = (r: Reply) => {
       const t = text(r);
       expect(t).toContain('Wrist 1 upgrades for Testchar');
-      expect(t).toContain(UPGRADES_COPY.otherSide('Wrist 2'));
       expect(t).toContain('Wrist 1: Silver Bracer (score 7.05)');
+      return t;
     };
+    const first = (r: Reply) => expect(firstSide(r)).toContain(UPGRADES_COPY.otherSide('Wrist 2'));
     first(await upgrades(ann, { slot: 'wrist' }));
     first(await send(select(ann, `${SLOT_PREFIX}${id}:c`, ['wrist'])));
     first(await send(press(ann, `${PAGE_PREFIX}${id}:wrist:c:0`)));
+    // Order 42: a posted page has no menus, so it never says "pick it from Pick a slot".
     const posted = await send(press(ann, `${POST_PREFIX}gu:${id}:wrist:c:0`));
     expect(posted.data.flags ?? 0).toBe(0);
-    first(posted);
+    const p = firstSide(posted);
+    expect(p).not.toContain(UPGRADES_COPY.otherSide('Wrist 2'));
+    expect(p).not.toContain('Pick a slot');
     // Ear and Finger too; a key that was never a slot is refused as before.
     expect(text(await upgrades(ann, { slot: 'ear' }))).toContain(UPGRADES_COPY.otherSide('Ear 2'));
     expect(text(await upgrades(ann, { slot: 'finger' }))).toContain('Finger 1 upgrades for Testchar');
@@ -504,7 +508,9 @@ describe('order 36, ITEM 3: how to get it', () => {
   it('crafted: the tradeskill and trivial, then up to three Reliable members with their skill; or none yet', () => {
     const crafters = [crafter('201', 'Cara', 'Cyl', 210), crafter('202', 'Dee', 'Dorn', 180), crafter('202', 'Dee', 'Dorn2', 150), crafter('203', 'Eve', 'Ely', 90), crafter('204', 'Fay', 'Fen', 46), crafter('205', 'Gus', 'Gil', 10)];
     const h = howToGet(gi({ levelKind: 'crafted', levelKinds: 'crafted', levelLow: 12 }), extras({}, { recipes: [recipe], crafters }), ANN, 25);
-    expect(h.lines).toEqual(['Crafted: Blacksmithing, trivial 45', 'Reliable in your guild: <@201> (Cara): Cyl 210, <@202> (Dee): Dorn 180, <@203> (Eve): Ely 90']);
+    expect(h.lines).toEqual(['Crafted: Blacksmithing, trivial 45', 'Reliable in your guild: Cara: Cyl 210, Dee: Dorn 180, Eve: Ely 90']);
+    // Order 42: one line per member (Dee's second Reliable character, Dorn2, is not listed), told apart by owner id.
+    expect(h.lines[1]).not.toContain('Dorn2');
     expect(h.craftable).toBe(true);
     expect(howToGet(gi({ levelKind: 'crafted', levelKinds: 'crafted' }), extras({}, { recipes: [recipe], crafters: [crafter('205', 'Gus', 'Gil', 10)] }), ANN, 25).lines[1]).toBe(UPGRADES_COPY.noReliable);
   });
@@ -512,7 +518,7 @@ describe('order 36, ITEM 3: how to get it', () => {
   it("crafted with the searcher's own Reliable character says so first; a crafted floor shows \"Lv 14+\"", () => {
     const crafters = [crafter(ANN, 'Ann', 'Durgrim', 178), crafter('201', 'Cara', 'Cyl', 210)];
     const h = howToGet(gi({ levelKind: 'crafted_floor', levelKinds: 'crafted_floor', levelLow: 14 }), extras({}, { recipes: [recipe], crafters }), ANN, 25);
-    expect(h.lines).toEqual(['Crafted: Blacksmithing, trivial 45 · Lv 14+', 'You can make this (Durgrim 178)', 'Reliable in your guild: <@201> (Cara): Cyl 210']);
+    expect(h.lines).toEqual(['Crafted: Blacksmithing, trivial 45 · Lv 14+', 'You can make this (Durgrim 178)', 'Reliable in your guild: Cara: Cyl 210']);
   });
 
   it('vendor (order 37: merchants named from npc and zone_name), harvest, quest, and primary first', () => {

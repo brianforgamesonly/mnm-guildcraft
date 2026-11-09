@@ -219,7 +219,19 @@ export function threadName(prefix: string, items: Pick<ItemRow, 'name' | 'quanti
 
 /** Saved names of the members a request shows, for memberTag. */
 export type Names = Map<string, string>;
-const tag = (names: Names, id: string) => (names.has(id) ? memberTag(id, names.get(id)!) : mention(id));
+/** Order 42: the saved name, plain; the mention alone when none is held. */
+export const tag = (names: Names, id: string) => memberTag(id, names.get(id));
+
+/**
+ * Order 42: the crafters' ping, its own short message posted right after the first message. The first message shows
+ * plain names and pings nobody, because Discord's docs do not say an edit never notifies (Edit Message: the mentions
+ * array "will be reconstructed from scratch based on the new content"; the Allowed Mentions object never covers edits),
+ * so its edits keep NO_PINGS. This message is never edited, so its mentions stay resolved.
+ */
+export const crafterPing = (ids: string[]) => {
+  const users = [...new Set(ids)];
+  return { content: truncate(`${users.map(mention).join(' ')}: a new craft request for you`, CONTENT_MAX), allowed_mentions: pingOnly(users) };
+};
 
 const CLOSE_TEXT: Record<CloseReason, string> = {
   done: 'every item is done or cancelled',
@@ -231,14 +243,14 @@ const CLOSE_TEXT: Record<CloseReason, string> = {
 
 function itemLine(it: ItemRow, n: number, many: boolean, names: Names): string {
   const status =
-    it.status === 'claimed' ? `Claimed by ${tag(names, it.claimer!)}` : it.status === 'done' ? `Done${it.claimer ? ` (${tag(names, it.claimer)})` : ''}` : it.status === 'cancelled' ? 'Cancelled' : 'Open';
+    it.status === 'claimed' ? `Claimed by ${tag(names, it.claimer!)}` : it.status === 'done' ? `Done${it.claimer ? ` by ${tag(names, it.claimer)}` : ''}` : it.status === 'cancelled' ? 'Cancelled' : 'Open';
   return `**${many ? `${n}. ` : ''}${md(it.name)}** ×${it.quantity} · ${status}`;
 }
 
 /** The first message: the items, quantities, note and, per item, the crafters added. Fits Discord's 2,000 characters. */
 export function requestContent(req: RequestRow, items: ItemRow[], names: Names): string {
   const many = items.length > 1;
-  const head = `## Craft request from ${tag(names, req.requester)}${req.main ? ` (${md(req.main)})` : ''}`;
+  const head = `## Craft request from ${tag(names, req.requester)}${req.main ? ` · ${md(req.main)}` : ''}`;
   const note = req.note ? `**Note:** ${md(req.note)}` : null;
   const closed = req.status === 'closed' && req.close_reason ? `**Closed:** ${CLOSE_TEXT[req.close_reason]}.` : null;
   const help =
@@ -249,7 +261,7 @@ export function requestContent(req: RequestRow, items: ItemRow[], names: Names):
   if (full.length <= CONTENT_MAX) return full;
   // Too long: one list of everyone added, and a count per item.
   const all = [...new Set(items.flatMap(crafters))];
-  return truncate(build((it) => `Crafters: ${crafters(it).length}`, `Crafters added: ${all.map((id) => mention(id)).join(' ')}`), CONTENT_MAX);
+  return truncate(build((it) => `Crafters: ${crafters(it).length}`, `Crafters added: ${all.map((id) => tag(names, id)).join(', ')}`), CONTENT_MAX);
 }
 
 /** Request a craft, on /craft find's reply (private or posted): rqf:<item id>. */
@@ -310,8 +322,8 @@ async function inThread<T>(api: BotApi, thread: string, method: string, path: st
 }
 
 /**
- * Brings a request's thread in line with its rows: the first message edited (posted, with its pings, when it never
- * went out), then an optional notice (its own pings), then the name; a closed request's thread is locked and archived.
+ * Brings a request's thread in line with its rows: the first message edited (posted, then the crafters' ping, when it
+ * never went out), then an optional notice (its own pings), then the name; a closed request's thread is locked and archived.
  * Edits ping nobody. A refused rename leaves the old name; the sweep tries again.
  */
 export async function syncThread(api: BotApi, req: RequestRow, items: ItemRow[], names: Names, notice?: { content: string; ping: string[] }): Promise<SyncResult> {
@@ -323,10 +335,17 @@ export async function syncThread(api: BotApi, req: RequestRow, items: ItemRow[],
     const e = await inThread(api, thread, 'PATCH', `/channels/${thread}/messages/${req.message_id}`, body(NO_PINGS), r);
     if (!e.ok) r.errors.push(`edit: ${e.status} ${e.code ?? ''}`.trim());
   } else {
-    // The first message never went out (its send failed): post it now, pinging the crafters it lists (nobody once closed).
-    const p = await inThread<{ id: string }>(api, thread, 'POST', `/channels/${thread}/messages`, body(req.status === 'closed' ? NO_PINGS : pingOnly([...new Set(items.flatMap(crafters))])), r);
-    if (p.ok) r.message_id = p.body.id;
-    else r.errors.push(`first message: ${p.status} ${p.code ?? ''}`.trim());
+    // The first message never went out (its send failed): post it now (pinging nobody), then the crafters' ping for the
+    // crafters it lists (none once closed; order 42).
+    const p = await inThread<{ id: string }>(api, thread, 'POST', `/channels/${thread}/messages`, body(NO_PINGS), r);
+    if (p.ok) {
+      r.message_id = p.body.id;
+      const ids = [...new Set(items.flatMap(crafters))];
+      if (req.status !== 'closed' && ids.length) {
+        const q = await inThread(api, thread, 'POST', `/channels/${thread}/messages`, crafterPing(ids), r);
+        if (!q.ok) r.errors.push(`crafter ping: ${q.status} ${q.code ?? ''}`.trim());
+      }
+    } else r.errors.push(`first message: ${p.status} ${p.code ?? ''}`.trim());
   }
   if (notice) {
     const n = await inThread(api, thread, 'POST', `/channels/${thread}/messages`, { content: notice.content, allowed_mentions: notice.ping.length ? pingOnly(notice.ping) : NO_PINGS }, r);

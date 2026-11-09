@@ -63,7 +63,7 @@ export function countText(lines: Pick<BoardLine, 'owner_user_id'>[]): string {
 }
 
 /**
- * A tradeskill post: rank, character, the member (a mention that pings nobody, with the saved name beside it; order 16),
+ * A tradeskill post: rank, character, the member (their saved name, plain; order 42),
  * skill level, and a stale marker after stale_days. Lines fill embeds of at most 4,096 description characters, and
  * messages of at most 6,000 embed characters and 10 embeds (EMBED_LIMITS); what does not fit goes to further bot-owned
  * messages. The split is measured on each line's own length, so longer lines (a mention is 21-22 characters) simply

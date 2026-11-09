@@ -58,7 +58,7 @@ export function listingMessage(l: Listing, item: Embed | null, closedByName: str
   const left = l.quantity - l.sold;
   const open = !l.closed_at && left > 0;
   const lines = [S.price(l.price), S.left(left, l.quantity, l.per_member), S.postedBy(memberTag(l.posted_by, l.poster))];
-  if (l.closed_at) lines.push('', S.closedEarly(memberTag(l.closed_by ?? '', closedByName ?? l.closed_by ?? '')));
+  if (l.closed_at) lines.push('', S.closedEarly(memberTag(l.closed_by ?? '', closedByName)));
   else if (!left) lines.push('', S.soldOut);
   return {
     embeds: [...(item ? [item] : []), { title: truncate(S.title(l.item_name), 256), description: lines.join('\n') }],

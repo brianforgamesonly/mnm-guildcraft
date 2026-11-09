@@ -12,8 +12,8 @@ import { as, auto, cmd, GUILD, send } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const ann = as(ANN);
-/** Order 16: every crafter line ends with the member's mention and saved name. */
-const TAG = ` · <@${ANN}> (Global ${ANN})`;
+/** Order 42: every crafter line ends with the member's saved name alone, never a mention. */
+const TAG = ` · Global ${ANN}`;
 const at = '2026-10-19T00:00:00Z';
 const WIKI = 'https://monstersandmemories.miraheze.org/wiki/';
 

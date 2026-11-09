@@ -96,7 +96,7 @@ const memberRow = (c: Ctx, m: GuildMember) =>
 export async function tags(c: Ctx, ids: string[]): Promise<string> {
   const { results } = await c.db.prepare('SELECT discord_user_id AS id, display_name AS name FROM member WHERE guild_id = ? AND discord_user_id IN (SELECT value FROM json_each(?))').bind(c.guild.id, JSON.stringify(ids)).all<{ id: string; name: string }>();
   const names = new Map(results.map((r) => [r.id, r.name]));
-  return ids.map((id) => memberTag(id, names.get(id) ?? id)).join(', ');
+  return ids.map((id) => memberTag(id, names.get(id))).join(', ');
 }
 
 /** A line in GC-Events: every change after the lock, and every /event roster change. It pings nobody. */

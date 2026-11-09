@@ -534,7 +534,9 @@ export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> 
   if ('reply' in t) return t.reply;
   const s = resolveSlot(key ?? '');
   if (!s) return ephemeral(UPGRADES_COPY.unknownSlot);
-  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, true, otherSideNote(s.oldSides));
+  // Order 42: a posted page has no menus, so it carries no "pick it from Pick a slot" note (an old pair key posts the
+  // first side's page alone). Private pages keep the note.
+  const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, true);
   return postedReply({ embeds: [v.embed] }, c.userId);
 }
 

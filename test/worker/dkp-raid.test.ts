@@ -196,7 +196,9 @@ describe('raid nights (ITEM 4)', () => {
     expect((await send(rawCmd(pip, 'me', undefined), TOKEN)).data.content).toContain(RAID_COPY.meLine('The Ruins', 0, 1, 2));
     const who = await pressAs(pip, `${WHO_EARNED_PREFIX}${id}`);
     expect(who.data.content).toContain(RAID_COPY.earnedHead('Goblin King', 1));
-    expect(who.data.content).toContain(`${RAID_COPY.standbyHead(1)}\n<@${pip.user.id}>`);
+    // Order 42: members named once, by saved name, never as mentions.
+    expect(who.data.content).toContain(`${RAID_COPY.standbyHead(1)}\nPip`);
+    expect(who.data.content).not.toContain(`<@${pip.user.id}>`);
   });
 
   it('the same named within 2 minutes asks to confirm a respawn; confirming records it', async () => {

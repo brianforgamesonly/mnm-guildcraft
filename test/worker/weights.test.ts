@@ -82,13 +82,13 @@ describe('order 36, ITEM 4: /gear weights', () => {
     expect(await stored()).toEqual([{ class: 'INQ', stat: 'AC', value: 5, set_by: OFFICER }]);
     expect(posted).toHaveLength(1);
     expect(posted[0].path).toBe(`/channels/${REVIEW}/messages`);
-    expect(posted[0].body.content).toBe(`**/gear upgrades weights:** <@${OFFICER}> (Joegandomi) set AC for **Inquisitor**.\nAC: 0.35 → 0.05`);
+    expect(posted[0].body.content).toBe(`**/gear upgrades weights:** Joegandomi set AC for **Inquisitor**.\nAC: 0.35 → 0.05`);
     expect(posted[0].body.allowed_mentions).toEqual({ parse: [] });
     // Plate Vest is now +0.50: the order changes. With AC 0, it goes.
     expect(order(await chest())).toEqual(['Plate Vest', 'Far Vest', 'Stamina Vest']);
     await weights(officer, { class: 'INQ', stat: 'AC', value: 0 });
     expect(order(await chest())).toEqual(['Far Vest', 'Stamina Vest']);
-    expect(field(await weights(officer, { class: 'INQ' }), 'AC')).toMatch(/^\*\*0\*\* \(default 0\.35\) · changed by <@100000000000000009> \(Joegandomi\), <t:\d+:d>$/);
+    expect(field(await weights(officer, { class: 'INQ' }), 'AC')).toMatch(/^\*\*0\*\* \(default 0\.35\) · changed by Joegandomi, <t:\d+:d>$/);
   });
 
   it('a preset, then one stat, then reset: only differences stored; reset deletes the rows; each change posted', async () => {
@@ -105,9 +105,9 @@ describe('order 36, ITEM 4: /gear weights', () => {
     await weights(officer, { class: 'INQ', reset: true });
     expect(await stored()).toEqual([]);
     expect(posted.map((p) => p.body.content.split('\n')[0])).toEqual([
-      `**/gear upgrades weights:** <@${OFFICER}> (Joegandomi) applied the Caster preset for **Inquisitor**.`,
-      `**/gear upgrades weights:** <@${OFFICER}> (Joegandomi) set HP for **Inquisitor**.`,
-      `**/gear upgrades weights:** <@${OFFICER}> (Joegandomi) reset to the defaults for **Inquisitor**.`,
+      `**/gear upgrades weights:** Joegandomi applied the Caster preset for **Inquisitor**.`,
+      `**/gear upgrades weights:** Joegandomi set HP for **Inquisitor**.`,
+      `**/gear upgrades weights:** Joegandomi reset to the defaults for **Inquisitor**.`,
     ]);
     expect(await weightsFor(env.DB, GUILD_ID, 'INQ')).toEqual(defaultWeights('INQ'));
   });

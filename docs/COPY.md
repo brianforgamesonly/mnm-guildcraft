@@ -1,7 +1,7 @@
 # GuildCraft copy list
 
 This is every piece of text GuildCraft shows to members, officers and admins in Discord. Every line marked APPROVED was approved for launch (the owner, by exception, 2026-10-20: work order 11). New or changed text added later is listed here as DRAFT until it is approved; work order 18's new command names changed some approved lines, which are now DRAFT. Text the bot no longer shows is taken out of the list.
-Parts in angle brackets, such as \<item name> or \<character>, are filled in by the bot each time. @\<member> is a mention of a member, #\<channel> a link to a channel, @\<role> a role, \<date and time> a Discord timestamp shown in the reader's own time zone.
+Parts in angle brackets, such as \<item name> or \<character>, are filled in by the bot each time. \<name> or \<member> is a member's saved name, shown once in plain text (order 42; the mention alone when no name is saved); @\<member> is a mention of a member, used only in a message that pings that member (order 42), #\<channel> a link to a channel, @\<role> a role, \<date and time> a Discord timestamp shown in the reader's own time zone.
 A count written "character(s)" shows as "1 character" or "3 characters".
 "(dev only)" marks a line only the operator's dev copy shows (the test server); production, and so every guild, never shows it.
 
@@ -662,7 +662,7 @@ Every line below is DRAFT until approved. \<label> is a filter as the member set
 
 ## Order 16: names and craft requests
 
-Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved name) · level` on the board (src/board/render.ts:47), the same `· @member (saved name)` after each crafter on `/item` (formerly `/craft find`; src/commands/find.ts:143) and `/roster skill` (src/commands/roster.ts:72), after the name on `/roster top` and `/roster recipes`, and the `/roster member` header `@member (saved name): N characters`.
+(Order 42: every "@member (saved name)" below now reads as the saved name alone, e.g. `**1.** **Character** · Kestrel · level`; see "Order 42".) Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved name) · level` on the board (src/board/render.ts:47), the same `· @member (saved name)` after each crafter on `/item` (formerly `/craft find`; src/commands/find.ts:143) and `/roster skill` (src/commands/roster.ts:72), after the name on `/roster top` and `/roster recipes`, and the `/roster member` header `@member (saved name): N characters`.
 
 | Where | Text | Status |
 |---|---|---|
@@ -677,17 +677,17 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 | src/commands/requests.ts:171-181 | Form: Add an item · Item: The exact item name. Or run /request again: it picks from a list and adds to this request. · Quantity (the Item note changed in order 18) | DRAFT |
 | src/commands/requests.ts:198 | No recipe found for **\<typed>**. … In the form the name must match exactly; `/request item:` picks from the list and adds to this request. (changed in order 18) | DRAFT |
 | src/commands/requests.ts:71, 210 | That request was already sent or discarded. Run `/request` to start another. (changed in order 18) · Discarded. Nothing was sent. · That request was already sent or discarded. | DRAFT |
-| src/commands/requests.ts:262-264 | Not sent: no opted-in crafter can make it yet, so no thread was opened. Your request is kept, unsent. / Left out: / @member (name): \<why> | DRAFT |
+| src/commands/requests.ts:262-264 | Not sent: no opted-in crafter can make it yet, so no thread was opened. Your request is kept, unsent. / Left out: / \<name>: \<why> (order 42: was "@member (name)") | DRAFT |
 | src/commands/requests.ts:279-283, 320 | Left-out reasons: no longer in the server · can't see #\<channel> · over the 20-crafter limit for one request · Discord refused to add them (\<status>) | DRAFT |
 | src/commands/requests.ts:269, 274, 276, 311 | Sorry, GuildCraft can't reach Discord right now. Nothing was sent; please try again. · Sorry, I couldn't check who can see #\<channel>. Nothing was sent; please try again. · You can't see #\<channel>, so you couldn't open your request's thread. Ask an admin for access to it. · Sorry, Discord refused to open the thread in #\<channel> (\<status>). Nothing was sent; your request is kept, unsent. An admin can check `/guildcraft setup requests:`. | DRAFT |
 | src/commands/requests.ts:339-342 | Sent: #\<thread>. \<n> crafter(s) added and pinged there. / **\<item>** ×\<qty>: \<members> (or: no crafter added) / -# The thread's first message didn't go out; it is posted within 15 minutes. | DRAFT |
 | src/requests.ts:204 | Thread name: [Open] / [Claimed] / [Done] / [Cancelled] \<item> ×\<qty> (+\<n> more) · \<main character> | DRAFT |
-| src/requests.ts:225-229, 241-252 | First message: ## Craft request from @requester (name) (\<main>) / **\<n>. \<item>** ×\<qty> · Open / Claimed by @member / Done (@member) / Cancelled / Crafters: \<members> (or Crafters: \<n> and Crafters added: \<mentions>) / **Note:** … / **Closed:** every item is done or cancelled · cancelled · nothing was claimed in 14 days · no activity in 30 days. / -# A crafter presses **I'll craft this** to take an item (the requester is told), and **Done** when it's handed over. The requester can **Cancel**. | DRAFT |
+| src/requests.ts:251-267 | First message (changed in order 42): ## Craft request from \<name> · \<character> (or ## Craft request from \<name> with no saved character) / **\<n>. \<item>** ×\<qty> · Open / Claimed by \<name> / Done by \<name> / Cancelled / Crafters: \<names> (or Crafters: \<n> and Crafters added: \<names>) / **Note:** … / **Closed:** every item is done or cancelled · cancelled · nothing was claimed in 14 days · no activity in 30 days. / -# A crafter presses **I'll craft this** to take an item (the requester is told), and **Done** when it's handed over. The requester can **Cancel**. | DRAFT |
 | src/requests.ts:259 | Thread buttons: I'll craft this · Done · Cancel (with "\<n> · " before each when there are several items) | DRAFT |
-| src/commands/requests.ts:374-394, 416 | Thread notices: @requester: @crafter will craft **\<item>** ×\<qty>. · @other: **\<item>** ×\<qty> is done (marked by @member). · @other: **\<item>** ×\<qty> was cancelled by @member. · (added when the last item closes) Every item is done or cancelled, so this thread is now closed. | DRAFT |
+| src/commands/requests.ts:374-394, 416 | Thread notices (order 42: the pinged member stays a mention; the one who acted is their saved name): @requester: \<name> will craft **\<item>** ×\<qty>. · @other: **\<item>** ×\<qty> is done (marked by \<name>). · @other: **\<item>** ×\<qty> was cancelled by \<name>. · (added when the last item closes) Every item is done or cancelled, so this thread is now closed. | DRAFT |
 | src/requests.ts:453 | This request closed itself: nothing was claimed in 14 days. · This request closed itself after 30 days with no activity. | DRAFT |
-| src/commands/requests.ts:355-412 | Private replies to thread buttons: This request is closed. · That item is no longer in this request. · You already took this item. / Someone already took this item. · You asked for this item, so you can't take it. · Only opted-in crafters whose characters can make **\<item>** ×\<qty> can take it. · You're down to craft **\<item>** ×\<qty>. @requester has been told. Press **Done** when it's handed over. · Only an item someone has taken can be marked done. · Only the crafter who took it, or the requester, can mark it done. · Marked **\<item>** ×\<qty> done. · That item is already closed. · Only the requester can cancel an item. Officers can cancel a whole request with `/officer requests`. (changed in order 18) · Cancelled **\<item>** ×\<qty>. · Sorry, that button has expired. · Someone changed that item first. Look at the thread for its status. | DRAFT |
-| src/commands/requests.ts:407-493 | Open requests and Cancel (on /me's panel and Cancel a request, and /officer requests; formerly `/craft requests`; the headings are under Work order 18): **#\<id>** #\<thread> · \<item> ×\<qty> · \<status> · from @requester · \<time> · Select: Cancel a request · That request is already closed. · Only the requester or an officer can cancel a request. · @…: This request was cancelled by @member, so this thread is now closed. · Cancelled request #\<id> (#\<thread>). | DRAFT |
+| src/commands/requests.ts:355-412 | Private replies to thread buttons: This request is closed. · That item is no longer in this request. · You already took this item. / Someone already took this item. · You asked for this item, so you can't take it. · Only opted-in crafters whose characters can make **\<item>** ×\<qty> can take it. · You're down to craft **\<item>** ×\<qty>. \<name> has been told (order 42: the requester's saved name). Press **Done** when it's handed over. · Only an item someone has taken can be marked done. · Only the crafter who took it, or the requester, can mark it done. · Marked **\<item>** ×\<qty> done. · That item is already closed. · Only the requester can cancel an item. Officers can cancel a whole request with `/officer requests`. (changed in order 18) · Cancelled **\<item>** ×\<qty>. · Sorry, that button has expired. · Someone changed that item first. Look at the thread for its status. | DRAFT |
+| src/commands/requests.ts:407-493 | Open requests and Cancel (on /me's panel and Cancel a request, and /officer requests; formerly `/craft requests`; the headings are under Work order 18): **#\<id>** #\<thread> · \<item> ×\<qty> · \<status> · from \<name> · \<time> · Select: Cancel a request · That request is already closed. · Only the requester or an officer can cancel a request. · @…: This request was cancelled by \<name>, so this thread is now closed. · Cancelled request #\<id> (#\<thread>). | DRAFT |
 | src/commands/setup.ts:26 | Request channel: #\<channel> / not set (`requests:` picks a text channel for craft requests) | DRAFT |
 | src/commands/setup.ts:149 | #\<channel> is not a text channel. Craft requests open private threads, which only text channels have: pick a text channel. | DRAFT |
 | src/commands/setup.ts:209 | (after the missing permissions) GuildCraft installed before craft requests existed did not ask for Create Private Threads: grant it on this channel, or re-invite GuildCraft with the current install link (ask Joegandomi). | DRAFT |
@@ -1044,7 +1044,7 @@ Craftable items' cards show Report a recipe problem and Report item data; other 
 
 ## Work order 27, PR A: DKP switch, ledger, settings, adjustments (DRAFT)
 
-Every string is in src/dkp/copy.ts (`DKP_COPY`), except the command and option descriptions (src/dkp/definition.ts) and the setting labels (src/dkp/settings.ts `SETTINGS`). Member mentions are `<@id> (saved name)` and ping nobody. Approved by exception when the owner's check passes.
+Every string is in src/dkp/copy.ts (`DKP_COPY`), except the command and option descriptions (src/dkp/definition.ts) and the setting labels (src/dkp/settings.ts `SETTINGS`). Members are shown by saved name, plain (order 42; was "Member mentions are `<@id> (saved name)`"), and nobody is pinged. Approved by exception when the owner's check passes.
 
 | Where | Text | Status |
 |---|---|---|
@@ -1104,7 +1104,7 @@ Replaces the order 17 rows above for the zone card's footer, its "Not recorded y
 
 ## Work order 29, PR B: raid auctions (DRAFT)
 
-Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the command and option descriptions (src/dkp/definition.ts, `auction`) and the setting labels (src/dkp/settings.ts: Wins per raid · Wins per 7 days · New-member wait (kills in that pool) · Raid auction length · General auction length). Members are `<@id> (saved name)` and nobody is pinged.
+Every string is in src/dkp/copy.ts `AUCTION_COPY` (lines 57-124), except the command and option descriptions (src/dkp/definition.ts, `auction`) and the setting labels (src/dkp/settings.ts: Wins per raid · Wins per 7 days · New-member wait (kills in that pool) · Raid auction length · General auction length). Members are shown by saved name, plain (order 42; was "Members are `<@id> (saved name)`"), and nobody is pinged.
 
 | Where | Text | Status |
 |---|---|---|
@@ -1344,9 +1344,9 @@ PR B: the how-to-get lines moved to src/gear/howto.ts (HOW_COPY), unchanged.
 
 | Where | Text | Status |
 |---|---|---|
-| src/gear/howto.ts (HOW_COPY.cardField) | /item card field: "How to get it" (the same lines as /gear upgrades; replaces the card's "Quest" and "Unknown — source not recorded" fields; the Vendor field now shows the price only) | DRAFT |
-| src/gear/upgrades.ts (UPGRADES_COPY.hidden) | "\<n> more above Lv \<n> not shown." (fixes "69 mores …") | DRAFT |
-| src/commands/gear.ts (sourceLines) | /gear find result line for a harvested item: "Harvested, any level" | DRAFT |
+| src/gear/howto.ts (HOW_COPY.cardField) | /item card field: "How to get it" (the same lines as /gear upgrades; replaces the card's "Quest" and "Unknown — source not recorded" fields; the Vendor field now shows the price only) | APPROVED (owner, 2026-11-08 15:03 ET) |
+| src/gear/upgrades.ts (UPGRADES_COPY.hidden) | "\<n> more above Lv \<n> not shown." (fixes "69 mores …") | APPROVED (owner, 2026-11-08 15:03 ET) |
+| src/commands/gear.ts (sourceLines) | /gear find result line for a harvested item: "Harvested, any level" | APPROVED (owner, 2026-11-08 15:03 ET) |
 
 ## Work order 39: one character head, the class menu, full item stats (DRAFT)
 
@@ -1370,4 +1370,16 @@ Retired by order 40 (the owner, 2026-11-07: each of the 20 slots is its own slot
 |---|---|---|
 | src/commands/definitions.ts:57 | (`/gear upgrades slot:`) choices are the 20 slots: Head, Face, Ear 1, Ear 2, Neck, Shoulders, Back, Chest, Shirt, Wrist 1, Wrist 2, Hands, Waist, Finger 1, Finger 2, Legs, Feet, Primary, Secondary, Range (were Ear, Wrist, Finger) | DRAFT |
 | src/gear/upgrades.ts:71, 80, 88 | The summary line, the slot list's title and Pick a slot now name the side: "**Wrist 2:** \<item> **+\<gain>** · \<level>", "Wrist 2 upgrades for \<name>", "Wrist 2 (smallest: \<item> +\<gain>)" (wording unchanged; the slot label is the side's) | DRAFT |
-| src/gear/upgrades.ts:95 | (a button, select or slot: value from before order 40 that named a pair: the first side's list opens with this line) "\<other side>: pick it from Pick a slot." e.g. "Wrist 2: pick it from Pick a slot." | DRAFT |
+| src/gear/upgrades.ts:95 | (a button, select or slot: value from before order 40 that named a pair: the first side's list opens with this line) "\<other side>: pick it from Pick a slot." e.g. "Wrist 2: pick it from Pick a slot." (not on posted pages, order 42) | APPROVED (owner, 2026-11-08 15:03 ET) |
+
+## Order 42
+
+Every member the bot names is shown once, as their saved name in plain text (src/discord.ts:145 `memberTag`), e.g. "Kestrel", where it read "@Kestrel (Kestrel)". With no saved name it shows the mention alone. A mention appears only in a message that pings that member. Unchanged wording elsewhere.
+
+| Where | Text | Status |
+|---|---|---|
+| src/requests.ts:253 | ## Craft request from \<name> · \<character> (or ## Craft request from \<name> when no character is saved) | DRAFT |
+| src/requests.ts:246 | Claimed by \<name> · Done by \<name> (was "Done (@member)") | DRAFT |
+| src/requests.ts:233 | The crafters' ping, posted right after the first message: "@\<crafter> @\<crafter>: a new craft request for you" | DRAFT |
+| src/commands/requests.ts:350-351, 360, 369, 495 | Thread notices and the claim reply name the one who acted by saved name: "@\<requester>: \<name> will craft …" · "… is done (marked by \<name>)." · "… was cancelled by \<name>." · "This request was cancelled by \<name>, so this thread is now closed." · "\<name> has been told." | DRAFT |
+| src/commands/recipes.ts:310 | `/roster recipes` who knows it: "\<character> · \<name>, \<character> · \<name>, +\<n> more" (a " · " now separates the two names, which the mention used to do) | DRAFT |

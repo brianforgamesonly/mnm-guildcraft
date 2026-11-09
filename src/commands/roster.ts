@@ -2,7 +2,7 @@
 // Rosters show guild roster data only: character names, classes, levels and skill levels. Removed
 // characters (deleted_at) and departed members (status 'left') never appear.
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, ephemeral, md, memberTag, mention, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, memberTag, optInt, optString, plural, publicReply, row, STYLE_SECONDARY, truncate, updateMessage, type Embed, type MessageReply, type Option } from '../discord.ts';
 import { fitLines } from './find.ts';
 import { postButton, postedReply, searchReply, SEARCH_REPLIES_PRIVATE } from './share.ts';
 import { skillGroups, type Tradeskill } from './skills.ts';
@@ -146,7 +146,7 @@ async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; 
          ORDER BY c.is_main DESC, c.created_at, c.id, cs.level DESC, t.name COLLATE NOCASE`,
       )
       .bind(c.guild.id, userId),
-    // Order 16: the saved name beside the header's mention (none for someone who never used GuildCraft).
+    // Order 42: the header's saved name, plain (the mention alone for someone who never used GuildCraft).
     c.db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(c.guild.id, userId),
   ]);
   const results = rows.results as { id: number; name: string; class: string | null; char_level: number | null; is_main: number; skill: string | null; level: number | null }[];
@@ -163,7 +163,7 @@ async function memberEmbeds(c: Ctx, userId: string): Promise<{ embeds: Embed[]; 
   }
   const all = [...chars.values()];
   const embeds = all.slice(0, EMBED_LIMITS.embeds).map(({ lines, ...e }) => ({ ...e, description: lines.length ? lines.join('\n') : 'No skills recorded.' }));
-  const who = savedName ? memberTag(userId, savedName) : mention(userId);
+  const who = memberTag(userId, savedName);
   const content = !all.length
     ? `${who} has no characters on the roster.`
     : `${who}: ${plural(all.length, 'character')}${all.length > embeds.length ? ` (showing ${embeds.length})` : ''}`;

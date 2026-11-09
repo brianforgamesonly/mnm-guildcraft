@@ -157,9 +157,11 @@ export function howToGet(it: Pick<GearItem, 'id' | 'key' | 'levelLow' | 'levelHi
       const reliable = tierCrafters(x.d.crafters as CrafterRow[], r, window).reliable;
       const own = reliable.filter((k) => k.owner_user_id === searcher);
       const others: string[] = [];
+      // One line per member (their first Reliable character), told apart by owner id, never by the rendered text (order 42).
+      const named = new Set<string>();
       for (const k of reliable) {
-        if (k.owner_user_id === searcher || others.length >= 3) continue;
-        if (others.some((t) => t.startsWith(`<@${k.owner_user_id}>`))) continue;
+        if (k.owner_user_id === searcher || others.length >= 3 || named.has(k.owner_user_id)) continue;
+        named.add(k.owner_user_id);
         others.push(`${memberTag(k.owner_user_id, k.member)}: ${md(k.character)} ${k.level}`);
       }
       if (own.length) lines.push(HOW_COPY.youCanMake(own[0].character, own[0].level));

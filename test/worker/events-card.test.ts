@@ -248,6 +248,8 @@ const check = (m: ReturnType<typeof cardMessage>) => {
 };
 
 describe('the card\'s limits', () => {
+  /** Order 42: a roster line names its member by saved name ("MemberN..."), never as a mention; one match per line shown. */
+  const MEMBER = /\bMember\d+/g;
   const s = eventSettingsOf(null);
   const at = Date.parse('2026-11-01T00:00:00Z');
 
@@ -257,21 +259,27 @@ describe('the card\'s limits', () => {
     expect(m.embeds[0].fields).toBeUndefined();
   });
 
-  it('a 60-person roster with long names stays inside every limit and says what it left out', () => {
-    const m = cardMessage(base(), people(60, 32), s, at);
+  // Order 42: a line is ~24 characters shorter without the mention, so 60 people with 32-character names (Discord's
+  // longest nickname) now fit; 90 of them still overflow the 6,000-character message.
+  it('a 90-person roster with long names stays inside every limit and says what it left out', () => {
+    const m = cardMessage(base(), people(90, 32), s, at);
     check(m);
     const text = [m.embeds[0].description, ...(m.embeds[0].fields ?? []).map((f) => f.value)].join('\n');
     expect(text).toMatch(/\+\d+ more: `\/event list`/);
-    const shown = (text.match(/<@1\d+>/g) ?? []).length;
+    expect(text).not.toMatch(/<@1\d+>/);
+    const shown = (text.match(MEMBER) ?? []).length;
     const more = Number(/\+(\d+) more/.exec(text)![1]);
-    expect(shown + more).toBe(60);
+    expect(shown).toBeGreaterThan(0);
+    expect(shown + more).toBe(90);
   });
 
-  it('a 60-person roster with ordinary names is whole, using fields after the description', () => {
-    const m = cardMessage(base(), people(60), s, at);
+  // Order 42: without the mention, 60 ordinary lines fit the description alone; 110 still spill into fields.
+  it('a 110-person roster with ordinary names is whole, using fields after the description', () => {
+    const m = cardMessage(base(), people(110), s, at);
     check(m);
     expect(JSON.stringify(m.embeds)).not.toContain('more:');
-    expect(([m.embeds[0].description, ...(m.embeds[0].fields ?? []).map((f) => f.value)].join('\n').match(/<@1\d+>/g) ?? []).length).toBe(60);
+    expect(m.embeds[0].fields?.length ?? 0).toBeGreaterThan(0);
+    expect(([m.embeds[0].description, ...(m.embeds[0].fields ?? []).map((f) => f.value)].join('\n').match(MEMBER) ?? []).length).toBe(110);
   });
 
   it('every size from 0 to 200 stays inside the limits, and no line is lost or counted twice', () => {
@@ -280,7 +288,7 @@ describe('the card\'s limits', () => {
         const m = cardMessage(base({ description: 'x'.repeat(1000), title: 'T'.repeat(100) }), people(n, len), s, at);
         check(m);
         const text = [m.embeds[0].description, ...(m.embeds[0].fields ?? []).map((f) => f.value)].join('\n');
-        const shown = (text.match(/<@1\d+>/g) ?? []).length;
+        const shown = (text.match(MEMBER) ?? []).length;
         const more = Number(/\+(\d+) more/.exec(text)?.[1] ?? 0);
         expect(shown + more, `${n}/${len}`).toBe(n);
       }

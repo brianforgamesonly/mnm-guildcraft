@@ -304,10 +304,10 @@ export const RARE_EMPTY =
 
 /** Knowers named per recipe line; the rest are counted (order 16: a knower is now a mention and a name, ~50 characters). */
 const WHO_MAX = 5;
-/** Order 16: "Annsmith <@id> (Ann), Bohammer <@id> (Bo)" from the query's JSON list of who marked it known, by character name. */
+/** Order 16, as order 42 shows names: "Annsmith · Ann, Bohammer · Bo" from the query's JSON list of who marked it known, by character name. */
 export function whoText(json: string): string {
   const list = (JSON.parse(json) as { name: string; user: string; member: string }[]).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
-  const shown = list.slice(0, WHO_MAX).map((w) => `${md(w.name)} ${memberTag(w.user, w.member)}`);
+  const shown = list.slice(0, WHO_MAX).map((w) => `${md(w.name)} · ${memberTag(w.user, w.member)}`);
   return [...shown, ...(list.length > WHO_MAX ? [`+${list.length - WHO_MAX} more`] : [])].join(', ');
 }
 

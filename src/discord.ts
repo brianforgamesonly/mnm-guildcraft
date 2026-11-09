@@ -131,15 +131,18 @@ export interface AllowedMentions {
 export const NO_PINGS: AllowedMentions = { parse: [] };
 /** Pings exactly these members (Discord takes at most 100), and nobody else. */
 export const pingOnly = (users: string[]): AllowedMentions => ({ parse: [], users: [...new Set(users)].slice(0, 100) });
-/** A member mention: shows the member's current server name, and is clickable. It pings only where allowed_mentions lets it. */
+/**
+ * A member mention: shows the member's current server name, and is clickable. It pings only where allowed_mentions lets
+ * it. Order 42: used for a member only in a message that pings them (or as memberTag's fallback with no saved name).
+ */
 export const mention = (userId: string) => `<@${userId}>`;
 /**
- * Order 16, ITEM 1: a member as a mention with the name saved at their last command beside it. A mention that pings
- * nobody is not sent in the message's `mentions` array, in content or in an embed, so a reader's app that has not
- * loaded that member shows `<@id>` or "@invalid-user" (discord-api-docs issues #1479 and #2126, Discord staff); the
- * saved name keeps the line readable there.
+ * Order 42 (replacing order 16's "<@id> (saved name)"): a member is shown once, as the name saved at their last command,
+ * in plain text (markdown-escaped), never a mention and a name together. With no saved name (none held, empty, or the
+ * id itself standing in for one, as SQL's coalesce(display_name, member_id) gives) it shows the mention alone, never a
+ * raw id as text. A mention that pings is built with `mention` only in the message that pings that member.
  */
-export const memberTag = (userId: string, savedName: string) => `${mention(userId)} (${md(savedName)})`;
+export const memberTag = (userId: string, savedName?: string | null) => (savedName && savedName !== userId ? md(savedName) : mention(userId));
 
 /** Order 33: a file sent with a deferred reply (src/respond.ts sends it as multipart/form-data). */
 export interface Upload {

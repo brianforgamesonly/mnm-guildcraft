@@ -12,7 +12,7 @@
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import { audit, now, touchMember } from '../access.ts';
 import type { Ctx } from '../context.ts';
-import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, mention, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, embedChars, ephemeral, memberTag, optString, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { NO_REQUEST_CHANNEL } from '../requests.ts';
 import { REQUEST_COLS, type RequestRow } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
@@ -245,7 +245,7 @@ export async function mePanel(c: Ctx, ownerId: string, name?: string): Promise<M
 
 async function whoIs(c: Ctx, userId: string): Promise<string> {
   const m = await c.db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(c.guild.id, userId).first<{ display_name: string }>();
-  return m ? memberTag(userId, m.display_name) : mention(userId);
+  return memberTag(userId, m?.display_name);
 }
 
 /** /me [character]. */

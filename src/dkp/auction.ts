@@ -173,13 +173,13 @@ export function auctionMessage(
   if (open && a.closes_at) lines.push(A.closes(unix(a.closes_at)), '', A.bidders(bids.length), ...(d.wanted ? [Q.wanted(d.wanted)] : []));
   else {
     lines.push('');
-    if (a.status === 'sold') lines.push(A.sold(memberTag(a.winner!, d.winnerName ?? a.winner!), a.price!));
+    if (a.status === 'sold') lines.push(A.sold(memberTag(a.winner!, d.winnerName), a.price!));
     else if (a.status === 'unsold') lines.push(A.unsold);
-    else if (a.status === 'cancelled') lines.push(A.cancelledBy(a.cancelled_by === 'bot' || !a.cancelled_by ? 'GuildCraft' : memberTag(a.cancelled_by, d.cancelledByName ?? a.cancelled_by), a.reason ?? ''));
+    else if (a.status === 'cancelled') lines.push(A.cancelledBy(a.cancelled_by === 'bot' || !a.cancelled_by ? 'GuildCraft' : memberTag(a.cancelled_by, d.cancelledByName), a.reason ?? ''));
     // Revealed after close (order 29's override 4: guild-public DKP data), members shown, nobody pinged.
     head.push('', A.bidsHead);
     shown.push(...(bids.length ? bids.slice(0, BIDS_SHOWN).map((b) => A.bidLine(memberTag(b.member_id, b.name), b.amount, b.dropped ? (A.dropped[b.dropped] ?? b.dropped) : null)) : [A.noBids]));
-    if (a.disposal) tail.push('', Q.disposal(a.disposal, memberTag(a.disposal_by ?? '', d.disposalByName ?? a.disposal_by ?? '')));
+    if (a.disposal) tail.push('', Q.disposal(a.disposal, memberTag(a.disposal_by ?? '', d.disposalByName)));
   }
   // Whole bid lines only, inside Discord's 6,000 characters across the message's embeds (the item card's included).
   const build = (list: string[]): Embed => {
@@ -616,7 +616,7 @@ export async function announceResult(db: D1Database, api: BotApi | null, guild: 
   if (a.message_id) await editCard(db, api, guild.id, `acard:${id}`, channelId, a.message_id, await cardFor(db, guild, a));
   if (a.winner) await refreshStandings(db, api, guild.id, channelId, [a.pool]);
   const name = a.winner ? (await db.prepare('SELECT display_name FROM member WHERE guild_id = ? AND discord_user_id = ?').bind(guild.id, a.winner).first<{ display_name: string }>())?.display_name : null;
-  await postIn(api, channelId, { content: A.result(a.item_name, a.winner ? memberTag(a.winner, name ?? a.winner) : null, a.price, link(guild.id, channelId, a.message_id)) });
+  await postIn(api, channelId, { content: A.result(a.item_name, a.winner ? memberTag(a.winner, name) : null, a.price, link(guild.id, channelId, a.message_id)) });
   return null;
 }
 
