@@ -302,12 +302,12 @@ async function loadRare(c: Ctx, skillId: number | null): Promise<KnownRare[]> {
 export const RARE_EMPTY =
   'No one has marked a reputation or discovery recipe as known yet. Officers set how a recipe is obtained with `/officer recipe-source`; members then mark the ones they know with the **I know this recipe** button on `/item`.';
 
-/** Knowers named per recipe line; the rest are counted (order 16: a knower is now a mention and a name, ~50 characters). */
+/** Knowers named per recipe line; the rest are counted (order 16; since order 42 a knower is a character and a saved name, or a mention when no name is saved). */
 const WHO_MAX = 5;
-/** Order 16: "Annsmith <@id> (Ann), Bohammer <@id> (Bo)" from the query's JSON list of who marked it known, by character name. */
+/** Order 16, as order 42 shows names: "Annsmith · Ann, Bohammer · Bo" from the query's JSON list of who marked it known, by character name. */
 export function whoText(json: string): string {
   const list = (JSON.parse(json) as { name: string; user: string; member: string }[]).sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }));
-  const shown = list.slice(0, WHO_MAX).map((w) => `${md(w.name)} ${memberTag(w.user, w.member)}`);
+  const shown = list.slice(0, WHO_MAX).map((w) => `${md(w.name)} · ${memberTag(w.user, w.member)}`);
   return [...shown, ...(list.length > WHO_MAX ? [`+${list.length - WHO_MAX} more`] : [])].join(', ');
 }
 
@@ -318,7 +318,7 @@ function rareEmbed(list: KnownRare[], page: number, skill: string | null): Embed
     .map((r) => `**${md(r.item)}** · ${r.tradeskill} · ${ACQUISITION_LABEL[r.acquisition]}${r.faction ? ` (${md(r.faction)})` : ''}: ${whoText(r.who)}`);
   return {
     title: truncate(`Reputation and discovery recipes${skill ? ` · ${skill}` : ''}: ${list.length}`, EMBED_LIMITS.title),
-    // Whole lines only: a cut line could split a mention (order 16).
+    // Whole lines only: a cut line could split a name or a fallback mention (orders 16, 42).
     description: lines.length ? fitLines(lines, PAGE_SIZE, EMBED_LIMITS.description) : RARE_EMPTY,
     footer: { text: `Page ${page + 1} of ${pages}` },
   };
@@ -370,5 +370,5 @@ export async function rosterRecipesPage(c: Ctx, customId: string): Promise<Messa
 export async function postRosterRecipes(c: Ctx, args: string[]): Promise<MessageReply> {
   const [skill, page] = args.map(Number);
   const { embed } = await rarePage(c, skill || null, page);
-  return postedReply({ embeds: [embed] }, c.userId);
+  return postedReply({ embeds: [embed] }, c);
 }

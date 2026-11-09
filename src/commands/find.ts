@@ -310,5 +310,5 @@ export async function postFind(c: Ctx, itemId: number): Promise<MessageReply> {
   const d = await loadFind(c.db, c.guild.id, { id: itemId });
   if (!d.item || !d.isResult) return ephemeral(GONE_RECIPE);
   const { embeds, note } = findEmbeds(d, c.guild.learning_window);
-  return postedReply({ content: note ?? undefined, embeds }, c.userId, itemLinks(d.item), [findActions(d.item.id)]);
+  return postedReply({ content: note ?? undefined, embeds }, c, itemLinks(d.item), [findActions(d.item.id)]);
 }

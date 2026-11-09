@@ -57,7 +57,7 @@ export async function editCardItem(db: D1Database, api: BotApi, guildId: string,
 export const pendingItem = (id: number) => `pcard:${id}`;
 
 /** A decided approval card, from its row. The card's text is its embed, which the edit keeps (order 22). */
-const decidedCard = (status: string, by: string | null, name: string | null): Message => ({ content: status === 'approved' ? DKP_COPY.approved(memberTag(by ?? '', name ?? by ?? '')) : DKP_COPY.lapsed, components: [] });
+const decidedCard = (status: string, by: string | null, name: string | null): Message => ({ content: status === 'approved' ? DKP_COPY.approved(memberTag(by ?? '', name)) : DKP_COPY.lapsed, components: [] });
 
 /** A decision just made, shown on its card. A refused edit is flagged for the sweep. */
 export const showDecision = (db: D1Database, api: BotApi, guildId: string, channelId: string, id: number, messageId: string, status: 'approved' | 'lapsed', by: string | null, name: string | null) =>

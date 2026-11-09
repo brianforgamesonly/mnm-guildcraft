@@ -159,7 +159,7 @@ describe('ITEM 0: wording', () => {
     expect(Object.keys(sources).length).toBeGreaterThan(80); // the scan saw the source tree
   });
 
-  it('the cancelled card reads as DKP\'s does, with the name beside the mention', async () => {
+  it('the cancelled card reads as DKP\'s does, naming the officer once by saved name (order 42)', async () => {
     await addEvents();
     const id = await posted();
     await event(officer, 'cancel', { event: String(id), reason: 'test' });
@@ -167,7 +167,8 @@ describe('ITEM 0: wording', () => {
     const e = { ...env, ...TOKEN.env };
     await EVENT_HANDLERS.evcard(e as never, GUILD, String(id), 0, Date.now(), timerApi(e as never, Date.now(), () => 0));
     const d = fake.patches.at(-1)!.body.embeds[0].description as string;
-    expect(d).toContain(`**Cancelled** by <@${officer.user.id}> (Joegandomi). Reason: test`);
+    expect(d).toContain(`**Cancelled** by Joegandomi. Reason: test`);
+    expect(d).not.toContain(`<@${officer.user.id}>`);
   });
 });
 

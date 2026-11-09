@@ -80,7 +80,7 @@ describe('old messages keep working (order 18): Approve, Reject and Stat image',
     expect((await send(press(ann, `ima:${imageId}`), TOKEN)).data.content).toBe('Only officers can do that.');
     const r = await send(press(officer, `ima:${imageId}`), TOKEN);
     expect(r.type).toBe(7);
-    expect(r.data.content).toMatch(/^Screenshot of \*\*Copper Sword\*\* · approved by <@100000000000000009> · <t:\d+:f>$/);
+    expect(r.data.content).toMatch(/^Screenshot of \*\*Copper Sword\*\* · approved by Global 100000000000000009 · <t:\d+:f>$/);
     expect(r.data.components).toEqual([]);
     expect((await one<{ status: string }>('SELECT status FROM item_image')).status).toBe('approved');
     // A second press writes no audit row (order 9 review).

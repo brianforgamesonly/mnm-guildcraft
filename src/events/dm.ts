@@ -146,7 +146,7 @@ export async function leftAndPromoted(env: Pick<Env, 'DB'>, api: BotApi, e: Even
   if (!left.length) return [];
   const promoted = moved.slice(2, -(1 + also.length)).flatMap((r) => r.results.map((x) => x.member_id));
   if (state.channel_id) {
-    const tags = (ids: string[]) => ids.map((m) => memberTag(m, names.get(m) ?? m)).join(', ');
+    const tags = (ids: string[]) => ids.map((m) => memberTag(m, names.get(m))).join(', ');
     const posted = await api.call('POST', `/channels/${state.channel_id}/messages`, { content: truncate([line(md(e.title), tags(left)), ...(promoted.length ? [EVENT_COPY.promotedLine(tags(promoted))] : [])].join('\n'), 2000), allowed_mentions: NO_PINGS });
     if (!posted.ok) console.error('event notice failed', posted.status);
   }

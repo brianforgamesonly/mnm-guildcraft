@@ -36,9 +36,9 @@ beforeEach(async () => {
 });
 
 const lines = (r: any) => (r.data.embeds[0].description as string).split('\n');
-/** Order 16: the member beside each character: seed()'s i-th member, and Ann (her saved name is her global name). */
-const seeded = (i: number) => `<@3000000000000${String(i).padStart(5, '0')}> (m${i})`;
-const ANN_TAG = `<@${ANN}> (Global ${ANN})`;
+/** Order 42: the member beside each character, by saved name alone: seed()'s i-th member, and Ann (her saved name is her global name). */
+const seeded = (i: number) => `m${i}`;
+const ANN_TAG = `Global ${ANN}`;
 
 describe('/roster skill', () => {
   it('ranked by skill level, 15 per page; Previous/Next page across 33 characters; each press a new interaction', async () => {

@@ -2,7 +2,8 @@
 // that re-posts the same content publicly (PRD FR-3). The operator's open question A6 may flip the default:
 // SEARCH_REPLIES_PRIVATE is the single setting.
 import { InteractionResponseFlags, InteractionResponseType } from 'discord-interactions';
-import { button, publicReply, row, type MessageData, type MessageReply } from '../discord.ts';
+import { displayName } from '../access.ts';
+import { button, memberTag, publicReply, row, type GuildMember, type MessageData, type MessageReply } from '../discord.ts';
 
 export const SEARCH_REPLIES_PRIVATE = true;
 
@@ -25,10 +26,11 @@ export function searchReply(data: Omit<MessageData, 'flags' | 'components'>, pos
 }
 
 /**
- * The public copy: same content, link buttons, and who shared it (a mention that never pings). `actionRows`
- * (order 9: /craft find's buttons) are buttons any viewer may press; each press answers that viewer privately.
+ * The public copy: same content, link buttons, and who shared it (order 42: the sharer's saved name, plain: the name
+ * their press saves, read from the interaction, no D1 read). `actionRows` (order 9: /craft find's buttons) are buttons
+ * any viewer may press; each press answers that viewer privately.
  */
-export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, userId: string, links: unknown[] = [], actionRows: unknown[] = []): MessageReply {
-  const by = `-# Shared by <@${userId}>`;
+export function postedReply(data: Omit<MessageData, 'flags' | 'components'>, sharer: { userId: string; member: GuildMember }, links: unknown[] = [], actionRows: unknown[] = []): MessageReply {
+  const by = `-# Shared by ${memberTag(sharer.userId, displayName(sharer.member))}`;
   return publicReply({ ...data, content: data.content ? `${data.content}\n${by}` : by, components: [...(links.length ? [row(links)] : []), ...actionRows] });
 }

@@ -784,7 +784,7 @@ The buttons name actions: the button is Sign up, and the roster says Signed up (
 **The card** (one message in GC-Events).
 
 - Header: title, a type tag, start, duration, zone, description, who posted it, and the lock time.
-- Roster: compact text, grouped by role with each count against its limit, then by class. Each line is Name · Cls 32 · @member (mention text, no ping).
+- Roster: compact text, grouped by role with each count against its limit, then by class. Each line is Name · Cls 32 · \<member's saved name> (plain text, no ping; order 42, was "@member (mention text, no ping)").
 - Tentative, Bench and Waitlist are listed the same way. Can't make it is a count.
 - The roster fills the description (at most 4,096 characters), then fields (at most 1,024 each). The whole embed stays within 6,000. On overflow it ends with "+N more: `/event list`".
 - Buttons, by type: the type's statuses, and Change character and Change role (Raid and Group). Nothing officer-only.
@@ -862,7 +862,7 @@ Marks are derived: "(not signed up)" and the bench list are worked out each time
 **No-shows.**
 
 - When a linked raid closes, the event card gains "No-shows: …". These are members Signed up (only that status) who were neither Present nor Standby at any kill of the raid, nor paid by a flat Pay attendance.
-- Names are shown with memberTag; nobody is pinged. None means "No-shows: none".
+- Names are shown as plain saved names (memberTag, order 42); nobody is pinged. None means "No-shows: none".
 - No-shows are written to the event card when the linked raid closes, even if the event already closed.
 - A raid with no kills and no flat payout records "No-shows: not recorded (no kills)".
 

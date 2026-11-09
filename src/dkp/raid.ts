@@ -458,7 +458,7 @@ export const correctCommand: DkpRun = async (c, opts, d) => {
   const api = apiFor(c);
   try {
     if (api && d.channel_id) {
-      await postIn(api, d.channel_id, { content: RAID_COPY.corrected(memberTag(member, member), action, scope.kills.length, by(c), reason) });
+      await postIn(api, d.channel_id, { content: RAID_COPY.corrected(memberTag(member, null), action, scope.kills.length, by(c), reason) });
       await refreshStandings(c.db, api, c.guild.id, d.channel_id, [scope.raid.pool, POOL_GUILD]);
     }
   } finally {
@@ -485,7 +485,7 @@ async function historyPage(c: Ctx, member: string, pool: string, page: number): 
   const lines = results.slice(0, HISTORY_PAGE).map((r) => RAID_COPY.historyLine(unix(r.at), r.amount, r.cut, r.balance_after, r.kind, r.kill_name, r.reason));
   const id = (p: number) => `${HISTORY_PAGE_PREFIX}${member}:${p}:${pool}`.slice(0, 100);
   return {
-    embeds: [{ title: truncate(RAID_COPY.historyTitle(names.get(pool)!), 256), description: [memberTag(member, member), '', ...(lines.length ? lines : [RAID_COPY.noHistory])].join('\n') }],
+    embeds: [{ title: truncate(RAID_COPY.historyTitle(names.get(pool)!), 256), description: [memberTag(member, null), '', ...(lines.length ? lines : [RAID_COPY.noHistory])].join('\n') }],
     components: page > 0 || more ? [row([button(id(page - 1), RAID_COPY.previous, STYLE_SECONDARY, page === 0), button(id(page + 1), RAID_COPY.next, STYLE_SECONDARY, !more)])] : [],
   };
 }

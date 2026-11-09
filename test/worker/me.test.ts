@@ -194,7 +194,9 @@ describe('/officer edit-member: the member\'s panel for an officer, re-checked o
   it('opens the panel without the member-only buttons; an edit is recorded as the officer\'s', async () => {
     await add('Testchar');
     const r = await send(cmd(officer, 'officer', 'edit-member', { member: ANN }));
-    expect(r.data.content).toMatch(/^\*\*Acting for <@100000000000000001> \(Global 100000000000000001\)\.\*\*/);
+    // Order 42: the member named once, by saved name, never as a mention as well.
+    expect(r.data.content).toMatch(/^\*\*Acting for Global 100000000000000001\.\*\*/);
+    expect(r.data.content).not.toContain('<@100000000000000001>');
     // Order 35: the same Gear button on the member's character.
     expect(buttons(r).map((b: any) => b.label)).toEqual([ME_COPY.edit, ME_COPY.remove, ME_COPY.update, ME_COPY.gear('Testchar')]);
     const modal = await send(press(officer, byLabel(r, ME_COPY.edit).custom_id));

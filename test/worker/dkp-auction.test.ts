@@ -181,8 +181,10 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     const spend = await one<{ amount: number; kind: string; actor: string; auction_id: number }>("SELECT amount, kind, actor, auction_id FROM dkp_ledger WHERE kind = 'spend'");
     expect(spend).toEqual({ amount: -5, kind: 'spend', actor: 'bot', auction_id: a.id });
     const result = cardOf(a.message_id).embeds[1].description;
-    expect(result).toContain(AUCTION_COPY.sold(`<@${kestrel.user.id}> (Kestrel)`, 5));
-    expect(result).toContain(`<@${kestrel.user.id}> (Kestrel): 20`);
+    expect(result).toContain(AUCTION_COPY.sold('Kestrel', 5));
+    expect(result).toContain(`\nKestrel: 20`);
+    // Order 42: the winner is named once, by saved name, never as a mention as well.
+    expect(result).not.toContain(`<@${kestrel.user.id}>`);
     expect(cardOf(a.message_id).components).toEqual([]);
     const line = fake.messages.find((m) => m.body.content?.startsWith('**Auction closed'))!;
     expect(line.body.allowed_mentions).toEqual({ parse: [] });
@@ -219,7 +221,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     await closeAt(a.id);
     expect(await auction()).toMatchObject({ status: 'sold', winner: pip.user.id, price: 5 });
     const text = cardOf(a.message_id).embeds[1].description;
-    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 35 (did not count: ${AUCTION_COPY.dropped.balance})`);
+    expect(text).toContain(`\nKestrel: 35 (did not count: ${AUCTION_COPY.dropped.balance})`);
     expect(await one("SELECT dropped FROM dkp_bid WHERE member_id = ?", kestrel.user.id)).toEqual({ dropped: 'balance' });
   });
 
@@ -295,8 +297,8 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect((await auction()).status).toBe('cancelled');
     const text = cardOf(a.message_id).embeds[1].description;
     expect(text).toContain('Reason: wrong drop');
-    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 11`);
-    expect(text).toContain(`<@${officer.user.id}> (Officer): 8`);
+    expect(text).toContain(`\nKestrel: 11`);
+    expect(text).toContain(`\nOfficer: 8`);
     expect(fake.messages.some((m) => m.body.content?.startsWith('**Auction cancelled: Fungal Robe.**'))).toBe(true);
     expect(await count('dkp_ledger', "kind = 'spend'")).toBe(0);
     // Its timer finds it cancelled: nothing.
@@ -409,7 +411,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     await pressAs(admin, REMOVE_DKP_PREFIX);
     expect(await auction()).toMatchObject({ status: 'cancelled' });
     expect(await one('SELECT reason, cancelled_by FROM dkp_auction WHERE id = ?', a.id)).toEqual({ reason: AUCTION_COPY.removedReason, cancelled_by: 'bot' });
-    expect(cardOf(a.message_id).embeds[1].description).toContain(`<@${kestrel.user.id}> (Kestrel): 9`);
+    expect(cardOf(a.message_id).embeds[1].description).toContain(`\nKestrel: 9`);
     expect(await timersOf(env, GUILD).list()).toEqual({});
     expect((await pressAs(kestrel, `${BID_PREFIX}${a.id}`)).data.content).toBe(DKP_COPY.off);
   });
@@ -429,8 +431,10 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     await closeAt(a.id);
     expect(await auction()).toMatchObject({ status: 'sold', winner: kestrel.user.id, price: 5 });
     const text = cardOf(a.message_id).embeds[1].description;
+    // Order 42: bidders are named by saved name, so the withdrawn bid is looked for by name (a line "Officer: ...").
+    expect(text).not.toMatch(/(^|\n)Officer: /);
     expect(text).not.toContain(`<@${officer.user.id}>`);
-    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 6`);
+    expect(text).toContain(`\nKestrel: 6`);
   });
 
   it('review of PR B: the close waits for a run with the calls it needs; the result is its own item and posts the line', async () => {
@@ -470,7 +474,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect((await one<{ status: string }>("SELECT status FROM dkp_auction WHERE item_id = 7003")).status).toBe('queued');
     await HANDLERS.render(withToken, GUILD, String(r.id), 0, Date.now(), timerApi(withToken, Date.now(), () => 0));
     const raidCard = cardOf(r.message_id).embeds[0].description;
-    expect(raidCard).toContain(`${QUEUE_COPY.wonTonight}\n${QUEUE_COPY.wonLine('Fungal Robe', `<@${kestrel.user.id}> (Kestrel)`, 3)}`);
+    expect(raidCard).toContain(`${QUEUE_COPY.wonTonight}\n${QUEUE_COPY.wonLine('Fungal Robe', 'Kestrel', 3)}`);
     expect(raidCard).toContain(QUEUE_COPY.upNext(1));
     // A cancel opens the next one as well.
     await send(submit(officerB, `${CANCEL_MODAL_PREFIX}${rows[1].id}`, { reason: 'duplicate' }), TOKEN);
@@ -506,7 +510,7 @@ describe('raid auctions (order 29, ITEM 4)', () => {
     expect(await one('SELECT disposal, disposal_by FROM dkp_auction WHERE id = ?', a.id)).toEqual({ disposal: 'Given to the guild bank', disposal_by: officer.user.id });
     expect(cardOf(a.message_id).embeds[1].description).toContain('**What was done:** Given to the guild bank');
     expect(cardOf(a.message_id).components).toEqual([]);
-    expect(fake.messages.some((m) => m.body.content === QUEUE_COPY.disposalLine('Lantern', 'Given to the guild bank', `<@${officer.user.id}> (Officer)`))).toBe(true);
+    expect(fake.messages.some((m) => m.body.content === QUEUE_COPY.disposalLine('Lantern', 'Given to the guild bank', 'Officer'))).toBe(true);
     expect((await send(submit(officerB, `${RECORD_MODAL_PREFIX}${a.id}`, { disposal: 'again' }), TOKEN)).data.content).toBe(QUEUE_COPY.notRecordable);
   });
 
@@ -570,8 +574,8 @@ describe('/dkp cancel (order 31)', () => {
     expect(done.data.content).toBe(AUCTION_COPY.cancelledReply);
     expect(done.data.flags).toBe(64);
     const text = cardOf(a.message_id).embeds[1].description;
-    expect(text).toContain(AUCTION_COPY.cancelledBy(`<@${officerB.user.id}> (OfficerB)`, 'wrong drop'));
-    expect(text).toContain(`<@${kestrel.user.id}> (Kestrel): 11`);
+    expect(text).toContain(AUCTION_COPY.cancelledBy('OfficerB', 'wrong drop'));
+    expect(text).toContain(`\nKestrel: 11`);
     expect(cardOf(a.message_id).components).toEqual([]);
     const posts = () => fake.messages.filter((m) => m.body.content?.startsWith('**Auction')).length;
     expect(posts()).toBe(1);
@@ -793,7 +797,7 @@ describe('the shop (order 29, ITEM 7)', () => {
     expect((await pressAs(kestrel, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.limit(1));
     expect((await pressAs(pip, `${BUY_PREFIX}${l.id}`)).data.content).toBe(SHOP_COPY.poor(4, 3));
     expect(await one("SELECT amount, kind, actor FROM dkp_ledger WHERE kind = 'spend'")).toEqual({ amount: -4, kind: 'spend', actor: 'bot' });
-    expect(fake.messages.some((m) => m.body.content === SHOP_COPY.purchaseLine(`<@${kestrel.user.id}> (Kestrel)`, 'Lantern', 4) && m.body.allowed_mentions?.parse?.length === 0)).toBe(true);
+    expect(fake.messages.some((m) => m.body.content === SHOP_COPY.purchaseLine('Kestrel', 'Lantern', 4) && m.body.allowed_mentions?.parse?.length === 0)).toBe(true);
     await pressAs(wren, `${BUY_PREFIX}${l.id}`);
     expect(cardOf(l.message_id).embeds[1].description).toContain(SHOP_COPY.soldOut);
     expect(cardOf(l.message_id).components).toEqual([]);

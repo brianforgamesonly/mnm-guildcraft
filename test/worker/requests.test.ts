@@ -283,8 +283,9 @@ describe('/craft request: the unsent request, then Send', () => {
     const r = await request(ann, 'Copper Plate Breastplate');
     expect(r.data.flags).toBe(64);
     expect(r.data.content).toContain('No opted-in crafter can make it yet.');
-    expect(r.data.content).toContain(`<@${BO}> (Bo)`);
-    expect(r.data.content).not.toContain(`<@${ANN}>`); // never routed to the requester
+    expect(r.data.content).toContain('ask them directly: Dee, Cy, Bo');
+    expect(r.data.content).not.toContain('<@'); // order 42: plain names, no mentions
+    expect(r.data.content).not.toContain('Ann'); // never routed to the requester
     expect(button(r, 'Send request').disabled).toBe(true);
     expect(threads.size).toBe(0);
   });
@@ -296,16 +297,22 @@ describe('/craft request: the unsent request, then Send', () => {
     expect(t).toMatchObject({ type: 12, invitable: false, autoArchive: 10080, name: '[Open] Copper Plate Breastplate ×2 · Testchar' });
     expect([...t.members].sort(), JSON.stringify(sent.data.content)).toEqual([APP_ID, ANN, BO].sort());
     expect(sent.data.content).toContain(`Sent: <#${t.id}>. 1 crafter added and pinged there.`);
-    expect(sent.data.content).toContain(`<@${CY}> (Cy): can't see <#${REQ}>`);
-    expect(sent.data.content).toContain(`<@${DEE}> (Dee): no longer in the server`);
+    expect(sent.data.content).toContain(`Cy: can't see <#${REQ}>`);
+    expect(sent.data.content).toContain('Dee: no longer in the server');
+    expect(sent.data.content).not.toContain('<@');
     expect(sent.data.content).not.toContain(EVE);
     const first = firstMessage(t);
-    expect(first.content).toContain(`## Craft request from <@${ANN}> (Ann) (Testchar)`);
+    // Order 42: one name, plain, no brackets; "· <character>" after it.
+    expect(first.content.split('\n')[0]).toBe('## Craft request from Ann · Testchar');
     expect(first.content).toContain('**Copper Plate Breastplate** ×2 · Open');
-    expect(first.content).toContain(`Crafters: <@${BO}> (Bo)`);
+    expect(first.content).toContain('Crafters: Bo');
+    expect(first.content).not.toContain('<@');
     expect(first.content).toContain('**Note:** For the raid');
-    // The first message pings only the crafters it adds.
-    expect(first.allowed_mentions).toEqual({ parse: [], users: [BO] });
+    // The first message pings nobody; the crafters it adds are pinged by the short message right after it, which names
+    // only them, as mentions.
+    expect(first.allowed_mentions).toEqual({ parse: [] });
+    expect([...t.messages.values()][1]).toEqual({ content: `<@${BO}>: a new craft request for you`, allowed_mentions: { parse: [], users: [BO] } });
+    expect(t.messages.size).toBe(2);
     expect(buttons({ data: first }).map((b: any) => b.label)).toEqual(["I'll craft this", 'Done', 'Cancel']);
     expect(await one('SELECT status, thread_id, message_id, thread_name FROM craft_request')).toMatchObject({ status: 'open', thread_id: t.id, thread_name: t.name });
     expect(await count('audit_log', "action = 'request.create'")).toBe(1);
@@ -357,7 +364,7 @@ describe('/craft request: the unsent request, then Send', () => {
     const added = await send(submit(ann, button(draft, 'Add item').custom_id.replace('rqa:', 'rqam:'), { item: 'clockwork gadget', qty: '1' }), TOKEN);
     expect(added.data.content).toMatch(/3\. \*\*Clockwork Gadget\*\* ×1 · No opted-in crafter can make it yet/);
     const sent = await send(press(ann, button(added, 'Send request').custom_id), TOKEN);
-    expect(sent.data.content).toContain('**Wool Cap** ×3: <@100000000000000002> (Bo)');
+    expect(sent.data.content).toContain('**Wool Cap** ×3: Bo');
     expect(sent.data.content).toContain('**Clockwork Gadget** ×1: no crafter added');
     expect(thread().name).toBe('[Open] Copper Plate Breastplate ×1 +2 more · Testchar');
     expect(buttons({ data: firstMessage(thread()) }).map((b: any) => b.label)).toEqual([
@@ -379,7 +386,8 @@ describe('/craft request: the unsent request, then Send', () => {
 
 describe('the thread: claim, done, cancel', () => {
   const press1 = (m: ReturnType<typeof as>, label: string) => send(press(m, buttons({ data: firstMessage(thread()) }).find((b: any) => b.label === label).custom_id), TOKEN);
-  const notices = () => [...thread().messages.values()].slice(1);
+  // After the first message and the crafters' ping (order 42).
+  const notices = () => [...thread().messages.values()].slice(2);
 
   it("I'll craft this pings the requester; Done pings the other party; the last item closes, locks and archives the thread", async () => {
     await sendPlate();
@@ -388,13 +396,17 @@ describe('the thread: claim, done, cancel', () => {
     const claim = await press1(bo, "I'll craft this");
     expect(claim.data.flags).toBe(64);
     expect(claim.data.content).toContain("You're down to craft **Copper Plate Breastplate** ×2.");
-    expect(notices()[0]).toEqual({ content: `<@${ANN}>: <@${BO}> will craft **Copper Plate Breastplate** ×2.`, allowed_mentions: { parse: [], users: [ANN] } });
+    expect(claim.data.content).toContain('Ann has been told.');
+    // Order 42: the pinged requester is their mention; the crafter who acted is their saved name.
+    expect(notices()[0]).toEqual({ content: `<@${ANN}>: Bo will craft **Copper Plate Breastplate** ×2.`, allowed_mentions: { parse: [], users: [ANN] } });
     expect(thread().name).toBe('[Claimed] Copper Plate Breastplate ×2 · Testchar');
-    expect(firstMessage(thread()).content).toContain(`· Claimed by <@${BO}> (Bo)`);
+    expect(firstMessage(thread()).content).toContain('· Claimed by Bo');
+    expect(firstMessage(thread()).content).not.toContain('<@');
     expect((await press1(cy, 'Done')).data.content).toMatch(/Only the crafter who took it, or the requester/);
     await press1(bo, 'Done');
     expect(notices()[1].allowed_mentions).toEqual({ parse: [], users: [ANN] });
-    expect(notices()[1].content).toContain('Every item is done or cancelled, so this thread is now closed.');
+    expect(notices()[1].content).toBe(`<@${ANN}>: **Copper Plate Breastplate** ×2 is done (marked by Bo). Every item is done or cancelled, so this thread is now closed.`);
+    expect(firstMessage(thread()).content).toContain('· Done by Bo');
     expect(thread()).toMatchObject({ name: '[Done] Copper Plate Breastplate ×2 · Testchar', locked: true, archived: true });
     expect(firstMessage(thread()).components).toEqual([]);
     expect(await one('SELECT status, close_reason FROM craft_request')).toEqual({ status: 'closed', close_reason: 'done' });
@@ -406,7 +418,7 @@ describe('the thread: claim, done, cancel', () => {
     await press1(bo, "I'll craft this");
     expect((await press1(bo, 'Cancel')).data.content).toMatch(/Only the requester can cancel/);
     await press1(ann, 'Cancel');
-    expect(notices().at(-1)).toEqual({ content: `<@${BO}>: **Copper Plate Breastplate** ×2 was cancelled by <@${ANN}>. Every item is done or cancelled, so this thread is now closed.`, allowed_mentions: { parse: [], users: [BO] } });
+    expect(notices().at(-1)).toEqual({ content: `<@${BO}>: **Copper Plate Breastplate** ×2 was cancelled by Ann. Every item is done or cancelled, so this thread is now closed.`, allowed_mentions: { parse: [], users: [BO] } });
     expect(thread()).toMatchObject({ name: '[Cancelled] Copper Plate Breastplate ×2 · Testchar', locked: true });
   });
 
@@ -520,7 +532,8 @@ describe('open requests: Cancel a request on /me (own), /officer requests (all)'
     await send(press(bo, buttons({ data: firstMessage(thread()) })[0].custom_id), TOKEN);
     const list = await send(rawCmd(off, 'officer', 'requests'), TOKEN);
     expect(list.data.flags).toBe(64);
-    expect(list.data.content).toContain(`from <@${ANN}> (Ann)`);
+    expect(list.data.content).toContain('from Ann');
+    expect(list.data.content).not.toContain(`<@${ANN}>`);
     const id = String((await one<{ id: number }>('SELECT id FROM craft_request')).id);
     const done = await send(select(off, 'rql:', [id]), TOKEN);
     expect(done.data.content).toContain(`Cancelled request #${id}`);
@@ -560,5 +573,100 @@ describe('thread names', () => {
     expect(name.length).toBeLessThanOrEqual(100);
     expect(name.startsWith('[Claimed] AAA')).toBe(true);
     expect(name.endsWith('… ×2 +1 more · Testchar')).toBe(true);
+  });
+});
+
+describe('order 42: names once, plain; a mention only where it pings', () => {
+  const userMentions = (s: string) => [...s.matchAll(/<@!?(\d+)>/g)].map((m) => m[1]);
+  /** B13's control: a ping is real only if the pinged member's mention is in that same message's content. */
+  const checkPings = () => {
+    const posts = calls.filter((c) => /\/channels\/\d+\/messages(\/\d+)?$/.test(c.path) && (c.method === 'POST' || c.method === 'PATCH') && c.body?.content !== undefined);
+    expect(posts.length).toBeGreaterThan(0);
+    const pinged: string[][] = [];
+    for (const p of posts) {
+      const users: string[] = p.body.allowed_mentions?.users ?? [];
+      expect(p.body.allowed_mentions?.parse, p.path).toEqual([]);
+      if (p.method === 'PATCH') expect(users, 'an edit never pings').toEqual([]);
+      // Every member it pings is mentioned in it; every member mentioned in a ping message is one it pings.
+      for (const u of users) expect(userMentions(p.body.content), `${u} pinged without a mention`).toContain(u);
+      if (users.length) expect(userMentions(p.body.content).every((u) => users.includes(u)), p.body.content).toBe(true);
+      // A message that pings nobody names members by saved name, never as a mention (each has one here).
+      else expect(userMentions(p.body.content), p.body.content).toEqual([]);
+      if (users.length) pinged.push(users);
+    }
+    return pinged;
+  };
+
+  it('the same members are pinged, each by a message that mentions them: the crafters (right after the first message), the requester on a claim, the other party on Done', async () => {
+    await sendPlate();
+    const press1 = (m: ReturnType<typeof as>, label: string) => send(press(m, buttons({ data: firstMessage(thread()) }).find((b: any) => b.label === label).custom_id), TOKEN);
+    await press1(bo, "I'll craft this");
+    await press1(bo, 'Done');
+    expect(checkPings()).toEqual([[BO], [ANN], [ANN]]);
+    // No rendered line holds both a member's mention and their name.
+    for (const msg of thread().messages.values()) for (const [id, name] of [[ANN, 'Ann'], [BO, 'Bo']]) expect(msg.content.includes(`<@${id}>`) && msg.content.includes(name), msg.content).toBe(false);
+  });
+
+  it('an officer who is not involved cancels: the notice pings the requester and names the officer by saved name', async () => {
+    await sendPlate();
+    const press1 = (m: ReturnType<typeof as>, label: string) => send(press(m, buttons({ data: firstMessage(thread()) }).find((b: any) => b.label === label).custom_id), TOKEN);
+    await press1(off, 'Cancel');
+    expect([...thread().messages.values()].at(-1).content).toBe(`<@${ANN}>: **Copper Plate Breastplate** ×2 was cancelled by Off. Every item is done or cancelled, so this thread is now closed.`);
+    expect(checkPings()).toEqual([[BO], [ANN]]);
+  });
+
+  it('a crafters\' ping that fails is not claimed in the reply', async () => {
+    const real = botApi.handle!;
+    let posts = 0;
+    botApi.handle = async (method, path, body) => {
+      if (method === 'POST' && /^\/channels\/\d+\/messages$/.test(path) && path !== `/channels/${REQ}/messages` && ++posts === 2) {
+        calls.push({ method, path, body });
+        return new Response(JSON.stringify({ code: 50013, message: 'Missing Permissions' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+      return real(method, path, body);
+    };
+    const sent = await sendPlate();
+    expect(sent.data.content).toContain(`Sent: <#${thread().id}>. 1 crafter added there.`);
+    expect(sent.data.content).toContain("-# The crafters' ping didn't go out");
+    expect(requestLogs().find((l) => l.action === 'create' && l.crafter_ping)).toBeTruthy();
+  });
+
+  it('a first message posted late by the sweep pings nobody, and the crafters\' ping follows it once', async () => {
+    const real = botApi.handle!;
+    let refused = false;
+    botApi.handle = async (method, path, body) => {
+      if (!refused && method === 'POST' && /^\/channels\/\d+\/messages$/.test(path) && path !== `/channels/${REQ}/messages`) {
+        refused = true;
+        calls.push({ method, path, body });
+        return new Response(JSON.stringify({ code: 50013, message: 'Missing Permissions' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+      return real(method, path, body);
+    };
+    const sent = await sendPlate();
+    expect(sent.data.content).toContain("The thread's first message didn't go out");
+    expect(thread().messages.size).toBe(0); // no ping without the message it belongs to
+    const swept = await runCron();
+    expect(swept).toMatchObject({ first_messages: 1 });
+    const [first, ping] = [...thread().messages.values()];
+    expect(first.allowed_mentions).toEqual({ parse: [] });
+    expect(first.content.split('\n')[0]).toBe('## Craft request from Ann · Testchar');
+    expect(ping).toEqual({ content: `<@${BO}>: a new craft request for you`, allowed_mentions: { parse: [], users: [BO] } });
+    await runCron();
+    expect(thread().messages.size).toBe(2); // the next sweep pings nobody again
+  });
+
+  it('a member with no saved name is shown as the mention alone, never as a raw id; no character, no "·"', async () => {
+    const { requestContent } = await import('../../src/requests.ts');
+    const req = { id: 1, guild_id: GUILD, requester: ANN, note: null, status: 'open', close_reason: null, thread_id: null, message_id: null, thread_name: null, created_at: at, opened_at: at, main: null, last_activity: null } as const;
+    const items = [{ request_id: 1, position: 1, item_id: 1, name: 'Wool Cap', quantity: 1, status: 'done', claimer: BO, crafters_json: JSON.stringify([BO]) }] as any;
+    const none = requestContent(req as any, items, new Map());
+    expect(none.split('\n')[0]).toBe(`## Craft request from <@${ANN}>`);
+    expect(none).toContain(`Done by <@${BO}>`);
+    // Every id shown is inside a mention: never bare digits.
+    expect(none.replace(/<@\d+>/g, '')).not.toMatch(/\d{17,}/);
+    const named = requestContent(req as any, items, new Map([[ANN, 'Ann'], [BO, 'Bo_1']]));
+    expect(named.split('\n')[0]).toBe('## Craft request from Ann');
+    expect(named).toContain('Done by Bo\\_1'); // markdown-escaped
+    expect(named).not.toContain('<@');
   });
 });

@@ -55,8 +55,8 @@ export const WEIGHTS_COPY = {
 
 const display = (c: Ctx) => c.member.nick ?? c.member.user.global_name ?? c.member.user.username;
 const who = (c: Ctx) => memberTag(c.userId, display(c));
-/** A setter as a mention with their saved name beside it (order 16), or the mention alone when no name is saved. */
-const setter = (id: string, name: string | null) => (name ? memberTag(id, name) : `<@${id}>`);
+/** A setter by their saved name, plain (order 42), or the mention alone when no name is saved. */
+const setter = (id: string, name: string | null) => memberTag(id, name);
 
 /** Posts one line in the review channel (pings nobody), after the change is written. */
 async function postReview(c: Ctx, content: string): Promise<PostResult> {

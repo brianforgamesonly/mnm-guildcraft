@@ -204,10 +204,10 @@ function header(e: EventRow, now: number, noShows: string | null): string {
   const lock = e.lock_at ? Date.parse(e.lock_at) : null;
   const zone = e.zone_key ? md(e.zone_name ?? e.zone_key) : null;
   return [
-    e.status === 'cancelled' ? EVENT_COPY.cancelledLine(memberTag(e.cancelled_by ?? '', e.canceller_name ?? e.cancelled_by ?? ''), e.cancel_reason ?? '') : e.status === 'closed' ? EVENT_COPY.closedLine : null,
+    e.status === 'cancelled' ? EVENT_COPY.cancelledLine(memberTag(e.cancelled_by ?? '', e.canceller_name), e.cancel_reason ?? '') : e.status === 'closed' ? EVENT_COPY.closedLine : null,
     noShows,
     `${stamp(start, 'F')} (${stamp(start, 'R')})`,
-    [EVENT_COPY.duration(hours), zone, EVENT_COPY.posted(memberTag(e.posted_by, e.poster_name ?? e.posted_by))].filter(Boolean).join(' · '),
+    [EVENT_COPY.duration(hours), zone, EVENT_COPY.posted(memberTag(e.posted_by, e.poster_name))].filter(Boolean).join(' · '),
     e.status === 'open' || e.status === PREVIEW ? (lock === null ? EVENT_COPY.noLock : lock <= now ? EVENT_COPY.locked(stamp(lock, 'f')) : EVENT_COPY.locks(stamp(lock, 'f'), stamp(lock, 'R'))) : null,
     e.signup_role ? EVENT_COPY.signupRole(e.signup_role) : null,
     e.description ? md(e.description) : null,

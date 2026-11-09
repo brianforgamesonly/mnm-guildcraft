@@ -334,7 +334,7 @@ describe('the ledger (ITEM 2)', () => {
   it('named-value: officers set a named\'s points in a zone, posted publicly', async () => {
     expect((await dkp(officerA, 'named-value', { zone: 'The Ruins', named: 'Kestrel the Old', points: 15 })).data.content).toBe(DKP_COPY.settingSaved);
     expect(await one('SELECT zone_key, name, points FROM dkp_named_value')).toEqual({ zone_key: 'the ruins', name: 'Kestrel the Old', points: 15 });
-    expect(fake.messages.some((m) => m.body.content === DKP_COPY.namedValue('Kestrel the Old', 'The Ruins', 15, `<@${officerA.user.id}> (Global ${officerA.user.id})`))).toBe(true);
+    expect(fake.messages.some((m) => m.body.content === DKP_COPY.namedValue('Kestrel the Old', 'The Ruins', 15, `Global ${officerA.user.id}`))).toBe(true);
   });
 
   it('Full standings answers privately and pages; the standings message names the top members only', async () => {
@@ -351,7 +351,9 @@ describe('the ledger (ITEM 2)', () => {
     const next = await pressAs(memberX, `${FULL_PAGE_PREFIX}${POOL_GUILD}:1`);
     expect(next.type).toBe(7);
     // The frozen member ('left') is marked, last with 1 point.
-    expect(next.data.embeds![0].description).toContain(`<@${ids[0]}> (M0): **1**${DKP_COPY.frozen}`);
+    expect(next.data.embeds![0].description).toContain(`. M0: **1**${DKP_COPY.frozen}`);
+    // Order 42: a member with a saved name is named by it alone, never as a mention as well.
+    expect(next.data.embeds![0].description).not.toContain(`<@${ids[0]}>`);
   });
 });
 

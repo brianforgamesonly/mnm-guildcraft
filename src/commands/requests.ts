@@ -3,14 +3,14 @@
 // src/requests.ts. Every reply here is private; the only messages others see are the thread's (its first message, and
 // the claim, done and cancel notices), and those ping only as order 16's override 2 allows.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
-import { now } from '../access.ts';
+import { displayName, now } from '../access.ts';
 import { botApi, type BotApi } from '../board/api.ts';
 import { AUTO_ARCHIVE_MINUTES } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, memberTag, mention, optInt, optString, pingOnly, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, ephemeral, md, memberTag, mention, NO_PINGS, optInt, optString, plural, row, STYLE_DANGER, STYLE_PRIMARY, STYLE_SECONDARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import {
-  auditIfChanged, closeStatements, syncChanged, crafters, involved, isEligible, ITEM_PREFIX, ITEMS_SQL, loadRequest, MAX_ADDED, MAX_ITEMS, MAX_OPEN_PER_MEMBER, MAX_QUANTITY, namesOf, NO_REQUEST_CHANNEL, NOTE_MAX, prefixOf,
-  REQUEST_COLS, requestComponents, requestContent, routeItems, syncThread, syncWrite, target, threadName, whoCanView, UNSENT_MS, type Crafter, type ItemAction, type ItemRoute, type ItemRow, type Names, type RequestRow,
+  auditIfChanged, closeStatements, syncChanged, crafterPing, crafters, involved, isEligible, ITEM_PREFIX, ITEMS_SQL, loadRequest, MAX_ADDED, MAX_ITEMS, MAX_OPEN_PER_MEMBER, MAX_QUANTITY, namesOf, NO_REQUEST_CHANNEL, NOTE_MAX, prefixOf,
+  REQUEST_COLS, requestComponents, requestContent, routeItems, syncThread, syncWrite, tag, target, threadName, whoCanView, UNSENT_MS, type Crafter, type ItemAction, type ItemRoute, type ItemRow, type Names, type RequestRow,
 } from '../requests.ts';
 import { visibleTo } from '../recipes.ts';
 import { GONE_RECIPE, noRecipe } from './find.ts';
@@ -25,9 +25,12 @@ export const LIST_PREFIX = 'rql:';
 const ITEM_INPUT = 'item';
 const QTY_INPUT = 'qty';
 
-/** The Discord calls one button may make: a send is 4 reads, a create, up to MAX_ADDED + 1 adds and a message. */
+/**
+ * The Discord calls one button may make: a send is 3 reads plus the member-list pages, a create, up to MAX_ADDED + 1
+ * adds and two messages (order 42: the first message, then the crafters' ping, one more call than before).
+ */
 const apiFor = (c: Ctx): BotApi | null =>
-  c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: MAX_ADDED + 12, deadline: Date.now() + 20_000 }) : null;
+  c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: MAX_ADDED + 13, deadline: Date.now() + 20_000 }) : null;
 
 /** One log line per request action: its D1 rows written (measured from D1's own meta) and its Discord calls. */
 export function logAction(action: string, rowsWritten: number, api: BotApi | null, extra: Record<string, unknown> = {}) {
@@ -35,7 +38,9 @@ export function logAction(action: string, rowsWritten: number, api: BotApi | nul
 }
 export const written = (rs: D1Result[]) => rs.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0);
 
-const tagOf = (names: Names, id: string) => (names.has(id) ? memberTag(id, names.get(id)!) : mention(id));
+const tagOf = tag;
+/** Order 42: saved names, with the presser's own (from the interaction) where the read didn't hold it. */
+const withMe = (names: Names, mine: Names): Names => new Map([...mine, ...names]);
 const crafterList = (cs: Crafter[]) => cs.map((x) => memberTag(x.userId, x.member)).join(', ');
 
 // ---------------------------------------------------------------- craft request notices (set with /me's Notices, order 18)
@@ -298,20 +303,24 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
   const first = await api.call<{ id: string }>('POST', `/channels/${thread}/messages`, {
     content: requestContent(open, withCrafters, names),
     components: requestComponents(open, withCrafters),
-    // The only pings: the crafters it adds (order 16, override 2).
-    allowed_mentions: pingOnly(sentTo.map((x) => x.userId)),
+    // Order 42: plain names, pinging nobody; the crafters it adds are pinged by the short message right after it.
+    allowed_mentions: NO_PINGS,
   });
+  const ping = first.ok && sentTo.length ? await api.call('POST', `/channels/${thread}/messages`, crafterPing(sentTo.map((x) => x.userId))) : null;
+  const pingError = ping && !ping.ok ? `${ping.status} ${ping.code ?? ''}`.trim() : null;
   const res = await c.db.batch([
     ...withCrafters.map((it) => c.db.prepare('UPDATE craft_request_item SET crafters_json = ? WHERE request_id = ? AND position = ?').bind(it.crafters_json, id, it.position)),
     c.db.prepare('UPDATE craft_request SET thread_id = ?, message_id = ?, thread_name = ? WHERE id = ? AND thread_id IS NULL').bind(thread, first.ok ? first.body.id : null, name, id),
     auditIfChanged(c.db, c.guild.id, c.userId, 'request.create', target(id), null, { items: items.map((i) => ({ item: i.item_id, quantity: i.quantity })), added: sentTo.length, left_out: left.length }),
   ]);
-  logAction('create', written([claimed, ...res]), api, { items: items.length, added: sentTo.length, left_out: left.length });
+  logAction('create', written([claimed, ...res]), api, { items: items.length, added: sentTo.length, left_out: left.length, ...(pingError ? { crafter_ping: pingError } : {}) });
   const lines = [
-    `Sent: <#${thread}>. ${plural(sentTo.length, 'crafter')} added and pinged there.`,
+    `Sent: <#${thread}>. ${plural(sentTo.length, 'crafter')} added${pingError ? '' : ' and pinged'} there.`,
     ...withCrafters.map((it) => `**${md(it.name)}** ×${it.quantity}: ${crafters(it).length ? crafters(it).map((u) => tagOf(names, u)).join(', ') : 'no crafter added'}`),
     ...(left.length ? ['Left out:', ...left.map((l) => `${memberTag(l.userId, l.member)}: ${l.why}`)] : []),
     ...(first.ok ? [] : ["-# The thread's first message didn't go out; it is posted within 15 minutes."]),
+    // Order 42: the ping is its own message; if it alone failed, the requester is told (it is not sent again).
+    ...(pingError ? ["-# The crafters' ping didn't go out, so they may not have noticed: say hello in the thread."] : []),
   ];
   return updateMessage({ content: lines.join('\n').slice(0, 2000), components: [] });
 }
@@ -333,8 +342,10 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
   let from: string;
   let auditAction: string;
   let ping: string[];
-  let notice: string;
-  let reply: string;
+  // Order 42: the pinged member is their mention (it pings, so it resolves); anyone else named is their saved name,
+  // from the names the sync below already reads (the mention alone when none is held).
+  let notice: (t: (id: string) => string) => string;
+  let reply: (t: (id: string) => string) => string;
   if (action === 'c') {
     if (it.status !== 'open') return ephemeral(it.claimer === me ? 'You already took this item.' : 'Someone already took this item.');
     if (!(await isEligible(c.db, c.guild.id, me, it.item_id, req.requester, c.guild.learning_window)))
@@ -343,8 +354,8 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
     from = 'open';
     auditAction = 'request.claim';
     ping = [req.requester];
-    notice = `${mention(req.requester)}: ${mention(me)} will craft ${IT(it)}.`;
-    reply = `You're down to craft ${IT(it)}. ${mention(req.requester)} has been told. Press **Done** when it's handed over.`;
+    notice = (t) => `${mention(req.requester)}: ${t(me)} will craft ${IT(it)}.`;
+    reply = (t) => `You're down to craft ${IT(it)}. ${t(req.requester)} has been told. Press **Done** when it's handed over.`;
   } else if (action === 'd') {
     if (it.status !== 'claimed') return ephemeral('Only an item someone has taken can be marked done.');
     if (me !== it.claimer && me !== req.requester) return ephemeral('Only the crafter who took it, or the requester, can mark it done.');
@@ -353,8 +364,8 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
     auditAction = 'request.done';
     const other = me === it.claimer ? req.requester : it.claimer!;
     ping = [other];
-    notice = `${mention(other)}: ${IT(it)} is done (marked by ${mention(me)}).`;
-    reply = `Marked ${IT(it)} done.`;
+    notice = (t) => `${mention(other)}: ${IT(it)} is done (marked by ${t(me)}).`;
+    reply = () => `Marked ${IT(it)} done.`;
   } else if (action === 'x') {
     if (it.status !== 'open' && it.status !== 'claimed') return ephemeral('That item is already closed.');
     if (me !== req.requester && !c.officer) return ephemeral('Only the requester can cancel an item. Officers can cancel a whole request with `/officer requests`.');
@@ -362,8 +373,8 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
     from = it.status;
     auditAction = 'request.cancel';
     ping = [...(it.claimer && it.claimer !== me ? [it.claimer] : []), ...(me !== req.requester ? [req.requester] : [])];
-    notice = `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}${IT(it)} was cancelled by ${mention(me)}.`;
-    reply = `Cancelled ${IT(it)}.`;
+    notice = (t) => `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}${IT(it)} was cancelled by ${t(me)}.`;
+    reply = () => `Cancelled ${IT(it)}.`;
   } else return ephemeral('Sorry, that button has expired.');
 
   const at = now();
@@ -385,12 +396,16 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
   const closed = res[2].meta.changes === 1;
   const items = loaded.items.map((i) => (i.position === it.position ? { ...i, ...next } : i));
   const after: RequestRow = closed ? { ...req, status: 'closed', close_reason: items.some((i) => i.status === 'done') ? 'done' : 'cancelled' } : req;
-  if (closed) notice += ' Every item is done or cancelled, so this thread is now closed.';
+  const closing = closed ? ' Every item is done or cancelled, so this thread is now closed.' : '';
   const api = apiFor(c);
   let rows = written(res);
+  // The presser's own saved name comes from the interaction (an officer may not be among those involved; no D1 read).
+  const mine: Names = new Map([[me, displayName(c.member)]]);
+  let t: (id: string) => string = (id) => tag(mine, id);
   if (api) {
-    const names = await namesOf(c.db, c.guild.id, involved(after, items));
-    const s = await syncThread(api, after, items, names, { content: notice, ping });
+    const names = withMe(await namesOf(c.db, c.guild.id, involved(after, items)), mine);
+    t = (id) => tag(names, id);
+    const s = await syncThread(api, after, items, names, { content: notice(t) + closing, ping });
     if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
     logAction(auditAction.replace('request.', ''), rows, api, { closed, errors: s.errors });
   } else {
@@ -398,7 +413,7 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
     rows += written(await c.db.batch([c.db.prepare('UPDATE craft_request SET thread_name = NULL WHERE id = ?').bind(req.id)]));
     logAction(auditAction.replace('request.', ''), rows, null, { closed, errors: ['no bot token'] });
   }
-  return ephemeral(reply);
+  return ephemeral(reply(t));
 }
 
 // ---------------------------------------------------------------- /craft requests (private): open requests, with Cancel
@@ -485,8 +500,8 @@ export async function cancelFromList(c: Ctx, values: string[]): Promise<MessageR
   const api = apiFor(c);
   let rows = written(res);
   if (api) {
-    const names = await namesOf(c.db, c.guild.id, involved(after, items));
-    const s = await syncThread(api, after, items, names, { content: `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}This request was cancelled by ${mention(c.userId)}, so this thread is now closed.`, ping });
+    const names = withMe(await namesOf(c.db, c.guild.id, involved(after, items)), new Map([[c.userId, displayName(c.member)]]));
+    const s = await syncThread(api, after, items, names, { content: `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}This request was cancelled by ${tag(names, c.userId)}, so this thread is now closed.`, ping });
     if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
     logAction('cancel', rows, api, { errors: s.errors });
   } else logAction('cancel', rows, null);

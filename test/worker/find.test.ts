@@ -12,8 +12,8 @@ import { as, auto, cmd, GUILD, send } from '../discord.ts';
 
 const ANN = '100000000000000001';
 const ann = as(ANN);
-/** Order 16: every crafter line ends with the member's mention and saved name. */
-const TAG = ` · <@${ANN}> (Global ${ANN})`;
+/** Order 42: every crafter line ends with the member's saved name alone, never a mention. */
+const TAG = ` · Global ${ANN}`;
 const at = '2026-10-19T00:00:00Z';
 const WIKI = 'https://monstersandmemories.miraheze.org/wiki/';
 
@@ -247,7 +247,7 @@ describe('Post to channel', () => {
     expect(pub.type).toBe(4);
     expect(pub.data.flags).toBeUndefined();
     expect(pub.data.embeds).toEqual(priv.data.embeds);
-    expect(pub.data.content).toBe(`-# Shared by <@${ANN}>`);
+    expect(pub.data.content).toBe(`-# Shared by Global ${ANN}`); // order 42: the sharer's saved name, plain
     expect((pub.data as any).allowed_mentions).toEqual({ parse: [] });
     expect(pub.data.components![0].components.map((b: any) => b.label)).toEqual(['Wiki', 'MnMdb', 'MNM Realm']);
   });

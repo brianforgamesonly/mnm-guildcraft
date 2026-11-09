@@ -137,8 +137,9 @@ describe('ITEM 3: no-shows', () => {
     await dkp(officer, 'kill', { named: 'A myconid prince' });
     await closeRaid(raid);
     const card = await description(id);
-    expect(card).toContain(`No-shows: <@${wren.user.id}> (Wren)`);
-    expect(card).not.toContain(`No-shows: <@${kestrel.user.id}>`);
+    // Order 42: named once, by saved name, never as a mention.
+    expect(card).toContain(`No-shows: Wren`);
+    expect(card).not.toContain(`<@${wren.user.id}>`);
     expect(card.split('\n').find((l) => l.startsWith('No-shows'))).not.toMatch(/Kestrel|Pip|OfficerB/);
   });
 
@@ -152,7 +153,7 @@ describe('ITEM 3: no-shows', () => {
     await pressAs(kestrel, `${PRESENT_PREFIX}${raid}`);
     await pressAs(officer, `${PAY_PREFIX}${raid}`);
     await closeRaid(raid);
-    expect(await description(id)).toContain(`No-shows: <@${pip.user.id}> (Pip)`);
+    expect(await description(id)).toContain(`No-shows: Pip`);
   });
 
   it('none means none; no kills means not recorded; the card pings nobody', async () => {
@@ -181,7 +182,7 @@ describe('ITEM 3: no-shows', () => {
     await env.DB.prepare("UPDATE event SET status = 'closed' WHERE id = ?").bind(id).run();
     expect(await description(id)).not.toContain('No-shows');
     await closeRaid(raid);
-    expect(await drawn(id, 'No-shows: <@')).toBe(true);
+    expect(await drawn(id, 'No-shows: Kestrel')).toBe(true);
   });
 
   it('a correction after close redraws the line from the roster, never the ledger', async () => {
@@ -191,13 +192,13 @@ describe('ITEM 3: no-shows', () => {
     const raid = await openRaid();
     await dkp(officer, 'kill', { named: 'A myconid prince' });
     await closeRaid(raid);
-    expect(await description(id)).toContain('No-shows: <@');
+    expect(await description(id)).toContain('No-shows: Kestrel');
     await dkp(officer, 'correct', { member: kestrel.user.id, action: 'add', reason: 'was there' });
     expect(await drawn(id, EVENT_COPY.noShowsNone)).toBe(true);
     // The ledger alone says nothing: a roster row removed takes them back out, whatever it holds.
     await env.DB.prepare('DELETE FROM dkp_kill_member').run();
     expect(await count('dkp_ledger', "member_id = ?", kestrel.user.id)).toBeGreaterThan(0);
-    expect(await description(id)).toContain('No-shows: <@');
+    expect(await description(id)).toContain('No-shows: Kestrel');
   });
 
   it('the auto-close writes them too', async () => {
@@ -208,7 +209,7 @@ describe('ITEM 3: no-shows', () => {
     await dkp(officer, 'kill', { named: 'A myconid prince' });
     await env.DB.prepare('UPDATE dkp_raid SET closes_at = ? WHERE id = ?').bind(new Date(Date.now() - 1000).toISOString(), raid).run();
     await HANDLERS.close(withToken, GUILD, String(raid), 0, Date.now(), api());
-    expect(await description(id)).toContain('No-shows: <@');
+    expect(await description(id)).toContain('No-shows: Kestrel');
   });
 
   it('an approved correction redraws them, and a change while Events is off waits for the module', async () => {
@@ -241,7 +242,7 @@ describe('ITEM 3: no-shows', () => {
     await env.DB.prepare('UPDATE dkp_kill SET check_due = ?').bind(new Date(Date.now() - 1000).toISOString()).run();
     const r = await HANDLERS.check(withToken, GUILD, String(k.id), 0, Date.now(), api());
     expect(r?.schedule?.map((s) => s.key)).toContain(`evcard:${id}`);
-    expect(await description(id)).toContain('No-shows: <@');
+    expect(await description(id)).toContain('No-shows: Kestrel');
   });
 
   it('a long list stays inside Discord\'s limits, and says how many it left out', async () => {
@@ -321,9 +322,11 @@ describe('ITEM 3: adjusting a whole event', () => {
     const posts = fake.messages.slice(before).filter((m) => m.body.embeds?.[0]?.description?.includes('+5'));
     expect(posts.length).toBe(1);
     const text = postText(posts[0].body);
-    for (const n of ['Kestrel', 'Pip', 'Wren']) expect(text).toContain(`(${n}): now 5`);
+    // Order 42: each member named once, by saved name, never as a mention.
+    for (const n of ['Kestrel', 'Pip', 'Wren']) expect(text).toContain(`\n${n}: now 5`);
+    for (const m of [kestrel, pip, wren]) expect(text).not.toContain(`<@${m.user.id}>`);
     expect(text).toContain('Reason: test');
-    expect(text).not.toContain('(Officer): now');
+    expect(text).not.toMatch(/(^|\n)Officer: now/);
     expect(posts[0].body.allowed_mentions).toEqual({ parse: [] });
   });
 
@@ -390,16 +393,18 @@ describe('ITEM 3: adjusting a whole event', () => {
     const id = await rosterOf([kestrel, 'Kestrel', 'signed_up'], [pip, 'Pip', 'signed_up'], [wren, 'Wren', 'signed_up']);
     await memberRow(wren, 'Wren', 'left');
     const r = await adjust(officer, id, 50);
-    expect(r.data.content).toContain(`Skipped as frozen: <@${wren.user.id}> (Wren)`);
+    expect(r.data.content).toContain(`Skipped as frozen: Wren`);
     await memberRow(pip, 'Pip', 'left');
     const { id: pid } = await one<{ id: number }>('SELECT id FROM dkp_pending');
     const card = fake.messages.at(-1)!.body.embeds[0].description as string;
-    expect(card).toContain(`<@${wren.user.id}> (Wren) (frozen)`);
+    expect(card).toContain(`Wren (frozen)`);
     await pressAs(officerB, `${APPROVE_PREFIX}${pid}`);
     expect((await ledger()).map((l) => l.member_id)).toEqual([kestrel.user.id]);
     const text = postText(fake.messages.find((m) => m.body.embeds?.[0]?.description?.startsWith('**+50'))!.body);
-    expect(text).toContain(`<@${pip.user.id}> (Pip)`);
-    expect(text).toContain(`<@${wren.user.id}> (Wren)`);
+    expect(text).toContain(`Pip`);
+    expect(text).toContain(`Wren`);
+    expect(text).not.toContain(`<@${pip.user.id}>`);
+    expect(text).not.toContain(`<@${wren.user.id}>`);
   });
 
   it('a batch whose members have all frozen by approval is refused, stays open and pays nothing', async () => {
@@ -434,18 +439,19 @@ describe('ITEM 3: adjusting a whole event', () => {
   it('a very long batch names those capped first, and points at /dkp history', async () => {
     await dkp(admin, 'settings', { setting: 'cap', value: 5 });
     const id = await openEvent();
-    const members = Array.from({ length: 150 }, (_, n) => as(`1000000000001${String(n).padStart(5, '0')}`, { global_name: `M${n}` }));
+    // Order 42: lines name the member alone (no mention), ~37 characters each, so 150 now fit in 6,000; 200 overflow.
+    const members = Array.from({ length: 200 }, (_, n) => as(`1000000000001${String(n).padStart(5, '0')}`, { global_name: `M${n}` }));
     for (const [n, m] of members.entries()) {
       await memberRow(m, `A rather long member name ${n}`);
       await signup(id, m, 'signed_up');
     }
-    await env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, actor, at) VALUES (?, ?, 'guild', 5, 0, 5, 'adjust', 'x', 'x')").bind(GUILD, members[149].user.id).run();
+    await env.DB.prepare("INSERT INTO dkp_ledger (guild_id, member_id, pool, amount, cut, balance_after, kind, actor, at) VALUES (?, ?, 'guild', 5, 0, 5, 'adjust', 'x', 'x')").bind(GUILD, members[199].user.id).run();
     await adjust(officer, id, 1);
     const b = fake.messages.find((m) => m.body.embeds?.[0]?.description?.startsWith('**+1'))!.body;
     expect(embedChars(b.embeds)).toBeLessThanOrEqual(EMBED_LIMITS.total);
     const text = postText(b);
     expect(text.indexOf('1 over the cap')).toBeGreaterThan(0);
-    expect(text.indexOf('1 over the cap')).toBeLessThan(text.indexOf('(A rather long member name 0)'));
+    expect(text.indexOf('1 over the cap')).toBeLessThan(text.indexOf('\nA rather long member name 0: '));
     expect(text).toMatch(/\+\d+ more: `\/dkp history`/);
   }, 30_000);
 
