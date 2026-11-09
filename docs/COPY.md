@@ -703,12 +703,12 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 | src/commands/definitions.ts:105 | `/zone` option `name`: The zone: pick from the list | DRAFT |
 | src/gear/options.ts:78 | `/gear` option `zone` (formerly on `/gear find`): Only items the wiki lists for this zone | DRAFT |
 | src/zone/card.ts:16-19 | **Levels:** \<level text> / not recorded. Order 41: a top recorded as question marks ("1 - ??") reads **Levels:** 1 and up (top level not recorded); only question marks ("?") reads not recorded; any other text as recorded (src/level-text.ts shownLevel) | DRAFT |
-| src/level-text.ts:20 | Order 41: \<known part> and up (top level not recorded), on the zone card's Levels line, its creature lines (\<creature> (L15 and up (top level not recorded))), the factions board (\<creature> (level 18 and up (top level not recorded))) and `/gear find`'s mob lines; a level of only question marks shows no level part | DRAFT |
-| src/zone/card.ts:15-17 | Field: Map · No map yet · [Open in MnM Atlas](\<atlas>) | DRAFT |
-| src/zone/card.ts:17, 22-23 | Buttons: Open in MnM Atlas · Gear here · More creatures | DRAFT |
-| src/zone/card.ts:24-28 | Fields: Adjacent zones · Creatures (\<n>) · Notable spots · line: \<creature> (L\<level>) · [find on map](\<atlas ?find>) · +\<n> more | DRAFT |
-| src/zone/card.ts:29 | Map credit (MnM Atlas pictures, off until ATLAS_ZONE_IMAGES is on): Map: MnM Atlas (mnmatlas.com) and its original map authors | DRAFT |
-| src/zone/card.ts:30-31 | Map credit (a licensed map; none today): Map: \<author> · via \<source> · [\<licence>](\<licence link>) · [file page](\<wiki file page>) | DRAFT |
+| src/level-text.ts:35 | Order 41: \<known part> and up (top level not recorded), on the zone card's Levels line, its creature lines (\<creature> (L15 and up (top level not recorded))), the factions board (\<creature> (level 18 and up (top level not recorded))) and `/gear find`'s mob lines; a level of only question marks shows no level part | DRAFT |
+| src/zone/card.ts:20-22 | Field: Map · No map yet · [Open in MnM Atlas](\<atlas>) | DRAFT |
+| src/zone/card.ts:22, 27-28 | Buttons: Open in MnM Atlas · Gear here · More creatures | DRAFT |
+| src/zone/card.ts:29-33 | Fields: Adjacent zones · Creatures (\<n>) · Notable spots · line: \<creature> (L\<level>) · [find on map](\<atlas ?find>) · +\<n> more | DRAFT |
+| src/zone/card.ts:38 | Map credit (MnM Atlas pictures, off until ATLAS_ZONE_IMAGES is on): Map: MnM Atlas (mnmatlas.com) and its original map authors | DRAFT |
+| src/zone/card.ts:39-40 | Map credit (a licensed map; none today): Map: \<author> · via \<source> · [\<licence>](\<licence link>) · [file page](\<wiki file page>) | DRAFT |
 | src/zone/card.ts:32 | Footer: Sources: Monsters and Memories Wiki on Miraheze (CC BY-SA 4.0) · MnM Atlas · mnm-tools · Mo Betta | DRAFT |
 | src/zone/card.ts:37-41 | Pages: Creatures in \<zone> · Page \<n> of \<m> · by level, lowest first · Previous · Next | DRAFT |
 | src/zone/suggest.ts:9-12 | (`/zone`, and `/gear zone:`) No zones are loaded yet. They arrive with the nightly import. · No zone is called **\<typed>**. · Did you mean: **\<zone>**, …? · The zones: \<zone>, …. | DRAFT |

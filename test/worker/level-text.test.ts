@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { pluralOnlyPairs } from '../../scripts/import/core.ts';
 import { computeLevels, parseLevel, type LevelInput } from '../../scripts/import/levels.ts';
 import { creatureText } from '../../src/board/factions.ts';
+import { dropLine, mobLine } from '../../src/commands/gear.ts';
 import { LEVEL_COPY, questionReading, shownLevel } from '../../src/level-text.ts';
 import { creatureLine, ZONE_COPY } from '../../src/zone/card.ts';
 import { MOB_ZONES_SOURCE } from '../../src/zone/names.ts';
@@ -137,6 +138,38 @@ describe('order 41: how a recorded level text is shown (one function for every s
     expect(creatureText({ creature: "An Ail'trist patrol", level: '?', location: 'The gate' })).toBe("An Ail'trist patrol (The gate)");
     expect(creatureText({ creature: 'A glowing wisp', level: '42-44?', location: null })).toBe('A glowing wisp (level 42-44?)');
     expect(creatureText({ creature: 'A bat', level: ' 23-24 ', location: null })).toBe('A bat (level 23-24)');
+  });
+});
+
+describe('order 41 (review): parse and reading judge the same text; /gear find\'s mob lines read it too', () => {
+  it('a parenthesis or a link around an unknown top: open in the parser, "not recorded" when shown, the rest kept', () => {
+    expect(parseLevel('15-? (boss)').range).toEqual({ low: 15, high: null });
+    expect(questionReading('15-? (boss)')).toBe('top not recorded');
+    expect(shownLevel('15-? (boss)')).toBe('15 and up (top level not recorded) (boss)');
+    expect(parseLevel('[[Zone 2]] 10 - ??').range).toEqual({ low: 10, high: null });
+    expect(shownLevel('[[Zone 2]] 10 - ??')).toBe('[[Zone 2]] 10 and up (top level not recorded)');
+    // A "?" only inside parentheses is not an unknown top: as recorded, and parsed as before.
+    expect(questionReading('12 (?)')).toBe('as recorded');
+    expect(parseLevel('12 (?)').range).toEqual({ low: 12, high: 12 });
+  });
+
+  it('/gear find: the drop line and the item card\'s mob line show an unknown top as not recorded, and no level part for "?"', () => {
+    const d = {
+      classes: [],
+      recipes: [],
+      crafters: [],
+      version: null,
+      mobs: [
+        { key: 'a wasp drone', title: 'a wasp drone', level: '15-?', zones_json: '["Scarwood"]' },
+        { key: 'a cultist', title: 'a cultist', level: '?', zones_json: '["Scarwood"]' },
+        { key: 'a bat', title: 'a bat', level: '3', zones_json: null },
+      ],
+    } as Parameters<typeof dropLine>[1];
+    expect(dropLine({ from: ['a wasp drone'] }, d, 3, 3)).toBe('Drop: a wasp drone (L15 and up (top level not recorded), Scarwood)');
+    expect(dropLine({ from: ['a cultist'] }, d, 3, 3)).toBe('Drop: a cultist (Scarwood)');
+    expect(dropLine({ from: ['a bat'] }, d, 3, 3)).toBe('Drop: a bat (L3)');
+    expect(mobLine(d, 'a wasp drone').text).toBe('a wasp drone (L15 and up (top level not recorded), Scarwood)');
+    expect(mobLine(d, 'a cultist').text).toBe('a cultist (Scarwood)');
   });
 });
 

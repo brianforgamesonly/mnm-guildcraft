@@ -12,6 +12,21 @@
 
 /** A top bound written only as question marks after a known low ("1 - ??", "15-?", "18-???"). Group 1: the known part. */
 export const UNKNOWN_TOP = /^(.*\d)\s*-\s*\?+\s*$/s;
+/** The unknown top's own text in a recorded level ("-" and the question marks after it), for the shown text. */
+const UNKNOWN_TOP_PART = /\s*-\s*\?+/;
+
+/**
+ * Order 35's first parsing step, shared by the parser (scripts/import/levels.ts parseLevel) and the reading below, so both
+ * judge the same text (review fix): [[…]] links (their text too) and anything in parentheses are removed.
+ */
+export function stripLevelText(text: string): string {
+  let t = text.replace(/\[\[[^\]]*\]\]/g, ' ');
+  for (let prev = ''; prev !== t; ) {
+    prev = t;
+    t = t.replace(/\([^()]*\)/g, ' ');
+  }
+  return t.trim();
+}
 /** A text made only of question marks ("?", "??"): no level is recorded. */
 export const ONLY_QUESTION_MARKS = /^\s*\?+\s*$/;
 
@@ -26,7 +41,7 @@ export type QuestionReading = 'top not recorded' | 'no level' | 'as recorded';
 export function questionReading(text: string): QuestionReading | null {
   if (!text.includes('?')) return null;
   if (ONLY_QUESTION_MARKS.test(text)) return 'no level';
-  return UNKNOWN_TOP.test(text.trim()) ? 'top not recorded' : 'as recorded';
+  return UNKNOWN_TOP.test(stripLevelText(text)) ? 'top not recorded' : 'as recorded';
 }
 
 /**
@@ -39,8 +54,12 @@ export function shownLevel(text: string | null | undefined): string | null {
   switch (questionReading(text)) {
     case 'no level':
       return null;
-    case 'top not recorded':
-      return LEVEL_COPY.topNotRecorded((UNKNOWN_TOP.exec(text.trim()) as RegExpExecArray)[1].trim());
+    case 'top not recorded': {
+      // The known part is the recorded text before the unknown top; anything after it (a parenthesis) is kept as recorded.
+      const at = text.search(UNKNOWN_TOP_PART);
+      const rest = text.slice(at).replace(UNKNOWN_TOP_PART, '').trim();
+      return `${LEVEL_COPY.topNotRecorded(text.slice(0, at).trim())}${rest ? ` ${rest}` : ''}`;
+    }
     default:
       return text;
   }

@@ -16,7 +16,7 @@
 // A dropping creature is any name the data links to the item as a drop: the item's `from` list, a mob whose loot names it,
 // an NPC row whose loot names it. Nothing is matched by anything but the name, case-insensitive.
 
-import { questionReading, UNKNOWN_TOP, type QuestionReading } from '../../src/level-text.ts';
+import { questionReading, stripLevelText, UNKNOWN_TOP, type QuestionReading } from '../../src/level-text.ts';
 import { MOB_ZONES_SOURCE } from '../../src/zone/names.ts';
 
 export const LEVEL_FLOOR = 1;
@@ -53,11 +53,7 @@ export interface Parsed {
  */
 export function parseLevel(text: string | number | null | undefined): Parsed {
   if (text === null || text === undefined) return { range: null, integers: 0 };
-  let t = String(text).replace(/\[\[[^\]]*\]\]/g, ' ');
-  for (let prev = ''; prev !== t; ) {
-    prev = t;
-    t = t.replace(/\([^()]*\)/g, ' ');
-  }
+  const t = stripLevelText(String(text));
   const found: { n: number; plus: boolean }[] = [];
   for (const m of t.matchAll(/(\d+)(\s*\+)?/g)) {
     const n = Number(m[1]);
@@ -65,7 +61,7 @@ export function parseLevel(text: string | number | null | undefined): Parsed {
   }
   if (!found.length) return { range: null, integers: 0 };
   const ns = found.map((f) => f.n);
-  const open = found.some((f) => f.plus) || UNKNOWN_TOP.test(t.trim());
+  const open = found.some((f) => f.plus) || UNKNOWN_TOP.test(t);
   return { range: { low: Math.min(...ns), high: open ? null : Math.max(...ns) }, integers: found.length };
 }
 

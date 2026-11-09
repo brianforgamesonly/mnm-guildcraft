@@ -624,4 +624,6 @@ Order 41 reads an unknown level top as not recorded, gathers the evidence on nea
 - A level bound recorded as question marks is unknown: parsed as open, shown as not recorded, never as "?".
 - Names that differ only by a plural or an article are reported, never merged; the owner decides. (The import reports item titles differing only by a trailing "s": `pluralPairs`, scripts/import/core.ts `pluralOnlyPairs`.)
 - A proof step never sets an environment variable for one command; it uses -c options or env -u.
+- Named, not lifted (review of PR #72): order 24's "What a faction's post shows changes only through the import, which sets that faction's `changed_at` in the same statement group as the change" stands. A faction post rendered before this order keeps its old level wording ("level 18-???", "level ?") until the import next changes that faction; nothing re-renders it early. Whether to refresh those posts is the owner's call (order 41's FINAL).
+- Parsing and reading judge the same text: links and parentheses are removed by one function (src/level-text.ts `stripLevelText`) for both. The Worker parses creature levels at request time (src/gear/sources.ts), so a drop line's level follows the new parse from the deploy, while stored item levels follow from the next import.
 - Failed runs: every one is listed in the FINAL (order 12).

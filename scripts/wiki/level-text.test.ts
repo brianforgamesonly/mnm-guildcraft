@@ -21,8 +21,12 @@ test('the snapshot holds level texts, some with "?" (else this check checks noth
 test('no bound made only of question marks survives shownLevel', () => {
   for (const t of texts.filter((x) => x.includes('?'))) {
     const shown = shownLevel(t);
+    const reading = questionReading(t);
     if (shown !== null) assert.doesNotMatch(shown, QUESTION_BOUND, `${JSON.stringify(t)} shows as ${JSON.stringify(shown)}`);
-    if (questionReading(t) === 'as recorded') assert.equal(shown, t);
+    // Review fix: each reading is checked for what it must show, so returning null for every "?" text fails.
+    if (reading === 'as recorded') assert.equal(shown, t);
+    if (reading === 'no level') assert.equal(shown, null);
+    if (reading === 'top not recorded') assert.match(shown ?? '', /\d and up \(top level not recorded\)/, JSON.stringify(t));
   }
 });
 
