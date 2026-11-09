@@ -135,8 +135,27 @@ describe('/roster top', () => {
     const r = await send(cmd(ann, 'roster', 'top'));
     expect(r.data.flags).toBe(64);
     expect(r.data.embeds![0].description).toBe(
-      `**Blacksmithing**: Testchar 25 ${ANN_TAG} · Smith01 5 ${seeded(0)} · Smith02 4 ${seeded(1)}\n**Tailoring**: Smith03 52 ${seeded(2)} · Smith02 51 ${seeded(1)} · Smith01 50 ${seeded(0)}`,
+      // Order 43 addendum: "<character> <level> (<owner>)".
+      `**Blacksmithing**: Testchar 25 (${ANN_TAG}) · Smith01 5 (${seeded(0)}) · Smith02 4 (${seeded(1)})\n**Tailoring**: Smith03 52 (${seeded(2)}) · Smith02 51 (${seeded(1)}) · Smith01 50 (${seeded(0)})`,
     );
     expect(r.data.components![0].components[0].label).toBe('Post to channel');
+  });
+
+  it('order 43 addendum: a named owner shows in brackets after the level, and the posted card shows the same', async () => {
+    await send(cmd(ann, 'craft', 'set', { skill: 'Blacksmithing', level: 25 }));
+    const r = await send(cmd(ann, 'roster', 'top'));
+    expect(r.data.embeds![0].description).toBe(`**Blacksmithing**: Testchar 25 (${ANN_TAG})`);
+    const posted = await send(button(ann, r.data.components![0].components[0].custom_id));
+    expect(posted.data.embeds![0].description).toBe(`**Blacksmithing**: Testchar 25 (${ANN_TAG})`);
+    expect(posted.data.components ?? []).toEqual([]);
+  });
+
+  it('order 43 addendum: an owner with no saved name shows as the mention alone in brackets, never a raw id', async () => {
+    await seed(1);
+    // member.display_name is NOT NULL, so "no saved name" is an empty one (order 42's memberTag reads empty as none).
+    await env.DB.prepare("UPDATE member SET display_name = '' WHERE discord_user_id = ?").bind('300000000000000000').run();
+    const d = (await send(cmd(ann, 'roster', 'top'))).data.embeds![0].description!;
+    expect(d).toContain('Smith01 1 (<@300000000000000000>)');
+    expect(d).not.toMatch(/\(300000000000000000\)/);
   });
 });

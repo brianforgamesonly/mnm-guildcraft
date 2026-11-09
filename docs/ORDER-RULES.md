@@ -677,3 +677,6 @@ Order 43 adds a Filter to one slot's upgrade list, by minimum AC and (weapon slo
 - The weapon slots are one constant (src/gear/slots.ts `WEAPON_TOKENS`, `WEAPON_SLOTS`), read by scoring's `ratioCounts` and by the Minimum ratio box; the box goes by slot token, never by the class preset.
 - The floors are judged on the candidate's own stats: AC from its score vector, the ratio from item.ratio exactly (added to the gear index's one query, src/gear/index.ts `GEAR_INDEX_SQL`), never the rounded RATIO the score uses.
 - Failed runs: every one is listed in the FINAL (order 12).
+- Addendum: /roster top shows '<character> <level> (<owner>)' (owner, 2026-11-08 21:10 ET); at the worst case it overflows into fitLines' '+N more', as before.
+  - Explicit override of docs/COPY.md:276 (at 299bd87), quoted with its status: "| src/commands/roster.ts:190 | **\<tradeskill>**: \<character> \<level> · \<character> \<level> · \<character> \<level> | APPROVED (owner, by exception, 2026-10-20) |". The row is now DRAFT, until Brian's check.
+  - Unchanged, quoted (this file, "Order 42"): "A member is named once, by saved name; a mention appears only in a message that pings that member."
