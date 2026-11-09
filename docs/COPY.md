@@ -1295,9 +1295,9 @@ The rows above under Work orders 27 and 29 carry the new wording. New or changed
 | src/commands/character.ts:41 | **\<race>** isn't a race in the list taken from the wiki data. | DRAFT |
 | src/commands/gear.ts:56 | That item is no longer in the data. Run `/gear search` again. (was `/gear`) | DRAFT |
 | src/commands/zone.ts:41 | No classes are loaded yet. Try `/gear search` once the nightly import has run. (was `/gear`) | DRAFT |
-| src/gear/wear.ts:59 | That item is no longer in the data. (I'm wearing this on an item gone upstream) | DRAFT |
+| src/gear/wear.ts:77 (was :59; renumbered by order 44) | That item is no longer in the data. (I'm wearing this on an item gone upstream) | DRAFT |
 | src/commands/character.ts:311 | (Remove character, appended) Its saved gear is removed. | DRAFT |
-| src/gear/wear.ts:57-95 (order 35; see order 36 below) | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT; the panel head and "Type again" RETIRED by order 39 (see "Work order 39"); order 44: "\<n> of 20 slots filled" and the 20 "\<Slot>: \<item>" lines move into the panel's embed, each worn item's name linked to its wiki page (see "Order 44") |
+| src/gear/wear.ts:75-123 (was :57-95; order 35; see order 36 below) | Every saved-gear string (WEAR_COPY): the panel head "\<name> · \<class> · level \<n> · race \<code>/any race", "\<n> of 20 slots filled", "—", "*(no longer listed)*", "*(\<class> can't use)*", Change a slot, the box (\<Slot>: type the item · Item name · Leave blank to empty the slot), Type again, Gear, no match, "\<n> \<slot> items match. Pick one:", "\<n> more: type more of the name", the save/replace/empty replies, the two-hander lines, the class and race refusals, doesn't go in, isn't worn, no item called, which character, which slot, both sides filled, several characters, "Changed by \<officer>", I'm wearing this, That character no longer exists., the not-yours replies | DRAFT; the panel head and "Type again" RETIRED by order 39 (see "Work order 39"); order 44: "\<n> of 20 slots filled" and the 20 "\<Slot>: \<item>" lines move into the panel's embed, each worn item's name linked to its wiki page (see "Order 44") |
 
 ## Work order 36, PR A: /gear upgrades and Find upgrades (DRAFT)
 
@@ -1358,7 +1358,7 @@ Retired by order 39 (marked in their rows above): the approved "Class \<class> i
 | src/commands/character.ts:174 | Added / Restored / Updated replies with the head: "Added **Banakil** · Ranger · level 18 · Halfling." (the rest of each reply as before) | DRAFT |
 | src/commands/character.ts:129 | **\<value>** isn't a class in the list taken from the wiki data. Pick one from the menu. | DRAFT |
 | src/commands/me.ts:89-90 | (Add/Edit character form, the Class menu) Optional. The classes in the wiki data · No class (options: the class names, e.g. Ranger) | DRAFT |
-| src/gear/wear.ts:82-86 | (Gear panel, the slot view) Type the item · Empty slot · Back · "**\<Slot>:** \<item>" / "**\<Slot>:** empty" | DRAFT; order 44: the slot view stays message text with no embed, and its \<item> is not linked (see "Order 44") |
+| src/gear/wear.ts:89-93 (was :82-86) | (Gear panel, the slot view) Type the item · Empty slot · Back · "**\<Slot>:** \<item>" / "**\<Slot>:** empty" | DRAFT; order 44: the slot view stays message text with no embed, and its \<item> is not linked (see "Order 44") |
 | src/gear/upgrades.ts:73 | Uses default weights: no game class saved. Pick one on /me. | DRAFT |
 | src/gear/statline.ts:72, 103-113 | The stat line: "AC 12 · Damage 20 / 30 delay · HP +15 · Mana +5 · STR +2 · FR +3 · Haste 10 · HP regen 1 · Mana regen 2 · Effect: \<effect> (\<trigger>)"; marked "**STA +5 ▲+2**", "**AGI +1 ▼−2**", "**WIS — ▼−4**"; "(vs Primary)"; "(doesn't stack: Haste \<n> worn elsewhere)"; "**Effect: \<effect> (new effect)**"; "**effect lost: \<effect>**" | DRAFT |
 
@@ -1404,7 +1404,7 @@ New variants beside approved and earlier strings, which are unchanged: "\<n> mor
 
 ## Order 44: the Gear panel's items, linked and viewable (DRAFT)
 
-The panel's earlier strings keep their words (the rows for src/gear/wear.ts:57-95 and :82-86 above say what moved). The head and any note stay the message text; "\<n> of 20 slots filled" and the 20 lines are now the panel's embed. Brian's check of order 44, if it passes, approves the rows below.
+The panel's earlier strings keep their words (the rows for src/gear/wear.ts:75-123 and :89-93 above, renumbered here, say what moved). The head and any note stay the message text; "\<n> of 20 slots filled" and the 20 lines are now the panel's embed. Brian's check of order 44, if it passes, approves the rows below.
 
 | Where | Text | Status |
 |---|---|---|

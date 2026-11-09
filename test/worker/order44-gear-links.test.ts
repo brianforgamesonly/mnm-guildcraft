@@ -108,6 +108,9 @@ describe('order 44, ITEM 1: wiki links on the worn items', () => {
     // Measured on the local D1 after npm run import:local (2026-11-09, mnm-tools 629970a): 3,156 wearable wiki items, all with
     // an https wiki_url; the longest name 44 characters, "Steadying Wristguards of the Experimentalist", whose address is
     // also the longest, 90. Used for all 20 slots, with the can't-use mark on every line (a stored class code is 3 letters).
+    // These are fixed numbers from that import: the check against the data as it is now is the bench (npm run
+    // bench:gear-panel prints the longest linked name over every wearable item, md-escaped: 138 on 2026-11-09). Future data
+    // past it is safe by panelText's fallback, tested below.
     const name = 'Steadying Wristguards of the Experimentalist';
     const url = `${WIKI}Steadying_Wristguards_of_the_Experimentalist`;
     expect(url.length).toBe(90);
@@ -173,12 +176,15 @@ describe('order 44, ITEM 1: wiki links on the worn items', () => {
     const emptied = await send(press(ann, `wre:${id}:chest`));
     check(emptied, 1, 'Empty slot');
     expect(emptied.data.content).toBe([WEAR_COPY.emptied('Chest', 'Green Drakeling Scale Coat'), HEAD].join('\n'));
-    // A refused save: the slot view with the reason (embeds []).
+    // A refused save: the slot view with the reason (embeds []), from the box and from the match list.
     await env.DB.prepare("UPDATE character SET class = 'WIZ' WHERE id = ?").bind(id).run();
     await env.DB.prepare('UPDATE item SET class_mask = ? WHERE name = ?').bind(CLS.INQ, 'Copper Breastplate').run();
     const refused = await send(submit(ann, `wrm:${id}:chest`, { item: 'copper breastplate' }));
     check(refused, 0, 'refused save');
     expect(refused.data.content!.split('\n')[0]).toBe(WEAR_COPY.classRefused('WIZ', 'Copper Breastplate'));
+    const refusedPick = await send(select(ann, `wrk:${id}:chest`, [String(await itemId('Copper Breastplate'))]));
+    check(refusedPick, 0, 'refused match pick');
+    expect(refusedPick.data.content!.split('\n')[0]).toBe(WEAR_COPY.classRefused('WIZ', 'Copper Breastplate'));
   });
 
   it('order 18: an old content-only panel is replaced whole: the edit Discord receives carries the new content and the embed', async () => {

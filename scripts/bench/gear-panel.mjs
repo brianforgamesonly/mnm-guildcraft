@@ -86,6 +86,7 @@ try {
   if (wear.VIEW_PREFIX && upgrades.upgradesComponent) {
     const key = args['show-card'] ?? 'chest';
     const coat = await raw.prepare('SELECT i.id FROM character_gear g JOIN item i ON i.name_key = g.item_key WHERE g.character_id = ? AND g.slot = ?').bind(id, key).first();
+    if (!coat) throw new Error(`--show-card ${key}: Banakil's ${key} holds no item with a row (seeded: ${Object.keys(WORN).join(', ')})`);
     // Warm once, then measure each (the isolate caches, as a live Worker's are after its first card).
     await upgrades.upgradesComponent(ctx(), `${upgrades.OPEN_PREFIX}${coat.id}`, []);
     for (const [label, cid, values] of [['Open item (guo:)', `${upgrades.OPEN_PREFIX}${coat.id}`, []], ['View an item (wrx:)', `${wear.VIEW_PREFIX}${id}`, [key]]]) {

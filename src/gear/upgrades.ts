@@ -22,9 +22,9 @@ import { pageData } from '../commands/gear.ts';
 import type { GearRow } from './search.ts';
 import { itemCard, itemCardReply } from '../commands/item.ts';
 import { wikiLinked } from './wiki-link.ts';
-import { POST_PREFIX, postedReply, searchReply } from '../commands/share.ts';
+import { POST_PREFIX, postedReply } from '../commands/share.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
-import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
+import { zoneButtons } from '../zone/buttons.ts';
 import { gearIndex, itemsFor, VERSION_SQL, type GearIndex } from './index.ts';
 import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
