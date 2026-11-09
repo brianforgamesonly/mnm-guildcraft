@@ -172,7 +172,7 @@ Skill level alone doesn't grant every recipe, so each recipe records how it is o
 | `/roster member` member: @user | All of one member's characters and skills, grouped by character. |
 | `/roster top` | The top 3 characters in each tradeskill, one compact list. (The rare-recipe roster, `/roster recipes`, is in FR-3.1.) |
 | `/gear` class: … | Gear for a class, by slot, weapon type, AC, ratio, stats, source and zone (work order 13). |
-| `/zone` name: | A zone's card: level range, creatures, and links to the wikis and MnM Atlas (work order 17). |
+| `/zone` name: | A zone's card: level range, creatures, and links to the wikis and MnM Atlas (work order 17). A level whose top is recorded as question marks reads "1 and up (top level not recorded)", and one of only question marks reads "not recorded", never a raw "?" (order 41; the same on creature lines and the factions board). |
 | `/request` item: \[quantity\] \[note\] | Asks the opted-in crafters who can make an item, in a private thread (work order 16). |
 | `/help` | A guide in pages, one button per page. |
 
@@ -937,7 +937,7 @@ The primary kind is the one with the lowest level (any level counts as 0). Ties 
 
 Crafted levels: a component's level is derived exactly as an item's is (all kinds above, recursively for a crafted component), and it uses its primary kind's low value. Stop at a cycle or depth 6; a component cut off there has no source. A recipe's level is the highest level among its components. Of an item's recipes, use the one with the lowest level among those where every component has a source. Use a floor recipe only when no such recipe exists. Ties: fewest components, then the lowest recipe id.
 
-Parsing level text: strip [[…]] link text and anything in parentheses first. Read every integer from 1 to 80 in what remains; low = the smallest, high = the largest. "~15" is 15–15. "N+" gives low N, high NULL. Text with no such integer is no level. Text with more than two integers is still parsed, and listed in the coverage report. Every distinct text that failed to parse is reported, with a count.
+Parsing level text: strip [[…]] link text and anything in parentheses first. Read every integer from 1 to 80 in what remains; low = the smallest, high = the largest. "~15" is 15–15. "N+" gives low N, high NULL. A bound written only as question marks is unknown (order 41): "N - ??", "N - ?" and "N-???" give low N, high NULL, as "N+" does; a number followed by "?" ("15?", "42-44?") parses as without it, and that "?" has no meaning yet. Text with no such integer is no level (a text of only question marks, "?" or "??", among them). Every level text holding a "?" is listed in the coverage report with its count and reading. Text with more than two integers is still parsed, and listed in the coverage report. Every distinct text that failed to parse is reported, with a count.
 
 Rules: levels are derived, never typed (no command sets an item's level). A level's kind is always shown with it; a zone-range fallback or a crafted floor is never presented as a mob's level.
 

@@ -702,7 +702,8 @@ Member lines (ITEM 1, no new words): `**1.** **Character** · @member (saved nam
 |---|---|---|
 | src/commands/definitions.ts:105 | `/zone` option `name`: The zone: pick from the list | DRAFT |
 | src/gear/options.ts:78 | `/gear` option `zone` (formerly on `/gear find`): Only items the wiki lists for this zone | DRAFT |
-| src/zone/card.ts:14 | **Levels:** \<level text> / not recorded | DRAFT |
+| src/zone/card.ts:16-19 | **Levels:** \<level text> / not recorded. Order 41: a top recorded as question marks ("1 - ??") reads **Levels:** 1 and up (top level not recorded); only question marks ("?") reads not recorded; any other text as recorded (src/level-text.ts shownLevel) | DRAFT |
+| src/level-text.ts:20 | Order 41: \<known part> and up (top level not recorded), on the zone card's Levels line, its creature lines (\<creature> (L15 and up (top level not recorded))), the factions board (\<creature> (level 18 and up (top level not recorded))) and `/gear find`'s mob lines; a level of only question marks shows no level part | DRAFT |
 | src/zone/card.ts:15-17 | Field: Map · No map yet · [Open in MnM Atlas](\<atlas>) | DRAFT |
 | src/zone/card.ts:17, 22-23 | Buttons: Open in MnM Atlas · Gear here · More creatures | DRAFT |
 | src/zone/card.ts:24-28 | Fields: Adjacent zones · Creatures (\<n>) · Notable spots · line: \<creature> (L\<level>) · [find on map](\<atlas ?find>) · +\<n> more | DRAFT |

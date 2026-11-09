@@ -4,6 +4,7 @@
 // read about 10,000 item rows per card; Gear here finds the zone's gear), and the other sites' links come from
 // src/zone/sites.json (scripts/zone/sites.ts).
 import { EMBED_LIMITS, md, truncate, type Embed, type EmbedField } from '../discord.ts';
+import { shownLevel } from '../level-text.ts';
 import { mergeCreature } from './creatures.ts';
 import { levelSort, MOB_ZONES_SOURCE, zoneNamesSql } from './names.ts';
 import SITES from './sites.json' with { type: 'json' };
@@ -11,7 +12,11 @@ import SITES from './sites.json' with { type: 'json' };
 // ---------------------------------------------------------------- copy (order 17; listed for approval in docs/COPY.md)
 
 export const ZONE_COPY = {
-  levels: (t: string | null) => `**Levels:** ${t ? md(t) : 'not recorded'}`,
+  // Order 41: the text as shownLevel reads it (a top recorded as question marks is "not recorded"; only "?" is no level).
+  levels: (t: string | null) => {
+    const shown = shownLevel(t);
+    return `**Levels:** ${shown ? md(shown) : 'not recorded'}`;
+  },
   map: 'Map',
   noMap: 'No map yet',
   openAtlas: 'Open in MnM Atlas',
@@ -163,8 +168,11 @@ export async function loadZone(db: D1Database, key: string): Promise<ZoneData | 
 // ---------------------------------------------------------------- lines
 
 /** A creature, with its find-on-map link when the zone has an atlas map (without one, ?find= may open the world map). */
-export const creatureLine = (c: Creature, atlasId: string | null) =>
-  `${md(c.name)}${c.level ? ` (L${md(c.level)})` : ''}${atlasId ? ` · [${ZONE_COPY.findOnMap}](${atlasFindUrl(c.name, atlasId)})` : ''}`;
+export const creatureLine = (c: Creature, atlasId: string | null) => {
+  // Order 41: a level of only question marks shows no level part, as a creature with no level does.
+  const level = shownLevel(c.level);
+  return `${md(c.name)}${level ? ` (L${md(level)})` : ''}${atlasId ? ` · [${ZONE_COPY.findOnMap}](${atlasFindUrl(c.name, atlasId)})` : ''}`;
+};
 
 /** Marker notes may hold URLs and line breaks: the URLs are dropped, the whitespace made one line, the rest kept short. */
 export const cleanNotes = (s: string | null): string | null => {
@@ -239,7 +247,7 @@ export function zoneEmbeds(d: ZoneData, atlasImages: boolean): Embed[] {
   if (spots.length) fields.push({ name: ZONE_COPY.spots, value: fitLines(spots, CARD_SPOTS, 600) });
   const P = ZONE_COPY.missingParts;
   const missing = [
-    ...(z.level ? [] : [P.level]),
+    ...(shownLevel(z.level) ? [] : [P.level]),
     // Order 29: the description is the wiki page's lead text (scripts/wiki/parse.ts leadText), shown under the levels when
     // the page has one. Many pages have none, so a missing one is still not reported as "not recorded yet".
     ...(d.creatures.length ? [] : [P.creatures]),

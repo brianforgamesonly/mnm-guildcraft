@@ -610,3 +610,18 @@ Order 40 makes each paired side its own slot in `/gear upgrades` (the owner, 202
 - A flag's game meaning comes only from its source's own definition, cited.
 - worker-cpu.ts windows are whole UTC days; an unread schema prints unknown, never absent.
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 41
+
+Order 41 reads an unknown level top as not recorded, gathers the evidence on near-identical item names for the owner, reads the CPU after order 39's deploy, and proves the repository's credentials with rule-compliant steps (the checklist of 2026-11-07). Its explicit overrides each quote the earlier text in full, from where it is stored.
+
+- Budget: this file's default (1 pull request, at most 3 pushes, 1 merge).
+- Override 1, of docs/PRD.md:940 (at d025476): "Parsing level text: strip [[…]] link text and anything in parentheses first. Read every integer from 1 to 80 in what remains; low = the smallest, high = the largest. "~15" is 15–15. "N+" gives low N, high NULL. Text with no such integer is no level. Text with more than two integers is still parsed, and listed in the coverage report. Every distinct text that failed to parse is reported, with a count."
+  - A bound written only as question marks is unknown. "N - ??", "N - ?" and "N-???" give low N, high NULL, as "N+" does (src/level-text.ts `UNKNOWN_TOP`, read by scripts/import/levels.ts `parseLevel`). A text that is only question marks ("?", "??") stays no level. The rest stands.
+  - A number or range followed by "?" ("15?", "42-44?") parses exactly as before; its "?" is given no meaning (order 4). Every level text holding a "?" is listed in the import's coverage report with its count and reading (`levels.questionMarks`).
+- Override 2, of docs/COPY.md:705 (at d025476), as stored: "| src/zone/card.ts:14 | **Levels:** \<level text> / not recorded | DRAFT |". A level text with an unknown top shows the known part and says the rest is not recorded ("1 and up (top level not recorded)"); a text of only question marks shows "not recorded"; any other text shows as recorded. One function decides it for every surface (src/level-text.ts `shownLevel`).
+- Unchanged, quoted so nobody widens it: order 35's "The import now parses mob.level, npc.level and zone.level into numbers, in memory, for the item level rule (scripts/import/levels.ts `parseLevel`). The text stays as recorded in its column."
+- A level bound recorded as question marks is unknown: parsed as open, shown as not recorded, never as "?".
+- Names that differ only by a plural or an article are reported, never merged; the owner decides. (The import reports item titles differing only by a trailing "s": `pluralPairs`, scripts/import/core.ts `pluralOnlyPairs`.)
+- A proof step never sets an environment variable for one command; it uses -c options or env -u.
+- Failed runs: every one is listed in the FINAL (order 12).
