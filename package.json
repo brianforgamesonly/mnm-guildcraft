@@ -37,6 +37,7 @@
     "bench:item-cards": "node scripts/bench/item-cards.ts",
     "bench:upgrade-pages": "node scripts/bench/upgrade-pages.mjs",
     "bench:gear-render": "node scripts/bench/gear-render.mjs",
+    "bench:gear-panel": "node scripts/bench/gear-panel.mjs",
     "commands:register": "node scripts/discord/register.ts"
   },
   "dependencies": {

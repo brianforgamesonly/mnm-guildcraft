@@ -14,14 +14,12 @@ import { WIKI_ZONES_SOURCE } from '../zone/names.ts';
 import type { GearItem } from './score.ts';
 import { dropPick, pageSources, sourceCache, vendorParts, type SourceIndex } from './sources.ts';
 import { SOURCES } from './vocab.ts';
+// Order 44: the link helpers moved to src/gear/wiki-link.ts, shared with the Gear panel; re-exported for this module's readers.
+import { linkUrl } from './wiki-link.ts';
 
+export { linkUrl };
 /** Order 37, ITEM 2: merchants named on a vendor line before "+N more". */
 export const VENDOR_MERCHANTS = 2;
-/**
- * A link's address with its parentheses encoded (review fix: wiki titles such as "Archer Starter Quest (Faelindral)" put
- * them in the address, which would end a markdown link early; src/board/factions.ts encodes them the same way).
- */
-export const linkUrl = (url: string) => url.replace(/\(/g, '%28').replace(/\)/g, '%29');
 export const range = (lo: number, hi: number | null) => (hi === null ? `${lo}+` : hi === lo ? `${lo}` : `${lo}–${hi}`);
 
 /** The how-to-get lines' copy (part of src/gear/upgrades.ts UPGRADES_COPY; listed in docs/COPY.md). */

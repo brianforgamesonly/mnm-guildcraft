@@ -144,9 +144,17 @@ export async function itemCommand(c: Ctx, opts: Option[]): Promise<MessageReply>
   // A client still holding the old definition may send screenshot: (order 24: turned off).
   if (optString(opts, 'screenshot') !== undefined) return ephemeral(SCREENSHOTS_OFF);
   const found = await c.db.prepare('SELECT id FROM item WHERE name_key = ?').bind(typed.toLowerCase()).first<{ id: number }>();
-  const k = found ? await itemCard(c, found.id) : null;
-  if (!found || !k) return ephemeral(ITEM_COPY.noItem(typed || '(nothing)'), { components: [row([button(missingId(typed), ITEM_COPY.missingButton)])] });
-  return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${POST_WHAT}${found.id}`, k.links, [k.actions]), k.zones);
+  const reply = found ? await itemCardReply(c, found.id) : null;
+  return reply ?? ephemeral(ITEM_COPY.noItem(typed || '(nothing)'), { components: [row([button(missingId(typed), ITEM_COPY.missingButton)])] });
+}
+
+/**
+ * The card as a private reply, with Post to channel and its zone buttons; null when the item id names no row. Order 44: the
+ * one function /item, Open item (guo:) and the Gear panel's View an item (wrx:) answer with, so the three read the same.
+ */
+export async function itemCardReply(c: Ctx, itemId: number): Promise<MessageReply | null> {
+  const k = await itemCard(c, itemId);
+  return k ? withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${POST_WHAT}${itemId}`, k.links, [k.actions]), k.zones) : null;
 }
 
 /** pub:item:<id>: the card, rebuilt now and posted publicly; its buttons (zone buttons too) answer each presser privately. */

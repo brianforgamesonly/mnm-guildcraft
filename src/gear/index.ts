@@ -16,6 +16,7 @@
 import { UPGRADE_SLOTS, STAT_VECTOR_SQL, vectorOf, type GearItem } from './score.ts';
 import type { SlotToken } from './slots.ts';
 import { bitOf, isTwoHanded, SLOTS } from './vocab.ts';
+import { wikiHref } from './wiki-link.ts';
 
 export const VERSION_SQL = "SELECT id || ':' || status || ':' || coalesce(finished_at, '') AS v FROM data_import ORDER BY id DESC LIMIT 1";
 /**
@@ -89,8 +90,9 @@ export const toItem = (r: Row): GearItem => ({
   sourceMask: Number(r.source_mask),
   gone: r.gone_at !== null,
   twoHanded: isTwoHanded(r.handed),
-  // Order 36 follow-up: item names in the lists link to the wiki, only an https address (order 17's rule for wiki links).
-  wiki: typeof r.wiki_url === 'string' && r.wiki_url.startsWith('https://') ? r.wiki_url : null,
+  // Order 36 follow-up: item names in the lists link to the wiki, only an https address (order 17's rule for wiki links;
+  // order 44: one helper, shared with the Gear panel).
+  wiki: wikiHref(r.wiki_url),
   levelLow: r.level_low,
   levelHigh: r.level_high,
   levelKind: r.level_kind,

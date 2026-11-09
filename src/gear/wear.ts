@@ -14,11 +14,12 @@
 //   two-hander (src/gear/vocab.ts isTwoHanded) is in Primary. A two-hander in Primary empties Secondary.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optString, row, STYLE_PRIMARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
+import { button, EMBED_LIMITS, ephemeral, md, optString, row, STYLE_PRIMARY, truncate, updateMessage, type InteractionReply, type MessageReply, type ModalComponent, type Option } from '../discord.ts';
 import { characterHead, findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { modalValues } from '../commands/reports.ts';
 import { slotByKey, WEAR_MASK, WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
 import { ALL_CLASSES, bitOf, isTwoHanded, SLOTS } from './vocab.ts';
+import { wikiHref, wikiLinked } from './wiki-link.ts';
 
 export { slotByKey, WEAR_MASK, WEAR_SLOTS };
 const fits = (slotMask: number, w: WearSlot) => (slotMask & bitOf(SLOTS, w.token)) !== 0;
@@ -54,6 +55,12 @@ export const WEARING_CHAR_PREFIX = 'wrc:';
 export const SLOT_PICK_PREFIX = 'wrz:';
 /** Order 36: guf:<character id>: Find upgrades on the panel (src/gear/upgrades.ts answers it). */
 export const FIND_UPGRADES_PREFIX = 'guf:';
+/**
+ * Order 44: wrx:<character id>: View an item on the panel (select; values: a slot key, never an item id: both sides of a
+ * pair can hold one item, and Discord refuses a select with two equal values). Deferred as a component (type 6) and
+ * answered with a new private message, the item's /item card (src/gear/upgrades.ts viewItem, as Pick a result's gur:).
+ */
+export const VIEW_PREFIX = 'wrx:';
 /** The controls that answer with a modal, at once (src/interactions.ts OPENS_MODAL). Order 39: the slot select no longer. */
 export const WEAR_OPENS_MODAL = [AGAIN_PREFIX];
 /** Order 39: the modal submits answered by editing the panel they were opened from (src/interactions.ts planFor). */
@@ -109,6 +116,10 @@ export const WEAR_COPY = {
   wearingButton: "I'm wearing this",
   /** Order 36. */
   findUpgrades: 'Find upgrades',
+  /** Order 44: the panel's menu of worn items; each option "<Slot>: <item>". */
+  viewItem: 'View an item',
+  /** Order 44: the panel's last line, only if its lines could ever pass 4,096 characters unlinked (fitLines' words). */
+  moreLines: (n: number) => `+${n} more`,
 } as const;
 
 // ---------------------------------------------------------------- reading
@@ -123,8 +134,10 @@ interface WearItem {
   race_mask: number;
   handed: string | null;
   gone_at: string | null;
+  /** Order 44: the panel links the name (https only, src/gear/wiki-link.ts wikiHref). */
+  wiki_url: string | null;
 }
-const ITEM_COLS = 'i.id, i.name, i.name_key, i.slot, i.slot_mask, i.class_mask, i.race_mask, i.handed, i.gone_at';
+const ITEM_COLS = 'i.id, i.name, i.name_key, i.slot, i.slot_mask, i.class_mask, i.race_mask, i.handed, i.gone_at, i.wiki_url';
 interface Worn {
   slot: string;
   item_key: string;
@@ -177,13 +190,61 @@ const displayName = (c: Ctx) => c.member.nick ?? c.member.user.global_name ?? c.
 
 // ---------------------------------------------------------------- the panel
 
-/** What a slot holds, as the panel shows it: the item, marked when no longer listed or the character can't use it. */
-function slotText(ch: Character, g: Worn | undefined, bits: Bits): string {
+/**
+ * What a slot holds, as the panel shows it: the item, marked when no longer listed or the character can't use it. Order 44:
+ * with `link`, a listed item's name links to its wiki page when it has an https one (unbolded, as the panel's names are);
+ * a gone or missing item is never linked. The slot view passes no link: its text is message content, where a link would
+ * unfold a preview (the panel's lines are in an embed, where links don't).
+ */
+function slotText(ch: Character, g: Worn | undefined, bits: Bits, link = false): string {
   if (!g) return WEAR_COPY.empty;
   if (!g.item || g.item.gone_at !== null) return `${md(g.item?.name ?? g.item_key)} ${WEAR_COPY.noLongerListed}`;
   // A class or race change keeps saved gear; the slot is marked when the character can no longer use it.
   const r = refusal(ch, g.item, bits);
-  return `${md(g.item.name)}${r ? ` ${WEAR_COPY.cantUse(r.who)}` : ''}`;
+  const name = md(g.item.name);
+  return `${link ? wikiLinked(name, wikiHref(g.item.wiki_url)) : name}${r ? ` ${WEAR_COPY.cantUse(r.who)}` : ''}`;
+}
+
+/**
+ * Order 44: the panel's embed text: the "filled" line, a blank line, then one line per slot, never cut mid-line. Each line
+ * comes linked and plain; when the linked text passes `max`, lines lose their link from the bottom up until it fits. On the
+ * data the linked worst case fits (docs/ORDER-RULES.md, "Order 44"); if even the plain lines ever passed `max`, whole lines
+ * would go from the bottom with "+N more" (fitLines' words), never part of one.
+ */
+export function panelText(filled: string, lines: { linked: string; plain: string }[], max: number = EMBED_LIMITS.description): string {
+  const shown = lines.map((l) => l.linked);
+  const text = (kept: number) => [filled, '', ...shown.slice(0, kept), ...(kept < shown.length ? [WEAR_COPY.moreLines(shown.length - kept)] : [])].join('\n');
+  for (let i = shown.length - 1; i >= 0 && text(shown.length).length > max; i--) shown[i] = lines[i].plain;
+  let kept = shown.length;
+  while (kept > 0 && text(kept).length > max) kept--;
+  return text(kept);
+}
+
+/**
+ * Order 44: View an item: one option per filled slot whose item row is still listed, in panel order (WEAR_SLOTS), its
+ * value the slot key; null (no menu) when none qualifies. At most 20 options, within Discord's 25. No default option.
+ */
+export function viewSelect(ch: Pick<Character, 'id'>, worn: Map<string, Worn>) {
+  const options = WEAR_SLOTS.flatMap((w) => {
+    const item = worn.get(w.key)?.item;
+    return item && item.gone_at === null ? [{ label: truncate(`${w.label}: ${item.name}`, 100), value: w.key }] : [];
+  });
+  return options.length ? row([{ type: MessageComponentTypes.STRING_SELECT, custom_id: `${VIEW_PREFIX}${ch.id}`, placeholder: WEAR_COPY.viewItem, options }]) : null;
+}
+
+/**
+ * Order 44: the item a slot holds now, read again on a View an item pick: its id while it is still listed, otherwise null (an
+ * empty slot, a key that names no item row, or an item gone since). One indexed row each (character_gear's primary key,
+ * item.name_key's unique index).
+ */
+export async function wornItemId(c: Ctx, ch: Character, slotKey: string): Promise<number | null> {
+  const slot = slotByKey(slotKey);
+  if (!slot) return null;
+  const r = await c.db
+    .prepare('SELECT i.id FROM character_gear g JOIN item i ON i.name_key = g.item_key WHERE g.character_id = ? AND g.slot = ? AND i.gone_at IS NULL')
+    .bind(ch.id, slot.key)
+    .first<{ id: number }>();
+  return r ? r.id : null;
 }
 
 /**
@@ -203,13 +264,26 @@ const slotSelect = (ch: Character, worn: Map<string, Worn>) =>
     },
   ]);
 
-/** The private Gear panel: the character, the 20 slots, how many are filled, and Change a slot. 1 round trip (2 statements). */
+/**
+ * The private Gear panel: the character, the 20 slots, how many are filled, and Change a slot. 1 round trip (2 statements).
+ * Order 44: any note and the character head are the message content (never empty: the head always has the name); the
+ * "filled" line and the 20 lines, each worn name linked to its wiki page, are one embed, where links don't unfold previews
+ * and the description holds 4,096 characters. Every form of the panel sends both, so an edit replaces each one (a Discord
+ * edit keeps any field it doesn't send). Rows: Change a slot, Find upgrades, then View an item when a slot qualifies.
+ */
 export async function gearPanel(c: Ctx, ch: Character, note?: string): Promise<MessageReply> {
   const { worn, bits } = await readGear(c, ch);
-  const lines = WEAR_SLOTS.map((w) => `${w.label}: ${slotText(ch, worn.get(w.key), bits)}`);
-  const content = [note, characterHead(ch, !!bits.ck), WEAR_COPY.filled(worn.size), '', ...lines].filter((l) => l !== undefined).join('\n');
-  // Order 36: Find upgrades opens /gear upgrades' summary for this character (the same owner-or-officer check).
-  return ephemeral(truncate(content, 2000), { components: [slotSelect(ch, worn), row([button(`${FIND_UPGRADES_PREFIX}${ch.id}`, WEAR_COPY.findUpgrades, STYLE_PRIMARY)])] });
+  const lines = WEAR_SLOTS.map((w) => {
+    const g = worn.get(w.key);
+    return { linked: `${w.label}: ${slotText(ch, g, bits, true)}`, plain: `${w.label}: ${slotText(ch, g, bits)}` };
+  });
+  const content = [note, characterHead(ch, !!bits.ck)].filter((l) => l !== undefined).join('\n');
+  const view = viewSelect(ch, worn);
+  return ephemeral(truncate(content, 2000), {
+    embeds: [{ description: panelText(WEAR_COPY.filled(worn.size), lines) }],
+    // Order 36: Find upgrades opens /gear upgrades' summary for this character (the same owner-or-officer check).
+    components: [slotSelect(ch, worn), row([button(`${FIND_UPGRADES_PREFIX}${ch.id}`, WEAR_COPY.findUpgrades, STYLE_PRIMARY)]), ...(view ? [view] : [])],
+  });
 }
 
 /**
