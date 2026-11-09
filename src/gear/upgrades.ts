@@ -20,17 +20,18 @@ import {
 import { findById, findByName, liveCharacters, noCharacters, type Character } from '../commands/character.ts';
 import { pageData } from '../commands/gear.ts';
 import type { GearRow } from './search.ts';
-import { itemCard, POST_WHAT as ITEM_POST } from '../commands/item.ts';
-import { POST_PREFIX, postedReply, searchReply } from '../commands/share.ts';
+import { itemCard, itemCardReply } from '../commands/item.ts';
+import { wikiLinked } from './wiki-link.ts';
+import { POST_PREFIX, postedReply } from '../commands/share.ts';
 import { FROM_FIND_PREFIX } from '../requests.ts';
-import { zoneButtons, withZoneButtons } from '../zone/buttons.ts';
+import { zoneButtons } from '../zone/buttons.ts';
 import { gearIndex, itemsFor, VERSION_SQL, type GearIndex } from './index.ts';
 import { HOW_COPY, howToGet, linkUrl, range, sourceExtras, VENDOR_MERCHANTS, type Extras } from './howto.ts';
 import {
   byGain, className, compareSlot, levelGroup, fmtHundredths, grouped, GROUPS, hasteWornElsewhere, MAX_LEVEL_CAP, presetOf, resolveSlot, slotLabel, upgradeSlot, UPGRADE_SLOTS, weightsFor, wornState, wornScore,
   type Context, type GearItem, type LevelGroup, type SlotResult, type Upgrade, type Wearer, type Weights, type Worn,
 } from './score.ts';
-import { characterFor, FIND_UPGRADES_PREFIX, wearById, WEAR_COPY } from './wear.ts';
+import { characterFor, FIND_UPGRADES_PREFIX, VIEW_PREFIX, wearById, WEAR_COPY, wornItemId } from './wear.ts';
 import { characterHead } from '../commands/character.ts';
 import { markedLine, parseStats, plainLine, type Baseline, type ItemStats } from './statline.ts';
 import { floorMiss, forSlot, isFiltered, listFilter, listState, NO_FILTER, parseAc, parseRatio, showRatio, takesRatio, type ListFilter } from './filter.ts';
@@ -76,8 +77,8 @@ export { VENDOR_MERCHANTS, linkUrl, howToGet, type Extras };
  * state segment with the floors (src/gear/filter.ts listState / listFilter, replacing capState / capOf).
  */
 export type Cap = number | null;
-/** An item name, linked to its wiki page when it has one (https only). */
-const named = (it: Pick<GearItem, 'name' | 'wiki'>) => (it.wiki ? `[**${md(it.name)}**](${linkUrl(it.wiki)})` : `**${md(it.name)}**`);
+/** An item name, bold, linked to its wiki page when it has one (https only: it.wiki is the index's wikiHref). */
+const named = (it: Pick<GearItem, 'name' | 'wiki'>) => wikiLinked(`**${md(it.name)}**`, it.wiki ?? null);
 
 // ---------------------------------------------------------------- copy (order 36; listed for approval in docs/COPY.md)
 
@@ -601,12 +602,23 @@ async function wearNow(c: Ctx, id: string): Promise<MessageReply> {
   return updateMessage({ embeds: [v.embed], components: v.components });
 }
 
-/** guo:<item id>: the /item card, privately, as /item shows it. */
+/** guo:<item id>: the /item card, privately, as /item shows it (order 44: the one function View an item uses too). */
 async function openItem(c: Ctx, id: string): Promise<MessageReply> {
   const itemId = Number(id.slice(OPEN_PREFIX.length));
-  const k = Number.isInteger(itemId) ? await itemCard(c, itemId) : null;
-  if (!k) return ephemeral(UPGRADES_COPY.gone);
-  return withZoneButtons(c.db, searchReply({ content: k.note ?? undefined, embeds: k.embeds }, `${ITEM_POST}${itemId}`, k.links, [k.actions]), k.zones);
+  return (Number.isInteger(itemId) ? await itemCardReply(c, itemId) : null) ?? ephemeral(UPGRADES_COPY.gone);
+}
+
+/**
+ * Order 44: wrx:<character id>: View an item on the Gear panel (values: a slot key). The panel's owner or an officer
+ * (characterFor, as every panel control); the slot's saved row is read again now, so a slot emptied, or an item gone or
+ * missing since the panel was drawn, answers "gone". Then the item's /item card, privately, exactly as Open item opens it.
+ * Sent from the panel (src/gear/wear.ts viewSelect); answered here because the card is built from this module's imports.
+ */
+async function viewItem(c: Ctx, id: string, values: string[]): Promise<MessageReply> {
+  const t = await characterFor(c, id.slice(VIEW_PREFIX.length));
+  if ('reply' in t) return t.reply;
+  const itemId = await wornItemId(c, t.ch, values[0] ?? '');
+  return (itemId !== null ? await itemCardReply(c, itemId) : null) ?? ephemeral(UPGRADES_COPY.gone);
 }
 
 /** pub:gu:<character id>:<slot>:<state>:<page>: this page, public, with no buttons (the filter line kept). The character's owner only. */
@@ -690,5 +702,6 @@ export function upgradesComponent(c: Ctx, id: string, values: string[], componen
   if (id.startsWith(RESULT_PREFIX)) return resultPicked(c, id, values);
   if (id.startsWith(WEAR_NOW_PREFIX)) return wearNow(c, id);
   if (id.startsWith(OPEN_PREFIX)) return openItem(c, id);
+  if (id.startsWith(VIEW_PREFIX)) return viewItem(c, id, values);
   return null;
 }
