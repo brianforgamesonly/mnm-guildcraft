@@ -5,7 +5,7 @@ import { audit } from './access.ts';
 import { deferredReply, immediateReply, planFor, type Interaction, type InteractionReply, type Plan } from './interactions.ts';
 import { refreshAfterCommand, scheduled as runScheduled } from './board/refresh.ts';
 import type { Effects } from './context.ts';
-import { ackFor, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
+import { ackFor, deadlineFrom, deliver, deliverError, ERROR_REPLY, type Delivery } from './respond.ts';
 import { countD1, isolateSnapshot, timingLine, type D1Call } from './telemetry.ts';
 import { GUARD_PATH, GUARD_PER_REQUEST, guardDecay, verifyGuard } from './dkp/guard.ts';
 import { timersOf } from './dkp/timers.ts';
@@ -48,16 +48,18 @@ type Isolate = ReturnType<typeof isolateSnapshot> & { receivedAt: number };
 async function runDeferred(i: Interaction, plan: Extract<Plan, { defer: true }>, env: Env, ctx: ExecutionContext, calls: D1Call[], colo: string | undefined, started: number, { receivedAt, ...isolate }: Isolate) {
   const log: Delivery[] = [];
   const effects: Effects = {};
+  // Order 45: every webhook call of this run shares one deadline inside waitUntil's 30 s.
+  const deadline = deadlineFrom(receivedAt);
   let err: string | null = null;
   try {
     const reply = await deferredReply(i, env, ctx, effects);
-    if (!(await deliver(i, plan, reply, log))) err = 'delivery refused';
+    if (!(await deliver(i, plan, reply, log, deadline))) err = 'delivery refused';
   } catch (e) {
     err = errText(e);
   }
   if (err) {
     console.error('interaction failed', err, JSON.stringify(log.filter((d) => d.error)));
-    await deliverError(i, plan, log);
+    await deliverError(i, plan, log, deadline);
   }
   // Order 7: a read's audit row, after the member has the reply (it adds nothing to what they wait for).
   let audited: { action: string; ok: boolean } | undefined;

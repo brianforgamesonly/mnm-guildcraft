@@ -2,7 +2,21 @@
 // ERROR_REPLY: the edit's answer missed our 10 s abort while Discord applied it. An unanswered edit is now read
 // back once (GET @original) before the member is told it failed.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DELIVERY_TIMEOUT_MS, editLanded, ERROR_REPLY, READ_TIMEOUT_MS, WAIT_UNTIL_MS } from '../../src/respond.ts';
+import {
+  canReadBack,
+  deadlineFrom,
+  deliver,
+  deliverError,
+  DELIVERY_TIMEOUT_MS,
+  type Delivery,
+  editLanded,
+  ERROR_CALL_MS,
+  ERROR_REPLY,
+  ERROR_RESERVE_MS,
+  READ_TIMEOUT_MS,
+  timeoutFor,
+  WAIT_UNTIL_MS,
+} from '../../src/respond.ts';
 import { one, reset } from '../db.ts';
 import { as, cmd, exchange, seen, select, send, webhook, type WebhookCall } from '../discord.ts';
 
@@ -98,8 +112,67 @@ describe('editLanded: the read-back judges the edit by its own content and time'
     expect(editLanded({ content: sent.content, edited_timestamp: null, flags: 0 }, sent, t, 5)).toBe(true);
     expect(editLanded({ content: '', edited_timestamp: null, flags: 1 << 7 }, sent, t, 5)).toBe(false);
   });
+  it('content is compared with its ends trimmed; an edit sent without content is never judged landed (review)', () => {
+    expect(editLanded({ content: sent.content, edited_timestamp: '2026-11-09T19:18:20.000Z' }, { content: `${sent.content}\n` }, t, 6)).toBe(true);
+    expect(editLanded({ content: '', edited_timestamp: '2026-11-09T19:18:20.000Z' }, {}, t, 6)).toBe(false);
+    expect(editLanded({ edited_timestamp: '2026-11-09T19:18:20.000Z' }, sent, t, 6)).toBe(false);
+  });
 });
 
-it('the edit, its read-back and the error follow-up fit inside waitUntil (30 s)', () => {
-  expect(2 * DELIVERY_TIMEOUT_MS + READ_TIMEOUT_MS).toBeLessThan(WAIT_UNTIL_MS);
+describe('order 45: the deadline keeps the edit, its read-back and the error inside waitUntil (30 s)', () => {
+  /** Every call takes its whole allowed time: the worst case, walked the way src/respond.ts orders the calls. */
+  /** Each error call's allowed time, and when the run ends. */
+  function worstCase(handlerMs: number, publicDefer: boolean) {
+    const deadline = deadlineFrom(0);
+    const own = deadline - ERROR_RESERVE_MS;
+    let now = handlerMs;
+    now += timeoutFor(DELIVERY_TIMEOUT_MS, own, now); // the edit, unanswered
+    if (canReadBack(deadline, now)) now += timeoutFor(READ_TIMEOUT_MS, own, now); // its read-back
+    const errorCalls: number[] = [];
+    for (let n = publicDefer ? 2 : 1; n > 0; n--) {
+      // the error: delete the public defer, then the follow-up (or the private edit)
+      const t = timeoutFor(ERROR_CALL_MS, deadline, now);
+      errorCalls.push(t);
+      now += t;
+    }
+    return { end: now, errorCalls };
+  }
+  it('handler times up to the reserve: every error call keeps its full 4 s and the run ends by the deadline, under 30 s', () => {
+    for (const handlerMs of [0, 500, 3_000, 9_000, 15_000, 20_000])
+      for (const pub of [false, true]) {
+        const r = worstCase(handlerMs, pub);
+        expect(r.end, `${handlerMs} ms, public ${pub}`).toBeLessThanOrEqual(deadlineFrom(0));
+        expect(r.errorCalls.every((t) => t === ERROR_CALL_MS), `${handlerMs} ms, public ${pub}`).toBe(true);
+      }
+    expect(deadlineFrom(0)).toBeLessThan(WAIT_UNTIL_MS);
+  });
+  it('a read-back leaves the error its reserve', () => {
+    expect(canReadBack(deadlineFrom(0), 10_500)).toBe(true);
+    expect(canReadBack(deadlineFrom(0), deadlineFrom(0) - READ_TIMEOUT_MS - ERROR_RESERVE_MS + 1)).toBe(false);
+  });
+  it('in code: with too little time left the unanswered edit is not read back, and the error still goes', async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      calls.push(init?.method ?? 'GET');
+      if (init?.method === 'PATCH') throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+      return new Response(JSON.stringify({ id: '1' }), { status: 200 });
+    });
+    const i = { type: 3, id: snowflake(Date.now()), application_id: '1', token: 't' };
+    const plan = { defer: true, ack: 6, private: true } as const;
+    const log: Delivery[] = [];
+    const deadline = Date.now() + READ_TIMEOUT_MS + ERROR_RESERVE_MS - 1;
+    expect(await deliver(i, plan, { type: 7, data: { content: 'x' } }, log, deadline)).toBe(false);
+    expect(await deliverError(i, plan, log, deadline)).toBe(true);
+    expect(calls).toEqual(['PATCH', 'POST']);
+  });
+  it('the error reply itself is never read back (private type 5: its edit unanswered → no GET)', async () => {
+    const calls: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_u, init) => {
+      calls.push(init?.method ?? 'GET');
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    const log: Delivery[] = [];
+    await deliverError({ type: 5, id: snowflake(Date.now()), application_id: '1', token: 't' }, { defer: true, ack: 5, private: true }, log);
+    expect(calls).toEqual(['PATCH']);
+  });
 });
