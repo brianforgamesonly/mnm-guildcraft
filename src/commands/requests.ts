@@ -3,7 +3,7 @@
 // src/requests.ts. Every reply here is private; the only messages others see are the thread's (its first message, and
 // the claim, done and cancel notices), and those ping only as order 16's override 2 allows.
 import { InteractionResponseType, MessageComponentTypes } from 'discord-interactions';
-import { now } from '../access.ts';
+import { displayName, now } from '../access.ts';
 import { botApi, type BotApi } from '../board/api.ts';
 import { AUTO_ARCHIVE_MINUTES } from '../board/refresh.ts';
 import type { Ctx } from '../context.ts';
@@ -25,9 +25,12 @@ export const LIST_PREFIX = 'rql:';
 const ITEM_INPUT = 'item';
 const QTY_INPUT = 'qty';
 
-/** The Discord calls one button may make: a send is 4 reads, a create, up to MAX_ADDED + 1 adds and two messages (order 42: the first message, then the crafters' ping). */
+/**
+ * The Discord calls one button may make: a send is 3 reads plus the member-list pages, a create, up to MAX_ADDED + 1
+ * adds and two messages (order 42: the first message, then the crafters' ping, one more call than before).
+ */
 const apiFor = (c: Ctx): BotApi | null =>
-  c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: MAX_ADDED + 12, deadline: Date.now() + 20_000 }) : null;
+  c.botToken ? botApi(c.botToken, { d1: () => 0, discord: 0, cap: MAX_ADDED + 13, deadline: Date.now() + 20_000 }) : null;
 
 /** One log line per request action: its D1 rows written (measured from D1's own meta) and its Discord calls. */
 export function logAction(action: string, rowsWritten: number, api: BotApi | null, extra: Record<string, unknown> = {}) {
@@ -36,6 +39,8 @@ export function logAction(action: string, rowsWritten: number, api: BotApi | nul
 export const written = (rs: D1Result[]) => rs.reduce((n, r) => n + (r.meta.rows_written ?? 0), 0);
 
 const tagOf = tag;
+/** Order 42: saved names, with the presser's own (from the interaction) where the read didn't hold it. */
+const withMe = (names: Names, mine: Names): Names => new Map([...mine, ...names]);
 const crafterList = (cs: Crafter[]) => cs.map((x) => memberTag(x.userId, x.member)).join(', ');
 
 // ---------------------------------------------------------------- craft request notices (set with /me's Notices, order 18)
@@ -310,10 +315,12 @@ export async function sendUnsent(c: Ctx, customId: string): Promise<MessageReply
   ]);
   logAction('create', written([claimed, ...res]), api, { items: items.length, added: sentTo.length, left_out: left.length, ...(pingError ? { crafter_ping: pingError } : {}) });
   const lines = [
-    `Sent: <#${thread}>. ${plural(sentTo.length, 'crafter')} added and pinged there.`,
+    `Sent: <#${thread}>. ${plural(sentTo.length, 'crafter')} added${pingError ? '' : ' and pinged'} there.`,
     ...withCrafters.map((it) => `**${md(it.name)}** ×${it.quantity}: ${crafters(it).length ? crafters(it).map((u) => tagOf(names, u)).join(', ') : 'no crafter added'}`),
     ...(left.length ? ['Left out:', ...left.map((l) => `${memberTag(l.userId, l.member)}: ${l.why}`)] : []),
     ...(first.ok ? [] : ["-# The thread's first message didn't go out; it is posted within 15 minutes."]),
+    // Order 42: the ping is its own message; if it alone failed, the requester is told (it is not sent again).
+    ...(pingError ? ["-# The crafters' ping didn't go out, so they may not have noticed: say hello in the thread."] : []),
   ];
   return updateMessage({ content: lines.join('\n').slice(0, 2000), components: [] });
 }
@@ -392,9 +399,11 @@ export async function itemButton(c: Ctx, customId: string): Promise<MessageReply
   const closing = closed ? ' Every item is done or cancelled, so this thread is now closed.' : '';
   const api = apiFor(c);
   let rows = written(res);
-  let t: (id: string) => string = mention;
+  // The presser's own saved name comes from the interaction (an officer may not be among those involved; no D1 read).
+  const mine: Names = new Map([[me, displayName(c.member)]]);
+  let t: (id: string) => string = (id) => tag(mine, id);
   if (api) {
-    const names = await namesOf(c.db, c.guild.id, involved(after, items));
+    const names = withMe(await namesOf(c.db, c.guild.id, involved(after, items)), mine);
     t = (id) => tag(names, id);
     const s = await syncThread(api, after, items, names, { content: notice(t) + closing, ping });
     if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
@@ -491,7 +500,7 @@ export async function cancelFromList(c: Ctx, values: string[]): Promise<MessageR
   const api = apiFor(c);
   let rows = written(res);
   if (api) {
-    const names = await namesOf(c.db, c.guild.id, involved(after, items));
+    const names = withMe(await namesOf(c.db, c.guild.id, involved(after, items)), new Map([[c.userId, displayName(c.member)]]));
     const s = await syncThread(api, after, items, names, { content: `${ping.length ? `${ping.map(mention).join(' ')}: ` : ''}This request was cancelled by ${tag(names, c.userId)}, so this thread is now closed.`, ping });
     if (syncChanged(after, s)) rows += written(await c.db.batch([syncWrite(c.db, after, s)]));
     logAction('cancel', rows, api, { errors: s.errors });

@@ -198,7 +198,7 @@ async function topEmbed(c: Ctx): Promise<Embed> {
   const lines = [...bySkill].map(([skill, top]) => `**${skill}**: ${top.join(' · ')}`);
   return {
     title: `Top ${TOP_N} in each tradeskill`,
-    // Whole lines only: a cut line could split a mention (order 16).
+    // Whole lines only: a cut line could split a name or a fallback mention (orders 16, 42).
     description: lines.length ? fitLines(lines, lines.length, EMBED_LIMITS.description) : 'No one in the guild has recorded a tradeskill yet.',
   };
 }
@@ -215,12 +215,12 @@ export async function postRoster(c: Ctx, what: string): Promise<MessageReply | n
     const [skillId, min, page] = args.map(Number);
     const d = await loadSkillPage(c, skillId, min, page);
     if (!d) return ephemeral('That tradeskill is no longer in the list. Run `/roster skill` again.');
-    return postedReply({ embeds: [skillEmbed(c, d)] }, c.userId);
+    return postedReply({ embeds: [skillEmbed(c, d)] }, c);
   }
   if (kind === 'rm') {
     const { embeds, content } = await memberEmbeds(c, args[0]);
-    return postedReply({ content, embeds }, c.userId);
+    return postedReply({ content, embeds }, c);
   }
-  if (kind === 'rt') return postedReply({ embeds: [await topEmbed(c)] }, c.userId);
+  if (kind === 'rt') return postedReply({ embeds: [await topEmbed(c)] }, c);
   return null;
 }

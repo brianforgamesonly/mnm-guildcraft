@@ -208,7 +208,7 @@ describe('/zone: the card', () => {
     const posted = await send(press(ann, r.data.components![1].components[0].custom_id));
     expect(posted.data.flags).toBeUndefined();
     expect(posted.data.embeds![0].title).toBe('Evershade Weald');
-    expect(posted.data.content).toBe(`-# Shared by <@${ann.user.id}>`);
+    expect(posted.data.content).toBe(`-# Shared by Global ${ann.user.id}`); // order 42: the sharer's saved name, plain
     expect(posted.data.components![0]).toEqual(r.data.components![0]); // the same five links, Open in MnM Atlas included
     const more = await send(press(as('100000000000000002'), posted.data.components!.at(-1).components[1].custom_id));
     expect(more.type).toBe(4);

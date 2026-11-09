@@ -247,7 +247,7 @@ describe('Post to channel', () => {
     expect(pub.type).toBe(4);
     expect(pub.data.flags).toBeUndefined();
     expect(pub.data.embeds).toEqual(priv.data.embeds);
-    expect(pub.data.content).toBe(`-# Shared by <@${ANN}>`);
+    expect(pub.data.content).toBe(`-# Shared by Global ${ANN}`); // order 42: the sharer's saved name, plain
     expect((pub.data as any).allowed_mentions).toEqual({ parse: [] });
     expect(pub.data.components![0].components.map((b: any) => b.label)).toEqual(['Wiki', 'MnMdb', 'MNM Realm']);
   });

@@ -537,7 +537,7 @@ export async function postUpgrades(c: Ctx, what: string): Promise<MessageReply> 
   // Order 42: a posted page has no menus, so it carries no "pick it from Pick a slot" note (an old pair key posts the
   // first side's page alone). Private pages keep the note.
   const v = await slotPage(c, await load(c, t.ch), s.slot.key, capOf(w), int(p) ?? 0, true);
-  return postedReply({ embeds: [v.embed] }, c.userId);
+  return postedReply({ embeds: [v.embed] }, c);
 }
 
 /** The deferred /gear upgrades controls (null: not one). */

@@ -607,6 +607,30 @@ describe('order 42: names once, plain; a mention only where it pings', () => {
     for (const msg of thread().messages.values()) for (const [id, name] of [[ANN, 'Ann'], [BO, 'Bo']]) expect(msg.content.includes(`<@${id}>`) && msg.content.includes(name), msg.content).toBe(false);
   });
 
+  it('an officer who is not involved cancels: the notice pings the requester and names the officer by saved name', async () => {
+    await sendPlate();
+    const press1 = (m: ReturnType<typeof as>, label: string) => send(press(m, buttons({ data: firstMessage(thread()) }).find((b: any) => b.label === label).custom_id), TOKEN);
+    await press1(off, 'Cancel');
+    expect([...thread().messages.values()].at(-1).content).toBe(`<@${ANN}>: **Copper Plate Breastplate** ×2 was cancelled by Off. Every item is done or cancelled, so this thread is now closed.`);
+    expect(checkPings()).toEqual([[BO], [ANN]]);
+  });
+
+  it('a crafters\' ping that fails is not claimed in the reply', async () => {
+    const real = botApi.handle!;
+    let posts = 0;
+    botApi.handle = async (method, path, body) => {
+      if (method === 'POST' && /^\/channels\/\d+\/messages$/.test(path) && path !== `/channels/${REQ}/messages` && ++posts === 2) {
+        calls.push({ method, path, body });
+        return new Response(JSON.stringify({ code: 50013, message: 'Missing Permissions' }), { status: 403, headers: { 'Content-Type': 'application/json' } });
+      }
+      return real(method, path, body);
+    };
+    const sent = await sendPlate();
+    expect(sent.data.content).toContain(`Sent: <#${thread().id}>. 1 crafter added there.`);
+    expect(sent.data.content).toContain("-# The crafters' ping didn't go out");
+    expect(requestLogs().find((l) => l.action === 'create' && l.crafter_ping)).toBeTruthy();
+  });
+
   it('a first message posted late by the sweep pings nobody, and the crafters\' ping follows it once', async () => {
     const real = botApi.handle!;
     let refused = false;

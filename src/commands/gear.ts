@@ -546,5 +546,5 @@ export async function gearDetails(c: Ctx, values: string[]): Promise<MessageRepl
 export async function postGear(c: Ctx, itemId: number): Promise<MessageReply> {
   const k = await card(c, itemId);
   if (!k) return ephemeral(GEAR_COPY.gone);
-  return withZoneButtons(c.db, postedReply({ embeds: k.embeds }, c.userId, k.links, [cardActions(itemId)]), k.zones);
+  return withZoneButtons(c.db, postedReply({ embeds: k.embeds }, c, k.links, [cardActions(itemId)]), k.zones);
 }

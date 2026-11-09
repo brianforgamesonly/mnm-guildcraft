@@ -1381,5 +1381,8 @@ Every member the bot names is shown once, as their saved name in plain text (src
 | src/requests.ts:253 | ## Craft request from \<name> · \<character> (or ## Craft request from \<name> when no character is saved) | DRAFT |
 | src/requests.ts:246 | Claimed by \<name> · Done by \<name> (was "Done (@member)") | DRAFT |
 | src/requests.ts:233 | The crafters' ping, posted right after the first message: "@\<crafter> @\<crafter>: a new craft request for you" | DRAFT |
-| src/commands/requests.ts:350-351, 360, 369, 495 | Thread notices and the claim reply name the one who acted by saved name: "@\<requester>: \<name> will craft …" · "… is done (marked by \<name>)." · "… was cancelled by \<name>." · "This request was cancelled by \<name>, so this thread is now closed." · "\<name> has been told." | DRAFT |
+| src/commands/requests.ts:357-358, 367, 376, 504 | Thread notices and the claim reply name the one who acted by saved name: "@\<requester>: \<name> will craft …" · "… is done (marked by \<name>)." · "… was cancelled by \<name>." · "This request was cancelled by \<name>, so this thread is now closed." · "\<name> has been told." | DRAFT |
+| src/commands/share.ts:34 | Every posted reply: "-# Shared by \<name>" (was "-# Shared by @member") | DRAFT |
+| src/commands/members.ts:61, src/commands/images.ts:65 | "(Checked by \<name>.)" · "\<name> kept …" · "approved by \<name>" (the officer, by saved name; were mentions) | DRAFT |
+| src/commands/requests.ts:318, 323 | "Sent: #\<thread>. \<n> crafter(s) added there." when the crafters' ping failed (else "added and pinged there") · "-# The crafters' ping didn't go out, so they may not have noticed: say hello in the thread." | DRAFT |
 | src/commands/recipes.ts:310 | `/roster recipes` who knows it: "\<character> · \<name>, \<character> · \<name>, +\<n> more" (a " · " now separates the two names, which the mention used to do) | DRAFT |

@@ -10,10 +10,10 @@
 // reference: "when your app receives a payload with a signed URL (like when you fetch a message), it will be valid").
 // A fresh link comes from reading the vault message back (GET channel message, order 9 override 5). The link is cached
 // with its expiry, the URL's `ex` parameter.
-import { audit, now } from '../access.ts';
+import { audit, displayName, now } from '../access.ts';
 import { botApi, UNKNOWN_MESSAGE } from '../board/api.ts';
 import type { Ctx } from '../context.ts';
-import { ephemeral, md, truncate, updateMessage, type MessageReply } from '../discord.ts';
+import { ephemeral, md, memberTag, truncate, updateMessage, type MessageReply } from '../discord.ts';
 import { OFFICER_ONLY } from './members.ts';
 
 /** A cached link is reused only while it has this long left. */
@@ -62,7 +62,7 @@ export async function imageButton(c: Ctx, customId: string): Promise<MessageRepl
   // Audited only when the press changed something (order 9 review).
   await audit(c.db, c.guild.id, c.userId, approve ? 'image.approve' : 'image.reject', `image:${id}`, null, null).run();
   if (approve)
-    return updateMessage({ content: `Screenshot of **${md(img.item)}** · approved by <@${c.userId}> · <t:${Math.floor(Date.now() / 1000)}:f>`, components: [] });
+    return updateMessage({ content: `Screenshot of **${md(img.item)}** · approved by ${memberTag(c.userId, displayName(c.member))} · <t:${Math.floor(Date.now() / 1000)}:f>`, components: [] });
   // Rejected images are not kept: the bot deletes its own vault message (no Manage Messages needed for its own).
   if (c.botToken && img.vault_channel_id && img.vault_message_id) {
     const api = botApi(c.botToken, { d1: () => 0, discord: 0, cap: 2, deadline: Date.now() + 10_000 });

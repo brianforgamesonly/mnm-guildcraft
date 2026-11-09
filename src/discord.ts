@@ -140,9 +140,10 @@ export const mention = (userId: string) => `<@${userId}>`;
  * Order 42 (replacing order 16's "<@id> (saved name)"): a member is shown once, as the name saved at their last command,
  * in plain text (markdown-escaped), never a mention and a name together. With no saved name (none held, empty, or the
  * id itself standing in for one, as SQL's coalesce(display_name, member_id) gives) it shows the mention alone, never a
- * raw id as text. A mention that pings is built with `mention` only in the message that pings that member.
+ * raw id as text; with no id either (a NULL column), "someone" rather than an empty "<@>". A mention that pings is built
+ * with `mention` only in the message that pings that member.
  */
-export const memberTag = (userId: string, savedName?: string | null) => (savedName && savedName !== userId ? md(savedName) : mention(userId));
+export const memberTag = (userId: string, savedName?: string | null) => (savedName && savedName !== userId ? md(savedName) : userId ? mention(userId) : 'someone');
 
 /** Order 33: a file sent with a deferred reply (src/respond.ts sends it as multipart/form-data). */
 export interface Upload {

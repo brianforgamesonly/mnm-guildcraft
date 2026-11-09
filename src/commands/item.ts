@@ -153,5 +153,5 @@ export async function itemCommand(c: Ctx, opts: Option[]): Promise<MessageReply>
 export async function postItem(c: Ctx, itemId: number): Promise<MessageReply> {
   const k = await itemCard(c, itemId);
   if (!k) return ephemeral(ITEM_COPY.gone);
-  return withZoneButtons(c.db, postedReply({ content: k.note ?? undefined, embeds: k.embeds }, c.userId, k.links, [k.actions]), k.zones);
+  return withZoneButtons(c.db, postedReply({ content: k.note ?? undefined, embeds: k.embeds }, c, k.links, [k.actions]), k.zones);
 }

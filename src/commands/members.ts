@@ -7,7 +7,8 @@
 // stay 'left' until they use GuildCraft themselves. Their removed characters stay removed until they run
 // /character add with the same name, which restores each one with its skills (order 2's restore path).
 import type { Ctx } from '../context.ts';
-import { button, ephemeral, md, optString, plural, row, STYLE_DANGER, STYLE_SECONDARY, updateMessage, type MessageReply, type Option } from '../discord.ts';
+import { displayName } from '../access.ts';
+import { button, ephemeral, md, memberTag, optString, plural, row, STYLE_DANGER, STYLE_SECONDARY, updateMessage, type MessageReply, type Option } from '../discord.ts';
 import { describeCharacter, keepMember, membersCharacters, NOTICE_PREFIX, removeMember, REMOVE_PREFIX, type CharacterBrief } from '../departures.ts';
 
 export const OFFICER_ONLY = 'Only officers can do that.';
@@ -57,7 +58,7 @@ export async function noticeButton(c: Ctx, customId: string): Promise<MessageRep
   if (!userId || (choice !== 'keep' && choice !== 'remove')) return ephemeral('Sorry, that button has expired.');
   const { member } = await membersCharacters(c.db, c.guild.id, userId);
   if (!member) return updateMessage({ content: 'This member is no longer recorded. Nothing was changed.', embeds: [], components: [] });
-  const by = `<@${c.userId}>`;
+  const by = memberTag(c.userId, displayName(c.member)); // order 42: the officer's saved name, plain
   if (member.status === 'active') return updateMessage({ content: `**${md(member.name)}** is back and active again, so nothing was changed. (Checked by ${by}.)`, embeds: [], components: [] });
   if (choice === 'keep') {
     await keepMember(c, userId);

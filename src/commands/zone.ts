@@ -105,7 +105,7 @@ export async function zoneOpen(c: Ctx, customId: string): Promise<MessageReply> 
 export async function postZone(c: Ctx, key: string): Promise<MessageReply> {
   const d = await loadZone(c.db, key);
   if (!d) return ephemeral(ZONE_REPLY_COPY.gone);
-  return postedReply({ embeds: zoneEmbeds(d, c.atlasZoneImages === true) }, c.userId, zoneLinks(d), [row(actionButtons(d))]);
+  return postedReply({ embeds: zoneEmbeds(d, c.atlasZoneImages === true) }, c, zoneLinks(d), [row(actionButtons(d))]);
 }
 
 // ---------------------------------------------------------------- More creatures
