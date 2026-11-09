@@ -18,9 +18,12 @@ import type { SlotToken } from './slots.ts';
 import { bitOf, isTwoHanded, SLOTS } from './vocab.ts';
 
 export const VERSION_SQL = "SELECT id || ':' || status || ':' || coalesce(finished_at, '') AS v FROM data_import ORDER BY id DESC LIMIT 1";
-/** Every gear item, its stats already a vector (STAT_VECTOR_SQL: D1 reads the JSON, so the Worker parses none). */
+/**
+ * Every gear item, its stats already a vector (STAT_VECTOR_SQL: D1 reads the JSON, so the Worker parses none). Order 43:
+ * plus `ratio` (the exact generated column), for the upgrade list's Minimum ratio floor: one more column, the same rows.
+ */
 export const GEAR_INDEX_SQL = `SELECT id, name, name_key, slot_mask, class_mask, race_mask, source_mask, gone_at, handed, wiki_url,
-    level_low, level_high, level_kind, level_kinds, ${STAT_VECTOR_SQL} FROM item WHERE slot_mask <> 0`;
+    level_low, level_high, level_kind, level_kinds, ratio, ${STAT_VECTOR_SQL} FROM item WHERE slot_mask <> 0`;
 export const CLASS_BITS_SQL = 'SELECT code, bit FROM game_class WHERE item_count > 0 AND bit IS NOT NULL';
 export const RACE_BITS_SQL = 'SELECT code, bit FROM game_race WHERE item_count > 0 AND bit IS NOT NULL';
 
@@ -67,6 +70,7 @@ interface Row {
   level_high: number | null;
   level_kind: string | null;
   level_kinds: string | null;
+  ratio: number | null;
 }
 
 let cached: GearIndex | null = null;
@@ -92,6 +96,7 @@ export const toItem = (r: Row): GearItem => ({
   levelKind: r.level_kind,
   levelKinds: r.level_kinds,
   v: vectorOf(r as unknown as Record<string, unknown>),
+  ratio: typeof r.ratio === 'number' && Number.isFinite(r.ratio) ? r.ratio : null,
 });
 
 /** The index for this version: from memory when the key matches, else read (one batch of three statements). */

@@ -24,7 +24,7 @@ describe('memberTag (order 42)', () => {
 
 // The same hand-made page data as test/worker/upgrades.test.ts's "how to get it".
 const gi = (o: Partial<GearItem>): GearItem => ({
-  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ...o,
+  id: 1, name: 'X', key: 'x', slotMask: 1, classMask: -1, raceMask: -1, sourceMask: 0, gone: false, twoHanded: false, levelLow: null, levelHigh: null, levelKind: null, levelKinds: null, v: statVector(null), ratio: null, ...o,
 });
 const extras = (crafters: unknown[]) => ({
   rows: new Map([[1, { origin_json: '{}', source_mask: 0 }]]),

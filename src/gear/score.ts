@@ -11,7 +11,7 @@
 //   in every other slot, for a candidate and for the item it replaces alike.
 // - Weights are read only through weightsFor(server, class) (ITEM 4 changes its source, never its callers).
 import { RESISTS, STATS, ALL_CLASSES, ALL_RACES, REMOVED_BIT, bitOf, SLOTS } from './vocab.ts';
-import { WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
+import { WEAPON_TOKENS, WEAR_SLOTS, type SlotToken, type WearSlot } from './slots.ts';
 
 // ---------------------------------------------------------------- the weights
 
@@ -156,6 +156,11 @@ export interface GearItem {
   levelKinds: string | null;
   /** Stat values in WEIGHT_KEYS order; RATIO is damage × 100 ÷ delay, rounded to a whole number (0 without both). */
   v: number[];
+  /**
+   * Order 43: the exact damage ÷ delay (item.ratio, the generated column; NULL when either is missing), for the upgrade
+   * list's Minimum ratio floor only. Scoring never reads it (it reads v's rounded RATIO).
+   */
+  ratio: number | null;
 }
 
 const IDX = Object.fromEntries(WEIGHT_KEYS.map((k, i) => [k, i])) as Record<WeightKey, number>;
@@ -264,7 +269,8 @@ export function resolveSlot(key: string): { slot: WearSlot; oldSides: readonly s
 }
 
 /** Whether damage ÷ delay counts in a slot, for a class's preset. */
-export const ratioCounts = (token: SlotToken, preset: Preset) => token === 'PRIMARY' || token === 'RANGE' || (token === 'SECONDARY' && (preset === 'Tank' || preset === 'Melee'));
+// Order 43: the weapon tokens come from one constant (src/gear/slots.ts WEAPON_TOKENS); the rule is unchanged.
+export const ratioCounts = (token: SlotToken, preset: Preset) => WEAPON_TOKENS.includes(token) && (token !== 'SECONDARY' || preset === 'Tank' || preset === 'Melee');
 
 /** Σ weight × stat, in hundredths, leaving haste out (it depends on the other slots) and ratio where it doesn't count. */
 function baseScore(v: number[], w: Weights, ratio: boolean): number {

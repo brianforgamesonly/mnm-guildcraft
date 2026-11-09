@@ -5,7 +5,7 @@
 // /help's pages are built from these definitions (src/commands/help.ts), so a command cannot be missing from them.
 
 import { BOARDS } from '../board/kinds.ts';
-import { gearFindOptions } from '../gear/options.ts';
+import { gearFindOptions, MIN_AC_MAX, MIN_RATIO_MAX } from '../gear/options.ts';
 import { WEAR_SLOTS } from '../gear/slots.ts';
 import { className, MAX_LEVEL_CAP, PRESETS, UPGRADE_SLOTS, WEIGHT_KEYS, WEIGHT_LABEL } from '../gear/score.ts';
 import { ACQUISITION_LABEL, ACQUISITIONS, FACTION_MAX } from '../recipes.ts';
@@ -57,6 +57,9 @@ const gearOptions = (classes: readonly string[]) => [
       { type: STRING, name: 'slot', description: 'One slot: its full list (leave out for every slot)', choices: UPGRADE_SLOTS.map((s) => ({ name: s.label, value: s.key })) },
       // Order 36 follow-up: no cap unless given; items above it are not listed (counted only).
       { type: INTEGER, name: 'max_level', description: 'Only items up to this level (leave out for no cap)', min_value: 1, max_value: MAX_LEVEL_CAP },
+      // Order 43: floors on one slot's list (with slot: only); the bounds are /gear search's (src/gear/options.ts).
+      { type: INTEGER, name: 'min_ac', description: 'With slot: only items with at least this much AC', min_value: 0, max_value: MIN_AC_MAX },
+      { type: NUMBER, name: 'min_ratio', description: 'With a weapon slot: only items with at least this damage ÷ delay', min_value: 0, max_value: MIN_RATIO_MAX },
     ],
   },
   {

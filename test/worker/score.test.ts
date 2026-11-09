@@ -12,7 +12,7 @@ let nextId = 1;
 function mk(name: string, slots: Tok[], stats: Record<string, unknown> = {}, o: Partial<GearItem> = {}): GearItem {
   return {
     id: nextId++, name, key: name.toLowerCase(), slotMask: slots.reduce((m, s) => m | bitOf(SLOTS, s), 0), classMask: -1, raceMask: -1, sourceMask: 0, gone: false,
-    twoHanded: false, levelLow: 1, levelHigh: 1, levelKind: 'mob', levelKinds: 'mob', v: statVector(JSON.stringify(stats)), ...o,
+    twoHanded: false, levelLow: 1, levelHigh: 1, levelKind: 'mob', levelKinds: 'mob', v: statVector(JSON.stringify(stats)), ratio: null, ...o,
   };
 }
 const anyone: Wearer = { classBit: null, raceBit: null };
