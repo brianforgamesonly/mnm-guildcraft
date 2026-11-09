@@ -16,6 +16,7 @@
 // A dropping creature is any name the data links to the item as a drop: the item's `from` list, a mob whose loot names it,
 // an NPC row whose loot names it. Nothing is matched by anything but the name, case-insensitive.
 
+import { questionReading, stripLevelText, UNKNOWN_TOP, type QuestionReading } from '../../src/level-text.ts';
 import { MOB_ZONES_SOURCE } from '../../src/zone/names.ts';
 
 export const LEVEL_FLOOR = 1;
@@ -46,14 +47,13 @@ export interface Parsed {
  * Level text as recorded ("3 - 10", "31-33", "~15", "Lv 5+", "[[Zone 2]] 10"): [[…]] links (their text too) and anything
  * in parentheses are removed first; then every integer from 1 to 80 is read; low = the smallest, high = the largest; an
  * integer followed by "+" makes high open (NULL). Text with no such integer is no level.
+ * Order 41 (override 1 of docs/PRD.md's parsing rule): a top bound written only as question marks ("1 - ??", "5 - ?",
+ * "15-?", "18-???": src/level-text.ts UNKNOWN_TOP) is unknown, so high is open (NULL), as "N+" does. A text of only
+ * question marks has no integer, so it stays no level. A number followed by "?" ("15?", "42-44?") parses as before.
  */
 export function parseLevel(text: string | number | null | undefined): Parsed {
   if (text === null || text === undefined) return { range: null, integers: 0 };
-  let t = String(text).replace(/\[\[[^\]]*\]\]/g, ' ');
-  for (let prev = ''; prev !== t; ) {
-    prev = t;
-    t = t.replace(/\([^()]*\)/g, ' ');
-  }
+  const t = stripLevelText(String(text));
   const found: { n: number; plus: boolean }[] = [];
   for (const m of t.matchAll(/(\d+)(\s*\+)?/g)) {
     const n = Number(m[1]);
@@ -61,7 +61,8 @@ export function parseLevel(text: string | number | null | undefined): Parsed {
   }
   if (!found.length) return { range: null, integers: 0 };
   const ns = found.map((f) => f.n);
-  return { range: { low: Math.min(...ns), high: found.some((f) => f.plus) ? null : Math.max(...ns) }, integers: found.length };
+  const open = found.some((f) => f.plus) || UNKNOWN_TOP.test(t);
+  return { range: { low: Math.min(...ns), high: open ? null : Math.max(...ns) }, integers: found.length };
 }
 
 /** The union of ranges: the lowest low, the highest high (open if any is open). */
@@ -105,6 +106,11 @@ export interface LevelSummary {
   manyIntegers: { text: string; count: number; low: number; high: number | null }[];
   /** Level texts that did not parse, with how many rows hold each. */
   unparsed: { text: string; count: number }[];
+  /**
+   * Order 41: every level text (mob, NPC, zone) holding a question mark, with how many rows hold it and how it is read
+   * (src/level-text.ts questionReading). A form nobody has ruled on shows up here as 'as recorded'.
+   */
+  questionMarks: { text: string; count: number; reading: QuestionReading }[];
   /** The components with no source in crafted gear's chosen recipes, by how many gear items' recipes hold them. */
   missingComponents: { key: string; items: number }[];
 }
@@ -289,8 +295,10 @@ export function computeLevels(input: LevelInput, gearKeys: Set<string>): { level
   const lower = (s: string) => s.toLowerCase();
   const texts = new Map<string, number>();
   const many = new Map<string, { count: number; range: Range }>();
+  const questions = new Map<string, number>();
   const parseCounted = (text: string | null): Range | null => {
     if (text === null) return null;
+    if (text.includes('?')) questions.set(text, (questions.get(text) ?? 0) + 1);
     const p = parseLevel(text);
     if (!p.range) texts.set(text, (texts.get(text) ?? 0) + 1);
     else if (p.integers > 2) many.set(text, { count: (many.get(text)?.count ?? 0) + 1, range: p.range });
@@ -415,6 +423,7 @@ export function computeLevels(input: LevelInput, gearKeys: Set<string>): { level
     nonCrafted: { items: 0, mobLevel: 0, dropNoLevel: 0, noSource: 0, vendorOnly: 0 },
     manyIntegers: [],
     unparsed: [],
+    questionMarks: [],
     missingComponents: [],
   };
   const missingCount = new Map<string, number>();
@@ -455,6 +464,7 @@ export function computeLevels(input: LevelInput, gearKeys: Set<string>): { level
   }
   const byCount = <T>(m: Map<string, T>, n: (v: T) => number) => [...m].sort((a, b) => n(b[1]) - n(a[1]) || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
   summary.unparsed = byCount(texts, (n) => n).map(([text, count]) => ({ text, count }));
+  summary.questionMarks = byCount(questions, (n) => n).map(([text, count]) => ({ text, count, reading: questionReading(text) as QuestionReading }));
   summary.manyIntegers = byCount(many, (v) => v.count).map(([text, v]) => ({ text, count: v.count, low: v.range.low, high: v.range.high }));
   summary.missingComponents = byCount(missingCount, (n) => n).slice(0, 20).map(([key, items]) => ({ key, items }));
   return { levels, summary, recipes: chosenRecipes };

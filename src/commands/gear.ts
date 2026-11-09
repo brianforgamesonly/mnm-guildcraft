@@ -12,6 +12,7 @@ import { ZONE_STATE_MAX } from '../gear/options.ts';
 import { GEAR_COLS, PAGE_SIZE, relaxStatement, searchStatement, type GearRow } from '../gear/search.ts';
 import { ALL_CLASSES, SLOTS, SOURCES, WEAPON_TYPES, type Source } from '../gear/vocab.ts';
 import { FINISHED_IMPORT } from '../import-status.ts';
+import { shownLevel } from '../level-text.ts';
 import { HOW_COPY, howToGet, sourceExtras, sourceWays, type Way } from '../gear/howto.ts';
 import { VERSION_SQL } from '../gear/index.ts';
 import { CORRECTED_COLS, correctionJoin, visibleTo, type Acquisition } from '../recipes.ts';
@@ -204,14 +205,15 @@ function statsText(r: GearRow, q: GearQuery, maxOthers: number): string {
 }
 
 /** `shown` (order 23) collects the zone names the line shows, in its order: each shown mob's first zone, then wikiZones. */
-function dropLine(o: Origin, d: PageData, maxMobs: number, maxZones: number, shown: ZoneRef[] = []): string {
+export function dropLine(o: Origin, d: PageData, maxMobs: number, maxZones: number, shown: ZoneRef[] = []): string {
   const from = o.from ?? [];
   const zones = o.wikiZones ?? [];
   const mob = (name: string) => {
     const m = mobFor(d, name);
     const zone = m?.zones_json ? (JSON.parse(m.zones_json) as string[])[0] : null;
     if (zone) shown.push({ source: MOB_ZONES_SOURCE, name: zone });
-    const bits = [m?.level ? `L${m.level}` : null, zone].filter(Boolean);
+    const level = shownLevel(m?.level); // order 41: a top recorded as question marks reads "not recorded"
+    const bits = [level ? `L${level}` : null, zone].filter(Boolean);
     return `${md(name)}${bits.length ? ` (${bits.map((b) => md(String(b))).join(', ')})` : ''}`;
   };
   const parts: string[] = [];
@@ -435,10 +437,11 @@ interface CardLine {
   text: string;
   zones: { ref: ZoneRef; end: number }[];
 }
-function mobLine(d: PageData, name: string): CardLine {
+export function mobLine(d: PageData, name: string): CardLine {
   const m = mobFor(d, name);
   const zones = (m?.zones_json ? (JSON.parse(m.zones_json) as string[]) : []).filter(Boolean);
-  const bits = [...(m?.level ? [{ text: `L${m.level}`, zone: null }] : []), ...zones.map((z) => ({ text: z, zone: z }))];
+  const level = shownLevel(m?.level); // order 41, as dropLine
+  const bits = [...(level ? [{ text: `L${level}`, zone: null }] : []), ...zones.map((z) => ({ text: z, zone: z }))];
   let text = md(name);
   const out: CardLine['zones'] = [];
   bits.forEach((b, i) => {

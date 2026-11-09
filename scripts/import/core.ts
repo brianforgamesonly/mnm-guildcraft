@@ -689,6 +689,8 @@ export interface Plan {
   duplicatesCollapsed: number;
   itemNameCollisions: number;
   caseOnlyMatches: number;
+  /** Order 41: item titles that differ only by a trailing "s" (pluralOnlyPairs). Report only: both stay distinct items. */
+  pluralPairs: [string, string][];
   scrolls: { skipped: number; adopted: number };
   warnings: Warning[];
   classes: ClassDerivation;
@@ -1047,9 +1049,27 @@ export function buildPlan(data: WikiData, existing: ExistingState): Plan {
     duplicatesCollapsed,
     itemNameCollisions,
     caseOnlyMatches,
+    pluralPairs: pluralOnlyPairs(Object.keys(data.items)),
     scrolls,
     warnings,
   };
+}
+
+/**
+ * Order 41, ITEM 2 (report only, as order 29 reported creature names differing only by "a"/"an"): the source's item titles
+ * that differ only by a trailing "s", case-insensitive ("Bloodied Allegiance Cuff" | "Bloodied Allegiance Cuffs"), sorted.
+ * Nothing is merged, aliased or decided from them (order 4); the owner rules on each.
+ */
+export function pluralOnlyPairs(titles: string[]): [string, string][] {
+  const byLower = new Map<string, string>();
+  for (const t of [...titles].sort()) if (!byLower.has(t.toLowerCase())) byLower.set(t.toLowerCase(), t);
+  const out: [string, string][] = [];
+  for (const [lower, t] of byLower) {
+    if (!lower.endsWith('s')) continue;
+    const single = byLower.get(lower.slice(0, -1));
+    if (single) out.push([single, t]);
+  }
+  return out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
 }
 
 // ---------------------------------------------------------------- item levels (order 35)
@@ -1834,6 +1854,8 @@ export interface ImportResult {
   /** Order 35: the race list as derived, and the gear levels' coverage (absent when the zone data was kept). */
   races?: RaceDerivation;
   levels?: LevelSummary;
+  /** Order 41: item titles that differ only by a trailing "s" (report only; nothing merged). */
+  pluralPairs?: [string, string][];
   /** Order 17: the zone mapping (matched and unmatched names per source), the NPC merge and the map images. */
   zones?: ZoneSummary;
   /** Every row the run wrote (D1 rows_written, index writes included), its own data_import rows too. */
@@ -1976,6 +1998,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
       gear: plan.gear,
       races: plan.races,
       levels,
+      pluralPairs: plan.pluralPairs,
       zones: plan.zones?.summary,
       gatheringCandidates: plan.gatheringCandidates,
       predicted,
@@ -2056,6 +2079,7 @@ export async function runImport(db: Db, raw: unknown, opts: ImportOptions): Prom
     gear: plan.gear,
     races: plan.races,
     levels,
+    pluralPairs: plan.pluralPairs,
     zones: plan.zones?.summary,
     gatheringCandidates: plan.gatheringCandidates,
     predicted,

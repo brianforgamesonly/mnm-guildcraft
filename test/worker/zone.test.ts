@@ -68,7 +68,8 @@ describe('/zone: the card', () => {
     expect(e.title).toBe('Evershade Weald');
     expect(e.url).toBe('https://monstersandmemories.miraheze.org/wiki/Evershade_Weald');
     // Order 28b, PR D: the wiki records no zone description, and a missing one is not reported.
-    expect(e.description).toBe('**Levels:** 1 - ??');
+    // Order 41: the wiki's "1 - ??" (a top recorded as question marks) reads as not recorded, never as a raw "??".
+    expect(e.description).toBe('**Levels:** 1 and up (top level not recorded)');
     expect(field(r, ZONE_COPY.missingName)).toBeUndefined();
     // mnm-tools' "A gnoll scout" (L8 - 10) keeps its level; the wiki adds Marshal Harding (20); the jackal (3) is mnm-tools only.
     const creatures = field(r, /^Creatures/)!;

@@ -6,6 +6,7 @@
 // records none), and no mechanic the wiki does not state.
 import { EMBED_LIMITS, md, NO_PINGS, plural, truncate, type Embed } from '../discord.ts';
 import { FACTION_ALIASES } from '../faction-aliases.ts';
+import { shownLevel } from '../level-text.ts';
 import { safeUrl } from '../zone/card.ts';
 import { BOARD_COLOR, buildingLine, plainText, type BoardMessage, type LineMode } from './render.ts';
 
@@ -48,7 +49,9 @@ export const FACTION_COPY = {
 
 /** A creature's line: its name, then whichever of level and location the wiki records. */
 export function creatureText(l: Pick<FactionLine, 'creature' | 'level' | 'location'>): string {
-  const extra = [l.level?.trim() ? `level ${l.level.trim()}` : null, l.location?.trim() || null].filter(Boolean) as string[];
+  // Order 41: the level as shownLevel reads it; one of only question marks shows no level part.
+  const level = shownLevel(l.level?.trim());
+  const extra = [level ? `level ${level}` : null, l.location?.trim() || null].filter(Boolean) as string[];
   return `${md(l.creature)}${extra.length ? ` (${extra.map(md).join(', ')})` : ''}`;
 }
 
