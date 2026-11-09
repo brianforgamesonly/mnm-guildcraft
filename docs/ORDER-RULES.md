@@ -702,3 +702,14 @@ Order 44 links each worn item on the Gear panel to its wiki page and adds View a
 - The Gear panel never truncates mid-line; lines that don't fit lose their link first.
   - From the bottom up (src/gear/wear.ts `panelText`); at the data's worst case every line keeps its link (3,316 of 4,096 characters: 20 lines of the longest name, 44, and the longest address, 90, with the can't-use mark). Only if the plain lines could pass 4,096 do whole lines go, with "+N more".
 - Failed runs: every one is listed in the FINAL (order 12).
+
+## Order 45
+
+Order 45 diagnoses and fixes the error reply sent after a Change a slot pick that Discord applied (Cowork's check of order 44, 2026-11-09 19:17–19:18 UTC). Its explicit override quotes the earlier rules in full, from where they are stored.
+
+- Budget: this file's default (1 pull request, at most 3 pushes, 1 merge).
+- Explicit override 1, of this file's order 15 rule, quoted in full: "A dispatch is made only to confirm a fix and only when it is expected to pass; a run expected to fail is never dispatched. Every failed run is listed in the report with its reason." and of order 12's "Don't dispatch a run you expect to fail. Test locally first, and dispatch only to confirm." For ITEM 1 only: one read-only dispatch of timings.yml (copy both, hours 72, requests true), expected to pass (run 42682954628, passed). The rest of both rules stands.
+- A delivery that times out is checked before the member is told it failed. An edit with no answer (status 0: our 10 s abort or a network error) or a 5xx is read back once (GET @original, src/respond.ts `readBack`); the error is sent only when the read fails or the message does not show the edit (`editLanded`: the content sent, edited after the interaction was created). A 4xx is a refusal and is never re-checked. The edit, its read-back and the error follow-up fit inside waitUntil's 30 s (test/worker/order45-delivery.test.ts).
+- Unchanged, quoted (src/respond.ts): "Never silent: an exception, or a delivery Discord refuses, logs Discord's answer and sends the polite ERROR_REPLY privately."
+- Known limit: a follow-up (POST) with no answer cannot be read back (Discord returns its id only in the answer), so it still sends the error.
+- Failed runs: every one is listed in the FINAL (order 12).
