@@ -19,8 +19,18 @@ export interface WebhookCall {
 }
 /** Every interaction-webhook call the Worker made, in order. */
 export const webhookCalls: WebhookCall[] = [];
-/** How the fake Discord answers a webhook call (default: accepted). Tests may replace it; reset() restores. */
-export const webhook = { status: (_c: WebhookCall) => 200, reset() { this.status = () => 200; } };
+/**
+ * How the fake Discord answers a webhook call (default: accepted). Tests may replace it; reset() restores.
+ * Order 45: status 0 is no answer (the call throws as our 10 s abort does); `original` is what GET @original returns.
+ */
+export const webhook = {
+  status: (_c: WebhookCall) => 200,
+  original: null as null | ((c: WebhookCall) => Record<string, unknown>),
+  reset() {
+    this.status = () => 200;
+    this.original = null;
+  },
+};
 /** The fake Discord's GET /guilds/{id} (the guild-name lookup): set `respond` to answer it; `calls` records the URLs. */
 export const guildLookup = {
   calls: [] as string[],
@@ -70,7 +80,9 @@ export function spyOnFetch() {
     const call = { method: init?.method ?? 'GET', url, token: url.slice(prefix.length).split('/')[1], body: uploaded ? { ...parsed, uploaded } : parsed };
     webhookCalls.push(call);
     const status = webhook.status(call);
+    if (status === 0) throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     if (status === 204) return new Response(null, { status });
+    if (status < 300 && call.method === 'GET' && webhook.original) return new Response(JSON.stringify(webhook.original(call)), { status });
     return new Response(JSON.stringify(status < 300 ? { id: '1' } : { code: 50035, message: 'Invalid Form Body' }), { status });
   });
 }

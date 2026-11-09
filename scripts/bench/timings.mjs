@@ -329,11 +329,13 @@ if (file)
  * Order 4's definition of a failed request: an exception, an outcome other than ok, a status other than 200,
  * or 3 s or more before Discord got its answer. A deferred request (ack 5/6) answers before any I/O, so its
  * wall time includes the delivery after the answer; for it, a refused delivery or an err counts instead.
+ * Order 45: an edit whose answer never came, confirmed applied by the read-back (op read, landed), was delivered.
  */
+const refused = (ds) => !ds.some((d) => d.op === 'read' && d.landed) && ds.some((d) => d.op !== 'read' && (d.status < 200 || d.status >= 300));
 const failed = (r) =>
   r.board && !r.line ? r.errors.length > 0 || !!r.board.err || (r.outcome && r.outcome !== 'ok') :
   r.errors.length > 0 || (r.outcome && r.outcome !== 'ok') || (r.status !== undefined && r.status !== 200) || !!r.line?.err ||
-  (r.line?.ack ? (r.line.deliveries ?? []).some((d) => d.status < 200 || d.status >= 300) : typeof r.wall === 'number' && r.wall >= 3000);
+  (r.line?.ack ? refused(r.line.deliveries ?? []) : typeof r.wall === 'number' && r.wall >= 3000);
 console.log(`failed requests (order 4 definition): ${[...byRequest.values()].filter(failed).length} of ${byRequest.size}`);
 if (perRequest) {
   // Order 5 (ITEM 2): sql_ms / d1_dur are D1's own server-side times, rows its rows read (a game-list cache

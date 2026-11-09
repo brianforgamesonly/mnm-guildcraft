@@ -137,8 +137,14 @@ const DISCORD_EPOCH = 1420070400000n;
  * network to Cloudflare. Clock skew between Discord and Cloudflare is in it too (small, unmeasured).
  */
 export function discordLagMs(id: string | undefined, receivedAt: number | undefined): number | null {
-  if (!id || receivedAt === undefined || !/^\d{15,25}$/.test(id)) return null;
-  return receivedAt - Number((BigInt(id) >> 22n) + DISCORD_EPOCH);
+  const created = snowflakeMs(id);
+  return created === null || receivedAt === undefined ? null : receivedAt - created;
+}
+
+/** When Discord created a snowflake (epoch ms), or null for anything that isn't one. */
+export function snowflakeMs(id: string | undefined): number | null {
+  if (!id || !/^\d{15,25}$/.test(id)) return null;
+  return Number((BigInt(id) >> 22n) + DISCORD_EPOCH);
 }
 
 /** The one structured line per interaction. Read back from Workers Logs (see .github/workflows/timings.yml). */
