@@ -272,9 +272,9 @@ Work order 18 replaced the commands: members have `/me`, `/skills`, `/item`, `/g
 | Where | Text | Status |
 |---|---|---|
 | src/commands/definitions.ts:180 | The top 3 characters in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/roster.ts:192 | Card title: Top 3 in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
-| src/commands/roster.ts:199, 202, 204 | **\<tradeskill>**: \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) (order 43 addendum: the owner in brackets, by saved name, or the mention alone with none; was "\<character> \<level>", APPROVED by exception 2026-10-20) | DRAFT |
-| src/commands/roster.ts:193 | No one in the guild has recorded a tradeskill yet. | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/roster.ts:202 | Card title: Top 3 in each tradeskill | APPROVED (owner, by exception, 2026-10-20) |
+| src/commands/roster.ts:199-200, 204 | **\<tradeskill>**: \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) · \<character> \<level> (\<owner>) (order 43 addendum: the owner in brackets, by saved name, or the mention alone with none; was "\<character> \<level>", APPROVED by exception 2026-10-20) | DRAFT |
+| src/commands/roster.ts:204 | No one in the guild has recorded a tradeskill yet. | APPROVED (owner, by exception, 2026-10-20) |
 
 #### /roster recipes
 

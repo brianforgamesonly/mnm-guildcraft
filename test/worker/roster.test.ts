@@ -157,5 +157,36 @@ describe('/roster top', () => {
     const d = (await send(cmd(ann, 'roster', 'top'))).data.embeds![0].description!;
     expect(d).toContain('Smith01 1 (<@300000000000000000>)');
     expect(d).not.toMatch(/\(300000000000000000\)/);
+    // A saved name equal to the member's own id (coalesce(display_name, member_id)) is no name either. (NULL can't be
+    // stored: member.display_name is NOT NULL.)
+    await env.DB.prepare('UPDATE member SET display_name = discord_user_id WHERE discord_user_id = ?').bind('300000000000000000').run();
+    expect((await send(cmd(ann, 'roster', 'top'))).data.embeds![0].description).toContain('Smith01 1 (<@300000000000000000>)');
+  });
+
+  it("order 43 addendum, review fix: at the worst case the card keeps whole lines and ends with fitLines' \"+N more\", within 4,096", async () => {
+    // 16 tradeskills of 14 letters (the data's count and longest name), 3 characters each at level 300 (skill_cap), each
+    // with a 32-character name and a 32-character saved name made of characters md() escapes (both doubled).
+    const skills = Array.from({ length: 16 }, (_, i) => `Tradeskill ${String(i).padStart(3, '0')}`);
+    await reset(skills);
+    await send(cmd(ann, 'character', 'add', { name: 'Testchar' })); // creates the guild row the inserts below name
+    const stmts = [];
+    for (let i = 0; i < 48; i++) {
+      const owner = `4000000000000${String(i).padStart(5, '0')}`;
+      const name = `${'_'.repeat(29)}${String(i).padStart(3, '0')}`;
+      stmts.push(
+        env.DB.prepare("INSERT INTO member (guild_id, discord_user_id, display_name, status, first_seen_at) VALUES (?, ?, ?, 'active', ?)").bind(GUILD, owner, '*'.repeat(32), at),
+        env.DB.prepare('INSERT INTO character (guild_id, owner_user_id, name, name_key, class, level, is_main, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)').bind(GUILD, owner, name, name, 'WAR', 10, at, at),
+        env.DB.prepare('INSERT INTO character_skill (character_id, tradeskill_id, level, updated_at, updated_by) VALUES ((SELECT id FROM character WHERE name_key = ?), (SELECT id FROM tradeskill WHERE name = ?), 300, ?, ?)').bind(name, skills[i % 16], at, 'x'),
+      );
+    }
+    await env.DB.batch(stmts);
+    const d = (await send(cmd(ann, 'roster', 'top'))).data.embeds![0].description!;
+    const out = d.split('\n');
+    expect(d.length).toBeLessThanOrEqual(4096);
+    expect(out.at(-1)).toMatch(/^\+\d+ more$/);
+    const shown = out.slice(0, -1);
+    expect(shown.length + Number(out.at(-1)!.match(/\d+/)![0])).toBe(16);
+    // Every shown line is whole: three entries, each ending in its owner's brackets.
+    for (const l of shown) expect(l).toMatch(/^\*\*Tradeskill \d{3}\*\*: (.+ 300 \((\\\*){32}\)( · )?){3}$/);
   });
 });
